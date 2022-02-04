@@ -1,0 +1,13 @@
+sphinx>=4.0,<5.0
+myst-parser>=0.15
+nbsphinx>=0.8.5
+pandoc>=1.0
+docutils>=0.16
+sphinxcontrib-fulltoc>=1.0
+sphinxcontrib-mockautodoc
+sphinx-autodoc-typehints>=1.0,<1.15  # v1.15 failing on main (#11405)
+sphinx-paramlinks>=0.5.1
+sphinx-togglebutton>=0.2
+sphinx-copybutton>=0.3
+typing-extensions  # already in `requirements.txt` but the docs CI job does not install it
+git+git://github.com/speediedan/lightning_sphinx_theme.git@8194234d87a85f8b1af6f28a0c8eb5de5ed02070#egg=pt_lightning_sphinx_theme

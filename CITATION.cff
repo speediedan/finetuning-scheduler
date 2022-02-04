@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you want to cite the framework, feel free to use this (but only if you loved it 😊)"
+title: "Finetuning Scheduler"
+abstract: "A PyTorch Lightning extension that enhances model experimentation with flexible finetuning schedules."
+date-released: 2022-02-04
+authors:
+  - family-names: "Dale"
+    given-names: "Dan"
+version: 0.1.0
+doi: tbd
+license: "Apache-2.0"
+url: "https://finetuning-scheduler.readthedocs.io/"
+repository-code: "https://github.com/speediedan/finetuning-scheduler"
+keywords:
+  - machine learning
+  - deep learning
+  - artificial intelligence

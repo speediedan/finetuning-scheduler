@@ -1,0 +1,165 @@
+# project
+.DS_Store
+run_configs/
+model_weights/
+app/models/
+pip-wheel-metadata/
+lightning_logs/
+.vscode/
+
+# Test-tube
+test_tube_*/
+
+# Documentations
+docs/source/api
+docs/source/*.md
+docs/source/generated
+docs/source/*/generated
+docs/source/notebooks
+docs/source/_static/images/course_UvA-DL
+docs/source/_static/images/lightning_examples
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+timit_data/
+grid_generated*
+grid_ori*
+
+
+
+# C extensions
+*.so
+
+# PyCharm
+.idea/
+
+# Distribution / packaging
+.Python
+ide_layouts/
+build/
+_build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+tests/tests_tt_dir/
+tests/save_dir
+tests/tests/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# celery beat schedule file
+celerybeat-schedule
+
+# SageMath parsed files
+*.sage.py
+
+# dotenv
+.env
+
+# virtualenv
+.venv
+env/
+venv/
+ENV/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+# pytest
+.pytest_cache/
+
+# data
+.data/
+Datasets/
+mnist/
+MNIST/
+legacy/checkpoints/
+*.gz
+*ubyte
+
+# pl tests
+ml-runs/
+mlruns/
+*.zip
+*.ckpt
+pytorch\ lightning
+test-reports/
+wandb
+.forked/
+*.prof
+*.tar.gz
+.neptune/
+
+# dataset generated from bolts in examples.
+cifar-10-batches-py
+*.pt
+# ctags
+tags
+.tags

@@ -1,0 +1,5 @@
+datasets
+transformers
+scikit-learn
+sentencepiece
+jsonargparse[signatures]>=4.0.4

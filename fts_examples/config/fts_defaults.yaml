@@ -1,0 +1,39 @@
+seed_everything: 42
+data:
+  class_path: fts_examples.fts_superglue.RteBoolqDataModule
+  init_args:
+    model_name_or_path: microsoft/deberta-v3-base
+    task_name: rte
+    tokenizers_parallelism: false
+    max_seq_length: 128
+    train_batch_size: 16
+    eval_batch_size: 16
+model:
+  class_path: fts_examples.fts_superglue.RteBoolqModule
+  init_args:
+    optimizer_init:
+      class_path: torch.optim.AdamW
+      init_args:
+        weight_decay: 1.0e-05
+        eps: 1.0e-07
+        lr: 1.0e-05
+    lr_scheduler_init:
+      class_path: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+      init_args:
+        T_0: 1
+        T_mult: 2
+        eta_min: 1.0e-07
+    pl_lrs_cfg:
+      interval: epoch
+      frequency: 1
+      name: CosineAnnealingWithWarmRestartsLR
+trainer:
+  max_epochs: 1000
+  gpus: -1
+  auto_select_gpus: true
+  strategy: ddp_find_unused_parameters_false
+  precision: 16
+  logger:
+    class_path: pytorch_lightning.loggers.TensorBoardLogger
+    init_args:
+      save_dir: lightning_logs
