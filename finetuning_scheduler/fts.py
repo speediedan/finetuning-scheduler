@@ -24,8 +24,8 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import BaseFinetuning
 from pytorch_lightning.trainer.states import TrainerFn
 from pytorch_lightning.utilities import _StrategyType, rank_zero_info
-from pytorch_lightning.utilities.distributed import rank_zero_debug
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
+from pytorch_lightning.utilities.rank_zero import rank_zero_debug
 from torch.optim.optimizer import Optimizer
 
 from finetuning_scheduler.fts_supporters import CallbackDepMixin, FTSEarlyStopping, FTSState, SchedulingMixin
@@ -476,3 +476,14 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
                 will be configured and added.
         """
         self._fts_state._ft_global_steps += 1
+
+    def on_train_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        """Synchronize internal :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state` on end of training
+        to ensure final training state is consistent with epoch semantics.
+
+        Args:
+            trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): _description_
+            pl_module (:external+pl:class:`~pytorch_lightning.core.lightning.LightningModule`): _description_
+        """
+        assert self._fts_state._ft_sync_objects is not None
+        self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)

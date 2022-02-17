@@ -362,14 +362,14 @@ def test_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expe
 
 
 EXPECTED_EXPIMP_RESULTS = {
-    (True, -1): (5, 0, 2, 5, 8, 3, 3, (0.001, 1e-06, 1e-05)),
-    (False, -1): (7, 0, 3, 7, 8, 4, 4, (0.001, 1e-05, 1e-05, 1e-05)),
-    (True, 0): (4, 0, 0, 4, 4, 1, 1, (0.001,)),
-    (False, 0): (4, 0, 0, 4, 2, 1, 1, (0.001,)),
-    (True, 2): (5, 0, 2, 5, 8, 3, 3, (0.001, 1e-06, 1e-05)),
-    (False, 2): (6, 0, 2, 6, 6, 3, 3, (0.001, 1e-05, 1e-05)),
-    (True, 999): (5, 0, 2, 5, 8, 3, 3, (0.001, 1e-06, 1e-05)),
-    (False, 999): (7, 0, 3, 7, 8, 4, 4, (0.001, 1e-05, 1e-05, 1e-05)),
+    (True, -1): (5, 0, 2, 6, 8, 3, 3, (0.001, 1e-06, 1e-05)),
+    (False, -1): (7, 0, 3, 8, 8, 4, 4, (0.001, 1e-05, 1e-05, 1e-05)),
+    (True, 0): (4, 0, 0, 5, 4, 1, 1, (0.001,)),
+    (False, 0): (4, 0, 0, 5, 2, 1, 1, (0.001,)),
+    (True, 2): (5, 0, 2, 6, 8, 3, 3, (0.001, 1e-06, 1e-05)),
+    (False, 2): (6, 0, 2, 7, 6, 3, 3, (0.001, 1e-05, 1e-05)),
+    (True, 999): (5, 0, 2, 6, 8, 3, 3, (0.001, 1e-06, 1e-05)),
+    (False, 999): (7, 0, 3, 8, 8, 4, 4, (0.001, 1e-05, 1e-05, 1e-05)),
 }
 
 
@@ -412,10 +412,10 @@ def test_finetuningscheduling_explicit_implicit(tmpdir, boring_ft_schedule, expl
 
 
 EXPECTED_DECAY_RESULTS = {
-    (True, False): (5, 0, 2, 5, 8, 3, 3, 1e-6),
-    (True, True): (5, 0, 2, 5, 8, 5, 5, 0.0),
-    (False, False): (7, 0, 3, 7, 8, 4, 4, 1e-6),
-    (False, True): (7, 0, 3, 7, 8, 7, 7, 0.0),
+    (True, False): (5, 0, 2, 6, 8, 3, 3, 1e-6),
+    (True, True): (5, 0, 2, 6, 8, 5, 5, 0.0),
+    (False, False): (7, 0, 3, 8, 8, 4, 4, 1e-6),
+    (False, True): (7, 0, 3, 8, 8, 7, 7, 0.0),
 }
 
 
@@ -664,7 +664,7 @@ def test_finetuningscheduling_optimizer_compat(tmpdir):
 
 @pytest.mark.parametrize(
     "epoch_only_cfg, expected_state",
-    [(True, ((0, 2, 5, 8, 3, 3), "extraneous EarlyS", "maximum phase-specified")), (False, (None, "missing a max_"))],
+    [(True, ((0, 2, 6, 8, 3, 3), "extraneous EarlyS", "maximum phase-specified")), (False, (None, "missing a max_"))],
     ids=["eponly", "noeponly"],
 )
 def test_finetuningscheduling_epoch_trans_only(tmpdir, boring_ft_schedule, epoch_only_cfg: bool, expected_state: Tuple):
@@ -727,7 +727,7 @@ def test_early_stopping_on_non_finite_monitor(tmpdir, stop_value):
         max_epochs=10,
     )
     trainer.fit(model)
-    assert trainer.current_epoch == expected_stop_epoch
+    assert trainer.current_epoch - 1 == expected_stop_epoch
     assert trainer.early_stopping_callback.stopped_epoch == expected_stop_epoch
 
 
@@ -760,7 +760,7 @@ def test_early_stopping_thresholds(tmpdir, stopping_threshold, divergence_thesho
         max_epochs=20,
     )
     trainer.fit(model)
-    assert trainer.current_epoch == expected_epoch, "early_stopping failed"
+    assert trainer.current_epoch - 1 == expected_epoch, "early_stopping failed"
 
 
 @RunIf(standalone=True, min_gpus=2)
