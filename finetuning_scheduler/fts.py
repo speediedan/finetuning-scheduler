@@ -144,7 +144,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         return max(self.max_depth - self._fts_state._curr_depth, 0)
 
     @staticmethod
-    def _supported_strategy_types() -> Sequence[_StrategyType]:
+    def _supported_strategy_types() -> Sequence[Union[_StrategyType, str]]:
         return (
             _StrategyType.DP,
             _StrategyType.DDP,
@@ -152,6 +152,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
             # _StrategyType.DEEPSPEED,  # support to be re-evaluated
             _StrategyType.DDP_SHARDED,
             _StrategyType.DDP_SHARDED_SPAWN,
+            "single_device",
         )
 
     def freeze_before_training(self, pl_module: "pl.LightningModule") -> None:

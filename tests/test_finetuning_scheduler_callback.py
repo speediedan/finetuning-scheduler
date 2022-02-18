@@ -153,7 +153,7 @@ class TestFinetuningScheduler(FinetuningScheduler):
 
     def setup(self, trainer, pl_module, stage: Optional[str] = None) -> None:
         if self.mock_strategy_wcpu:
-            trainer._accelerator_connector._strategy_type = _StrategyType.DDP2
+            trainer.strategy.strategy_name = _StrategyType.DDP2
         return super().setup(trainer, pl_module, stage)
 
     def on_save_checkpoint(
