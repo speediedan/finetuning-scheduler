@@ -1,0 +1,9 @@
+**/.classpath
+**/.dockerignore
+**/.env
+**/.git
+**/.gitignore
+**/.vscode
+**/Dockerfile*
+**/build
+**/lightning_logs/*
