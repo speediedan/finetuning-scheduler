@@ -1,3 +1,2 @@
-# the default package dependencies
-# git+https://github.com/PyTorchLightning/pytorch-lightning.git@4dba492fb55e2862bb20f304e6bef43f1f151fc7#egg=pytorch-lightning
-git+https://github.com/PyTorchLightning/pytorch-lightning.git@cf64f3443474a93d23b5afb0417e4a60298006e6#egg=pytorch-lightning
+git+https://github.com/PyTorchLightning/pytorch-lightning.git@cf64f3443474a93d23b5afb0417e4a60298006e6
+torch==1.8.1

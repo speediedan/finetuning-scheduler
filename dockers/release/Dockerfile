@@ -1,5 +1,3 @@
-# Copyright The PyTorch Lightning team.
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -15,7 +13,7 @@
 ARG PYTHON_VERSION=3.9
 ARG PYTORCH_VERSION=1.8
 
-FROM pytorchlightning/pytorch_lightning:base-cuda-py${PYTHON_VERSION}-torch${PYTORCH_VERSION}
+FROM base-cuda-py3.9-pt1.8
 
 LABEL maintainer="Dan Dale <https://github.com/speediedan>"
 

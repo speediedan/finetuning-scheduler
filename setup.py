@@ -96,15 +96,12 @@ setup(
         "Environment :: Console",
         "Natural Language :: English",
         "Development Status :: 5 - Production/Stable",
-        # Indicate who your project is intended for
         "Intended Audience :: Developers",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
         "Topic :: Scientific/Engineering :: Image Recognition",
         "Topic :: Scientific/Engineering :: Information Analysis",
-        # Pick your license as you wish
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
-        # Specify the Python versions you support here.
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
