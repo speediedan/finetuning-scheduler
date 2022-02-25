@@ -83,7 +83,7 @@ setup(
     install_requires=[
         (
             "pytorch-lightning @ "
-            "git+https://github.com/PyTorchLightning/pytorch-lightning.git@cf64f3443474a93d23b5afb0417e4a60298006e6"
+            "git+https://github.com/PyTorchLightning/pytorch-lightning.git@f5304897cec970bb1cfaef901bbe12532242f1e3"
         )
     ],
     extras_require=extras,

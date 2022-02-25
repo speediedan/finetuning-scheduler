@@ -290,10 +290,16 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
                 :external+pl:class:`~pytorch_lightning.strategies.Strategy` strategy being used is not currently
                 compatible with the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback.
         """
-        trainer.callbacks = self._configure_callback_deps(trainer)
+        trainer.callbacks, added_es_fts, added_ckpt_fts = self._configure_callback_deps(trainer)
+        # if we added callbacks for the user after the setup hooks loop was initiated from trainer, we'll need to
+        # explicitly call the setup hooks for those added callbacks
+        if added_ckpt_fts:
+            trainer.checkpoint_callback.setup(trainer, pl_module, stage)  # type: ignore[union-attr]
+        if added_es_fts:
+            trainer.early_stopping_callback.setup(trainer, pl_module, stage)  # type: ignore[union-attr]
         assert pl_module is not None and pl_module.trainer is not None
         supported = [t.lower() for t in self._supported_strategy_types()]
-        if trainer._strategy_type and trainer._strategy_type not in supported:
+        if trainer.strategy.strategy_name and trainer.strategy.strategy_name not in supported:
             raise MisconfigurationException(
                 "FTS is currently experimental and has not yet been adapted for the"
                 " specified distributed strategy please select from currently"

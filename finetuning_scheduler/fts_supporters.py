@@ -178,11 +178,13 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         self.es_phase_complete = True
         self.final_phase = True
         self.finetuningscheduler_callback = None
+        self._check_on_train_epoch_end = False
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
         """Ensure a :class:`~finetuning_scheduler.fts.FinetuningScheduler` is provided before beginning
         training."""
         self.connect_callback(trainer)
+        super().setup(trainer, pl_module, stage)
 
     def _evaluate_stopping_criteria(self, current: torch.Tensor) -> Tuple[bool, Optional[str]]:
         """Evaluate whether and why to stop the current training session.
@@ -308,6 +310,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
                     f"(restore_best=True) but {self.__class__.__name__} but has no quantity to monitor (monitor=None)."
                     "Please provide a value to monitor or set restore_best=False."
                 )
+        super().setup(trainer, pl_module, stage)
 
     def on_save_checkpoint(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", checkpoint: Dict[str, Any]
@@ -886,7 +889,7 @@ class CallbackDepMixin(ABC):
             callback_inspection.append(any([isinstance(c, ci) for c in trainer.callbacks]))
         return callback_inspection
 
-    def _configure_callback_deps(self, trainer: "pl.Trainer") -> List[Callback]:
+    def _configure_callback_deps(self, trainer: "pl.Trainer") -> Tuple[List[Callback], bool, bool]:
         """Ensures FTSCheckpoint and :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`
         callbacks are present and configured, removing any.
 
@@ -899,8 +902,11 @@ class CallbackDepMixin(ABC):
         Returns:
             List[Callback]: A new callback list that includes at least one FTSCheckpoint and EarlyStopping class,
                 ensuring the FTSCheckpoint is at the end of list.
+            Bool: Whether a :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` callback was added
+            Bool: Whether a :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callback was added
         """
         has_ckpt_fts, has_ckpt_base, has_es_fts, has_es_base = self._inspect_callback_deps(trainer)
+        added_ckpt_fts, added_es_fts = False, False
         if not any([has_es_fts, self.epoch_transitions_only, self.gen_ft_sched_only]):  # type: ignore[attr-defined]
             if has_es_base:
                 rank_zero_warn(
@@ -915,6 +921,7 @@ class CallbackDepMixin(ABC):
                     "in epoch_transitions_only mode. Adding an FTSEarlyStopping callback with default configuration."
                 )
             trainer.callbacks.append(FTSEarlyStopping(monitor="val_loss"))
+            added_es_fts = True
         if (has_es_fts or has_es_base) and self.epoch_transitions_only:  # type: ignore[attr-defined]
             rank_zero_warn(
                 "You have specified an EarlyStopping callback along with epoch_transitions_only. Pruning the "
@@ -930,9 +937,10 @@ class CallbackDepMixin(ABC):
                 )
                 trainer.callbacks = [c for c in trainer.callbacks if not isinstance(c, ModelCheckpoint)]
             trainer.callbacks.append(FTSCheckpoint(monitor="val_loss", verbose=True))
+            added_ckpt_fts = True
         for uc in [c for c in trainer.callbacks if any([isinstance(c, d) for d in CALLBACK_DEP_PARENTS.values()])]:
             uc.connect_callback(trainer)  # type: ignore[attr-defined]
         # ensure existing callback_connector logic is adhered to. Adding an FTS configuration method to
         # CallbackConnector or forcing users to manually add default EarlyStopping and FTSCheckpoint classes
         # would avoid this callback_connector call
-        return trainer._callback_connector._reorder_callbacks(trainer.callbacks)
+        return trainer._callback_connector._reorder_callbacks(trainer.callbacks), added_es_fts, added_ckpt_fts
