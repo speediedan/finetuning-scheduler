@@ -27,6 +27,8 @@ jobs:
         release: ["latest"]
         exclude:
           - {os: ubuntu-20.04, requires: "oldest"}
+          - {os: windows-2019, requires: "oldest"}
+          - {os: macOS-10.15, python-version: "3.9", requires: "oldest"}
         # include:
         #   # adding when using a release candidate
         #   # - {os: ubuntu-20.04, python-version: "3.9", requires: "latest", release: "pre"}

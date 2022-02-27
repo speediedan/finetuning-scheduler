@@ -11,12 +11,12 @@
 # limitations under the License.
 # initially based on https://bit.ly/3pdAf1G
 
-ARG CUDA_VERSION=11.1
+ARG CUDA_VERSION=10.2
 
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu18.04
 
 ARG PYTHON_VERSION=3.9
-ARG PYTORCH_VERSION=1.10
+ARG PYTORCH_VERSION=1.8
 
 SHELL ["/bin/bash", "-c"]
 # https://techoverflow.net/2019/05/18/how-to-fix-configuring-tzdata-interactive-input-when-building-docker-images/

@@ -27,7 +27,7 @@ jobs:
 
     container:
       # run on torch 1.8 as it's the LTS version
-      image: "speediedan/finetuning-scheduler:base-cuda-py3.9-pt1.8-azpl-init"
+      image: "speediedan/finetuning-scheduler:py3.9-pt1.8-azpl-init"
       mapDockerSocket: false
       volumes:
       - /var/run/user/998/docker.sock:/var/run/docker.sock
@@ -71,7 +71,6 @@ jobs:
     - script: |
         set -e
         python -m pytest fts_examples -v --maxfail=1 --durations=0
-        python fts_examples/fts_superglue.py fit --config fts_examples/config/fts_explicit.yaml
       displayName: 'Testing: examples'
 
     # - script: |
