@@ -12,8 +12,9 @@
 
 ARG PYTHON_VERSION=3.9
 ARG PYTORCH_VERSION=1.10
+ARG CUST_BASE
 
-FROM base-cuda-py3.9-pt1.10-pl1.6
+FROM base-${CUST_BASE}py${PYTHON_VERSION}-pt${PYTORCH_VERSION}-pl1.6
 
 LABEL maintainer="Dan Dale <https://github.com/speediedan>"
 

@@ -10,14 +10,52 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+ARG CUDA_VERSION=11.1
+
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04
+
+# prefer 11.3 toolkit due to bug but allow 11.1 runtime
+ARG CUDATOOLKIT_VERSION=11.3
 ARG PYTHON_VERSION=3.9
 ARG PYTORCH_VERSION=1.10
+ARG CONDA_VERSION=4.11.0
 
-FROM base-conda-py3.9-pt1.10-pl1.6
+SHELL ["/bin/bash", "-c"]
+ENV \
+    PATH="$PATH:/root/.local/bin" \
+    DEBIAN_FRONTEND=noninteractive \
+    TZ=US/Pacific
+
+RUN apt-get update -qq --fix-missing && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        git \
+        wget \
+        curl \
+        unzip \
+        ca-certificates \
+    && \
+    curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py39_${CONDA_VERSION}-Linux-x86_64.sh && \
+    chmod +x ~/miniconda.sh && \
+    ~/miniconda.sh -b && \
+    rm ~/miniconda.sh && \
+# Cleaning
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /root/.cache && \
+    rm -rf /var/lib/apt/lists/*
+ENV \
+    PATH="/root/miniconda3/bin:$PATH" \
+    # LD_LIBRARY_PATH="/root/miniconda3/lib:$LD_LIBRARY_PATH" \
+    CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
+    MAKEFLAGS="-j$(nproc)" \
+    TORCH_CUDA_ARCH_LIST="3.7;5.0;6.0;7.0;7.5" \
+    CONDA_ENV=finetuning-scheduler \
+    CONDA_DEFAULT_ENV=${CONDA_ENV}
 
 LABEL maintainer="Dan Dale <https://github.com/speediedan>"
 
-ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64
 WORKDIR /home/finetuning-scheduler
 COPY ./tests ./tests
 COPY ./requirements ./requirements
@@ -25,25 +63,25 @@ COPY ./fts_examples ./fts_examples
 COPY ./finetuning_scheduler ./finetuning_scheduler
 COPY ./requirements.txt ./setup.py ./setup.cfg ./pyproject.toml ./README.md ./
 
+ENV PATH=/root/miniconda3/envs/${CONDA_ENV}/bin:$PATH \
+    CONDA_DEFAULT_ENV=${CONDA_ENV}
+# conda init
+RUN conda update -n base -c defaults conda && \
+    conda create -y --name $CONDA_ENV && \
+    conda init bash
+
 SHELL ["conda", "run", "--no-capture-output", "-n", "finetuning-scheduler", "/bin/bash", "-c"]
 
-# upgrade cudatoolkit due to 11.1 issues
-# RUN conda install -c pytorch -c nvidia python=3.9 pytorch=1.10 cudatoolkit=11.3 -y
-RUN conda install -c pytorch -c nvidia mkl numpy python=3.9 pytorch=1.10 cudatoolkit=11.3 -y
-# install dependencies
-RUN \
+RUN conda install -c pytorch -c nvidia python=${PYTHON_VERSION} pytorch=${PYTORCH_VERSION} cudatoolkit=${CUDATOOLKIT_VERSION} && \
     pip install ".[all]" && \
     conda clean -ya && \
     rm -rf requirements.* requirements/
 
-RUN python --version && \
-    pip --version && \
+COPY ./dockers/release-conda/conda_entrypoint.sh ./conda_entrypoint.sh
+RUN echo "conda activate ${CONDA_ENV}" >> ~/.bashrc
+RUN pip --version && \
+    conda info && \
     pip list && \
     python -c "import pytorch_lightning as pl; print(pl.__version__)" && \
     python -c "import finetuning_scheduler as fts; print(fts.__version__)"
-
-ENV CONDA_DEFAULT_ENV=${CONDA_ENV}
-COPY ./dockers/release-conda/conda_entrypoint.sh ./conda_entrypoint.sh
-RUN echo "LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64" >> ~/.bashrc && \
-    echo "conda activate ${CONDA_ENV}" >> ~/.bashrc
 ENTRYPOINT ["./conda_entrypoint.sh"]

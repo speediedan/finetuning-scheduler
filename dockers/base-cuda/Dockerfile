@@ -11,22 +11,26 @@
 # limitations under the License.
 # initially based on https://bit.ly/3pdAf1G
 
-ARG CUDA_VERSION=11.1
+ARG CUDA_VERSION=11.3.1
+ARG OS_VER=ubuntu20.04
 
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04
+FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
 ARG PYTHON_VERSION=3.9
 ARG PYTORCH_VERSION=1.10
+ARG CUST_BUILD=0
+ARG MKL_THREADING_LAYER=GNU
 
 SHELL ["/bin/bash", "-c"]
 # https://techoverflow.net/2019/05/18/how-to-fix-configuring-tzdata-interactive-input-when-building-docker-images/
 ENV \
+    CUST_BUILD=${CUST_BUILD} \
     DEBIAN_FRONTEND=noninteractive \
     TZ=US/Pacific \
     PATH="$PATH:/root/.local/bin" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     TORCH_CUDA_ARCH_LIST="3.7;5.0;6.0;7.0;7.5" \
-    MKL_THREADING_LAYER=GNU \
+    MKL_THREADING_LAYER=${MKL_THREADING_LAYER} \
     MAKEFLAGS="-j$(nproc)"
     # MAKEFLAGS="-j1"
 
@@ -43,7 +47,6 @@ RUN apt-get update -qq --fix-missing  && \
         software-properties-common \
         libopenmpi-dev \
     && \
-
 # Install python
     add-apt-repository ppa:deadsnakes/ppa && \
     apt-get install -y \
@@ -51,25 +54,13 @@ RUN apt-get update -qq --fix-missing  && \
         python${PYTHON_VERSION}-distutils \
         python${PYTHON_VERSION}-dev \
     && \
-
     update-alternatives --install /usr/bin/python${PYTHON_VERSION%%.*} python${PYTHON_VERSION%%.*} /usr/bin/python${PYTHON_VERSION} 1 && \
     update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1 && \
-
 # Cleaning
     apt-get autoremove -y && \
     apt-get clean && \
     rm -rf /root/.cache && \
     rm -rf /var/lib/apt/lists/*
-
-# ENV \
-#     HOROVOD_CUDA_HOME=$CUDA_TOOLKIT_ROOT_DIR \
-#     HOROVOD_BUILD_CUDA_CC_LIST=$TORCH_CUDA_ARCH_LIST \
-#     HOROVOD_GPU_OPERATIONS=NCCL \
-#     HOROVOD_WITH_PYTORCH=1 \
-#     HOROVOD_WITHOUT_TENSORFLOW=1 \
-#     HOROVOD_WITHOUT_MXNET=1 \
-#     HOROVOD_WITH_GLOO=1 \
-#     HOROVOD_WITHOUT_MPI=1
 
 COPY ./requirements.txt requirements.txt
 COPY ./requirements/ ./requirements/
@@ -80,13 +71,17 @@ RUN \
     wget https://bootstrap.pypa.io/get-pip.py --progress=bar:force:noscroll --no-check-certificate && \
     python${PYTHON_VERSION} get-pip.py && \
     rm get-pip.py && \
-
     # Disable cache
     pip config set global.cache-dir false && \
     # set particular PyTorch version
-    python ./requirements/pl_adjust_versions.py requirements.txt ${PYTORCH_VERSION} && \
-    python ./requirements/pl_adjust_versions.py requirements/extra.txt ${PYTORCH_VERSION} && \
-    python ./requirements/pl_adjust_versions.py requirements/examples.txt ${PYTORCH_VERSION} && \
+    if [[ "${CUST_BUILD}" -eq 0 ]]; then \
+        python ./requirements/pl_adjust_versions.py requirements.txt ${PYTORCH_VERSION}; \
+        python ./requirements/pl_adjust_versions.py requirements/extra.txt ${PYTORCH_VERSION}; \
+        python ./requirements/pl_adjust_versions.py requirements/examples.txt ${PYTORCH_VERSION}; \
+    else \
+        # target specific pytorch cuda build
+        pip install torch==1.10.2+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
+    fi && \
     # Install all requirements
     pip install -r requirements/devel.txt --no-cache-dir && \
     rm -rf requirements.* requirements/
@@ -94,17 +89,6 @@ RUN \
 RUN \
     CUDA_VERSION_MAJOR=$(python -c "import torch; print(torch.version.cuda.split('.')[0])") && \
     py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.9'.split('.')))")
-    # # install DALI, needed for examples
-    # # todo: waiting for 1.4 - https://github.com/NVIDIA/DALI/issues/3144#issuecomment-877386691
-    # if [ $py_ver -eq "0" ]; then \
-    #     pip install --extra-index-url https://developer.download.nvidia.com/compute/redist "nvidia-dali-cuda${CUDA_VERSION_MAJOR}0>1.0" ; \
-    #     python -c 'from nvidia.dali.pipeline import Pipeline' ; \
-    # fi
-
-# RUN \
-#     # install NVIDIA apex
-#     pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" https://github.com/NVIDIA/apex/archive/refs/heads/master.zip && \
-#     python -c "from apex import amp"
 
 RUN \
     # install FairScale
