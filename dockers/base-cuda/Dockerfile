@@ -95,10 +95,10 @@ RUN \
     pip install fairscale==0.4.0 && \
     python -c "import fairscale; print(fairscale.__version__)"
 
-RUN \
-    # install DeepSpeed
-    pip install deepspeed==0.5.7 && \
-    python -c "import deepspeed; print(deepspeed.__version__)"
+# RUN \ # removing deepspeed from extras unless/until add optimizer pg interface added to DS API
+#     # install DeepSpeed
+#     pip install deepspeed==0.5.7 && \
+#     python -c "import deepspeed; print(deepspeed.__version__)"
 
 RUN \
     # Show what we have

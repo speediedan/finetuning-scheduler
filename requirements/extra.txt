@@ -3,5 +3,4 @@
 omegaconf>=2.0.5
 jsonargparse[signatures]>=4.0.4
 rich>=10.2.2
-deepspeed
 fairscale

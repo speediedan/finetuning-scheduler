@@ -149,7 +149,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
             _StrategyType.DP,
             _StrategyType.DDP,
             _StrategyType.DDP_SPAWN,
-            # _StrategyType.DEEPSPEED,  # support to be re-evaluated
+            # _StrategyType.DEEPSPEED,  # support to be re-evaluated if add optimizer pg functionality added to DS API
             _StrategyType.DDP_SHARDED,
             _StrategyType.DDP_SHARDED_SPAWN,
             "single_device",
