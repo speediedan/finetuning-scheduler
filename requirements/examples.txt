@@ -1,4 +1,6 @@
 datasets
+# transformers depending on a specific commit until patch release for 4.17.0 or 4.18 is issued
+# git+https://github.com/huggingface/transformers.git@2f4cea0899b0f2c2988f3da30dc89deaf6af7fcb#egg=transformers
 transformers
 scikit-learn
 sentencepiece

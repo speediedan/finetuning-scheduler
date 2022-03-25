@@ -60,7 +60,7 @@ class FTSState:
     _best_ckpt_depth: int = 0
     _ft_sync_props: Tuple = (
         ("epoch_progress.current.completed", "_ft_epoch"),
-        ("global_step", "_ft_global_steps"),
+        ("epoch_loop.global_step", "_ft_global_steps"),
     )
     _ft_sync_objects: Optional[Tuple] = None
     _curr_thawed_params: List = field(default_factory=list)
@@ -178,12 +178,14 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         self.es_phase_complete = True
         self.final_phase = True
         self.finetuningscheduler_callback = None
-        self._check_on_train_epoch_end = False
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
         """Ensure a :class:`~finetuning_scheduler.fts.FinetuningScheduler` is provided before beginning
         training."""
         self.connect_callback(trainer)
+        if self._check_on_train_epoch_end is None:
+            # post-validation saving/evaluation is the most common fts usage pattern
+            self._check_on_train_epoch_end = False
         super().setup(trainer, pl_module, stage)
 
     def _evaluate_stopping_criteria(self, current: torch.Tensor) -> Tuple[bool, Optional[str]]:
@@ -265,14 +267,11 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
                 Reference to the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
                 callback being used.
             save_on_train_epoch_end (bool): Whether to run checkpointing at the end of the training epoch. If this is
-                ``False``, then the check runs at the end of the validation. Defaults to ``True``
-                (instead of ``None`` :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`
-                does) to enable callback state restoration and support multi-phase restoration without changing
-                :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.on_load_checkpoint`
-                logic.
+                ``False``, then the check runs at the end of the validation. Defaults to ``None`` similar to
+                :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint` but is set to
+                 ``False`` during setup unless overridden.
         """
         super().__init__(*args, **kwargs)
-        self._save_on_train_epoch_end = True
         self.current_ckpt_depth = 0
         self.best_ckpt_depth = 0
         self.finetuningscheduler_callback = None
@@ -310,6 +309,9 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
                     f"(restore_best=True) but {self.__class__.__name__} but has no quantity to monitor (monitor=None)."
                     "Please provide a value to monitor or set restore_best=False."
                 )
+        if self._save_on_train_epoch_end is None:
+            # post-validation saving/evaluation is the most common fts usage pattern
+            self._save_on_train_epoch_end = False
         super().setup(trainer, pl_module, stage)
 
     def on_save_checkpoint(

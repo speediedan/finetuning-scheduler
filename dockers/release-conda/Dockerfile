@@ -17,8 +17,8 @@ FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04
 # prefer 11.3 toolkit due to bug but allow 11.1 runtime
 ARG CUDATOOLKIT_VERSION=11.3
 ARG PYTHON_VERSION=3.9
-ARG PYTORCH_VERSION=1.10
-ARG CONDA_VERSION=4.11.0
+ARG PYTORCH_VERSION=1.11
+ARG CONDA_VERSION=4.12.0
 
 SHELL ["/bin/bash", "-c"]
 ENV \
@@ -49,8 +49,8 @@ ENV \
     PATH="/root/miniconda3/bin:$PATH" \
     # LD_LIBRARY_PATH="/root/miniconda3/lib:$LD_LIBRARY_PATH" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
-    MAKEFLAGS="-j$(nproc)" \
-    TORCH_CUDA_ARCH_LIST="3.7;5.0;6.0;7.0;7.5" \
+    MAKEFLAGS="-j2" \
+    TORCH_CUDA_ARCH_LIST="3.7;5.0;6.0;7.0;7.5;8.0" \
     CONDA_ENV=finetuning-scheduler \
     CONDA_DEFAULT_ENV=${CONDA_ENV}
 

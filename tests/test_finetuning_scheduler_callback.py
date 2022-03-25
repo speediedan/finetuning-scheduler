@@ -463,27 +463,44 @@ def test_finetuningscheduling_decay(tmpdir, boring_ft_schedule, explicit_mode: b
 
 
 EXPECTED_RESUME_RESULTS = {
-    ("best", False, -1): (0, 0, 3),
-    ("kth", False, -1): (0, 0, 3),
-    ("best", True, -1): (0, 0, 3),
-    ("kth", True, -1): (1, 0, 3),
-    ("best", False, 1): (0, 0, 1),
-    ("kth", False, 1): (0, 0, 1),
-    ("best", True, 1): (0, 0, 1),
-    ("kth", True, 1): (1, 0, 1),
+    (False, "best", False, -1): (0, 0, 3),
+    (True, "best", False, -1): (0, 0, 3),
+    (False, "kth", False, -1): (0, 0, 3),
+    (True, "kth", False, -1): (1, 0, 3),
+    (False, "best", True, -1): (0, 0, 3),
+    (True, "best", True, -1): (0, 0, 3),
+    (False, "kth", True, -1): (1, 0, 3),
+    (True, "kth", True, -1): (1, 0, 3),
+    (False, "best", False, 1): (0, 0, 1),
+    (True, "best", False, 1): (0, 0, 1),
+    (False, "kth", False, 1): (0, 0, 1),
+    (True, "kth", False, 1): (1, 0, 1),
+    (False, "best", True, 1): (0, 0, 1),
+    (True, "best", True, 1): (0, 0, 1),
+    (False, "kth", True, 1): (1, 0, 1),
+    (True, "kth", True, 1): (1, 0, 1),
 }
 EXPECTED_WARNS = ["does not have many workers", "GPU available but", "`max_epochs` was not", "that ended mid-epoch"]
+EXPECTED_TRAIN_CHK_WARNS = ["could not find the monitored key", "callbacks used to create"]
+# temporarily add checkpoint to state_dict expected warns until migration implemented
+EXPECTED_WARNS.extend(["on_load_checkpoint` will change", "Returning a value from"])
+# temporarily add dirpath change until new_incarnation behavior set to default
+EXPECTED_WARNS.append("The dirpath has changed from")
 
 
+@pytest.mark.parametrize("train_chk_mode,", [None, True], ids=["defaultchk", "trainchk"])
 @pytest.mark.parametrize("ckpt,", ["best", "kth"], ids=["best", "kth"])
 @pytest.mark.parametrize("inc_mode,", [False, True], ids=["defaultinc", "newinc"])
 @pytest.mark.parametrize("max_depth", [-1, 1], ids=["nomaxdepth", "maxdepth1"])
-def test_finetuningscheduler_callback_resume(tmpdir, ckpt_set, recwarn, ckpt: str, inc_mode: bool, max_depth: int):
+def test_fts_callback_resume(
+    tmpdir, ckpt_set, recwarn, train_chk_mode: bool, ckpt: str, inc_mode: Optional[bool], max_depth: int
+):
     """Validate scheduled finetuning resumption functions as expected from both 'best' and 'kth'(not-best)
     checkpoints in both new_incarnation modes with and without max_depth specified."""
+    resume_warns = None
     resume_callbacks = [
         FTSEarlyStopping(monitor="val_loss", patience=1, min_delta=0.001),
-        FTSCheckpoint(monitor="val_loss", verbose=True, save_top_k=3),
+        FTSCheckpoint(monitor="val_loss", save_on_train_epoch_end=train_chk_mode, verbose=True, save_top_k=3),
     ]
     resume_callbacks.append(FinetuningScheduler(new_incarnation_mode=inc_mode, max_depth=max_depth))
 
@@ -492,13 +509,22 @@ def test_finetuningscheduler_callback_resume(tmpdir, ckpt_set, recwarn, ckpt: st
     trainer = Trainer(default_root_dir=tmpdir, callbacks=resume_callbacks)
     finetuningscheduler_callback = get_fts(trainer)
     trainer.fit(model, ckpt_path=ckpt_set[ckpt])
-    expected_state = EXPECTED_RESUME_RESULTS[(ckpt, getattr(resume_callbacks[2], "new_incarnation_mode"), max_depth)]
+    # note if save_on_train_epoch_end is set to `None` then it will be False by default
+    expected_state = EXPECTED_RESUME_RESULTS[
+        (
+            resume_callbacks[1]._save_on_train_epoch_end,
+            ckpt,
+            getattr(resume_callbacks[2], "new_incarnation_mode"),
+            max_depth,
+        )
+    ]
     assert trainer.checkpoint_callback.best_ckpt_depth == expected_state[0]
     assert finetuningscheduler_callback.depth_remaining == expected_state[1]
     assert finetuningscheduler_callback.curr_depth == expected_state[2]
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
-    # ensure no unexpected warnings detected
-    assert all([any([re.compile(w).search(w_msg.message.args[0]) for w in EXPECTED_WARNS]) for w_msg in recwarn.list])
+    resume_warns = EXPECTED_WARNS + EXPECTED_TRAIN_CHK_WARNS if train_chk_mode else EXPECTED_WARNS
+    # ensure no unexpected warnings detected and that all expected warnings are detected
+    assert all([any([re.compile(w).search(w_msg.message.args[0]) for w in resume_warns]) for w_msg in recwarn.list])
 
 
 EXPECTED_INTRAFIT_STATE = {
@@ -686,8 +712,9 @@ def test_finetuningscheduling_epoch_trans_only(tmpdir, boring_ft_schedule, epoch
         # we're testing an epoch_transitions_only schedule that should trigger the specified warning
         with pytest.warns(UserWarning) as eto_warns:
             trainer.fit(model)
-        assert re.compile(expected_state[1]).search(eto_warns[0].message.args[0])
-        assert re.compile(expected_state[2]).search(eto_warns[1].message.args[0])
+            # TODO: update expected message indices once migration from on_load_checkpoint to load_state_dict complete
+        assert re.compile(expected_state[1]).search(eto_warns[2].message.args[0])
+        assert re.compile(expected_state[2]).search(eto_warns[3].message.args[0])
         # for the valid epoch_only_transitions schedule, verify expected state
         assert finetuningscheduler_callback.depth_remaining == expected_state[0][0]
         assert finetuningscheduler_callback.curr_depth == expected_state[0][1]

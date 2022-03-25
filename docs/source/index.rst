@@ -28,6 +28,10 @@ Setup
 *****
 Setup is straightforward, just install from PyPI!
 
+.. warning::
+   Currently awaiting first pytorch-lightning 1.6.x release to pypi before publishing initial finetuning-scheduler
+   package on pypi. The first release candidate is out so it shouldn't be long as of 2022.03.24.
+
 .. code-block:: bash
 
    pip install finetuning-scheduler

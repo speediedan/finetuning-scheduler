@@ -367,7 +367,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         self._fts_state._fts_ckpt_metadata["current_ckpt_depth"] = self._fts_state._curr_depth
         self._fts_state._fts_ckpt_metadata["best_ckpt_depth"] = self._fts_state._best_ckpt_depth
         return {
-            "optimizer_metadata": self._internal_optimizer_metadata,
+            "internal_optimizer_metadata": self._internal_optimizer_metadata,
             "fts_metadata": self._fts_state._fts_ckpt_metadata,
         }
 
@@ -386,7 +386,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
                 dictionary that will be loaded from the checkpoint
         """
         self._restarting = True
-        self._internal_optimizer_metadata = callback_state["optimizer_metadata"]
+        self._internal_optimizer_metadata = callback_state["internal_optimizer_metadata"]
         self._fts_state._fts_ckpt_metadata = callback_state["fts_metadata"]
         if self._fts_state._resume_fit_from_ckpt:  # if resuming training, on_fit_start will already be called
             # if resuming from a checkpoint, we need to update current fts depth from the used ckpt

@@ -6,6 +6,7 @@ Finetuning Scheduler API
 .. autosummary::
     :toctree: api
     :nosignatures:
+    :template: classtemplate.rst
 
     fts
     fts_supporters
