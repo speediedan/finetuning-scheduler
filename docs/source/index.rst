@@ -36,9 +36,8 @@ Setup is straightforward, just install from PyPI!
 
    pip install finetuning-scheduler
 
-Additional installation options (from source etc.) are discussed in
-the
-`README <https://github.com/PyTorchLightning/pytorch-lightning/#to-install-additional-packages-required-for-examples>`_.
+Additional installation options (from source etc.) are discussed under "Additional installation options" in the
+`README <https://github.com/speediedan/finetuning-scheduler/blob/main/README.md>`_
 
 Motivation
 **********
@@ -250,14 +249,16 @@ sessions.
     .. code-block:: python
 
         trainer = Trainer(
-            callbacks=[FinetuningScheduler(new_incarnation_mode=True)],
+            callbacks=[FinetuningScheduler()],
             ckpt_path="some/path/to/my_kth_best_checkpoint.ckpt",
         )
 
-    To handle the edge case wherein one is resuming scheduled finetuning from a non-best checkpoint and the previous
-    best checkpoints may not be accessible, setting
-    :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.new_incarnation_mode` to
-    ``True`` as above will re-initialize the checkpoint state with a new best checkpoint at the resumption depth.
+    Note that similar to the behavior of
+    :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`,
+    (`specifically this PR <https://github.com/PyTorchLightning/pytorch-lightning/pull/12045>`_), when resuming training
+    with a different :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` ``dirpath`` from the provided
+    checkpoint, the new training session's checkpoint state will be re-initialized at the resumption depth with the
+    provided checkpoint being set as the best checkpoint.
 
 Finetuning all the way down!
 ****************************

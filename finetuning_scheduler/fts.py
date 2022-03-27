@@ -18,7 +18,7 @@ Used to implement flexible finetuning training schedules
 """
 import logging
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, Optional, Sequence, Union
 
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import BaseFinetuning
@@ -71,7 +71,6 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         max_depth: int = -1,
         base_max_lr: float = 1e-5,
         restore_best: bool = True,
-        new_incarnation_mode: bool = False,
         gen_ft_sched_only: bool = False,
         epoch_transitions_only: bool = False,
     ):
@@ -96,9 +95,6 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
             restore_best: If ``True``, restore the best available (defined by the
                 :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint`) checkpoint
                 before finetuning depth transitions. Defaults to ``True``.
-            new_incarnation_mode: If ``True``, checkpoint state will be re-initialized at resumption depth when resuming
-                a scheduled finetuning training schedule. Useful for example when previously saved checkpoints may not
-                be accessible. Defaults to ``False``.
             gen_ft_sched_only: If ``True``, generate the default finetuning schedule to ``Trainer.log_dir`` (it will be
                 named after your :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` subclass with
                 the suffix ``_ft_schedule.yaml``) and exit without training. Typically used to generate a default
@@ -118,7 +114,6 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         self._fts_state = FTSState()
         self.max_depth = max_depth
         self.restore_best = restore_best
-        self.new_incarnation_mode = new_incarnation_mode
         self.ft_schedule = ft_schedule
         self.base_max_lr = base_max_lr
         self.gen_ft_sched_only = gen_ft_sched_only
@@ -256,7 +251,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         checkpoint_connector = self.pl_module.trainer._checkpoint_connector
 
         # restore precision plugin (scaler etc.)
-        self.pl_module.trainer.precision_plugin.on_load_checkpoint(checkpoint_connector._loaded_checkpoint)
+        checkpoint_connector.restore_precision_plugin_state()
 
         # checkpoint_connector.restore_training_state() would restore loops here
         # self.restore_loops()
@@ -339,28 +334,19 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
             raise MisconfigurationException("fts currently only supports a single-optimizer configuration")
         super().on_fit_start(trainer, pl_module)
 
-    def on_save_checkpoint(
-        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", checkpoint: Dict[str, Any]
-    ) -> Dict[int, List[Dict[str, Any]]]:
+    def state_dict(self) -> Dict[str, Any]:
         """Before saving a checkpoint, add the
         :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state to be saved.
 
-        Args:
-            trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The
-                :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
-            pl_module (:external+pl:class:`~pytorch_lightning.core.lightning.LightningModule`): The
-                :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` object
-            checkpoint: the checkpoint dictionary
-
         Returns:
-            Dict[int, List[Dict[str, Any]]]: The
-            :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state dictionary
-            that will be added to the checkpoint
+            Dict[str, Any]: The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state dictionary
+                that will be added to the checkpoint
         """
         assert self.pl_module is not None and self.pl_module.trainer is not None
+        trainer = self.pl_module.trainer
         if trainer.checkpoint_callback.current_score == trainer.checkpoint_callback.best_model_score:
             self._fts_state._best_ckpt_depth = self._fts_state._curr_depth
-            for opt_idx, _ in enumerate(self.pl_module.trainer.optimizers):
+            for opt_idx, _ in enumerate(trainer.optimizers):
                 self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"][opt_idx] = deepcopy(
                     self._internal_optimizer_metadata[opt_idx]
                 )
@@ -371,30 +357,23 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
             "fts_metadata": self._fts_state._fts_ckpt_metadata,
         }
 
-    def on_load_checkpoint(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", callback_state: Dict) -> None:
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         """After loading a checkpoint, load the saved
         :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state and update the
         current callback state accordingly.
 
         Args:
-            trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The
-                :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
-            pl_module (:external+pl:class:`~pytorch_lightning.core.lightning.LightningModule`): The
-                :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` object
-            callback_state: The
-                :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state
-                dictionary that will be loaded from the checkpoint
+            state_dict: The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state dictionary that will
+                be loaded from the checkpoint
         """
         self._restarting = True
-        self._internal_optimizer_metadata = callback_state["internal_optimizer_metadata"]
-        self._fts_state._fts_ckpt_metadata = callback_state["fts_metadata"]
+        self._internal_optimizer_metadata = state_dict["internal_optimizer_metadata"]
+        self._fts_state._fts_ckpt_metadata = state_dict["fts_metadata"]
         if self._fts_state._resume_fit_from_ckpt:  # if resuming training, on_fit_start will already be called
             # if resuming from a checkpoint, we need to update current fts depth from the used ckpt
             self._fts_state._curr_depth = self._fts_state._fts_ckpt_metadata["current_ckpt_depth"]
-            # if we're restoring from a non-best ckpt depth, and new_incarnation_mode=True, ensure it is the new
-            # training incarnation's initial best
-            if self.new_incarnation_mode:
-                self._fts_state._best_ckpt_depth = self._fts_state._fts_ckpt_metadata["current_ckpt_depth"]
+            # if we're restoring from a non-best ckpt depth, ensure it is the new training incarnation's initial best
+            self._fts_state._best_ckpt_depth = self._fts_state._fts_ckpt_metadata["current_ckpt_depth"]
 
     def should_transition(self, trainer: "pl.Trainer") -> bool:
         """Phase transition logic is contingent on whether we are composing

@@ -21,6 +21,7 @@ import logging
 import os
 import pathlib
 import re
+import warnings
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import KeysView
@@ -173,6 +174,10 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
             finetuningscheduler_callback (pytorch_lightning.callbacks.Callback):
                 Reference to the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
                 callback being used.
+            check_on_train_epoch_end (bool): Whether to run early stopping check at the end of the training epoch. If
+                this is ``False``, then the check runs at the end of the validation. Defaults to ``None`` similar to
+                :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` but is set to
+                 ``False`` during setup unless overridden.
         """
         super().__init__(*args, **kwargs)
         self.es_phase_complete = True
@@ -243,8 +248,8 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
     r"""
     Extends/specializes :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint` to facilitate
     multi-phase scheduled finetuning. Overrides the
-    :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.on_save_checkpoint` and
-    :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.on_load_checkpoint` hooks to
+    :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.state_dict` and
+    :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.load_state_dict` hooks to
     maintain additional state (:attr:`current_ckpt_depth`, :attr:`best_ckpt_depth`,
     :attr:`finetuningscheduler_callback`). Usage of :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is
     identical to :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint` and
@@ -314,21 +319,14 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             self._save_on_train_epoch_end = False
         super().setup(trainer, pl_module, stage)
 
-    def on_save_checkpoint(
-        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", checkpoint: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def state_dict(self) -> Dict[str, Any]:
         """Overrides.
 
-        :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.on_save_checkpoint` to
+        :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.state_dict` to
         maintain multi-phase training depth state.
 
-        Args:
-            trainer: the current :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` instance.
-            pl_module: the current :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` instance.
-            checkpoint: the checkpoint dictionary that will be saved.
-
         Returns:
-            Dict[str, Any]: the checkpoint dictionary that will be saved.
+            Dict[str, Any]: the callback state dictionary that will be saved.
         """
         self.current_ckpt_depth = self.finetuningscheduler_callback.curr_depth  # type: ignore[attr-defined]
         # note, if current score is precisely the best score but a previous depth had the same score the
@@ -342,48 +340,48 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             "best_model_path": self.best_model_path,
             "current_score": self.current_score,
             "dirpath": self.dirpath,
+            "best_k_models": self.best_k_models,
+            "kth_best_model_path": self.kth_best_model_path,
+            "kth_value": self.kth_value,
+            "last_model_path": self.last_model_path,
             "current_ckpt_depth": self.current_ckpt_depth,
             "best_ckpt_depth": self.best_ckpt_depth,
         }
 
-    def on_load_checkpoint(
-        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", callback_state: Dict[str, Any]
-    ) -> None:
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         """Overrides.
 
-        :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.on_load_checkpoint` to
+        :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.load_state_dict` to
         load multi-phase training depth state.
 
         Args:
-            trainer: the current :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` instance.
-            pl_module: the current :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` instance.
-            callback_state: the callback state returned by
-                :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.on_save_checkpoint`.
+            state_dict: the callback state dict of :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint`.
         """
-        self.best_model_score = callback_state["best_model_score"]
-        self.best_model_path = callback_state["best_model_path"]
-        self.current_ckpt_depth = callback_state["current_ckpt_depth"]
-        self.best_ckpt_depth = callback_state["best_ckpt_depth"]
-        assert isinstance(trainer.early_stopping_callback, FTSEarlyStopping)
+        assert self.finetuningscheduler_callback is not None
+        assert isinstance(self.finetuningscheduler_callback.pl_module.trainer.early_stopping_callback, FTSEarlyStopping)
         # if we're starting a new level from another checkpoint depth, wait_count could be > 0 contingent on the
         # min_delta
-        if self.finetuningscheduler_callback.curr_depth > self.best_ckpt_depth:  # type: ignore[attr-defined]
-            if not self.finetuningscheduler_callback.epoch_transitions_only:  # type: ignore[attr-defined]
-                trainer.early_stopping_callback.wait_count = 0
-        if self.finetuningscheduler_callback._fts_state._resume_fit_from_ckpt:  # type: ignore[attr-defined]
-            if self.finetuningscheduler_callback.new_incarnation_mode:  # type: ignore[attr-defined]
-                # reset state for new training incarnation at resumption depth
-                self.best_ckpt_depth = self.current_ckpt_depth
-                self.best_model_path = ""
-                self.best_model_score = None
-                self.best_k_models: Dict = {}
-                self.kth_best_model_path = ""
-                self.kth_value = None
+        if self.finetuningscheduler_callback.curr_depth > self.best_ckpt_depth:
+            if not self.finetuningscheduler_callback.epoch_transitions_only:
+                self.finetuningscheduler_callback.pl_module.trainer.early_stopping_callback.wait_count = 0
+        if self.finetuningscheduler_callback._fts_state._resume_fit_from_ckpt:
+            dirpath_from_ckpt = state_dict.get("dirpath", self.dirpath)
+            if self.dirpath == dirpath_from_ckpt:
+                self.best_k_models = state_dict.get("best_k_models", self.best_k_models)
+                self.kth_best_model_path = state_dict.get("kth_best_model_path", self.kth_best_model_path)
+                self.kth_value = state_dict.get("kth_value", self.kth_value)
+                self.current_ckpt_depth = state_dict["current_ckpt_depth"]
+                self.best_ckpt_depth = state_dict["best_ckpt_depth"]
             else:
-                self.best_k_models[self.best_model_path] = self.best_model_score
-                _op = max if self.mode == "min" else min
-                self.kth_best_model_path = _op(self.best_k_models, key=lambda k: self.best_k_models[k])
-                self.kth_value = self.best_k_models[self.kth_best_model_path]
+                warnings.warn(
+                    f"The dirpath has changed from {dirpath_from_ckpt!r} to {self.dirpath!r}, therefore"
+                    " `best_model_score`, `kth_best_model_path`, `kth_value` and `best_k_models` won't be reloaded."
+                    " Only `last_model_path`, `best_model_path` and `current_ckpt_depth` will be reloaded."
+                )
+                self.current_ckpt_depth = state_dict["current_ckpt_depth"]
+                self.best_ckpt_depth = self.current_ckpt_depth
+            self.last_model_path = state_dict.get("last_model_path", self.last_model_path)
+            self.best_model_path = state_dict["best_model_path"]
 
 
 class UniqueKeyLoader(yaml.SafeLoader):

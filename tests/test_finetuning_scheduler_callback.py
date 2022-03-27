@@ -156,11 +156,9 @@ class TestFinetuningScheduler(FinetuningScheduler):
             trainer.strategy.strategy_name = _StrategyType.DDP2
         return super().setup(trainer, pl_module, stage)
 
-    def on_save_checkpoint(
-        self, trainer: "Trainer", pl_module: "LightningModule", checkpoint: Dict[str, Any]
-    ) -> Dict[int, List[Dict[str, Any]]]:
+    def state_dict(self) -> Dict[str, Any]:
         self.best_ckpt_test_weight = self.pl_module._modules["layer"]._modules["3"].bias.data.detach().clone()
-        return super().on_save_checkpoint(trainer, pl_module, checkpoint)
+        return super().state_dict()
 
     def restore_best_ckpt(self) -> None:
         super().restore_best_ckpt()
@@ -463,46 +461,52 @@ def test_finetuningscheduling_decay(tmpdir, boring_ft_schedule, explicit_mode: b
 
 
 EXPECTED_RESUME_RESULTS = {
-    (False, "best", False, -1): (0, 0, 3),
-    (True, "best", False, -1): (0, 0, 3),
-    (False, "kth", False, -1): (0, 0, 3),
-    (True, "kth", False, -1): (1, 0, 3),
-    (False, "best", True, -1): (0, 0, 3),
-    (True, "best", True, -1): (0, 0, 3),
-    (False, "kth", True, -1): (1, 0, 3),
-    (True, "kth", True, -1): (1, 0, 3),
-    (False, "best", False, 1): (0, 0, 1),
-    (True, "best", False, 1): (0, 0, 1),
-    (False, "kth", False, 1): (0, 0, 1),
-    (True, "kth", False, 1): (1, 0, 1),
-    (False, "best", True, 1): (0, 0, 1),
-    (True, "best", True, 1): (0, 0, 1),
-    (False, "kth", True, 1): (1, 0, 1),
-    (True, "kth", True, 1): (1, 0, 1),
+    (True, False, "best", -1): (0, 0, 3),
+    (True, False, "best", 1): (0, 0, 1),
+    (True, False, "kth", -1): (1, 0, 3),
+    (True, False, "kth", 1): (1, 0, 1),
+    (True, True, "best", -1): (0, 0, 3),
+    (True, True, "best", 1): (0, 0, 1),
+    (True, True, "kth", -1): (1, 0, 3),
+    (True, True, "kth", 1): (1, 0, 1),
+    (False, False, "best", -1): (0, 0, 3),
+    (False, False, "best", 1): (0, 0, 1),
+    (False, False, "kth", -1): (0, 0, 3),
+    (False, False, "kth", 1): (0, 0, 1),
+    (False, True, "best", -1): (0, 0, 3),
+    (False, True, "best", 1): (0, 0, 1),
+    (False, True, "kth", -1): (1, 0, 3),
+    (False, True, "kth", 1): (1, 0, 1),
 }
-EXPECTED_WARNS = ["does not have many workers", "GPU available but", "`max_epochs` was not", "that ended mid-epoch"]
+EXPECTED_WARNS = [
+    "does not have many workers",
+    "GPU available but",
+    "`max_epochs` was not",
+    "that ended mid-epoch",
+    "The dirpath has changed from",
+]
 EXPECTED_TRAIN_CHK_WARNS = ["could not find the monitored key", "callbacks used to create"]
-# temporarily add checkpoint to state_dict expected warns until migration implemented
-EXPECTED_WARNS.extend(["on_load_checkpoint` will change", "Returning a value from"])
-# temporarily add dirpath change until new_incarnation behavior set to default
-EXPECTED_WARNS.append("The dirpath has changed from")
+EXPECTED_DIRPATH = "exists and is not empty"
 
 
+@pytest.mark.parametrize("diff_dirpath,", [True, False], ids=["diffdirpath", "samedirpath"])
 @pytest.mark.parametrize("train_chk_mode,", [None, True], ids=["defaultchk", "trainchk"])
 @pytest.mark.parametrize("ckpt,", ["best", "kth"], ids=["best", "kth"])
-@pytest.mark.parametrize("inc_mode,", [False, True], ids=["defaultinc", "newinc"])
 @pytest.mark.parametrize("max_depth", [-1, 1], ids=["nomaxdepth", "maxdepth1"])
 def test_fts_callback_resume(
-    tmpdir, ckpt_set, recwarn, train_chk_mode: bool, ckpt: str, inc_mode: Optional[bool], max_depth: int
+    tmpdir, ckpt_set, recwarn, diff_dirpath: bool, train_chk_mode: Optional[bool], ckpt: str, max_depth: int
 ):
     """Validate scheduled finetuning resumption functions as expected from both 'best' and 'kth'(not-best)
-    checkpoints in both new_incarnation modes with and without max_depth specified."""
-    resume_warns = None
+    checkpoints in both train/val stage check modes with and without max_depth specified."""
+    resume_warns = EXPECTED_WARNS
+    dirpath = None if diff_dirpath else Path(ckpt_set["best"]).parent
     resume_callbacks = [
         FTSEarlyStopping(monitor="val_loss", patience=1, min_delta=0.001),
-        FTSCheckpoint(monitor="val_loss", save_on_train_epoch_end=train_chk_mode, verbose=True, save_top_k=3),
+        FTSCheckpoint(
+            monitor="val_loss", dirpath=dirpath, save_on_train_epoch_end=train_chk_mode, verbose=True, save_top_k=3
+        ),
     ]
-    resume_callbacks.append(FinetuningScheduler(new_incarnation_mode=inc_mode, max_depth=max_depth))
+    resume_callbacks.append(FinetuningScheduler(max_depth=max_depth))
 
     seed_everything(42)
     model = FinetuningSchedulerBoringModel()
@@ -512,9 +516,9 @@ def test_fts_callback_resume(
     # note if save_on_train_epoch_end is set to `None` then it will be False by default
     expected_state = EXPECTED_RESUME_RESULTS[
         (
+            diff_dirpath,
             resume_callbacks[1]._save_on_train_epoch_end,
             ckpt,
-            getattr(resume_callbacks[2], "new_incarnation_mode"),
             max_depth,
         )
     ]
@@ -522,8 +526,11 @@ def test_fts_callback_resume(
     assert finetuningscheduler_callback.depth_remaining == expected_state[1]
     assert finetuningscheduler_callback.curr_depth == expected_state[2]
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
-    resume_warns = EXPECTED_WARNS + EXPECTED_TRAIN_CHK_WARNS if train_chk_mode else EXPECTED_WARNS
-    # ensure no unexpected warnings detected and that all expected warnings are detected
+    if train_chk_mode:
+        resume_warns.extend(EXPECTED_TRAIN_CHK_WARNS)
+    if not diff_dirpath:
+        resume_warns.append(EXPECTED_DIRPATH)
+    # ensure no unexpected warnings detected
     assert all([any([re.compile(w).search(w_msg.message.args[0]) for w in resume_warns]) for w_msg in recwarn.list])
 
 
@@ -712,9 +719,8 @@ def test_finetuningscheduling_epoch_trans_only(tmpdir, boring_ft_schedule, epoch
         # we're testing an epoch_transitions_only schedule that should trigger the specified warning
         with pytest.warns(UserWarning) as eto_warns:
             trainer.fit(model)
-            # TODO: update expected message indices once migration from on_load_checkpoint to load_state_dict complete
-        assert re.compile(expected_state[1]).search(eto_warns[2].message.args[0])
-        assert re.compile(expected_state[2]).search(eto_warns[3].message.args[0])
+        assert re.compile(expected_state[1]).search(eto_warns[0].message.args[0])
+        assert re.compile(expected_state[2]).search(eto_warns[1].message.args[0])
         # for the valid epoch_only_transitions schedule, verify expected state
         assert finetuningscheduler_callback.depth_remaining == expected_state[0][0]
         assert finetuningscheduler_callback.curr_depth == expected_state[0][1]
