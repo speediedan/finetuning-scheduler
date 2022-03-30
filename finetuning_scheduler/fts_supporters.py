@@ -156,12 +156,12 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
     specified early stopping criteria at every scheduled phase.
     :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` will automatically be
     used if a :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is detected
-    and :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is
-    ``False``
+    and :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is ``False``
 
-    .. warning:: :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` is in beta
-        and subject to change. For detailed usage information, see
-        :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`.
+    .. warning::
+
+       :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` is in beta and subject to change. For detailed
+       usage information, see :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -177,7 +177,7 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
             check_on_train_epoch_end (bool): Whether to run early stopping check at the end of the training epoch. If
                 this is ``False``, then the check runs at the end of the validation. Defaults to ``None`` similar to
                 :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` but is set to
-                 ``False`` during setup unless overridden.
+                ``False`` during setup unless overridden.
         """
         super().__init__(*args, **kwargs)
         self.es_phase_complete = True
@@ -248,17 +248,16 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
     r"""
     Extends/specializes :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint` to facilitate
     multi-phase scheduled finetuning. Overrides the
-    :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.state_dict` and
-    :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.load_state_dict` hooks to
-    maintain additional state (:attr:`current_ckpt_depth`, :attr:`best_ckpt_depth`,
-    :attr:`finetuningscheduler_callback`). Usage of :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is
-    identical to :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint` and
-    :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` will automatically be used
-    if a :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is detected.
+    ``state_dict`` and ``load_state_dict`` hooks to maintain additional state (:attr:`current_ckpt_depth`,
+    :attr:`best_ckpt_depth`, :attr:`finetuningscheduler_callback`). Usage of
+    :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is identical to
+    :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint` and
+    :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` will automatically be used if a
+    :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is detected.
 
-    .. warning:: :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is in beta and
-        subject to change. For detailed usage information, see
-        :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`.
+    .. warning::
+        :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is in beta and subject to change. For detailed usage
+        information, see :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`.
     """
 
     def __init__(self, *args: Any, **kwargs: Any):
@@ -274,7 +273,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             save_on_train_epoch_end (bool): Whether to run checkpointing at the end of the training epoch. If this is
                 ``False``, then the check runs at the end of the validation. Defaults to ``None`` similar to
                 :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint` but is set to
-                 ``False`` during setup unless overridden.
+                ``False`` during setup unless overridden.
         """
         super().__init__(*args, **kwargs)
         self.current_ckpt_depth = 0
@@ -320,10 +319,8 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         super().setup(trainer, pl_module, stage)
 
     def state_dict(self) -> Dict[str, Any]:
-        """Overrides.
-
-        :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.state_dict` to
-        maintain multi-phase training depth state.
+        """Overrides. :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`'s
+        ``state_dict`` method to maintain multi-phase training depth state.
 
         Returns:
             Dict[str, Any]: the callback state dictionary that will be saved.
@@ -349,10 +346,8 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         }
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        """Overrides.
-
-        :external+pl:meth:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint.load_state_dict` to
-        load multi-phase training depth state.
+        """Overrides :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`'s
+        ``load_state_dict`` method to load multi-phase training depth state.
 
         Args:
             state_dict: the callback state dict of :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint`.
