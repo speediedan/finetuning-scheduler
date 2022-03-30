@@ -79,9 +79,6 @@ setup(
     python_requires=">=3.7",
     setup_requires=[],
     install_requires=setup_tools._load_requirements(_PATH_ROOT),
-    # install_requires=[
-    #     ("pytorch-lightning @ " "git+https://github.com/PyTorchLightning/pytorch-lightning.git@1.6.0rc1")
-    # ],
     extras_require=extras,
     project_urls={
         "Bug Tracker": "https://github.com/speediedan/finetuning-scheduler/issues",

@@ -430,8 +430,10 @@ class SchedulingMixin(ABC):
 
     def gen_or_load_sched(self) -> None:
         """Load an explicitly specified finetuning schedule if one provided, otherwise generate a default one."""
+        assert self.pl_module.trainer is not None
         if not self.ft_schedule and self.max_depth == -1:
             rank_zero_info("No finetuning schedule provided, max_depth set to -1 so iteratively thawing entire model")
+        assert self.pl_module.trainer.log_dir is not None
         if self.ft_schedule:  # thaw according to an explicit schedule
             self.ft_schedule = (
                 self.load_yaml_schedule(pathlib.Path(self.ft_schedule))
@@ -442,11 +444,11 @@ class SchedulingMixin(ABC):
             SchedulingMixin.save_schedule(
                 f"{self.pl_module.__class__.__name__}_ft_schedule.yaml",
                 self.ft_schedule,
-                self.pl_module.trainer.log_dir,  # type: ignore[attr-defined]
+                self.pl_module.trainer.log_dir,
             )
         else:
-            self.gen_implicit_schedule(self.pl_module.trainer.log_dir)  # type: ignore[attr-defined]
-            self.ft_schedule = self.pl_module.trainer.strategy.broadcast(self.ft_schedule)  # type: ignore[attr-defined]
+            self.gen_implicit_schedule(self.pl_module.trainer.log_dir)
+            self.ft_schedule = self.pl_module.trainer.strategy.broadcast(self.ft_schedule)
 
     def validate_ft_sched(self) -> Tuple[int, int]:
         """Ensure the explicitly specified finetuning schedule has a valid configuration.
@@ -489,6 +491,8 @@ class SchedulingMixin(ABC):
             MisconfigurationException: Raised if the schedule contains non-integer keys and/or non-zero-based and
                 contiguous keys.
         """
+        assert self.pl_module.trainer is not None
+        assert self.pl_module.trainer.log_dir is not None
         assert isinstance(self.ft_schedule, Dict)
         all_ints = all([isinstance(k, int) for k in self.ft_schedule.keys()])
         contiguous = len(self.ft_schedule.keys()) == (max(self.ft_schedule.keys()) + 1)
@@ -500,7 +504,7 @@ class SchedulingMixin(ABC):
             rewrite_dest = SchedulingMixin.save_schedule(
                 f"{self.pl_module.__class__.__name__}_ft_schedule_valid.yaml",
                 self.ft_schedule,
-                self.pl_module.trainer.log_dir,  # type: ignore[attr-defined]
+                self.pl_module.trainer.log_dir,
             )
             err_msg = "The supplied schedule was found to"
             reason_msg = " use non-integer keys " if not all_ints else " have non-contiguous or non-zero-indexed keys "
@@ -566,7 +570,7 @@ class SchedulingMixin(ABC):
         self.ft_schedule = self.load_yaml_schedule(default_ft_schedule)
 
     @staticmethod
-    def save_schedule(schedule_name: str, layer_config: Dict, dump_loc: os.PathLike) -> os.PathLike:
+    def save_schedule(schedule_name: str, layer_config: Dict, dump_loc: Union[str, os.PathLike]) -> os.PathLike:
         """Save loaded or generated schedule to a directory to ensure reproducability.
 
         Args:
@@ -590,7 +594,7 @@ class SchedulingMixin(ABC):
         return ft_schedule_yaml
 
     @staticmethod
-    def gen_ft_schedule(module: Module, dump_loc: Optional[os.PathLike]) -> os.PathLike:
+    def gen_ft_schedule(module: Module, dump_loc: Union[str, os.PathLike]) -> os.PathLike:
         """Generate the default finetuning schedule using a naive, 2-parameters per-level heuristic.
 
         Args:

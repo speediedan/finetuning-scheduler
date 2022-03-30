@@ -182,7 +182,9 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         else:
             self.thaw_to_depth()
         if self.depth_remaining == 0 and not self.epoch_transitions_only:
-            self.pl_module.trainer.early_stopping_callback.final_phase = True
+            assert self.pl_module.trainer.early_stopping_callback is not None
+            self.pl_module.trainer.early_stopping_callback.final_phase = True  # type: ignore[attr-defined]
+        assert self._fts_state._ft_sync_objects is not None
         FinetuningScheduler.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
         rank_zero_info(f"Multi-phase fine-tuned training continuing at level {self.curr_depth}.")
 
@@ -233,6 +235,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
                 self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"][opt_idx], dict(self.pl_module.named_parameters())
             )
         # we're restoring everything but callbacks and loops, otherwise, checkpoint_connector.restore() could be used
+        assert self.pl_module.trainer.checkpoint_callback is not None
         checkpoint_path = self.pl_module.trainer.checkpoint_callback.best_model_path
         self.pl_module.trainer._checkpoint_connector.resume_start(checkpoint_path=checkpoint_path)
         self.pl_module.trainer._checkpoint_connector.restore_datamodule()
@@ -286,6 +289,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
                 compatible with the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback.
         """
         trainer.callbacks, added_es_fts, added_ckpt_fts = self._configure_callback_deps(trainer)
+        strategy = trainer.strategy
         # if we added callbacks for the user after the setup hooks loop was initiated from trainer, we'll need to
         # explicitly call the setup hooks for those added callbacks
         if added_ckpt_fts:
@@ -294,7 +298,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
             trainer.early_stopping_callback.setup(trainer, pl_module, stage)  # type: ignore[union-attr]
         assert pl_module is not None and pl_module.trainer is not None
         supported = [t.lower() for t in self._supported_strategy_types()]
-        if trainer.strategy.strategy_name and trainer.strategy.strategy_name not in supported:
+        if strategy.strategy_name and strategy.strategy_name not in supported:  # type: ignore[attr-defined]
             raise MisconfigurationException(
                 "FTS is currently experimental and has not yet been adapted for the"
                 " specified distributed strategy please select from currently"
@@ -302,6 +306,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
             )
         if self.gen_ft_sched_only:
             if trainer.is_global_zero:
+                assert trainer.log_dir is not None
                 _ = self.gen_ft_schedule(pl_module, trainer.log_dir)
                 log.info("Bypassing training, generating finetuning schedule for review and subsequent finetuning")
             raise SystemExit()
@@ -344,7 +349,8 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         """
         assert self.pl_module is not None and self.pl_module.trainer is not None
         trainer = self.pl_module.trainer
-        if trainer.checkpoint_callback.current_score == trainer.checkpoint_callback.best_model_score:
+        checkpoint_callback = trainer.checkpoint_callback
+        if checkpoint_callback.current_score == checkpoint_callback.best_model_score:  # type: ignore[union-attr]
             self._fts_state._best_ckpt_depth = self._fts_state._curr_depth
             for opt_idx, _ in enumerate(trainer.optimizers):
                 self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"][opt_idx] = deepcopy(
@@ -386,24 +392,28 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
             trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The
                 :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
         """
-        assert self.pl_module is not None and self.pl_module.trainer is not None
+        assert self.pl_module is not None
+        assert isinstance(self.ft_schedule, Dict)
+        early_stopping_callback = trainer.early_stopping_callback
         curr_max_epoch = (
             self.ft_schedule[self.curr_depth]["max_transition_epoch"]
             if self.depth_remaining > 0
-            else self.pl_module.trainer.fit_loop.max_epochs
+            else trainer.fit_loop.max_epochs
         )
         if not self.epoch_transitions_only:  # if we're considering FTSEarlyStopping criteria
             epoch_driven_transition = (
                 True
-                if not self.pl_module.trainer.early_stopping_callback.final_phase
-                and (0 <= curr_max_epoch <= self.pl_module.trainer.current_epoch)
+                if not early_stopping_callback.final_phase  # type: ignore[union-attr]
+                and (0 <= curr_max_epoch <= trainer.current_epoch)
                 else False
             )
             phase_transition = (
-                True if trainer.early_stopping_callback.es_phase_complete or epoch_driven_transition else False
+                True
+                if early_stopping_callback.es_phase_complete or epoch_driven_transition  # type: ignore[union-attr]
+                else False
             )
         else:  # we're only considering epoch-driven transition constraints
-            phase_transition = True if 0 <= curr_max_epoch <= self.pl_module.trainer.current_epoch else False
+            phase_transition = True if 0 <= curr_max_epoch <= trainer.current_epoch else False
         return phase_transition
 
     def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:

@@ -415,6 +415,13 @@ class CustLightningCLI(LightningCLI):
     :class:`~pytorch_lighting.core.LightningDataModule` and :class:`~pytorch_lightning.core.lightning.LightningModule`
     use the same Hugging Face model, SuperGLUE task and custom logging tag."""
 
+    def before_instantiate_classes(self) -> None:
+        deprecated_keys = ["agg_key_funcs", "agg_default_func"]
+        target_namespace = self.config.fit.trainer.logger.init_args
+        for k in deprecated_keys:
+            if k in target_namespace.__dict__:
+                delattr(target_namespace, k)
+
     def add_arguments_to_parser(self, parser):
         parser.link_arguments("trainer.logger.init_args.name", "model.init_args.experiment_tag")
         parser.link_arguments("data.init_args.model_name_or_path", "model.init_args.model_name_or_path")
