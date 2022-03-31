@@ -38,7 +38,7 @@ ______________________________________________________________________
 
 ## Setup
 
-### **NOTE: Currently awaiting first pytorch-lightning 1.6.x release to pypi before publishing initial finetuning-scheduler package on pypi**
+### **NOTE: Currently awaiting first transformers 4.18 release to pypi before publishing initial finetuning-scheduler package on pypi**
 
 ### Step 0: Install from PyPI
 

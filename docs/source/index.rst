@@ -29,8 +29,8 @@ Setup
 Setup is straightforward, just install from PyPI!
 
 .. warning::
-   Currently awaiting first pytorch-lightning 1.6.x release to pypi before publishing initial finetuning-scheduler
-   package on pypi. The first release candidate is out so it shouldn't be long as of 2022.03.24.
+   Currently awaiting transformers 4.18 release to pypi before publishing initial finetuning-scheduler
+   package on pypi.
 
 .. code-block:: bash
 
