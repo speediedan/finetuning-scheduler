@@ -28,10 +28,6 @@ Setup
 *****
 Setup is straightforward, just install from PyPI!
 
-.. warning::
-   Currently awaiting transformers 4.18 release to pypi before publishing initial finetuning-scheduler
-   package on pypi.
-
 .. code-block:: bash
 
    pip install finetuning-scheduler
@@ -211,7 +207,8 @@ and transitions will be exclusively epoch-driven.
 For a practical end-to-end example of using
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` in implicit versus explicit modes,
 see :ref:`scheduled finetuning for SuperGLUE<scheduled-finetuning-superglue>` below or the
-`notebook-based tutorial  <https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/text-transformers.html>`_ .
+notebook-based tutorial (link will be added as soon as it is released on the PyTorch Lightning production documentation
+site).
 
 
 Resuming Scheduled Finetuning Training Sessions
@@ -436,7 +433,7 @@ Footnotes
    :name: Examples
    :caption: Examples
 
-   Notebook-based Finetuning Scheduler tutorial <https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html>
+   Notebook-based Finetuning Scheduler tutorial (link will be added as soon as it is released on the PyTorch Lightning production documentation site)
    CLI-based Finetuning Scheduler tutorial <https://finetuning-scheduler.readthedocs.io/en/latest/#example-scheduled-finetuning-for-superglue>
 
 .. toctree::
