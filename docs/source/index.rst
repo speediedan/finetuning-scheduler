@@ -19,9 +19,8 @@ foundational model experimentation with flexible finetuning schedules. Training 
 .. note::
    If you're exploring using the :class:`~finetuning_scheduler.fts.FinetuningScheduler`, this is a great place
    to start!
-   You may also find `the notebook-based
-   <https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html>`_
-   tutorial useful and for those using the :ref:`LightningCLI<common/lightning_cli:LightningCLI>`,
+   You may also find the notebook-based tutorial useful (link provided here as soon as it is published on the pytorch
+   lightning production documentation site) and for those using the :ref:`LightningCLI<common/lightning_cli:LightningCLI>`,
    there is a :ref:`CLI-based<scheduled-finetuning-superglue>` example at the bottom of this introduction.
 
 Setup
@@ -433,7 +432,6 @@ Footnotes
    :name: Examples
    :caption: Examples
 
-   Notebook-based Finetuning Scheduler tutorial (link will be added as soon as it is released on the PyTorch Lightning production documentation site)
    CLI-based Finetuning Scheduler tutorial <https://finetuning-scheduler.readthedocs.io/en/latest/#example-scheduled-finetuning-for-superglue>
 
 .. toctree::
