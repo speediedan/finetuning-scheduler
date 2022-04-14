@@ -14,7 +14,7 @@ ARG PYTHON_VERSION=3.9
 ARG PYTORCH_VERSION=1.11
 ARG CUST_BASE
 
-FROM base-${CUST_BASE}py${PYTHON_VERSION}-pt${PYTORCH_VERSION}-pl1.6
+FROM speediedan/finetuning-scheduler:base-${CUST_BASE}py${PYTHON_VERSION}-pt${PYTORCH_VERSION}-pl1.6
 
 LABEL maintainer="Dan Dale <https://github.com/speediedan>"
 

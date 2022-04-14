@@ -21,7 +21,7 @@ class AssistantCLI:
     @staticmethod
     def prepare_nightly_version(proj_root: str = _PATH_ROOT) -> None:
         """Replace semantic version by date."""
-        path_info = os.path.join(proj_root, "pytorch_lightning", "__about__.py")
+        path_info = os.path.join(proj_root, "finetuning_scheduler", "__about__.py")
         # get today date
         now = datetime.datetime.now()
         now_date = now.strftime("%Y%m%d")

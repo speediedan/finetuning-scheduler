@@ -416,6 +416,7 @@ class CustLightningCLI(LightningCLI):
     use the same Hugging Face model, SuperGLUE task and custom logging tag."""
 
     def before_instantiate_classes(self) -> None:
+        # fix needed for pl 1.6.0 (patched w/ https://github.com/PyTorchLightning/pytorch-lightning/pull/12609)
         deprecated_keys = ["agg_key_funcs", "agg_default_func"]
         target_namespace = self.config.fit.trainer.logger.init_args
         for k in deprecated_keys:
