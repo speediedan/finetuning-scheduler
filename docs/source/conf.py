@@ -144,8 +144,8 @@ pygments_style = None
 # html_theme = 'bizstyle'
 # https://sphinx-themes.org
 html_theme = "pt_lightning_sphinx_theme"
-html_theme_path = [pt_lightning_sphinx_theme.get_html_theme_path()]
-# html_theme_path = ["../../../lightning_sphinx_theme"]
+html_theme_path = [pt_lightning_sphinx_theme.get_html_theme_path()]  # comment to test local theme
+# html_theme_path = ["../../../lightning_sphinx_theme"]  # uncomment to test local theme
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the

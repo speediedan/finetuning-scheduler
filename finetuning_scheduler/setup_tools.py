@@ -48,9 +48,10 @@ def _load_readme_description(path_dir: str, homepage: str, version: str) -> str:
     '<div align="center">...'
     """
     path_readme = os.path.join(path_dir, "README.md")
+    version_prefix = "v"  # standard prefix used for tagging versions
     text = open(path_readme, encoding="utf-8").read()
 
-    github_source_url = os.path.join(homepage, "raw", version)
+    github_source_url = os.path.join(homepage, "raw", version_prefix + version)
     # replace relative repository path to absolute link to the release
     #  do not replace all "docs" as in the readme we reger some other sources with particular path to docs
     text = text.replace("docs/source/_static/", f"{os.path.join(github_source_url, 'docs/source/_static/')}")

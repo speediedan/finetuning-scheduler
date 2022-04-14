@@ -45,7 +45,7 @@ extras["dev"] = extras["extra"] + extras["test"]
 extras["all"] = extras["dev"] + extras["examples"]
 
 # These packages shall be installed only on GPU machines
-PACKAGES_GPU_ONLY = ["deepspeed", "fairscale"]
+PACKAGES_GPU_ONLY = ["fairscale"]
 # create a version for CPU machines
 for ex in ("cpu", "cpu-extra"):
     kw = ex.split("-")[1] if "-" in ex else "all"

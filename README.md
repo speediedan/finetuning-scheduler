@@ -13,9 +13,8 @@ ______________________________________________________________________
   <a href="#community">Community</a>
 </p>
 
-<!-- [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/finetuning-scheduler)](https://pypi.org/project/finetuning-scheduler/)
-[![PyPI Status](https://badge.fury.io/py/finetuning-scheduler.svg)](https://badge.fury.io/py/finetuning-scheduler) -->
-
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/finetuning-scheduler)](https://pypi.org/project/finetuning-scheduler/)
+[![PyPI Status](https://badge.fury.io/py/finetuning-scheduler.svg)](https://badge.fury.io/py/finetuning-scheduler)
 [![codecov](https://codecov.io/gh/speediedan/finetuning-scheduler/branch/main/graph/badge.svg)](https://codecov.io/gh/speediedan/finetuning-scheduler)
 [![ReadTheDocs](https://readthedocs.org/projects/finetuning-scheduler/badge/?version=latest)](https://finetuning-scheduler.readthedocs.io/en/latest/)
 [![license](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/speediedan/finetuning-scheduler/blob/master/LICENSE)
@@ -60,6 +59,12 @@ pip install finetuning-scheduler['examples']
 
 ```bash
 pip install finetuning-scheduler['all']
+```
+
+#### Conda installation
+
+```bash
+conda install finetuning-scheduler -c conda-forge
 ```
 
 #### To install from source (editable) using a custom version of pytorch-lightning (includes docs as well)
