@@ -4,17 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [0.1.1] - 2022-04-DD
+## [0.1.1] - 2022-04-15
 
 ### Added
 
-- added conda-forge package
+- added conda-forge package (pending approval by conda-forge maintainers, should be available within a few days)
 - added docker release and pypi workflows
 - additional badges for readme, testing enhancements for oldest/newest pl patch versions
 
 ### Changed
 
-- associate release with PL 1.6.1 - CLI example depends on PL logger fix ([#12609](https://github.com/PyTorchLightning/pytorch-lightning/pull/12609))
+- bumped latest tested PL patch version to 1.6.1, CLI example depends on PL logger fix ([#12609](https://github.com/PyTorchLightning/pytorch-lightning/pull/12609))
 
 ### Deprecated
 

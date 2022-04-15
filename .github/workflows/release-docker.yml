@@ -58,5 +58,5 @@ jobs:
             PYTHON_VERSION=${{ matrix.python_version }}
             PYTORCH_VERSION=${{ matrix.pytorch_version }}
             CUST_BASE=${{ matrix.cust_base }}
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/finetuning-scheduler:fts${{ steps.get_version.outputs.RELEASE_VERSION }}-${{ matrix.cust_base }}py${{ matrix.python_version }}-pt${{ matrix.pytorch_version }}-pl${{ matrix.pl_version }},${{ secrets.DOCKERHUB_USERNAME }}/finetuning-scheduler:test
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/finetuning-scheduler:fts${{ steps.get_version.outputs.RELEASE_VERSION }}-${{ matrix.cust_base }}py${{ matrix.python_version }}-pt${{ matrix.pytorch_version }}-pl${{ matrix.pl_version }},${{ secrets.DOCKERHUB_USERNAME }}/finetuning-scheduler:latest
         timeout-minutes: 55
