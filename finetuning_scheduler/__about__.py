@@ -1,7 +1,7 @@
 import time
 
 _this_year = time.strftime("%Y")
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __author__ = "Dan Dale"
 __author_email__ = "danny.dale@gmail.com"
 __license__ = "Apache-2.0"
@@ -30,7 +30,7 @@ final phase of the schedule has its stopping criteria met.
 
 Documentation
 -------------
-- https://finetuning-scheduler.readthedocs.io/en/latest/
+- https://finetuning-scheduler.readthedocs.io/en/stable/
 - https://finetuning-scheduler.readthedocs.io/en/0.1.2/
 """
 
