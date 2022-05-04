@@ -14,6 +14,9 @@ identifiers:
   - description: "Finetuning Scheduler (v0.1.1)"
     type: doi
     value: 10.5281/zenodo.6463992
+  - description: "Finetuning Scheduler (v0.1.2)"
+    type: doi
+    value: 10.5281/zenodo.6499358
 license: "Apache-2.0"
 url: "https://finetuning-scheduler.readthedocs.io/"
 repository-code: "https://github.com/speediedan/finetuning-scheduler"
