@@ -73,6 +73,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         restore_best: bool = True,
         gen_ft_sched_only: bool = False,
         epoch_transitions_only: bool = False,
+        reinit_lr: bool = False,
     ):
         r"""
         Define and configure a scheduled finetuning training session.
@@ -118,6 +119,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         self.base_max_lr = base_max_lr
         self.gen_ft_sched_only = gen_ft_sched_only
         self.epoch_transitions_only = epoch_transitions_only
+        self.reinit_lr = reinit_lr
         self.pl_module: pl.LightningModule
 
     @property

@@ -401,7 +401,7 @@ class UniqueKeyLoader(yaml.SafeLoader):
 class SchedulingMixin(ABC):
     """Functionality for generating, parsing and executing finetuning schedules."""
 
-    # proper initialisation of these variables should be done in the child class
+    # proper initialization of these variables should be done in the child class
     pl_module: pl.LightningModule
     ft_schedule: Optional[Union[str, dict]]
     max_depth: int
@@ -782,6 +782,20 @@ class SchedulingMixin(ABC):
         if len(thawed_pl) == 0:
             rank_zero_warn("No thawed parameters passed so no new optimizer groups will be added.")
         else:
+            # TODO: probably better to just initialize a new lr_scheduler,
+            # ie  scheduler = {"scheduler": instantiate_registered_class(args=optimizer, init=self.lr_scheduler_init),
+            #  **self.pl_lrs_cfg,}
+            # config.scheduler = LRSchedulerConfig(**scheduler)
+            # but if resetting exisiting, could try following
+            # add reinit_lr param. if true, bypass params_lr and denom_lr, simply setting lr_factor to
+            # optimizer.param_groups[0]["initial_lr"]
+            # add "initial_lr" key to each added group below to ref later
+            # and then at the end of this func
+            # 1. set config.scheduler.base_lrs to [group['initial_lr'] for group in optimizer.param_groups]
+            # 2. group['lr'] to 'initial_lr' for all optimizer.param_groups,
+            # 3. reset config.scheduler._step_count to 1 and config.scheduler.last_epoch = 0
+            # 4.  config.scheduler._last_lr to [group['lr'] for group in self.optimizer.param_groups]
+
             params_lr = optimizer.param_groups[0]["lr"] if lr is None else float(lr)
             denom_lr = initial_denom_lr if lr is None else 1.0
             lr_factor = params_lr / denom_lr

@@ -143,9 +143,17 @@ class TestFinetuningScheduler(FinetuningScheduler):
     """Extends :class:`~finetuning_scheduler.FinetuningScheduler` to facilitate intra- fit state inspection during
     testing of scheduled finetuning."""
 
-    def __init__(self, expected_state: Optional[Dict] = None, mock_strategy_wcpu: bool = False, *args, **kwargs):
+    def __init__(
+        self,
+        expected_state: Optional[Dict] = None,
+        lrs_state: Optional[Dict] = None,
+        mock_strategy_wcpu: bool = False,
+        *args,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.expected_state = expected_state
+        self.lrs_state = lrs_state
         self.mock_strategy_wcpu = mock_strategy_wcpu
         self.best_ckpt_test_weight = None
         self.restored_best_cnt = 0
@@ -180,7 +188,11 @@ class TestFinetuningScheduler(FinetuningScheduler):
             trainer.checkpoint_callback.current_ckpt_depth,
             trainer.checkpoint_callback.best_ckpt_depth,
         )
-        assert current_state == self.expected_state[state_key]
+        lrs_state = tuple(round(pg["lr"], 6) for pg in trainer.optimizers[0].param_groups)
+        if self.expected_state:
+            assert current_state == self.expected_state[state_key]
+        if self.lrs_state:
+            assert lrs_state == self.lrs_state[state_key]
         if self.restore_best:
             assert self.restored_best_cnt == self.curr_depth
         else:
@@ -561,6 +573,52 @@ def test_finetuningscheduling_intrafit(tmpdir, restore_best: bool):
     finetuningscheduler_callback = get_fts(trainer)
     assert finetuningscheduler_callback.depth_remaining == 0
     assert finetuningscheduler_callback.curr_depth == 3
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+
+
+EXPECTED_LR_STATE = {
+    (False, False): {
+        "max_depth": 3,
+        0: (0.001,),
+        1: (0.0007,),
+        2: (0.00049,),
+        3: (0.000343,),
+        4: (0.00024,),
+        5: (0.00024, 1e-05),
+        6: (0.00024, 1e-05, 1e-05),
+        7: (0.00024, 1e-05, 1e-05, 1e-05),
+    },
+    (True, False): {
+        "max_depth": 2,
+        0: (0.001,),
+        1: (0.0007,),
+        2: (0.00049,),
+        3: (0.000343, 1e-06),
+        4: (0.00024, 1e-06),
+        5: (0.00024, 1e-06, 1e-05),
+    },
+}
+
+
+@pytest.mark.parametrize("reinit_lr", [True, False], ids=["reinit_lr", "default"])
+@pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
+def test_finetuningscheduling_reinitlr(tmpdir, boring_ft_schedule, explicit_mode: bool, reinit_lr: bool):
+    """Inspect scheduled finetuning state within the training process to ensure it is taking the expected path in
+    both restore_best modes."""
+    seed_everything(42)
+    ft_schedule = boring_ft_schedule[1] if explicit_mode else None
+    model = FinetuningSchedulerBoringModel()
+    callbacks = [
+        TestFinetuningScheduler(
+            lrs_state=EXPECTED_LR_STATE[(explicit_mode, reinit_lr)], reinit_lr=reinit_lr, ft_schedule=ft_schedule
+        ),
+        FTSEarlyStopping(monitor="val_loss", patience=1),
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer.fit(model)
+    finetuningscheduler_callback = get_fts(trainer)
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == EXPECTED_LR_STATE[(explicit_mode, reinit_lr)]["max_depth"]
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
