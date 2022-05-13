@@ -35,6 +35,7 @@ EXPECTED_WARNS = [
     "torch.distributed._sharded_tensor will be deprecated",
     "`np.object` is a deprecated alias",
     "`np.int` is a deprecated alias",
+    "sentencepiece tokenizer that you are converting",
 ]
 MIN_VERSION_WARNS = "1.8"
 MAX_VERSION_WARNS = "1.11"
