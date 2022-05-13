@@ -19,9 +19,9 @@ foundational model experimentation with flexible finetuning schedules. Training 
 .. note::
    If you're exploring using the :class:`~finetuning_scheduler.fts.FinetuningScheduler`, this is a great place
    to start!
-   You may also find the notebook-based tutorial useful (link provided here as soon as it is published on the pytorch
-   lightning production documentation site) and for those using the :doc:`LightningCLI<cli/lightning_cli>`,
-   there is a :ref:`CLI-based<scheduled-finetuning-superglue>` example at the bottom of this introduction.
+   You may also find the `notebook-based tutorial <https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html>`_
+   useful and for those using the :doc:`LightningCLI<cli/lightning_cli>`, there is a
+   :ref:`CLI-based<scheduled-finetuning-superglue>` example at the bottom of this introduction.
 
 Setup
 *****
@@ -206,8 +206,7 @@ and transitions will be exclusively epoch-driven.
 For a practical end-to-end example of using
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` in implicit versus explicit modes,
 see :ref:`scheduled finetuning for SuperGLUE<scheduled-finetuning-superglue>` below or the
-notebook-based tutorial (link will be added as soon as it is released on the PyTorch Lightning production documentation
-site).
+`notebook-based tutorial <https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html>`_.
 
 
 Resuming Scheduled Finetuning Training Sessions
@@ -301,6 +300,11 @@ should install them using the ``[examples]`` extra:
 There are three different demo schedule configurations composed with shared defaults (./config/fts_defaults.yaml)
 provided for the default 'rte' task. Note DDP (with auto-selected GPUs) is the default configuration so ensure you
 adjust the configuration files referenced below as desired for other configurations.
+
+Note there will likely be minor variations in training paths and performance as packages (e.g. ``transformers``,
+``datasets``, ``finetuning-scheduler`` itself etc.) evolve. The precise package versions and salient environmental
+configuration used in the building of this tutorial is available in the tensorboard summaries, logs and checkpoints
+referenced below if you're interested.
 
 .. code-block:: bash
 
@@ -432,6 +436,7 @@ Footnotes
    :name: Examples
    :caption: Examples
 
+   Notebook-based Finetuning Scheduler tutorial <https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html>
    CLI-based Finetuning Scheduler tutorial <https://finetuning-scheduler.readthedocs.io/en/latest/#example-scheduled-finetuning-for-superglue>
 
 .. toctree::
