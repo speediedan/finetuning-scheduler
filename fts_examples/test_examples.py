@@ -39,7 +39,7 @@ EXPECTED_WARNS = [
 ]
 MIN_VERSION_WARNS = "1.8"
 MAX_VERSION_WARNS = "1.11"
-# version-specific warns go here
+# torch version-specific warns will go here
 EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [], MAX_VERSION_WARNS: []}
 torch_version = get_distribution("torch").version
 if Version(torch_version) < Version(MAX_VERSION_WARNS):

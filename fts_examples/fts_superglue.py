@@ -32,138 +32,29 @@ adjust the configuration files referenced below as desired for other configurati
 """
 
 import os
-import sys
 import warnings
-from collections import namedtuple
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional
 
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.utilities import rank_zero_warn
-from pytorch_lightning.utilities.cli import _Registry, CALLBACK_REGISTRY, LightningCLI
-from pytorch_lightning.utilities.exceptions import MisconfigurationException
-from torch.utils import collect_env
+from pytorch_lightning.utilities.cli import LightningCLI
 from torch.utils.data import DataLoader
 
 from finetuning_scheduler.fts import FinetuningScheduler
 from fts_examples import _HF_AVAILABLE, _SP_AVAILABLE
+from fts_examples.cli_experiment_utils import collect_env_info, instantiate_registered_class
 
 if _HF_AVAILABLE:
     import datasets
+    from datasets.arrow_dataset import Batch
     from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer
     from transformers import logging as transformers_logging
+    from transformers.tokenization_utils_base import BatchEncoding
 
 TASK_NUM_LABELS = {"boolq": 2, "rte": 2}
 DEFAULT_TASK = "rte"
-MOCK_REGISTRY = _Registry()
-
-
-def instantiate_registered_class(init: Dict[str, Any], args: Optional[Union[Any, Tuple[Any, ...]]] = None) -> Any:
-    """Instantiates a class with the given args and init. Accepts class definitions in the form of a "class_path"
-    or "callback_key" associated with a _Registry.
-
-    Args:
-        init: Dict of the form {"class_path":... or "callback_key":..., "init_args":...}.
-        args: Positional arguments required for instantiation.
-
-    Returns:
-        The instantiated class object.
-    """
-    class_module, class_name, args_class = None, None, None
-    shortcircuit_local = False
-    kwargs = init.get("init_args", {})
-    class_path = init.get("class_path", None)
-    if args and not isinstance(args, tuple):
-        args = (args,)
-    if class_path:
-        shortcircuit_local = False if "." in class_path else True
-        if not shortcircuit_local:
-            class_module, class_name = init["class_path"].rsplit(".", 1)
-        else:  # class is expected to be locally defined
-            args_class = globals()[init["class_path"]]
-    elif init.get("callback_key", None):
-        callback_path = CALLBACK_REGISTRY.get(init["callback_key"], None) or MOCK_REGISTRY.get(
-            init["callback_key"], None
-        )
-        assert callback_path, MisconfigurationException(
-            f'specified callback_key {init["callback_key"]} has not been registered'
-        )
-        class_module, class_name = callback_path.__module__, callback_path.__name__
-    else:
-        raise MisconfigurationException(
-            "Neither a class_path nor callback_key were included in a configuration that" "requires one"
-        )
-    if not shortcircuit_local:
-        module = __import__(class_module, fromlist=[class_name])
-        args_class = getattr(module, class_name)
-    return args_class(**kwargs) if not args else args_class(*args, **kwargs)
-
-
-# override PyTorch default, extending it to capture additional salient packages for reproducability
-# https://github.com/pytorch/pytorch/blob/7c2489bdae5a96dc122c3bb7b42c18528bcfdc86/torch/utils/collect_env.py#L271
-def get_pip_packages(run_lambda):
-    """Returns `pip list` output.
-
-    Note: will also find conda-installed pytorch
-    and numpy packages.
-    """
-    # People generally have `pip` as `pip` or `pip3`
-    # But here it is incoved as `python -mpip`
-    def run_with_pip(pip):
-        if collect_env.get_platform() == "win32":
-            system_root = os.environ.get("SYSTEMROOT", "C:\\Windows")
-            findstr_cmd = os.path.join(system_root, "System32", "findstr")
-            grep_cmd = fr'{findstr_cmd} /R "numpy torch mypy transformers datasets"'
-        else:
-            grep_cmd = r'grep "torch\|numpy\|mypy\|transformers\|datasets"'
-        return collect_env.run_and_read_all(run_lambda, pip + " list --format=freeze | " + grep_cmd)
-
-    pip_version = "pip3" if sys.version[0] == "3" else "pip"
-    out = run_with_pip(sys.executable + " -mpip")
-
-    return pip_version, out
-
-
-def collect_env_info() -> Dict:
-    """Collect environmental details, logging versions of salient packages for improved reproducibility.
-
-    Returns:
-        Dict: The dictionary of environmental details
-    """
-    _ = namedtuple(
-        "SystemEnv",
-        [
-            "torch_version",
-            "is_debug_build",
-            "cuda_compiled_version",
-            "gcc_version",
-            "clang_version",
-            "cmake_version",
-            "os",
-            "libc_version",
-            "python_version",
-            "python_platform",
-            "is_cuda_available",
-            "cuda_runtime_version",
-            "nvidia_driver_version",
-            "nvidia_gpu_models",
-            "cudnn_version",
-            "pip_version",  # 'pip' or 'pip3'
-            "pip_packages",
-            "conda_packages",
-            "hip_compiled_version",
-            "hip_runtime_version",
-            "miopen_runtime_version",
-            "caching_allocator_config",
-        ],
-    )
-    collect_env.get_pip_packages = get_pip_packages
-    sys_info = collect_env.get_env_info()
-    sys_dict = sys_info._asdict()
-    pip_dict = {name: ver for name, ver in [p.split("==") for p in sys_info._asdict()["pip_packages"].split("\n")]}
-    sys_dict["pip_packages"] = pip_dict
-    return sys_dict
 
 
 transformers_logging.set_verbosity_error()
@@ -198,24 +89,47 @@ class RteBoolqDataModule(pl.LightningDataModule):
         tokenizers_parallelism: bool = True,
         **dataloader_kwargs: Any,
     ):
+        r"""Initialize the ``LightningDataModule`` designed for both the RTE or BoolQ SuperGLUE Hugging Face
+        datasets.
+
+        Args:
+            model_name_or_path (str):
+                Can be either:
+                    - A string, the ``model id`` of a pretrained model hosted inside a model repo on huggingface.co.
+                        Valid model ids can be located at the root-level, like ``bert-base-uncased``, or namespaced
+                        under a user or organization name, like ``dbmdz/bert-base-german-cased``.
+                    - A path to a ``directory`` containing model weights saved using
+                        :meth:`~transformers.PreTrainedModel.save_pretrained`, e.g., ``./my_model_directory/``.
+            task_name (str, optional): Name of the SuperGLUE task to execute. This module supports 'rte' or 'boolq'.
+                Defaults to DEFAULT_TASK which is 'rte'.
+            max_seq_length (int, optional): Length to which we will pad sequences or truncate input. Defaults to 128.
+            train_batch_size (int, optional): Training batch size. Defaults to 16.
+            eval_batch_size (int, optional): Batch size to use for validation and testing splits. Defaults to 16.
+            tokenizers_parallelism (bool, optional): Whether to use parallelism in the tokenizer. Defaults to True.
+            \**dataloader_kwargs: Arguments passed when initializing the dataloader
+        """
         super().__init__()
-        self.model_name_or_path = model_name_or_path
-        self.task_name = task_name if task_name in TASK_NUM_LABELS.keys() else DEFAULT_TASK
-        self.max_seq_length = max_seq_length
-        self.train_batch_size = train_batch_size
-        self.eval_batch_size = eval_batch_size
-        self.tokenizers_parallelism = tokenizers_parallelism
+        task_name = task_name if task_name in TASK_NUM_LABELS.keys() else DEFAULT_TASK
+        self.text_fields = self.TASK_TEXT_FIELD_MAP[task_name]
         self.dataloader_kwargs = {
             "num_workers": dataloader_kwargs.get("num_workers", 0),
             "pin_memory": dataloader_kwargs.get("pin_memory", False),
         }
-        self.text_fields = self.TASK_TEXT_FIELD_MAP[self.task_name]
-        self.num_labels = TASK_NUM_LABELS[self.task_name]
-        os.environ["TOKENIZERS_PARALLELISM"] = "true" if self.tokenizers_parallelism else "false"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name_or_path, use_fast=True, local_files_only=False)
+        self.save_hyperparameters()
+        os.environ["TOKENIZERS_PARALLELISM"] = "true" if self.hparams.tokenizers_parallelism else "false"
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.hparams.model_name_or_path, use_fast=True, local_files_only=False
+        )
+
+    def prepare_data(self):
+        """Load the SuperGLUE dataset."""
+        # N.B. PL calls prepare_data from a single process (rank 0) so do not use it to assign
+        # state (e.g. self.x=y)
+        datasets.load_dataset("super_glue", self.hparams.task_name)
 
     def setup(self, stage):
-        self.dataset = datasets.load_dataset("super_glue", self.task_name)
+        """Setup our dataset splits for training/validation."""
+        self.dataset = datasets.load_dataset("super_glue", self.hparams.task_name)
         for split in self.dataset.keys():
             self.dataset[split] = self.dataset[split].map(
                 self._convert_to_features, batched=True, remove_columns=["label"]
@@ -225,36 +139,27 @@ class RteBoolqDataModule(pl.LightningDataModule):
 
         self.eval_splits = [x for x in self.dataset.keys() if "validation" in x]
 
-    def prepare_data(self):
-        # N.B. PL calls prepare_data from a single process (rank 0) so do not use it to assign state (e.g. self.x=y)
-        datasets.load_dataset("super_glue", self.task_name)
-
     def train_dataloader(self):
-        return DataLoader(self.dataset["train"], batch_size=self.train_batch_size, **self.dataloader_kwargs)
+        return DataLoader(self.dataset["train"], batch_size=self.hparams.train_batch_size, **self.dataloader_kwargs)
 
     def val_dataloader(self):
-        if len(self.eval_splits) == 1:
-            return DataLoader(self.dataset["validation"], batch_size=self.eval_batch_size, **self.dataloader_kwargs)
-        elif len(self.eval_splits) > 1:
-            return [
-                DataLoader(self.dataset[x], batch_size=self.eval_batch_size, **self.dataloader_kwargs)
-                for x in self.eval_splits
-            ]
+        return DataLoader(self.dataset["validation"], batch_size=self.hparams.eval_batch_size, **self.dataloader_kwargs)
 
-    def test_dataloader(self):
-        if len(self.eval_splits) == 1:
-            return DataLoader(self.dataset["test"], batch_size=self.eval_batch_size, **self.dataloader_kwargs)
-        elif len(self.eval_splits) > 1:
-            return [
-                DataLoader(self.dataset[x], batch_size=self.eval_batch_size, **self.dataloader_kwargs)
-                for x in self.eval_splits
-            ]
+    def _convert_to_features(self, example_batch: Batch) -> BatchEncoding:
+        """Convert raw text examples to a :class:`~transformers.tokenization_utils_base.BatchEncoding` container
+        (derived from python dict) of features that includes helpful methods for translating between word/character
+        space and token space.
 
-    def _convert_to_features(self, example_batch):
+        Args:
+            example_batch ([type]): The set of examples to convert to token space.
+
+        Returns:
+            ``BatchEncoding``: A batch of encoded examples (note default tokenizer batch_size=1000)
+        """
         text_pairs = list(zip(example_batch[self.text_fields[0]], example_batch[self.text_fields[1]]))
         # Tokenize the text/text pairs
         features = self.tokenizer.batch_encode_plus(
-            text_pairs, max_length=self.max_seq_length, padding="longest", truncation=True
+            text_pairs, max_length=self.hparams.max_seq_length, padding="longest", truncation=True
         )
         # Rename label to labels to make it easier to pass to model forward
         features["labels"] = example_batch["label"]
@@ -309,34 +214,34 @@ class RteBoolqModule(pl.LightningModule):
                 reproducibility. Defaults to ``True``.
         """
         super().__init__()
-        self.optimizer_init = optimizer_init
-        self.lr_scheduler_init = lr_scheduler_init
-        self.pl_lrs_cfg = pl_lrs_cfg or {}
-        if task_name in TASK_NUM_LABELS.keys():
-            self.task_name = task_name
-        else:
-            self.task_name = DEFAULT_TASK
-            rank_zero_warn(f"Invalid task_name '{task_name}'. Proceeding with the default task: '{DEFAULT_TASK}'")
-        self.num_labels = TASK_NUM_LABELS[self.task_name]
-        self.experiment_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{experiment_tag}"
+        if task_name not in TASK_NUM_LABELS.keys():
+            rank_zero_warn(f"Invalid task_name {task_name!r}. Proceeding with the default task: {DEFAULT_TASK!r}")
+            task_name = DEFAULT_TASK
+        self.num_labels = TASK_NUM_LABELS[task_name]
         self.model_cfg = model_cfg or {}
         conf = AutoConfig.from_pretrained(model_name_or_path, num_labels=self.num_labels, local_files_only=False)
         self.model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, config=conf)
         self.model.config.update(self.model_cfg)  # apply model config overrides
         self.init_hparams = {
-            "optimizer": self.optimizer_init,
-            "lr_scheduler": self.lr_scheduler_init,
-            "pl_lrs_cfg": self.pl_lrs_cfg,
+            "optimizer_init": optimizer_init,
+            "lr_scheduler_init": lr_scheduler_init,
+            "pl_lrs_cfg": pl_lrs_cfg,
             "model_config": self.model.config,
             "model_name_or_path": model_name_or_path,
-            "task_name": self.task_name,
-            "experiment_id": self.experiment_id,
+            "task_name": task_name,
+            "experiment_id": f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{experiment_tag}",
         }
         self.init_hparams["env_info"] = collect_env_info() if log_env_details else None
         self.save_hyperparameters(self.init_hparams)
-        self.metric = datasets.load_metric("super_glue", self.task_name, experiment_id=self.experiment_id)
+        self.metric = datasets.load_metric(
+            "super_glue", self.hparams.task_name, experiment_id=self.hparams.experiment_id
+        )
         self.no_decay = ["bias", "LayerNorm.weight"]
-        self.finetuningscheduler_callback = None
+
+    @property
+    def finetuningscheduler_callback(self) -> Optional[FinetuningScheduler]:  # type: ignore
+        fts = [c for c in self.trainer.callbacks if isinstance(c, FinetuningScheduler)]  # type: ignore
+        return fts[0] if fts else None
 
     def forward(self, **inputs):
         return self.model(**inputs)
@@ -344,11 +249,10 @@ class RteBoolqModule(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         outputs = self(**batch)
         loss = outputs[0]
+        self.log("train_loss", loss)
         return loss
 
     def training_epoch_end(self, outputs: List[Any]) -> None:
-        loss = torch.stack([x["loss"] for x in outputs]).mean()
-        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
         if self.finetuningscheduler_callback:
             self.log("finetuning_schedule_depth", float(self.finetuningscheduler_callback.curr_depth))
 
@@ -378,7 +282,7 @@ class RteBoolqModule(pl.LightningModule):
                     for n, p in self.model.named_parameters()
                     if not any(nd in n for nd in self.no_decay) and p.requires_grad
                 ],
-                "weight_decay": self.optimizer_init["init_args"]["weight_decay"],
+                "weight_decay": self.hparams.optimizer_init["init_args"]["weight_decay"],
             },
             {
                 "params": [
@@ -396,18 +300,12 @@ class RteBoolqModule(pl.LightningModule):
         # but in this case we pass a list of parameter groups to ensure weight_decay is
         # not applied to the bias parameter (for completeness, in this case it won't make much
         # performance difference)
-        optimizer = instantiate_registered_class(args=self._init_param_groups(), init=self.optimizer_init)
+        optimizer = instantiate_registered_class(args=self._init_param_groups(), init=self.hparams.optimizer_init)
         scheduler = {
-            "scheduler": instantiate_registered_class(args=optimizer, init=self.lr_scheduler_init),
-            **self.pl_lrs_cfg,
+            "scheduler": instantiate_registered_class(args=optimizer, init=self.hparams.lr_scheduler_init),
+            **self.hparams.pl_lrs_cfg,
         }
         return [optimizer], [scheduler]
-
-    def configure_callbacks(self):
-        found_fts = [c for c in self.trainer.callbacks if isinstance(c, FinetuningScheduler)]
-        if found_fts:
-            self.finetuningscheduler_callback = found_fts[0]
-        return super().configure_callbacks()
 
 
 class CustLightningCLI(LightningCLI):
