@@ -1,0 +1,42 @@
+0:
+  params:
+  - model.classifier.bias
+  - model.classifier.weight
+1:
+  params:
+  - model.pooler.dense.bias
+  - model.pooler.dense.weight
+  - model.deberta.encoder.LayerNorm.bias
+  - model.deberta.encoder.LayerNorm.weight
+  new_lr_scheduler:
+    lr_scheduler_init:
+      class_path: torch.optim.lr_scheduler.StepLR
+      init_args:
+        step_size: 1
+        gamma: 0.7
+    pl_lrs_cfg:
+      interval: epoch
+      frequency: 1
+      name: Explicit_Reinit_LR_Scheduler
+    init_pg_lrs: [2.0e-06, 2.0e-06]
+2:
+  params:
+  - model.deberta.encoder.rel_embeddings.weight
+  - model.deberta.encoder.layer.{0,11}.(output|attention|intermediate).*
+  - model.deberta.embeddings.LayerNorm.bias
+  - model.deberta.embeddings.LayerNorm.weight
+  new_lr_scheduler:
+    lr_scheduler_init:
+      class_path: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+      init_args:
+        T_0: 3
+        T_mult: 2
+        eta_min: 1.0e-07
+    pl_lrs_cfg:
+      interval: epoch
+      frequency: 1
+      name: Explicit_Reinit_LR_Scheduler
+    init_pg_lrs: [1.0e-06, 1.0e-06, 2.0e-06, 2.0e-06]
+3:
+  params:
+  - model.deberta.embeddings.word_embeddings.weight

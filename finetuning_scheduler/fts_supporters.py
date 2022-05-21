@@ -25,21 +25,26 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import KeysView
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from functools import reduce
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 import pytorch_lightning as pl
 import torch
 import yaml
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.callbacks.lr_monitor import LearningRateMonitor
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
+from pytorch_lightning.core.optimizer import _MockOptimizer
 from pytorch_lightning.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
 from pytorch_lightning.utilities.cloud_io import get_filesystem
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
+from pytorch_lightning.utilities.types import _LRScheduler, LRSchedulerConfig
 from torch.nn import Module
+from torch.optim.lr_scheduler import _LRScheduler as torch_LRScheduler
+from torch.optim.lr_scheduler import ChainedScheduler, SequentialLR
 from torch.optim.optimizer import Optimizer
 
 log = logging.getLogger(__name__)
@@ -398,12 +403,456 @@ class UniqueKeyLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep)
 
 
-class SchedulingMixin(ABC):
-    """Functionality for generating, parsing and executing finetuning schedules."""
+class ScheduleParsingMixin(ABC):
+    """Functionality for parsing and validating finetuning schedules."""
 
     # proper initialization of these variables should be done in the child class
     pl_module: pl.LightningModule
     ft_schedule: Optional[Union[str, dict]]
+    reinit_lr_cfg: Optional[Dict]
+
+    def _validate_ft_sched(self) -> Tuple[int, int]:
+        """Ensure the explicitly specified finetuning schedule has a valid configuration.
+
+        Returns:
+            Tuple[int, int]: A tuple of ints specifying:
+                1. The depth of the final scheduled phase
+                2. The maximum epoch watermark explicitly specified in the schedule
+        """
+        max_epoch_wm = -1
+        max_phase = 0
+        self._validate_schedule_keys()
+        self._validate_lr_scheduler_cfg()
+        named_params = dict(self.pl_module.named_parameters()).keys()
+        for depth in self.ft_schedule.keys():  # type: ignore[union-attr]
+            max_phase = max(max_phase, depth)
+            self._parse_phase(depth, named_params)
+            if depth > 0:
+                assert isinstance(self.ft_schedule, Dict)
+                curr_max_epoch = self.ft_schedule[depth]["max_transition_epoch"]
+                if 0 <= curr_max_epoch <= max_epoch_wm:
+                    es_addendum = " depending upon EarlyStopping criteria."
+                    rank_zero_info(
+                        f"Specified max_transition_epoch of depth {depth}"
+                        f"({self.ft_schedule[depth]['max_transition_epoch']}) is less than or equal to a "
+                        f"previous max_transition_epoch ({max_epoch_wm}), depth may execute only a single "
+                        f"epoch{'.' if self.epoch_transitions_only else es_addendum}"  # type: ignore[attr-defined]
+                    )
+                max_epoch_wm = max(max_epoch_wm, curr_max_epoch)
+        self._validate_phases_disjoint()
+        if self.epoch_transitions_only:  # type: ignore[attr-defined]
+            self._validate_epoch_transitions()
+        return max_phase, max_epoch_wm
+
+    def _prune_pl_lrs(self, pl_lrs_cfg: Dict) -> Dict:
+        """Prune keys not part of a valid PyTorch Lightning lr scheduler configuration (if automatic optimization
+        used)
+
+        Args:
+            pl_lrs_cfg (Dict): User-provided PyTorch Lightning lr scheduler configuration
+
+        Returns:
+            Dict: PyTorch Lightning lr scheduler configuration without extra keys
+        """
+        if self.pl_module.automatic_optimization:
+            supported_keys = {field.name for field in fields(LRSchedulerConfig)}
+            extra_keys = pl_lrs_cfg.keys() - supported_keys
+            if extra_keys:
+                rank_zero_warn(
+                    f"Found unsupported keys in the lr scheduler dict: {extra_keys}.",
+                    category=RuntimeWarning,
+                )
+        return {k: v for k, v in pl_lrs_cfg.items() if k in supported_keys}
+
+    def _pl_lrs_validation(self, pl_lrs_cfg: Dict) -> None:
+        """Check basic pl lrs config (we aren't instantiating the new scheduler yet so can't validate everything)
+        replicating basic PL lr schedule config validation here, originally based on https://bit.ly/3NldbaG.
+
+        Args:
+            pl_lrs_cfg (Dict): The PyTorch Lightning learning rate scheduler configuration option dictionary
+
+        Raises:
+            MisconfigurationException: If `pl_lrs_cfg['interval']` is not either `step` or `epoch`. Warnings raised for
+                unsupported keys that will be ignored.
+        """
+        if self.pl_module.automatic_optimization:
+            if "interval" in pl_lrs_cfg and pl_lrs_cfg["interval"] not in ("step", "epoch"):
+                raise MisconfigurationException(
+                    'The "interval" key in lr scheduler dict must be "step" or "epoch"'
+                    f' but is "{pl_lrs_cfg["interval"]}"'
+                )
+
+    def _lr_scheduler_reinit_key_validation(self, target_sched: Dict, depth: Optional[int] = None) -> None:
+        """Validate the keys in a given lr reinitialization configuration.
+
+        Args:
+            target_sched (Dict): The provided lr scheduler reinitialization configuration for either an implicit mode
+                finetuning schedule (passed via `reinit_lr_cfg`) or for a given explicity mode finetuning phase (passed
+                via `new_lr_scheduler` for a given phase)
+            depth (Optional[int], optional): If parsing an explicit schedule, the current phase. Defaults to None.
+
+        Raises:
+            MisconfigurationException: If an `init_pg_lrs` key is provided in implicit mode training
+                (via `reinit_lr_cfg`).
+            MisconfigurationException: If an `lr_scheduler_init` key is missing in the lr scheduler reinitialization
+                configuration.
+            MisconfigurationException: If the configuration provided in `lr_scheduler_init` does not specify a
+                `class_path` for the lr scheduler to be instantiated.
+        """
+        if "init_pg_lrs" in target_sched.keys() and (self.reinit_lr_cfg or not depth):
+            raise MisconfigurationException(
+                "Specifying a `init_pg_lrs` key in the lr scheduler configuration passed via `reinit_lr_cfg` (i.e. "
+                "implicit mode training) is not a valid configuration since the same lr scheduler configuration "
+                "is intended to be reinitialized at every finetuning phase with implicit mode finetuning."
+            )
+        # validate lr_scheduler_init config
+        if "lr_scheduler_init" not in target_sched.keys():
+            phase_specific_msg = "" if not depth else f"for phase {depth}"
+            raise MisconfigurationException(
+                "Specifying a lr scheduler configuration to reinitialize with requires a valid lr scheduler "
+                "configuration dictionary be provided via a `lr_scheduler_init` key but no such key was found "
+                + phase_specific_msg
+                + "."
+            )
+        # if we're passing pl lr scheduler configuration, validate the keys
+        if "pl_lrs_cfg" in target_sched.keys():
+            self._pl_lrs_validation(pl_lrs_cfg=target_sched["pl_lrs_cfg"])
+        if not target_sched["lr_scheduler_init"].get("class_path"):
+            phase_specific_msg = "the specified lr schedule config." if not depth else f"the specified phase ({depth})."
+            raise MisconfigurationException(
+                "Specifying an `lr_scheduler_init` requires at least a  `class_path` to be specified "
+                "but this is not the case for " + phase_specific_msg
+            )
+        if "init_pg_lrs" in target_sched.keys():
+            warn_msg = (
+                "Found an `init_pg_lrs` key in the specified lr scheduler reinitialization config. Remember to "
+                "ensure the number of specified parameter groups matches the number of parameter groups created in "
+                "in previous phases. This aspect of the optimization path is not currently fully simulated on "
+                "`FinetuningScheduler` initialization so is left to the user to validate."
+            )
+            assert depth
+            ScheduleParsingMixin._parse_reint_pg_lrs(depth=depth, init_pg_lrs=target_sched["init_pg_lrs"])
+            rank_zero_warn(warn_msg)
+        lr_scheduler_init = target_sched.get("lr_scheduler_init")
+        assert lr_scheduler_init
+        ScheduleParsingMixin._lr_scheduler_sanity_chk(lr_scheduler_init)
+
+    def _lr_scheduler_init_validation(self, lr_reinit_phases: Dict) -> None:
+        """Trigger lr scheduler reinitialization configuration validation for all provided configurations. This
+        will be a single configuration for implicit mode finetuning or n configurations for explicit mode.
+
+        Args:
+            lr_reinit_phases (Dict): Dictionary of lr scheduler reinitialization configurations to parse/validate
+        """
+        if self.reinit_lr_cfg:
+            self._lr_scheduler_reinit_key_validation(lr_reinit_phases)
+        else:
+            for k, lr_cfg in lr_reinit_phases.items():
+                self._lr_scheduler_reinit_key_validation(lr_cfg, k)
+
+    def _validate_lr_scheduler_cfg(self) -> None:
+        """Orchestrate lr scheduler reinitialization configuration validation.
+
+        Raises:
+            MisconfigurationException: If a `new_lr_scheduler` configuration is passed to the initial training phase.
+        """
+        assert isinstance(self.ft_schedule, Dict)
+        lr_reinit_phases = self.reinit_lr_cfg or {
+            k: self.ft_schedule[k].get("new_lr_scheduler")
+            for k in self.ft_schedule.keys()
+            if self.ft_schedule[k].get("new_lr_scheduler")
+        }
+        if not lr_reinit_phases:
+            return  # no further validation needed since there is no lr scheduler reinitialization configuration
+        assert self.pl_module.trainer is not None
+        assert self.pl_module.trainer.log_dir is not None
+        if 0 in lr_reinit_phases.keys():
+            raise MisconfigurationException(
+                "You have specified a `new_lr_scheduler` for the initial training phase which is an invalid "
+                "configuration. The initial lr_scheduler configuration should be passed to your LightningModule."
+            )
+        self._lr_scheduler_init_validation(lr_reinit_phases)
+
+    def _validate_schedule_keys(self) -> None:
+        """Ensures schedule keys are integers, zero-based and contiguous. If the schedule does not meet these
+        requirements, attempts to transform the passed schedule to meet them and writes the candidate schedule out
+        for subsequent user validation.
+
+        Raises:
+            MisconfigurationException: Raised if the schedule contains non-integer keys and/or non-zero-based and
+                contiguous keys.
+        """
+        assert self.pl_module.trainer is not None
+        assert self.pl_module.trainer.log_dir is not None
+        assert isinstance(self.ft_schedule, Dict)
+        all_ints = all([isinstance(k, int) for k in self.ft_schedule.keys()])
+        contiguous = len(self.ft_schedule.keys()) == (max(self.ft_schedule.keys()) + 1)
+        rewrite_dest = None
+        if not (all_ints and contiguous):
+            for i, k in enumerate(sorted(self.ft_schedule.keys())):
+                self.ft_schedule[i] = self.ft_schedule.pop(k)
+            # write the reconfigured schedule to our log directory to allow user validation
+            rewrite_dest = ScheduleImplMixin.save_schedule(
+                f"{self.pl_module.__class__.__name__}_ft_schedule_valid.yaml",
+                self.ft_schedule,
+                self.pl_module.trainer.log_dir,
+            )
+            err_msg = "The supplied schedule was found to"
+            reason_msg = " use non-integer keys " if not all_ints else " have non-contiguous or non-zero-indexed keys "
+            raise MisconfigurationException(
+                err_msg + reason_msg + "and has thus been reconfigured and saved to "
+                f"'{rewrite_dest}'. Please validate the reconfigured schedule and restart "
+                "training with a valid schedule."
+            )
+
+    def _validate_epoch_transitions(self) -> None:
+        """If not composing :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` and epoch-driven
+        stopping criteria (the default behavior) but instead specifying exclusively epoch-driven transitions (
+        :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is
+        ``True``), ensure the specified schedule specifies transitions for every phase.
+
+        Raises:
+            MisconfigurationException: If the specified schedule does not include epoch-driven transitions for all
+                phases.
+        """
+        assert isinstance(self.ft_schedule, Dict)
+        missing_transitions = [d for d in self.ft_schedule.keys() if self.ft_schedule[d]["max_transition_epoch"] < 0]
+        if missing_transitions:
+            raise MisconfigurationException(
+                f"epoch_transitions_only specified but some phases "
+                f"({', '.join(str(d) for d in missing_transitions)}) are missing a "
+                "max_transition_epoch. Please unset epoch_transitions_only or "
+                "specify a max_transition_epoch for each phase."
+            )
+
+    def _parse_phase_lr(self, depth: int) -> None:
+        """Parse/Define per-phase base learning rates.
+
+        Args:
+            depth (int): Schedule depth/phase to parse
+        Raises:
+            MisconfigurationException: If the specified per-phase learning rate is not convertable to a float.
+        """
+        assert isinstance(self.ft_schedule, Dict)
+        if depth > 0:
+            self.ft_schedule[depth].setdefault("lr", self.base_max_lr)  # type: ignore[attr-defined]
+            try:
+                float(self.ft_schedule[depth]["lr"])
+            except ValueError:
+                raise MisconfigurationException(
+                    f"The lr '{self.ft_schedule[depth]['lr']}' in phase {depth} of the provided explicit schedule"
+                    "could not be cast to a float. Specified learning rates must be convertable to a float."
+                )
+        else:
+            if self.ft_schedule[depth].get("lr", None):
+                rank_zero_warn(
+                    f"A lr for finetuning phase 0 has been specified ({self.ft_schedule[0]['lr']}). This"
+                    " lr will be overridden by the lr specified via the initial optimizer configuration"
+                    " (typically in `configure_optimizers()`)."
+                )
+                del self.ft_schedule[depth]["lr"]
+
+    def _parse_phase(self, depth: int, named_params: KeysView) -> None:
+        """Expand any regex expressions specified in an ft_schedule phase to fully qualified parameter names.
+
+        Args:
+            depth (int): Schedule depth/phase to parse
+            named_params (KeysView): The named parameters of the model
+
+        Raises:
+            MisconfigurationException: If a specified parameter or regex does not resolve to at least one parameter.
+        """
+        assert isinstance(self.ft_schedule, Dict)
+        self.ft_schedule[depth].setdefault("max_transition_epoch", -1)
+        self._parse_phase_lr(depth)
+        orig_params = self.ft_schedule[depth].get("params", [])
+        resolved_params = []
+        for p in orig_params:
+            regex_params = []
+            explicit_params = False
+            if p in named_params:
+                explicit_params = True
+                resolved_params.append(p)
+            else:
+                ppat = re.compile(p)
+                regex_params = [n for n in named_params if ppat.match(n)]
+                resolved_params.extend(regex_params)
+            if not (regex_params or explicit_params):
+                raise MisconfigurationException(
+                    f"The parameter or regex '{p}' specified in phase {depth} of the "
+                    "provided explicit schedule did not match any named parameter in the "
+                    "model."
+                )
+        self.ft_schedule[depth]["params"] = resolved_params
+
+    def _validate_phases_disjoint(self) -> None:
+        """Validate that the defined schedule does not specify any parameter in multiple phases.
+
+        Raises:
+            MisconfigurationException: Provides a list of the parameters specified in more than one phase.
+        """
+        assert isinstance(self.ft_schedule, Dict)
+        phase_lists = [self.ft_schedule[d]["params"] for d in self.ft_schedule.keys()]
+        params = Counter(list(itertools.chain(*phase_lists)))
+        unique_params = Counter(list(set().union(*phase_lists)))
+        params.subtract(unique_params)
+        dup_params = list(params.elements())
+        if dup_params:
+            raise MisconfigurationException(
+                f"Phases are not disjoint. The following parameters are specified in "
+                f"multiple phases: {', '.join(dup_params)}"
+            )
+
+    def reinit_lr_scheduler(self, new_lr_scheduler: Dict, trainer: pl.Trainer, optimizer: Optimizer) -> None:
+        """Reinitialize the learning rate scheduler, using a validated learning rate scheduler configuration and
+        wrapping the existing optimizer.
+
+        Args:
+            new_lr_scheduler (Dict): A dictionary defining the new lr scheduler configuration to be initialized.
+            trainer (pl.Trainer): The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object.
+            optimizer (class:`~torch.optim.Optimizer`): The :class:`~torch.optim.Optimizer` around which the new lr
+                scheduler will be wrapped.
+        """
+        lr_scheduler_init = new_lr_scheduler["lr_scheduler_init"]
+        lrs_class = ScheduleParsingMixin._import_lr_scheduler(lr_scheduler_init)
+        # unless overridden by user directive, reset optimizer pg lrs to initial before wrapping in new scheduler
+        curr_optimizer_lrs = [group["initial_lr"] for group in optimizer.param_groups]
+        reset_init_pg_lrs = True if new_lr_scheduler.get("init_pg_lrs", None) else False
+        initial_optimizer_lrs = new_lr_scheduler.get("init_pg_lrs", curr_optimizer_lrs)
+        for _, data in enumerate(zip(optimizer.param_groups, initial_optimizer_lrs)):
+            param_group, lr = data
+            param_group["lr"] = lr
+            if reset_init_pg_lrs:
+                param_group["initial_lr"] = lr
+        if "pl_lrs_cfg" in new_lr_scheduler.keys():
+            new_lr_scheduler["pl_lrs_cfg"] = self._prune_pl_lrs(new_lr_scheduler["pl_lrs_cfg"])
+        new_lrs_config = LRSchedulerConfig(
+            opt_idx=0,
+            scheduler=lrs_class(optimizer=optimizer, **lr_scheduler_init.get("init_args", {})),
+            **new_lr_scheduler.get("pl_lrs_cfg", {}),
+        )
+        trainer.strategy.lr_scheduler_configs = [new_lrs_config]
+
+    @staticmethod
+    def _parse_reint_pg_lrs(depth: int, init_pg_lrs: List) -> None:
+        """Parse/Define per-phase base-learning rate overrides for an lr scheduler reinitialization.
+
+        Args:
+            depth (int): the current schedule depth being evaluated
+            init_pg_lrs (List): the list of new lrs to set as initial for the new lr scheduler.
+        Raises:
+            MisconfigurationException: If any of the specified per-phase learning rates are not convertable to a float.
+        """
+        for lr in init_pg_lrs:
+            try:
+                float(lr)
+            except ValueError:
+                raise MisconfigurationException(
+                    f"Not all of the lrs specified in `init_pg_lrs`: ({init_pg_lrs}) associated with phase {depth} of "
+                    "the provided explicit schedule could be cast to a float. Specified learning rates must be "
+                    "convertable to a float."
+                )
+
+    @staticmethod
+    def _unsupported_reinit_lr_types() -> Tuple[Type[torch_LRScheduler], ...]:
+        """Provide the `_LRScheduler` types that are currently not supported in a lr scheduler reinitialization
+        context.
+
+        Returns:
+            Tuple[Type[torch_LRScheduler], ...]: SequentialLR and ChainedScheduler are not currently supported
+        """
+        return (ChainedScheduler, SequentialLR)
+
+    @staticmethod
+    def _is_supported_reinit_lr(lr_class: Type[_LRScheduler]) -> None:
+        """Evaulate whether the provided lr scheduler is currently supported in a lr scheduler reinitialization
+        context.
+
+        .. note::
+        This may be changed from a nominal subtype approach to a protocol/structural subtype design once Python >=
+            3.8 is required
+        """
+        if issubclass(lr_class, ScheduleParsingMixin._unsupported_reinit_lr_types()):
+            error_msg = (
+                f"The provided lr scheduler type ({lr_class}) is not currently supported in the context of lr "
+                "scheduler reinitialization. The following lr scheduler types are currently unsupported in lr "
+                f"reinitialization configurations: { ScheduleParsingMixin._unsupported_reinit_lr_types() } "
+            )
+            rank_zero_warn(error_msg)
+            raise MisconfigurationException(error_msg)
+
+    @staticmethod
+    def _import_lr_scheduler(lr_scheduler_init: Dict) -> Type[_LRScheduler]:
+        """Import the lr scheduler specified in the provided `lr_scheduler_init` configuration.
+
+        Args:
+            lr_scheduler_init (Dict): The user-provided lr scheduler reinitialization configuration.
+
+        Raises:
+            MisconfigurationException: If the specified LR scheduler cannot be imported successfully.
+
+        Returns:
+            Type[_LRScheduler]: The lr scheduler class to be instantiated.
+        """
+        try:
+            class_module, class_name = lr_scheduler_init["class_path"].rsplit(".", 1)
+            module = __import__(class_module, fromlist=[class_name])
+            lrs_class = getattr(module, class_name)
+            ScheduleParsingMixin._is_supported_reinit_lr(lrs_class)
+        except (ImportError, AttributeError) as err:
+            error_msg = (
+                f"Could not import specified LR scheduler class using class_path ({lr_scheduler_init['class_path']}) "
+                f"Recieved the following error while importing: {err}. Please validate specified `class_path` before "
+                "resubmitting."
+            )
+            rank_zero_warn(error_msg)
+            raise MisconfigurationException(error_msg)
+        return lrs_class
+
+    @staticmethod
+    def _lr_scheduler_sanity_chk(lr_scheduler_init: Dict) -> None:
+        """Before beginning execution of defined finetuning schedule, perform a sanity check of the specified lr
+        scheduler reinitialization configuration. To the extent reasonable (i.e. without simulating the entire
+        training path), if the provided lr scheduler reinitialization configuration is expected to fail, it is
+        user-friendly to provide this feedback to the user before training begins.
+
+        Args:
+            lr_scheduler_init (Dict): The user-provided lr scheduler reinitialization configuration.
+
+        Raises:
+            MisconfigurationException: If a valid and supported scheduler cannot be instantiated with the specified
+                init args.
+        """
+        lrs_class = ScheduleParsingMixin._import_lr_scheduler(lr_scheduler_init)
+        if lr_scheduler_init.get("init_args") and "optimizer" in lr_scheduler_init.get("init_args", {}).keys():
+            warn_msg = (
+                f"Found an `optimizer` key in the provided `lr_scheduler_init`: {lr_scheduler_init['init_args']} "
+                f"Note that the existing optimizer and all associated parameter groups will be used when "
+                "reinitializing the lr schedule using the specified scheduler so the provided `optimizer` key will "
+                "have no effect."
+            )
+            rank_zero_warn(warn_msg)
+            del lr_scheduler_init["init_args"]["optimizer"]
+        try:
+            testlr = lrs_class(optimizer=_MockOptimizer(), **lr_scheduler_init.get("init_args", {}))
+        except Exception as err:
+            error_msg = (
+                "Could not configure the specified LR scheduler class using the `init_args` "
+                f"({lr_scheduler_init['init_args']}). Recieved the following error while sanity checking schedule "
+                f"phases: {err}. Please validate specified `init_args` before resubmitting."
+            )
+            rank_zero_warn(error_msg)
+            raise MisconfigurationException(error_msg)
+        assert isinstance(testlr, torch.optim.lr_scheduler._LRScheduler)
+
+
+class ScheduleImplMixin(ABC):
+    """Functionality for generating, and executing finetuning schedules."""
+
+    # proper initialization of these variables should be done in the child class
+    pl_module: pl.LightningModule
+    ft_schedule: Optional[Union[str, dict]]
+    reinit_lr_cfg: Optional[Dict]
     max_depth: int
     _fts_state: FTSState
 
@@ -429,6 +878,17 @@ class SchedulingMixin(ABC):
         if not self.ft_schedule and self.max_depth == -1:
             rank_zero_info("No finetuning schedule provided, max_depth set to -1 so iteratively thawing entire model")
         assert self.pl_module.trainer.log_dir is not None
+        if self.ft_schedule and self.reinit_lr_cfg:
+            error_msg = (
+                "Specifying both `ft_schedule` and `reinit_lr_cfg` is an invalid configuration. `reinit_lr_cfg` "
+                "specifies an lr scheduler configuration to reinitialize with at every new phase of an implicitly "
+                "defined finetuning shedule whereas `ft_schedule` is an explicity defined schedule. To reinitialize "
+                "a given lr scheduler configuration with an explicit finetuning schedule, please add the desired "
+                "lr scheduler configurations to your explicit schedule using the `new_lr_scheduler` key of the "
+                "relevant phases."
+            )
+            rank_zero_warn(error_msg)
+            raise MisconfigurationException(error_msg)
         if self.ft_schedule:  # thaw according to an explicit schedule
             self.ft_schedule = (
                 self.load_yaml_schedule(pathlib.Path(self.ft_schedule))
@@ -436,7 +896,7 @@ class SchedulingMixin(ABC):
                 else self.ft_schedule
             )
             # save the parsed schedule to our log directory to ensure reproducability
-            SchedulingMixin.save_schedule(
+            ScheduleImplMixin.save_schedule(
                 f"{self.pl_module.__class__.__name__}_ft_schedule.yaml",
                 self.ft_schedule,
                 self.pl_module.trainer.log_dir,
@@ -444,70 +904,6 @@ class SchedulingMixin(ABC):
         else:
             self.gen_implicit_schedule(self.pl_module.trainer.log_dir)
             self.ft_schedule = self.pl_module.trainer.strategy.broadcast(self.ft_schedule)
-
-    def validate_ft_sched(self) -> Tuple[int, int]:
-        """Ensure the explicitly specified finetuning schedule has a valid configuration.
-
-        Returns:
-            Tuple[int, int]: A tuple of ints specifying:
-                1. The depth of the final scheduled phase
-                2. The maximum epoch watermark explicitly specified in the schedule
-        """
-        max_epoch_wm = -1
-        max_phase = 0
-        self.validate_schedule_keys()
-        named_params = dict(self.pl_module.named_parameters()).keys()
-        for depth in self.ft_schedule.keys():  # type: ignore[union-attr]
-            max_phase = max(max_phase, depth)
-            self.parse_phase(depth, named_params)
-            if depth > 0:
-                assert isinstance(self.ft_schedule, Dict)
-                curr_max_epoch = self.ft_schedule[depth]["max_transition_epoch"]
-                if 0 <= curr_max_epoch <= max_epoch_wm:
-                    es_addendum = " depending upon EarlyStopping criteria."
-                    rank_zero_info(
-                        f"Specified max_transition_epoch of depth {depth}"
-                        f"({self.ft_schedule[depth]['max_transition_epoch']}) is less than or equal to a "
-                        f"previous max_transition_epoch ({max_epoch_wm}), depth may execute only a single "
-                        f"epoch{'.' if self.epoch_transitions_only else es_addendum}"  # type: ignore[attr-defined]
-                    )
-                max_epoch_wm = max(max_epoch_wm, curr_max_epoch)
-        self.validate_phases_disjoint()
-        if self.epoch_transitions_only:  # type: ignore[attr-defined]
-            self.validate_epoch_transitions()
-        return max_phase, max_epoch_wm
-
-    def validate_schedule_keys(self) -> None:
-        """Ensures schedule keys are integers, zero-based and contiguous. If the schedule does not meet these
-        requirements, attempts to transform the passed schedule to meet them and writes the candidate schedule out
-        for subsequent user validation.
-
-        Raises:
-            MisconfigurationException: Raised if the schedule contains non-integer keys and/or non-zero-based and
-                contiguous keys.
-        """
-        assert self.pl_module.trainer is not None
-        assert self.pl_module.trainer.log_dir is not None
-        assert isinstance(self.ft_schedule, Dict)
-        all_ints = all([isinstance(k, int) for k in self.ft_schedule.keys()])
-        contiguous = len(self.ft_schedule.keys()) == (max(self.ft_schedule.keys()) + 1)
-        rewrite_dest = None
-        if not (all_ints and contiguous):
-            for i, k in enumerate(sorted(self.ft_schedule.keys())):
-                self.ft_schedule[i] = self.ft_schedule.pop(k)
-            # write the reconfigured schedule to our log directory to allow user validation
-            rewrite_dest = SchedulingMixin.save_schedule(
-                f"{self.pl_module.__class__.__name__}_ft_schedule_valid.yaml",
-                self.ft_schedule,
-                self.pl_module.trainer.log_dir,
-            )
-            err_msg = "The supplied schedule was found to"
-            reason_msg = " use non-integer keys " if not all_ints else " have non-contiguous or non-zero-indexed keys "
-            raise MisconfigurationException(
-                err_msg + reason_msg + "and has thus been reconfigured and saved to "
-                f"'{rewrite_dest}'. Please validate the reconfigured schedule and restart "
-                "training with a valid schedule."
-            )
 
     def init_ft_sched(self) -> None:
         """Generate the default finetuning schedule and/or load it into
@@ -519,7 +915,7 @@ class SchedulingMixin(ABC):
             self.max_depth = len(self.ft_schedule) - 1
         else:
             self.max_depth = min(self.max_depth, len(self.ft_schedule) - 1)
-        max_phase, max_epoch_wm = self.validate_ft_sched()
+        max_phase, max_epoch_wm = self._validate_ft_sched()  # type: ignore[attr-defined]
         # if the final phase is not using EarlyStopping, apply the maximum phase-specified epoch to global max_epochs
         if self.ft_schedule[max_phase]["max_transition_epoch"] >= 0:
             assert self.pl_module.trainer is not None
@@ -530,26 +926,6 @@ class SchedulingMixin(ABC):
                 f" the maximum phase-specified epoch ({max_epoch_wm})."
             )
             self.pl_module.trainer.fit_loop.max_epochs = max(max_epoch_wm, self.pl_module.trainer.max_epochs)
-
-    def validate_epoch_transitions(self) -> None:
-        """If not composing :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` and epoch-driven
-        stopping criteria (the default behavior) but instead specifying exclusively epoch-driven transitions (
-        :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is
-        ``True``), ensure the specified schedule specifies transitions for every phase.
-
-        Raises:
-            MisconfigurationException: If the specified schedule does not include epoch-driven transitions for all
-                phases.
-        """
-        assert isinstance(self.ft_schedule, Dict)
-        missing_transitions = [d for d in self.ft_schedule.keys() if self.ft_schedule[d]["max_transition_epoch"] < 0]
-        if missing_transitions:
-            raise MisconfigurationException(
-                f"epoch_transitions_only specified but some phases "
-                f"({', '.join(str(d) for d in missing_transitions)}) are missing a "
-                "max_transition_epoch. Please unset epoch_transitions_only or "
-                "specify a max_transition_epoch for each phase."
-            )
 
     @rank_zero_only
     def gen_implicit_schedule(self, sched_dir: os.PathLike) -> None:
@@ -623,7 +999,7 @@ class SchedulingMixin(ABC):
             layer_config[i] = {"params": l}
         schedule_name = f"{module.__class__.__name__}_ft_schedule.yaml"
         assert dump_loc is not None
-        return SchedulingMixin.save_schedule(schedule_name, layer_config, dump_loc)
+        return ScheduleImplMixin.save_schedule(schedule_name, layer_config, dump_loc)
 
     @staticmethod
     def load_yaml_schedule(schedule_yaml_file: os.PathLike) -> Dict:
@@ -656,84 +1032,6 @@ class SchedulingMixin(ABC):
             rank_zero_warn(error_msg)
             raise MisconfigurationException(error_msg)
         return schedule_dict
-
-    def parse_phase_lr(self, depth: int) -> None:
-        """Parse/Define per-phase base learning rates.
-
-        Args:
-            depth (int): Schedule depth/phase to parse
-        Raises:
-            MisconfigurationException: If the specified per-phase learning rate is not convertable to a float.
-        """
-        assert isinstance(self.ft_schedule, Dict)
-        if depth > 0:
-            self.ft_schedule[depth].setdefault("lr", self.base_max_lr)  # type: ignore[attr-defined]
-            try:
-                float(self.ft_schedule[depth]["lr"])
-            except ValueError:
-                raise MisconfigurationException(
-                    f"The lr '{self.ft_schedule[depth]['lr']}' in phase {depth} of the provided explicit schedule"
-                    "could not be cast to a float. Specified learning rates must be convertable to a float."
-                )
-        else:
-            if self.ft_schedule[depth].get("lr", None):
-                rank_zero_warn(
-                    f"A lr for finetuning phase 0 has been specified ({self.ft_schedule[0]['lr']}). This"
-                    " lr will be overridden by the lr specified via the initial optimizer configuration"
-                    " (typically in `configure_optimizers()`)."
-                )
-                del self.ft_schedule[depth]["lr"]
-
-    def parse_phase(self, depth: int, named_params: KeysView) -> None:
-        """Expand any regex expressions specified in an ft_schedule phase to fully qualified parameter names.
-
-        Args:
-            depth (int): Schedule depth/phase to parse
-            named_params (KeysView): The named parameters of the model
-
-        Raises:
-            MisconfigurationException: If a specified parameter or regex does not resolve to at least one parameter.
-        """
-        assert isinstance(self.ft_schedule, Dict)
-        self.ft_schedule[depth].setdefault("max_transition_epoch", -1)
-        self.parse_phase_lr(depth)
-        orig_params = self.ft_schedule[depth].get("params", [])
-        resolved_params = []
-        for p in orig_params:
-            regex_params = []
-            explicit_params = False
-            if p in named_params:
-                explicit_params = True
-                resolved_params.append(p)
-            else:
-                ppat = re.compile(p)
-                regex_params = [n for n in named_params if ppat.match(n)]
-                resolved_params.extend(regex_params)
-            if not (regex_params or explicit_params):
-                raise MisconfigurationException(
-                    f"The parameter or regex '{p}' specified in phase {depth} of the "
-                    "provided explicit schedule did not match any named parameter in the "
-                    "model."
-                )
-        self.ft_schedule[depth]["params"] = resolved_params
-
-    def validate_phases_disjoint(self) -> None:
-        """Validate that the defined schedule does not specify any parameter in multiple phases.
-
-        Raises:
-            MisconfigurationException: Provides a list of the parameters specified in more than one phase.
-        """
-        assert isinstance(self.ft_schedule, Dict)
-        phase_lists = [self.ft_schedule[d]["params"] for d in self.ft_schedule.keys()]
-        params = Counter(list(itertools.chain(*phase_lists)))
-        unique_params = Counter(list(set().union(*phase_lists)))
-        params.subtract(unique_params)
-        dup_params = list(params.elements())
-        if dup_params:
-            raise MisconfigurationException(
-                f"Phases are not disjoint. The following parameters are specified in "
-                f"multiple phases: {', '.join(dup_params)}"
-            )
 
     def thaw_to_depth(self, depth: int = None) -> None:
         """Thaw/unfreeze the current
@@ -782,20 +1080,6 @@ class SchedulingMixin(ABC):
         if len(thawed_pl) == 0:
             rank_zero_warn("No thawed parameters passed so no new optimizer groups will be added.")
         else:
-            # TODO: probably better to just initialize a new lr_scheduler,
-            # ie  scheduler = {"scheduler": instantiate_registered_class(args=optimizer, init=self.lr_scheduler_init),
-            #  **self.pl_lrs_cfg,}
-            # config.scheduler = LRSchedulerConfig(**scheduler)
-            # but if resetting exisiting, could try following
-            # add reinit_lr param. if true, bypass params_lr and denom_lr, simply setting lr_factor to
-            # optimizer.param_groups[0]["initial_lr"]
-            # add "initial_lr" key to each added group below to ref later
-            # and then at the end of this func
-            # 1. set config.scheduler.base_lrs to [group['initial_lr'] for group in optimizer.param_groups]
-            # 2. group['lr'] to 'initial_lr' for all optimizer.param_groups,
-            # 3. reset config.scheduler._step_count to 1 and config.scheduler.last_epoch = 0
-            # 4.  config.scheduler._last_lr to [group['lr'] for group in self.optimizer.param_groups]
-
             params_lr = optimizer.param_groups[0]["lr"] if lr is None else float(lr)
             denom_lr = initial_denom_lr if lr is None else 1.0
             lr_factor = params_lr / denom_lr
@@ -809,6 +1093,7 @@ class SchedulingMixin(ABC):
                             if not any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
                         ],
                         "lr": lr_factor,
+                        "initial_lr": lr_factor,
                     }
                 )
                 optimizer.add_param_group(
@@ -820,6 +1105,7 @@ class SchedulingMixin(ABC):
                         ],
                         "weight_decay": 0.0,
                         "lr": lr_factor,
+                        "initial_lr": lr_factor,
                     }
                 )
                 added_pgs = 2
@@ -828,10 +1114,11 @@ class SchedulingMixin(ABC):
                     {
                         "params": [p for n, p in module.named_parameters() if n in thawed_pl and p.requires_grad],
                         "lr": lr_factor,
+                        "initial_lr": lr_factor,
                     }
                 )
                 added_pgs = 1
-            # extend base_lrs for added groups rather than re-initialize lr_scheduler(s)
+            # extend base_lrs for added groups
             for config in module.trainer.lr_scheduler_configs:  # type: ignore[union-attr]
                 config.scheduler.base_lrs.extend([lr_factor] * added_pgs)
 
@@ -896,11 +1183,27 @@ class CallbackDepMixin(ABC):
         Returns:
             Tuple[bool]: The ascertained :paramref:`~pytorch_lighting.trainer.trainer.Trainer.callbacks` capabilities
         """
-        callbacks_inspected = [FTSCheckpoint, ModelCheckpoint, FTSEarlyStopping, EarlyStopping]
+        callbacks_inspected = [FTSCheckpoint, ModelCheckpoint, FTSEarlyStopping, EarlyStopping, LearningRateMonitor]
         callback_inspection = []
         for ci in callbacks_inspected:
             callback_inspection.append(any([isinstance(c, ci) for c in trainer.callbacks]))
         return callback_inspection
+
+    @staticmethod
+    def _reorder_callback_by_type(callbacks: List[Callback], target_callback: type) -> List[Callback]:
+        """Moves all ModelCheckpoint callbacks to the end of the list. The sequential order within the group of
+        checkpoint callbacks is preserved, as well as the order of all other callbacks.
+
+        Args:
+            callbacks: A list of callbacks.
+
+        Return:
+            A new list in which the last elements are ModelCheckpoints if there were any present in the
+            input.
+        """
+        target_callbacks = [c for c in callbacks if isinstance(c, target_callback)]
+        other_callbacks = [c for c in callbacks if not isinstance(c, target_callback)]
+        return other_callbacks + target_callbacks
 
     def _configure_callback_deps(self, trainer: "pl.Trainer") -> Tuple[List[Callback], bool, bool]:
         """Ensures FTSCheckpoint and :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`
@@ -918,7 +1221,7 @@ class CallbackDepMixin(ABC):
             Bool: Whether a :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` callback was added
             Bool: Whether a :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callback was added
         """
-        has_ckpt_fts, has_ckpt_base, has_es_fts, has_es_base = self._inspect_callback_deps(trainer)
+        has_ckpt_fts, has_ckpt_base, has_es_fts, has_es_base, has_lr_monitor = self._inspect_callback_deps(trainer)
         added_ckpt_fts, added_es_fts = False, False
         if not any([has_es_fts, self.epoch_transitions_only, self.gen_ft_sched_only]):  # type: ignore[attr-defined]
             if has_es_base:
@@ -953,6 +1256,8 @@ class CallbackDepMixin(ABC):
             added_ckpt_fts = True
         for uc in [c for c in trainer.callbacks if any([isinstance(c, d) for d in CALLBACK_DEP_PARENTS.values()])]:
             uc.connect_callback(trainer)  # type: ignore[attr-defined]
+        if has_lr_monitor:
+            trainer.callbacks = CallbackDepMixin._reorder_callback_by_type(trainer.callbacks, LearningRateMonitor)
         # ensure existing callback_connector logic is adhered to. Adding an FTS configuration method to
         # CallbackConnector or forcing users to manually add default EarlyStopping and FTSCheckpoint classes
         # would avoid this callback_connector call

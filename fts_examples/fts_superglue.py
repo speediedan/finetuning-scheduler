@@ -252,9 +252,16 @@ class RteBoolqModule(pl.LightningModule):
         self.log("train_loss", loss)
         return loss
 
-    def training_epoch_end(self, outputs: List[Any]) -> None:
+    def on_train_epoch_start(self) -> None:
         if self.finetuningscheduler_callback:
-            self.log("finetuning_schedule_depth", float(self.finetuningscheduler_callback.curr_depth))
+            self.logger.log_metrics(
+                metrics={"finetuning_schedule_depth": float(self.finetuningscheduler_callback.curr_depth)},
+                step=self.global_step,
+            )
+
+    def training_epoch_end(self, outputs: List[Any]) -> None:
+        loss = torch.stack([x["loss"] for x in outputs]).mean()
+        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         outputs = self(**batch)

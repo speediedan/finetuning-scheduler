@@ -433,6 +433,13 @@ Footnotes
 
 .. toctree::
    :maxdepth: 1
+   :name: Advanced Usage
+   :caption: Advanced Usage
+
+   advanced/lr_scheduler_reinitialization
+
+.. toctree::
+   :maxdepth: 1
    :name: Examples
    :caption: Examples
 
