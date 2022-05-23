@@ -13,8 +13,10 @@ trigger:
       - "release/*"
       - "refs/tags/*"
 pr:
-  - "main"
-  - "release/*"
+  branches:
+    include:
+    - main
+    - release/*
 
 jobs:
   - job: pytest
