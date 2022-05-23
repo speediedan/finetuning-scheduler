@@ -847,7 +847,7 @@ class ScheduleParsingMixin(ABC):
 
 
 class ScheduleImplMixin(ABC):
-    """Functionality for generating, and executing finetuning schedules."""
+    """Functionality for generating and executing finetuning schedules."""
 
     # proper initialization of these variables should be done in the child class
     pl_module: pl.LightningModule

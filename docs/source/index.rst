@@ -34,6 +34,8 @@ Setup is straightforward, just install from PyPI!
 Additional installation options (from source etc.) are discussed under "Additional installation options" in the
 `README <https://github.com/speediedan/finetuning-scheduler/blob/main/README.md>`_
 
+.. _motivation:
+
 Motivation
 **********
 Fundamentally, the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback enables

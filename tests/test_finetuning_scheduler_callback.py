@@ -802,10 +802,6 @@ EXPECTED_LR_STATE = {
 def test_finetuningscheduling_reinitlr(tmpdir, boring_ft_schedule, explicit_mode: bool, reinit_lr: bool):
     """Inspect learning rate scheduler state within the training process to ensure it is taking the expected path
     in both explicit and implict finetuning modes."""
-    # TODO:
-    # check coverage
-    # add documentation example to advanced_usage.rst
-    # demo version 28 of explicit test, version 2 of implicit
     seed_everything(42)
     reinit_lr_cfg = None
     if explicit_mode:
