@@ -907,7 +907,7 @@ def test_finetuningscheduling_misconfiguration(tmpdir, callbacks: List[Callback]
         ("dup_key", ("Duplicate key", None)),
         ("lr_phase0", ("A lr for finetuning phase 0", None)),
         ("invalid_lr", ("convertable to a float", None)),
-        ("unsupp_rlrs", ("provided lr scheduler type ", None)),
+        pytest.param("unsupp_rlrs", ("provided lr scheduler type ", None), marks=RunIf(min_torch="1.10")),
         ("invalid_plrs", ("key in lr scheduler dict must be", None)),
         ("missing_lrs_init", ("configuration to reinitialize with requires", None)),
         ("no_cpath", ("`lr_scheduler_init` requires at least a  `class_", None)),

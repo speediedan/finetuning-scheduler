@@ -37,14 +37,12 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks.lr_monitor import LearningRateMonitor
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.core.optimizer import _MockOptimizer
-from pytorch_lightning.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
+from pytorch_lightning.utilities import _TORCH_GREATER_EQUAL_1_10, rank_zero_info, rank_zero_only, rank_zero_warn
 from pytorch_lightning.utilities.cloud_io import get_filesystem
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
 from pytorch_lightning.utilities.types import _LRScheduler, LRSchedulerConfig
 from torch.nn import Module
-from torch.optim.lr_scheduler import _LRScheduler as torch_LRScheduler
-from torch.optim.lr_scheduler import ChainedScheduler, SequentialLR
 from torch.optim.optimizer import Optimizer
 
 log = logging.getLogger(__name__)
@@ -754,16 +752,6 @@ class ScheduleParsingMixin(ABC):
                 )
 
     @staticmethod
-    def _unsupported_reinit_lr_types() -> Tuple[Type[torch_LRScheduler], ...]:
-        """Provide the `_LRScheduler` types that are currently not supported in a lr scheduler reinitialization
-        context.
-
-        Returns:
-            Tuple[Type[torch_LRScheduler], ...]: SequentialLR and ChainedScheduler are not currently supported
-        """
-        return (ChainedScheduler, SequentialLR)
-
-    @staticmethod
     def _is_supported_reinit_lr(lr_class: Type[_LRScheduler]) -> None:
         """Evaulate whether the provided lr scheduler is currently supported in a lr scheduler reinitialization
         context.
@@ -772,14 +760,18 @@ class ScheduleParsingMixin(ABC):
         This may be changed from a nominal subtype approach to a protocol/structural subtype design once Python >=
             3.8 is required
         """
-        if issubclass(lr_class, ScheduleParsingMixin._unsupported_reinit_lr_types()):
-            error_msg = (
-                f"The provided lr scheduler type ({lr_class}) is not currently supported in the context of lr "
-                "scheduler reinitialization. The following lr scheduler types are currently unsupported in lr "
-                f"reinitialization configurations: { ScheduleParsingMixin._unsupported_reinit_lr_types() } "
-            )
-            rank_zero_warn(error_msg)
-            raise MisconfigurationException(error_msg)
+        if _TORCH_GREATER_EQUAL_1_10:
+            from torch.optim.lr_scheduler import ChainedScheduler, SequentialLR
+
+            unsupported_schedulers = (ChainedScheduler, SequentialLR)
+            if issubclass(lr_class, unsupported_schedulers):
+                error_msg = (
+                    f"The provided lr scheduler type ({lr_class}) is not currently supported in the context of lr "
+                    "scheduler reinitialization. The following lr scheduler types are currently unsupported in lr "
+                    f"reinitialization configurations: { unsupported_schedulers } "
+                )
+                rank_zero_warn(error_msg)
+                raise MisconfigurationException(error_msg)
 
     @staticmethod
     def _import_lr_scheduler(lr_scheduler_init: Dict) -> Type[_LRScheduler]:
@@ -798,7 +790,8 @@ class ScheduleParsingMixin(ABC):
             class_module, class_name = lr_scheduler_init["class_path"].rsplit(".", 1)
             module = __import__(class_module, fromlist=[class_name])
             lrs_class = getattr(module, class_name)
-            ScheduleParsingMixin._is_supported_reinit_lr(lrs_class)
+            if _TORCH_GREATER_EQUAL_1_10:
+                ScheduleParsingMixin._is_supported_reinit_lr(lrs_class)
         except (ImportError, AttributeError) as err:
             error_msg = (
                 f"Could not import specified LR scheduler class using class_path ({lr_scheduler_init['class_path']}) "
