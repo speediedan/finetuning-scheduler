@@ -575,7 +575,7 @@ class SchedulingMixin(ABC):
 
         Returns:
             os.PathLike: The path to the generated schedule, by default ``Trainer.log_dir`` and named after the
-            :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` subclass in use with the suffix
+            :external+pl:class:`~pytorch_lightning.core.module.LightningModule` subclass in use with the suffix
             ``_ft_schedule.yaml``)
         """
         dump_path = pathlib.Path(dump_loc)
@@ -598,7 +598,7 @@ class SchedulingMixin(ABC):
             dump_loc: The directory to which the generated schedule (.yaml) should be written
         Returns:
             os.PathLike: The path to the generated schedule, by default ``Trainer.log_dir`` and named after the
-            :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` subclass in use with the suffix
+            :external+pl:class:`~pytorch_lightning.core.module.LightningModule` subclass in use with the suffix
             ``_ft_schedule.yaml``)
         """
         # Note: This initial default finetuning schedule generation approach is intentionally simple/naive but is

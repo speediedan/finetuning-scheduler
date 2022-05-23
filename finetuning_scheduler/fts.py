@@ -82,7 +82,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
                 properly structured Dict. See
                 :ref:`Specifying a Finetuning Schedule<index:Specifying a Finetuning Schedule>`
                 for the schedule format. If a schedule is not provided, will generate and execute a default finetuning
-                schedule using the provided :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule`.
+                schedule using the provided :external+pl:class:`~pytorch_lightning.core.module.LightningModule`.
                 See :ref:`the default schedule<index:The Default Finetuning Schedule>`. Defaults
                 to ``None``.
             max_depth: Maximum schedule depth to which the defined finetuning schedule should be executed. Specifying -1
@@ -96,7 +96,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
                 :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint`) checkpoint
                 before finetuning depth transitions. Defaults to ``True``.
             gen_ft_sched_only: If ``True``, generate the default finetuning schedule to ``Trainer.log_dir`` (it will be
-                named after your :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` subclass with
+                named after your :external+pl:class:`~pytorch_lightning.core.module.LightningModule` subclass with
                 the suffix ``_ft_schedule.yaml``) and exit without training. Typically used to generate a default
                 schedule that will be adjusted by the user before training. Defaults to ``False``.
             epoch_transitions_only: If ``True``, Use epoch-driven stopping criteria exclusively (rather than composing
@@ -155,8 +155,8 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         finetuning schedule.
 
         Args:
-            pl_module (:external+pl:class:`~pytorch_lightning.core.lightning.LightningModule`): The target
-                :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` to freeze parameters of
+            pl_module (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The target
+                :external+pl:class:`~pytorch_lightning.core.module.LightningModule` to freeze parameters of
         """
         self.freeze(modules=pl_module)
 
@@ -271,15 +271,15 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         1. configure the :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping`
         callback (if relevant)
         2. initialize the :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`
-        3. freeze the target :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` parameters
+        3. freeze the target :external+pl:class:`~pytorch_lightning.core.module.LightningModule` parameters
         Finally, initialize the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
         training session in the training environment.
 
         Args:
             trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The
                 :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
-            pl_module (:external+pl:class:`~pytorch_lightning.core.lightning.LightningModule`): The
-                :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` object
+            pl_module (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The
+                :external+pl:class:`~pytorch_lightning.core.module.LightningModule` object
             stage: The ``RunningStage.{SANITY_CHECKING,TRAINING,VALIDATING}``. Defaults to None.
 
         Raises:
@@ -329,8 +329,8 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         Args:
             trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The
                 :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
-            pl_module (:external+pl:class:`~pytorch_lightning.core.lightning.LightningModule`): The
-                :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` object
+            pl_module (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The
+                :external+pl:class:`~pytorch_lightning.core.module.LightningModule` object
 
         Raises:
             MisconfigurationException: If more than 1 optimizers are configured indicates a configuration error
@@ -424,8 +424,8 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         Args:
             trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The
                 :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
-            pl_module (:external+pl:class:`~pytorch_lightning.core.lightning.LightningModule`): The
-                :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` object
+            pl_module (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The
+                :external+pl:class:`~pytorch_lightning.core.module.LightningModule` object
         """
         # if resuming from a ckpt, we need to sync fts_state
         if self._fts_state._resume_fit_from_ckpt:
@@ -466,8 +466,8 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         Args:
             trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The
                 :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
-            pl_module  (:external+pl:class:`~pytorch_lightning.core.lightning.LightningModule`): The
-                :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` object
+            pl_module  (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The
+                :external+pl:class:`~pytorch_lightning.core.module.LightningModule` object
             optimizer (:class:`~torch.optim.Optimizer`): The :class:`~torch.optim.Optimizer` to which parameter groups
                 will be configured and added.
         """
@@ -479,7 +479,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
 
         Args:
             trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): _description_
-            pl_module (:external+pl:class:`~pytorch_lightning.core.lightning.LightningModule`): _description_
+            pl_module (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): _description_
         """
         assert self._fts_state._ft_sync_objects is not None
         self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
