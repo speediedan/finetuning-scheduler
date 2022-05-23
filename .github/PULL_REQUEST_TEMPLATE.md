@@ -32,7 +32,7 @@ Fixes #\<issue_number>
 ## PR review
 
 Anyone in the community is welcome to review the PR.
-Before you start reviewing make sure you have read [Review guidelines](https://github.com/speediedan/finetuning-scheduler/wiki/Review-guidelines). In short, see the following bullet-list:
+In short, see the following bullet-list:
 
 - [ ] Is this pull request ready for review? (if not, please submit in draft mode)
 - [ ] Check that all items from **Before submitting** are resolved
