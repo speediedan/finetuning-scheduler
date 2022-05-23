@@ -2,222 +2,438 @@
 LR Scheduler Reinitialization
 #############################
 
-**Audience**: Users looking to use pretrained models with Lightning.
+Overview
+********
+In some contexts it can be useful to re-wrap your optimizer with new LR scheduler configurations at the beginning of one
+or more scheduled training phases. Among others, example use cases include:
 
-----
+* implementing complex LR schedules along with multi-phase early-stopping
+* injecting new parameter group specific rates on a scheduled basis
+* programmatically exploring training behavioral dynamics with heterogenous schedulers and early-stopping
 
-Basic Usage
-***********
-If no finetuning schedule is user-provided, :class:`~finetuning_scheduler.fts.FinetuningScheduler` will generate a
-:ref:`default schedule<index:The Default Finetuning Schedule>` and proceed to finetune
-according to the generated schedule, using default
-:class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping`
-and :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks with
-``monitor=val_loss``.
-
-.. code-block:: python
-
-    from pytorch_lightning import Trainer
-    from finetuning_scheduler import FinetuningScheduler
-
-    trainer = Trainer(callbacks=[FinetuningScheduler()])
+The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback supports (versions >= ``0.1.4``) LR scheduler
+reinitialization in both explicit and implicit finetuning schedule modes (see the
+:ref:`Finetuning Scheduler intro<motivation>` for more on basic usage modes). As LR scheduler reinitialization is likely
+to be applied most frequently in the context of explicitly defined finetuning schedules, we'll cover configuration in
+that mode first.
 
 
-.. _explicit lr reinitialization schedule:
+.. _explicit-lr-reinitialization-schedule:
 
-The Default Finetuning Schedule
-*******************************
-Schedule definition is facilitated via
-:meth:`~finetuning_scheduler.fts_supporters.SchedulingMixin.gen_ft_schedule` which dumps
-a default finetuning schedule (by default using a naive, 2-parameters per level heuristic) which can be adjusted as
-desired by the user and/or subsequently passed to the callback. Using the default/implicitly generated schedule will
-often be less computationally efficient than a user-defined finetuning schedule but can often serve as a
-good baseline for subsequent explicit schedule refinement and will marginally outperform many explicit schedules.
+Specifying LR Scheduler Configurations For Specific Finetuning Phases
+*********************************************************************
 
+When defining a finetuning schedule (see :ref:`the intro<specifying schedule>` for basic schedule specification), a new
+lr scheduler configuration can be applied to the existing optimizer at the beginning of a given phase by specifying the
+desired configuration in the ``new_lr_scheduler`` key. The ``new_lr_scheduler`` dictionary format is described in the
+annotated yaml schedule below and can be explored using the
+:ref:`advanced usage example<advanced-finetuning-lr-example>`.
 
-.. _implicit lr reinitialization schedule:
+When specifying an LR scheduler configuration for a given phase, the ``new_lr_scheduler`` dictionary requires at minimum
+an ``lr_scheduler_init`` dictionary containing a ``class_path`` key indicating the class of the lr scheduler to be
+instantiated and wrapped around your optimizer. Currently, all :class:`~torch.optim.lr_scheduler._LRScheduler` s
+are supported with the exception of :external+torch:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
+:external+torch:class:`~torch.optim.lr_scheduler.SequentialLR` (due to the configuration complexity and semantic
+conflicts supporting them would introduce).
 
-Specifying a Finetuning Schedule
-********************************
+Any arguments you would like to pass to initialize the specified lr scheduler with should be specified in the
+``init_args`` key of the ``lr_scheduler_init`` dictionary.
 
-To specify a finetuning schedule, it's convenient to first generate the default schedule and then alter the
-thawed/unfrozen parameter groups associated with each finetuning phase as desired. Finetuning phases are zero-indexed
-and executed in ascending order.
+.. code-block:: yaml
+  :linenos:
+  :emphasize-lines: 11-16
 
-1. First, generate the default schedule to ``Trainer.log_dir``. It will be named after your
-   :external+pl:class:`~pytorch_lightning.core.module.LightningModule` subclass with the suffix
-   ``_ft_schedule.yaml``.
+    0:
+      params:
+      - model.classifier.bias
+      - model.classifier.weight
+    1:
+      params:
+      - model.pooler.dense.bias
+      - model.pooler.dense.weight
+      - model.deberta.encoder.LayerNorm.bias
+      - model.deberta.encoder.LayerNorm.weight
+      new_lr_scheduler:
+        lr_scheduler_init:
+          class_path: torch.optim.lr_scheduler.StepLR
+          init_args:
+            step_size: 1
+            gamma: 0.7
+    ...
 
-.. code-block:: python
+Optionally, one can include arguments to pass to PyTorch Lightning's lr scheduler configuration
+(:class:`~pytorch_lightning.utilities.types.LRSchedulerConfig`) in the ``pl_lrs_cfg`` dictionary.
 
-    from pytorch_lightning import Trainer
-    from finetuning_scheduler import FinetuningScheduler
+.. code-block:: yaml
+  :linenos:
+  :emphasize-lines: 13-16
 
-    trainer = Trainer(callbacks=[FinetuningScheduler(gen_ft_sched_only=True)])
+    0:
+      ...
+    1:
+      params:
+      - model.pooler.dense.bias
+      ...
+      new_lr_scheduler:
+        lr_scheduler_init:
+          class_path: torch.optim.lr_scheduler.StepLR
+          init_args:
+            step_size: 1
+            ...
+        pl_lrs_cfg:
+          interval: epoch
+          frequency: 1
+          name: Explicit_Reinit_LR_Scheduler
 
+If desired, one can also specify new initial learning rates to use for each of the existing parameter groups in the
+optimizer being wrapped via a list in the ``init_pg_lrs`` key.
 
-2. Alter the schedule as desired.
+.. code-block:: yaml
+  :linenos:
+  :emphasize-lines: 8
 
-.. container:: sbs-code
+    ...
+    1:
+      params:
+      ...
+      new_lr_scheduler:
+        lr_scheduler_init:
+          ...
+        init_pg_lrs: [2.0e-06, 2.0e-06]
 
-    .. rst-class:: sbs-hdr1
+All lr scheduler reinitialization configurations specified in the finetuning schedule will have their configurations
+sanity-checked prior to training initiation.
 
-        Changing the generated schedule for this boring model...
+.. note::
 
-    .. rst-class:: sbs-blk1
+    It is currently is up to the user to ensure the number of parameter groups listed in ``init_pg_lrs`` matches the
+    number of optimizer parameter groups created in previous phases. This number of groups is dependent on a number of
+    factors including the ``nodecay`` mapping of parameters specified in previous phases and isn't yet
+    introspected/simulated in the current :class:`~finetuning_scheduler.fts.FinetuningScheduler` version.
 
-    .. code-block:: yaml
-      :linenos:
-
-        0:
-            params:
-            - layer.3.bias
-            - layer.3.weight
-        1:
-            params:
-            - layer.2.bias
-            - layer.2.weight
-        2:
-            params:
-            - layer.1.bias
-            - layer.1.weight
-        3:
-            params:
-            - layer.0.bias
-            - layer.0.weight
-
-    .. rst-class:: sbs-hdr2
-
-        ... to have three finetuning phases instead of four:
-
-    .. rst-class:: sbs-blk2
-
-    .. code-block:: yaml
-      :linenos:
-
-        0:
-            params:
-            - layer.3.bias
-            - layer.3.weight
-        1:
-            params:
-            - layer.2.*
-            - layer.1.bias
-            - layer.1.weight
-        2:
-            params:
-            - layer.0.*
-
-3. Once the finetuning schedule has been altered as desired, pass it to
-   :class:`~finetuning_scheduler.fts.FinetuningScheduler` to commence scheduled training:
-
-.. code-block:: python
-
-    from pytorch_lightning import Trainer
-    from finetuning_scheduler import FinetuningScheduler
-
-    trainer = Trainer(callbacks=[FinetuningScheduler(ft_schedule="/path/to/my/schedule/my_schedule.yaml")])
-
-EarlyStopping and Epoch-Driven Phase Transition Criteria
-********************************************************
-
-By default, :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` and epoch-driven
-transition criteria are composed. If a ``max_transition_epoch`` is specified for a given phase, the next finetuning
-phase will begin at that epoch unless
-:class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria are met first.
-If :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is
-``True``, :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` will not be used
-and transitions will be exclusively epoch-driven.
+Note that specifying LR scheduler reinitialization configurations is only supported for phases >= ``1``. This is because
+for finetuning phase ``0``, the LR scheduler configuration will be the scheduler that you initiate your training session
+with, usually via the ``configure_optimizer`` method of :external+pl:class:`~pytorch_lightning.core.module.LightningModule`.
 
 .. tip::
 
-    Use of regex expressions can be convenient for specifying more complex schedules. Also, a per-phase
-    :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.base_max_lr` can be specified:
+    If you want your learning rates logged on the same graph for each of the scheduler configurations defined in various
+    phases, ensure that you provide the same name in the
+    `lr_scheduler configuration <https://pytorch-lightning.readthedocs.io/en/latest/common/lightning_module.html>`_
+    for each of the defined lr schedulers. For instance, in the
+    :ref:`lr reinitialization example<advanced-finetuning-lr-example>`, we provide:
 
     .. code-block:: yaml
       :linenos:
-      :emphasize-lines: 2, 7, 13, 15
+      :emphasize-lines: 9-13
 
-       0:
-         params: # the parameters for each phase definition can be fully specified
-         - model.classifier.bias
-         - model.classifier.weight
-         max_transition_epoch: 3
-       1:
-         params: # or specified via a regex
-         - model.albert.pooler.*
-       2:
-         params:
-         - model.albert.encoder.*.ffn_output.*
-         max_transition_epoch: 9
-         lr: 1e-06 # per-phase maximum learning rates can be specified
-       3:
-         params: # both approaches to parameter specification can be used in the same phase
-         - model.albert.encoder.*.(ffn\.|attention|full*).*
-         - model.albert.encoder.embedding_hidden_mapping_in.bias
-         - model.albert.encoder.embedding_hidden_mapping_in.weight
-         - model.albert.embeddings.*
+        model:
+          class_path: fts_examples.fts_superglue.RteBoolqModule
+          init_args:
+            lr_scheduler_init:
+              class_path: torch.optim.lr_scheduler.LinearLR
+              init_args:
+                start_factor: 0.1
+                total_iters: 4
+            pl_lrs_cfg:
+              # use the same name for your initial lr scheduler
+              # configuration and your ``new_lr_scheduler`` configs
+              # if you want LearningRateMonitor to generate a single graph
+              name: Explicit_Reinit_LR_Scheduler
 
-For a practical end-to-end example of using
-:class:`~finetuning_scheduler.fts.FinetuningScheduler` in implicit versus explicit modes,
-see :ref:`scheduled finetuning for SuperGLUE<scheduled-finetuning-superglue>` below or the
-notebook-based tutorial (link will be added as soon as it is released on the PyTorch Lightning production documentation
-site).
+As you can observe in the explicit mode :ref:`lr scheduler reinitialization example<advanced-finetuning-lr-example>`
+below, lr schedulers specified in different finetuning phases can be of differing types.
 
-Example: Scheduled Finetuning For SuperGLUE
-*******************************************
-A demonstration of the scheduled finetuning callback
-:class:`~finetuning_scheduler.fts.FinetuningScheduler` using the
-`RTE <https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte>`_ and
-`BoolQ <https://github.com/google-research-datasets/boolean-questions>`_ tasks of the
-`SuperGLUE <https://super.gluebenchmark.com/>`_ benchmark and the :doc:`LightningCLI<cli/lightning_cli>`
-is available under ``./fts_examples/``.
+.. code-block:: yaml
+  :linenos:
+  :emphasize-lines: 13-16, 30-34
 
-Since this CLI-based example requires a few additional packages (e.g. ``transformers``, ``sentencepiece``), you
-should install them using the ``[examples]`` extra:
+    0:
+      params:
+      - model.classifier.bias
+      - model.classifier.weight
+    1:
+      params:
+      - model.pooler.dense.bias
+      - model.pooler.dense.weight
+      - model.deberta.encoder.LayerNorm.bias
+      - model.deberta.encoder.LayerNorm.weight
+      new_lr_scheduler:
+        lr_scheduler_init:
+          class_path: torch.optim.lr_scheduler.StepLR
+          init_args:
+            step_size: 1
+            gamma: 0.7
+        pl_lrs_cfg:
+          interval: epoch
+          frequency: 1
+          name: Explicit_Reinit_LR_Scheduler
+        init_pg_lrs: [2.0e-06, 2.0e-06]
+    2:
+      params:
+      - model.deberta.encoder.rel_embeddings.weight
+      - model.deberta.encoder.layer.{0,11}.(output|attention|intermediate).*
+      - model.deberta.embeddings.LayerNorm.bias
+      - model.deberta.embeddings.LayerNorm.weight
+      new_lr_scheduler:
+        lr_scheduler_init:
+          class_path: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+          init_args:
+            T_0: 3
+            T_mult: 2
+            eta_min: 1.0e-07
+        pl_lrs_cfg:
+          interval: epoch
+          frequency: 1
+          name: Explicit_Reinit_LR_Scheduler
+        init_pg_lrs: [1.0e-06, 1.0e-06, 2.0e-06, 2.0e-06]
+
+Once a new lr scheduler is re-initialized, it will continue to be used for subsequent phases unless replaced with
+another lr scheduler configuration defined in a subsequent schedule phase.
+
+.. _implicit lr reinitialization schedule:
+
+LR Scheduler Reinitialization With Generated (Implicit Mode) Finetuning Schedules
+*********************************************************************************
+One can also specify LR scheduler reinitialization in the context of implicit mode finetuning schedules. Since the
+finetuning schedule is automatically generated, the same LR scheduler configuration will be applied at each of the
+phase transitions. In implicit mode, the lr scheduler reconfiguration should be supplied to the
+:paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_lr_cfg` parameter of
+:class:`~finetuning_scheduler.fts.FinetuningScheduler`.
+
+For example, configuring this dictionary via the :external+pl:class:`~pytorch_lightning.utilities.cli.LightningCLI`, one
+could use:
+
+.. code-block:: yaml
+  :linenos:
+  :emphasize-lines: 14-23
+
+    model:
+      class_path: fts_examples.fts_superglue.RteBoolqModule
+      init_args:
+        lr_scheduler_init:
+          class_path: torch.optim.lr_scheduler.StepLR
+          init_args:
+            step_size: 1
+        pl_lrs_cfg:
+          name: Implicit_Reinit_LR_Scheduler
+    trainer:
+      callbacks:
+        - class_path: finetuning_scheduler.FinetuningScheduler
+          init_args:
+            reinit_lr_cfg:
+              lr_scheduler_init:
+                class_path: torch.optim.lr_scheduler.StepLR
+                init_args:
+                  step_size: 1
+                  gamma: 0.7
+              pl_lrs_cfg:
+                interval: epoch
+                frequency: 1
+                name: Implicit_Reinit_LR_Scheduler
+
+Note that an initial lr scheduler configuration should also still be provided per usual (again, typically via the
+``configure_optimizer`` method of :external+pl:class:`~pytorch_lightning.core.module.LightningModule`) and the initial
+lr scheduler configuration can differ in lr scheduler type and configuration from the configuration specified in
+:paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_lr_cfg` applied at each phase transition. Because the
+same schedule is applied at each phase transition, the ``init_pg_lrs`` list is not supported in an implicit finetuning
+context.
+
+Application of LR scheduler reinitialization in both explicit and implicit modes may be best understood via examples, so
+we'll proceed to those next.
+
+.. _advanced-finetuning-lr-example:
+
+Advanced Usage Examples: Explicit and Implicit Mode LR Scheduler Reinitialization
+*********************************************************************************
+Demonstration LR scheduler reinitialization configurations for both explicit and implicit finetuning scheduling contexts
+are available under ``./fts_examples/config/advanced/``.
+
+The LR scheduler reinitialization examples use the same code and have the same dependencies as the basic
+:ref:`scheduled finetuning for SuperGLUE<scheduled-finetuning-superglue>` example.
+
+The two different demo schedule configurations are composed with shared defaults (``./config/fts_defaults.yaml``).
 
 .. code-block:: bash
 
-   pip install finetuning-scheduler['examples']
+    cd ./finetuning_scheduler/fts_examples/
+    # Demo LR scheduler reinitialization with an explicitly defined finetuning schedule:
+    python fts_superglue.py fit --config config/advanced/fts_explicit_reinit_lr.yaml
 
-There are three different demo schedule configurations composed with shared defaults (./config/fts_defaults.yaml)
-provided for the default 'rte' task. Note DDP (with auto-selected GPUs) is the default configuration so ensure you
-adjust the configuration files referenced below as desired for other configurations.
-
-.. code-block:: bash
-
-    # Generate a baseline without scheduled finetuning enabled:
-    python fts_superglue.py fit --config config/nofts_baseline.yaml
-
-    # Train with the default finetuning schedule:
-    python fts_superglue.py fit --config config/fts_implicit.yaml
-
-    # Train with a non-default finetuning schedule:
-    python fts_superglue.py fit --config config/fts_explicit.yaml
+    # Demo LR scheduler reinitialization with an implicitly defined finetuning schedule:
+    python fts_superglue.py fit --config config/advanced/fts_implicit_reinit_lr.yaml
 
 
-:class:`~finetuning_scheduler.fts.FinetuningScheduler` expands the space of possible
-finetuning schedules and the composition of more sophisticated schedules can yield marginal finetuning performance
-gains. That stated, it should be emphasized the primary utility of
-:class:`~finetuning_scheduler.fts.FinetuningScheduler` is to grant greater finetuning
-flexibility for model exploration in research. For example, glancing at DeBERTa-v3's implicit training run, a critical
-tuning transition point is immediately apparent:
+Notice in the explicitly defined schedule scenario, we are using three distinct lr schedulers for three different
+training phases:
+
+.. figure:: ../_static/images/fts/explicit_lr_scheduler_reinit_pg1_phase0.png
+   :alt: Phase 0
+   :width: 75%
+
+   LR log for parameter group 1 (:external+torch:class:`~torch.optim.lr_scheduler.LinearLR` initial target lr
+   = ``1.0e-05``)
+
+Phase ``0`` in :yellow-highlight:`yellow` (passed to our
+:external+pl:class:`~pytorch_lightning.core.module.LightningModule` via the ``model``
+definition in our :external+pl:class:`~pytorch_lightning.utilities.cli.LightningCLI` configuration) uses a
+:external+torch:class:`~torch.optim.lr_scheduler.LinearLR` scheduler (defined in
+``./config/advanced/fts_explicit_reinit_lr.yaml``) with the initial lr defined via the shared initial optimizer
+configuration (defined in ``./config/fts_defaults.yaml``).
+
+This is the effective phase ``0`` config (defined in ``./config/advanced/fts_explicit_reinit_lr.yaml``, applying
+defaults defined in ``./config/fts_defaults.yaml``):
+
+.. code-block:: yaml
+  :linenos:
+
+    model:
+      class_path: fts_examples.fts_superglue.RteBoolqModule
+      init_args:
+        optimizer_init:
+          class_path: torch.optim.AdamW
+          init_args:
+            weight_decay: 1.0e-05
+            eps: 1.0e-07
+            lr: 1.0e-05
+        ...
+        lr_scheduler_init:
+          class_path: torch.optim.lr_scheduler.LinearLR
+          init_args:
+            start_factor: 0.1
+            total_iters: 4
+        pl_lrs_cfg:
+          interval: epoch
+          frequency: 1
+          name: Explicit_Reinit_LR_Scheduler
 
 
-Our val_loss begins a precipitous decline at step 3119 which corresponds to phase 17 in the schedule. Referring to our
-schedule, in phase 17 we're beginning tuning the attention parameters of our 10th encoder layer (of 11). Interesting!
-Though beyond the scope of this documentation, it might be worth investigating these dynamics further and
-:class:`~finetuning_scheduler.fts.FinetuningScheduler` allows one to do just that quite
-easily.
+Phase ``1`` in :blue-highlight:`blue` uses a :external+torch:class:`~torch.optim.lr_scheduler.StepLR` scheduler, including the specified
+initial lr for the existing parameter groups (``2.0e-06``).
+
+.. list-table:: LR log for parameter groups 1 and 3 respectively
+   :widths: 50 50
+   :header-rows: 1
+
+   * - pg1 starts at ``2.0e-06``
+     - pg3 starts at the default of ``1.0e-05``
+   *  -
+       .. figure:: ../_static/images/fts/explicit_lr_scheduler_reinit_pg1_phase1.png
+          :alt: Explicit pg1
+      -
+       .. figure:: ../_static/images/fts/explicit_lr_scheduler_reinit_pg3_phase1.png
+          :alt: Explicit pg3
 
 
-Note that though this example is intended to capture a common usage scenario, substantial variation is expected among
-use cases and models. In summary, :class:`~finetuning_scheduler.fts.FinetuningScheduler`
-provides increased finetuning flexibility that can be useful in a variety of contexts from exploring model tuning
-behavior to maximizing performance.
+This is the phase ``1`` config (defined in our explicit schedule ``./config/advanced/explicit_reinit_lr.yaml``):
 
-.. figure:: ../_static/images/fts/fts_explicit_loss_anim.gif
-   :alt: FinetuningScheduler Explicit Loss Animation
-   :width: 300
+.. code-block:: yaml
+  :linenos:
 
-.. note:: The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is currently in beta.
+    ...
+    1:
+      params:
+      - model.pooler.dense.bias
+      - model.pooler.dense.weight
+      - model.deberta.encoder.LayerNorm.bias
+      - model.deberta.encoder.LayerNorm.weight
+      new_lr_scheduler:
+        lr_scheduler_init:
+          class_path: torch.optim.lr_scheduler.StepLR
+          init_args:
+            step_size: 1
+            gamma: 0.7
+        pl_lrs_cfg:
+          interval: epoch
+          frequency: 1
+          name: Explicit_Reinit_LR_Scheduler
+        init_pg_lrs: [2.0e-06, 2.0e-06]
+
+
+Phase ``2`` in :green-highlight:`green` uses a :external+torch:class:`~torch.optim.lr_scheduler.CosineAnnealingWarmRestarts` scheduler, with
+the assigned initial lr for each of the parameter groups (``1.0e-06`` for pg1 and ``2.0e-06`` for pg3).
+
+.. list-table:: LR log for parameter groups 1 and 3 respectively
+   :widths: 50 50
+   :header-rows: 1
+
+   * - pg1 oscillates between ``1.0e-06`` and ``1.0e-07``
+     - pg3 oscillates between ``2.0e-06`` and ``1.0e-07``
+   *  -
+       .. figure:: ../_static/images/fts/explicit_lr_scheduler_reinit_pg1_phase2.png
+          :alt: Explicit pg1
+      -
+       .. figure:: ../_static/images/fts/explicit_lr_scheduler_reinit_pg3_phase2.png
+          :alt: Explicit pg3
+
+
+This is the phase ``2`` config (like all non-zero phases, defined in our explicit schedule
+``./config/advanced/explicit_reinit_lr.yaml``):
+
+.. code-block:: yaml
+  :linenos:
+
+    ...
+    2:
+      params:
+      - model.deberta.encoder.rel_embeddings.weight
+      - model.deberta.encoder.layer.{0,11}.(output|attention|intermediate).*
+      - model.deberta.embeddings.LayerNorm.bias
+      - model.deberta.embeddings.LayerNorm.weight
+      new_lr_scheduler:
+        lr_scheduler_init:
+          class_path: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+          init_args:
+            T_0: 3
+            T_mult: 2
+            eta_min: 1.0e-07
+        pl_lrs_cfg:
+          interval: epoch
+          frequency: 1
+          name: Explicit_Reinit_LR_Scheduler
+        init_pg_lrs: [1.0e-06, 1.0e-06, 2.0e-06, 2.0e-06]
+
+
+In the implicitly defined schedule scenario, the :external+torch:class:`~torch.optim.lr_scheduler.StepLR` lr scheduler
+specified via :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_lr_cfg` (which happens to be the same as
+the initially defined lr scheduler in this case) is reinitialized at each phase transition and applied to all optimizer
+parameter groups.
+
+.. code-block:: yaml
+  :linenos:
+
+    ...
+    - class_path: finetuning_scheduler.FinetuningScheduler
+      init_args:
+        # note, we're not going to see great performance due
+        # to the shallow depth, just demonstrating the lr scheduler
+        # reinitialization behavior in implicit mode
+        max_depth: 4
+        # disable restore_best for lr pattern clarity
+        restore_best: false
+        reinit_lr_cfg:
+          lr_scheduler_init:
+            class_path: torch.optim.lr_scheduler.StepLR
+            init_args:
+              step_size: 1
+              gamma: 0.7
+          pl_lrs_cfg:
+            interval: epoch
+            frequency: 1
+            name: Implicit_Reinit_LR_Scheduler
+
+.. list-table:: LR log for parameter groups 1 and 3 respectively
+   :widths: 50 50
+   :header-rows: 0
+
+   *  -
+       .. figure:: ../_static/images/fts/implicit_lr_scheduler_reinit_pg1.png
+          :alt: Explicit pg1
+      -
+       .. figure:: ../_static/images/fts/implicit_lr_scheduler_reinit_pg3.png
+          :alt: Explicit pg3
+
+Note that we have disabled :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.restore_best` in both examples for
+clarity of lr patterns.
+
+.. note:: LR reinitialization with :class:`~finetuning_scheduler.fts.FinetuningScheduler` is currently in beta.

@@ -88,10 +88,12 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
             ft_schedule: The finetuning schedule to be executed. Usually will be a .yaml file path but can also be a
                 properly structured Dict. See
                 :ref:`Specifying a Finetuning Schedule<index:Specifying a Finetuning Schedule>`
-                for the schedule format. If a schedule is not provided, will generate and execute a default finetuning
-                schedule using the provided :external+pl:class:`~pytorch_lightning.core.module.LightningModule`.
-                See :ref:`the default schedule<index:The Default Finetuning Schedule>`. Defaults
-                to ``None``.
+                for the basic schedule format. See
+                :ref:`LR Scheduler Reinitialization<explicit-lr-reinitialization-schedule>` for more complex
+                schedule configurations (including per-phase LR scheduler reinitialization). If a schedule is not
+                provided, will generate and execute a default finetuning schedule using the provided
+                :external+pl:class:`~pytorch_lightning.core.module.LightningModule`. See
+                :ref:`the default schedule<index:The Default Finetuning Schedule>`. Defaults to ``None``.
             max_depth: Maximum schedule depth to which the defined finetuning schedule should be executed. Specifying -1
                 or an integer > (number of defined schedule layers) will result in the entire finetuning schedule being
                 executed. Defaults to -1.
@@ -106,13 +108,34 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                 named after your :external+pl:class:`~pytorch_lightning.core.module.LightningModule` subclass with
                 the suffix ``_ft_schedule.yaml``) and exit without training. Typically used to generate a default
                 schedule that will be adjusted by the user before training. Defaults to ``False``.
-            epoch_transitions_only: If ``True``, Use epoch-driven stopping criteria exclusively (rather than composing
+            epoch_transitions_only: If ``True``, use epoch-driven stopping criteria exclusively (rather than composing
                 :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` and
                 epoch-driven criteria which is the default). If using this mode, an epoch-driven transition
                 (``max_transition_epoch`` >= 0) must be specified for each phase. If unspecified,
                 ``max_transition_epoch`` defaults to -1 for each phase which signals the application of
-                :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria only
-                . epoch_transitions_only defaults to ``False``.
+                :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria only.
+                epoch_transitions_only defaults to ``False``.
+            reinit_lr_cfg: A lr scheduler reinitialization configuration dictionary consisting of at minimum a nested
+                ``lr_scheduler_init`` dictionary with a ``class_path`` key specifying the class of the
+                :class:`~torch.optim.lr_scheduler._LRScheduler` to be instantiated. Optionally, an ``init_args``
+                dictionary of arguments to initialize the lr scheduler with may be included. Additionally, one may
+                optionally include arguments to pass to PyTorch Lightning's lr scheduler configuration
+                :class:`~pytorch_lightning.utilities.types.LRSchedulerConfig` in the ``pl_lrs_cfg`` dictionary. By way
+                of example, one could configure this dictionary via the
+                :external+pl:class:`~pytorch_lightning.utilities.cli.LightningCLI` with the following:
+
+                .. code-block:: yaml
+
+                    reinit_lr_cfg:
+                        lr_scheduler_init:
+                            class_path: torch.optim.lr_scheduler.StepLR
+                            init_args:
+                                step_size: 1
+                                gamma: 0.7
+                            pl_lrs_cfg:
+                                interval: epoch
+                                frequency: 1
+                                name: Implicit_Reinit_LR_Scheduler
 
         Attributes:
             _fts_state: The internal finetuning scheduler state.
