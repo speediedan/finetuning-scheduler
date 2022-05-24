@@ -167,8 +167,8 @@ class RteBoolqDataModule(pl.LightningDataModule):
 
 
 class RteBoolqModule(pl.LightningModule):
-    """A :class:`~pytorch_lightning.core.module.LightningModule` that can be used to finetune a foundational model
-    on either the RTE or BoolQ `SuperGLUE <https://super.gluebenchmark.com/>`_ tasks using Hugging Face
+    """A :class:`~pytorch_lightning.core.lightning.LightningModule` that can be used to finetune a foundational
+    model on either the RTE or BoolQ `SuperGLUE <https://super.gluebenchmark.com/>`_ tasks using Hugging Face
     implementations of a given model and the `SuperGLUE Hugging Face dataset.
 
     <https://huggingface.co/datasets/super_glue#data-instances>`_.
@@ -185,10 +185,10 @@ class RteBoolqModule(pl.LightningModule):
         experiment_tag: str = "default",
         log_env_details: bool = True,
     ):
-        """In this example, this :class:`~pytorch_lightning.core.module.LightningModule` is initialized by composing
+        """In this example, this :class:`~pytorch_lightning.core.lightning.LightningModule` is initialized by composing
         the ./config/fts_defaults.yaml default configuration with various scheduled finetuning yaml configurations
         via the :class:`~pytorch_lightning.utilities.cli.LightningCLI` but it can be used like any other
-        :class:`~pytorch_lightning.core.module.LightningModule` as well.
+        :class:`~pytorch_lightning.core.lightning.LightningModule` as well.
 
         Args:
             model_name_or_path (str): Path to pretrained model or identifier `from <https://huggingface.co/models>`_
@@ -317,7 +317,7 @@ class RteBoolqModule(pl.LightningModule):
 
 class CustLightningCLI(LightningCLI):
     """Customize the :class:`~pytorch_lightning.utilities.cli.LightningCLI` to ensure the
-    :class:`~pytorch_lighting.core.LightningDataModule` and :class:`~pytorch_lightning.core.module.LightningModule`
+    :class:`~pytorch_lighting.core.LightningDataModule` and :class:`~pytorch_lightning.core.lightning.LightningModule`
     use the same Hugging Face model, SuperGLUE task and custom logging tag."""
 
     def before_instantiate_classes(self) -> None:

@@ -8,18 +8,18 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
-- Added LR scheduler reinitialization functionality ([#2](https://github.com/speediedan/finetuning-scheduler/pull/2))
-- Added advanced usage documentation
-- Added advanced scheduling examples
-- added notebook-based tutorial link
+- LR scheduler reinitialization functionality ([#2](https://github.com/speediedan/finetuning-scheduler/pull/2))
+- advanced usage documentation
+- advanced scheduling examples
+- notebook-based tutorial link
 - enhanced cli-based example hparam logging among other code clarifications
-
-### Changed
 
 ### Fixed
 
 - addressed URI length limit for custom badge
 - allow new deberta fast tokenizer conversion warning for transformers >= 4.19
+### Changed
+
 ### Deprecated
 
 ## [0.1.3] - 2022-05-04
