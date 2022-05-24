@@ -136,6 +136,10 @@ exclude_patterns = [
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = None
 
+rst_prolog = """
+.. include:: /_static/fts_cust_roles.rst
+"""
+
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
@@ -263,6 +267,7 @@ def setup(app):
     # see: http://z4r.github.io/python/2011/12/02/hides-the-prompts-and-output/
     app.add_js_file("copybutton.js")
     app.add_css_file("main.css")
+    app.add_css_file("fts_cust_roles.css")
 
 
 # Ignoring Third-party packages

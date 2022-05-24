@@ -1,0 +1,37 @@
+model:
+  class_path: fts_examples.fts_superglue.RteBoolqModule
+  init_args:
+    lr_scheduler_init:
+      class_path: torch.optim.lr_scheduler.LinearLR
+      init_args:
+        start_factor: 0.1
+        total_iters: 4
+    pl_lrs_cfg:
+      interval: epoch
+      frequency: 1
+      name: Explicit_Reinit_LR_Scheduler
+trainer:
+  callbacks:
+  - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+  - class_path: finetuning_scheduler.FinetuningScheduler
+    init_args:
+      ft_schedule: ./fts_examples/config/advanced/explicit_reinit_lr.yaml
+      max_depth: 2
+      restore_best: false  # disable restore_best for lr pattern clarity
+  - class_path: finetuning_scheduler.FTSCheckpoint
+    init_args:
+      save_top_k: 1
+      monitor: val_loss
+      verbose: true
+  - class_path: finetuning_scheduler.FTSEarlyStopping
+    init_args:
+      monitor: val_loss
+      min_delta: 0.001
+      patience: 5 # lots of patience to demo learning rate patterns
+      verbose: false
+      mode: min
+  logger:
+    class_path: pytorch_lightning.loggers.TensorBoardLogger
+    init_args:
+      save_dir: lightning_logs
+      name: fts_explicit_reinit_lr

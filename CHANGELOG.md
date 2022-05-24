@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - added notebook-based tutorial link
 - enhanced cli-based example hparam logging among other code clarifications
+- Added LR scheduler reinitialization functionality ([#2](https://github.com/speediedan/finetuning-scheduler/pull/2))
 
 ### Changed
 

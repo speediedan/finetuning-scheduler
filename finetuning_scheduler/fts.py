@@ -28,12 +28,18 @@ from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
 from torch.optim.optimizer import Optimizer
 
-from finetuning_scheduler.fts_supporters import CallbackDepMixin, FTSEarlyStopping, FTSState, SchedulingMixin
+from finetuning_scheduler.fts_supporters import (
+    CallbackDepMixin,
+    FTSEarlyStopping,
+    FTSState,
+    ScheduleImplMixin,
+    ScheduleParsingMixin,
+)
 
 log = logging.getLogger(__name__)
 
 
-class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
+class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMixin):
     r"""
     This callback enables flexible, multi-phase, scheduled finetuning of foundational models. Gradual unfreezing/thawing
     can help maximize foundational model knowledge retention while allowing (typically upper layers of) the model to
@@ -51,7 +57,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
     :ref:`Early Stopping<common/early_stopping:Early stopping>` for more details on that callback's configuration.
 
     Schedule definition is facilitated via
-    :meth:`~finetuning_scheduler.fts_supporters.SchedulingMixin.gen_ft_schedule` which dumps
+    :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.gen_ft_schedule` which dumps
     a default finetuning schedule (by default using a naive, 2-parameters per level heuristic) which can be adjusted as
     desired by the user and subsuquently passed to the callback. Implicit finetuning mode generates the default schedule
     and proceeds to finetune according to the generated schedule. Implicit finetuning will often be less computationally
@@ -73,6 +79,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         restore_best: bool = True,
         gen_ft_sched_only: bool = False,
         epoch_transitions_only: bool = False,
+        reinit_lr_cfg: Optional[Dict] = None,
     ):
         r"""
         Define and configure a scheduled finetuning training session.
@@ -81,10 +88,12 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
             ft_schedule: The finetuning schedule to be executed. Usually will be a .yaml file path but can also be a
                 properly structured Dict. See
                 :ref:`Specifying a Finetuning Schedule<index:Specifying a Finetuning Schedule>`
-                for the schedule format. If a schedule is not provided, will generate and execute a default finetuning
-                schedule using the provided :external+pl:class:`~pytorch_lightning.core.module.LightningModule`.
-                See :ref:`the default schedule<index:The Default Finetuning Schedule>`. Defaults
-                to ``None``.
+                for the basic schedule format. See
+                :ref:`LR Scheduler Reinitialization<explicit-lr-reinitialization-schedule>` for more complex
+                schedule configurations (including per-phase LR scheduler reinitialization). If a schedule is not
+                provided, will generate and execute a default finetuning schedule using the provided
+                :external+pl:class:`~pytorch_lightning.core.module.LightningModule`. See
+                :ref:`the default schedule<index:The Default Finetuning Schedule>`. Defaults to ``None``.
             max_depth: Maximum schedule depth to which the defined finetuning schedule should be executed. Specifying -1
                 or an integer > (number of defined schedule layers) will result in the entire finetuning schedule being
                 executed. Defaults to -1.
@@ -99,13 +108,34 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
                 named after your :external+pl:class:`~pytorch_lightning.core.module.LightningModule` subclass with
                 the suffix ``_ft_schedule.yaml``) and exit without training. Typically used to generate a default
                 schedule that will be adjusted by the user before training. Defaults to ``False``.
-            epoch_transitions_only: If ``True``, Use epoch-driven stopping criteria exclusively (rather than composing
+            epoch_transitions_only: If ``True``, use epoch-driven stopping criteria exclusively (rather than composing
                 :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` and
                 epoch-driven criteria which is the default). If using this mode, an epoch-driven transition
                 (``max_transition_epoch`` >= 0) must be specified for each phase. If unspecified,
                 ``max_transition_epoch`` defaults to -1 for each phase which signals the application of
-                :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria only
-                . epoch_transitions_only defaults to ``False``.
+                :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria only.
+                epoch_transitions_only defaults to ``False``.
+            reinit_lr_cfg: A lr scheduler reinitialization configuration dictionary consisting of at minimum a nested
+                ``lr_scheduler_init`` dictionary with a ``class_path`` key specifying the class of the
+                :class:`~torch.optim.lr_scheduler._LRScheduler` to be instantiated. Optionally, an ``init_args``
+                dictionary of arguments to initialize the lr scheduler with may be included. Additionally, one may
+                optionally include arguments to pass to PyTorch Lightning's lr scheduler configuration
+                :class:`~pytorch_lightning.utilities.types.LRSchedulerConfig` in the ``pl_lrs_cfg`` dictionary. By way
+                of example, one could configure this dictionary via the
+                :external+pl:class:`~pytorch_lightning.utilities.cli.LightningCLI` with the following:
+
+                .. code-block:: yaml
+
+                    reinit_lr_cfg:
+                        lr_scheduler_init:
+                            class_path: torch.optim.lr_scheduler.StepLR
+                            init_args:
+                                step_size: 1
+                                gamma: 0.7
+                            pl_lrs_cfg:
+                                interval: epoch
+                                frequency: 1
+                                name: Implicit_Reinit_LR_Scheduler
 
         Attributes:
             _fts_state: The internal finetuning scheduler state.
@@ -118,6 +148,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         self.base_max_lr = base_max_lr
         self.gen_ft_sched_only = gen_ft_sched_only
         self.epoch_transitions_only = epoch_transitions_only
+        self.reinit_lr_cfg = reinit_lr_cfg
         self.pl_module: pl.LightningModule
 
     @property
@@ -205,6 +236,7 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
         next_tl: Dict = {}
         assert isinstance(self.ft_schedule, dict)
         assert isinstance(self.pl_module, pl.LightningModule)
+        assert isinstance(self.pl_module.trainer, pl.Trainer)
         if depth_sync:
             thaw_layers = {d: l for d, l in self.ft_schedule.items() if d > self._fts_state._best_ckpt_depth}.items()
         else:
@@ -214,6 +246,11 @@ class FinetuningScheduler(BaseFinetuning, SchedulingMixin, CallbackDepMixin):
                 _, self._fts_state._curr_thawed_params = FinetuningScheduler.exec_ft_phase(
                     self.pl_module, thaw_pl=next_tl["params"]
                 )
+                new_scheduler_cfg = self.reinit_lr_cfg or next_tl.get("new_lr_scheduler", None)
+                if new_scheduler_cfg:
+                    self.reinit_lr_scheduler(
+                        new_lr_scheduler=new_scheduler_cfg, trainer=self.pl_module.trainer, optimizer=optimizer
+                    )
                 FinetuningScheduler.add_optimizer_groups(
                     module=self.pl_module,
                     optimizer=optimizer,
