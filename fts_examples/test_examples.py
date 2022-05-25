@@ -11,6 +11,7 @@
 # limitations under the License.
 import os.path
 import re
+import subprocess
 
 import pytest
 from packaging.version import Version
@@ -97,3 +98,22 @@ def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_fi
     # ensure no unexpected warnings detected
     matched = [any([re.compile(w).search(w_msg.message.args[0]) for w in ADV_EXPECTED_WARNS]) for w_msg in recwarn.list]
     assert all(matched)
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+@RunIf(min_gpus=1, skip_windows=True)
+@pytest.mark.parametrize("nb_name", ["fts_superglue_nb"], ids=["fts_superglue_nb"])
+def test_fts_superglue_nb(nb_name):
+    # simple sanity check that the notebook-based version of the example builds and executes successfully
+    test_example_base = os.path.join(os.path.dirname(__file__), "ipynb_src")
+    example_script = os.path.join(test_example_base, f"{nb_name}.py")
+    command = ["python", "-m", "jupytext", "--set-formats", "ipynb,py:percent", example_script]
+    exitcode = subprocess.call(command)
+    assert exitcode == 0
+    example_ipynb = os.path.join(test_example_base, f"{nb_name}.ipynb")
+    assert os.path.exists(example_ipynb)
+    command = ["python", "-m", "pytest", "--nbval", "-v", example_ipynb]
+    exitcode = subprocess.call(command)
+    assert exitcode == 0
+    os.remove(example_ipynb)
+    assert not os.path.exists(example_ipynb)
