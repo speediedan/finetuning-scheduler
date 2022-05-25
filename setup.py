@@ -40,8 +40,9 @@ extras = {
     "examples": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="examples.txt"),
     "extra": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="extra.txt"),
     "test": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="test.txt"),
+    "ipynb": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="ipynb.txt"),
 }
-extras["dev"] = extras["extra"] + extras["test"]
+extras["dev"] = extras["extra"] + extras["test"] + extras["ipynb"]
 extras["all"] = extras["dev"] + extras["examples"]
 
 # These packages shall be installed only on GPU machines

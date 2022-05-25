@@ -6,6 +6,8 @@ app/models/
 pip-wheel-metadata/
 lightning_logs/
 .vscode/
+# ignore ipynb files themselves since we want to only store the source *.py
+*.ipynb
 
 # Test-tube
 test_tube_*/
