@@ -115,5 +115,7 @@ def test_fts_superglue_nb(nb_name):
     command = ["python", "-m", "pytest", "--nbval", "-v", example_ipynb]
     exitcode = subprocess.call(command)
     assert exitcode == 0
-    os.remove(example_ipynb)
-    assert not os.path.exists(example_ipynb)
+    generated_schedule = os.path.join(test_example_base, "RteBoolqModule_ft_schedule_deberta_base.yaml")
+    for f in [example_ipynb, generated_schedule]:
+        os.remove(f)
+        assert not os.path.exists(f)
