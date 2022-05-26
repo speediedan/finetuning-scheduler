@@ -101,9 +101,9 @@ jobs:
         # NOTE: do not include coverage report here, see: https://github.com/nedbat/coveragepy/issues/1003
         coverage run --source finetuning_scheduler -m pytest finetuning_scheduler tests -v --durations=50 --junitxml=junit/test-results-${{ runner.os }}-py${{ matrix.python-version }}-${{ matrix.requires }}-${{ matrix.release }}.xml
 
-    - name: Examples
-      run: |
-        python -m pytest fts_examples -v --durations=3
+    # - name: Examples
+    #   run: |
+    #     python -m pytest fts_examples -v --durations=3
 
     - name: Upload pytest results
       uses: actions/upload-artifact@v2
