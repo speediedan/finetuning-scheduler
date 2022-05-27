@@ -2,3 +2,5 @@ pytorch-lightning>=1.6.0,<=1.6.3
 torch>=1.8.*
 # setuptools version constraint can be removed once torch >= 1.11 is required
 setuptools < 59.6.0
+# temporary fix for https://github.com/PyTorchLightning/pytorch-lightning/issues/13159
+protobuf >= 3.9.2, < 3.20
