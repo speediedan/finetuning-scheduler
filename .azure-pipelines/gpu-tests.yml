@@ -40,6 +40,7 @@ jobs:
 
     steps:
     - bash: |
+        pip install --upgrade pip requests
         pip install . --requirement requirements/devel.txt
       displayName: 'Install dependencies'
 
@@ -72,7 +73,7 @@ jobs:
 
     - script: |
         set -e
-        python -m pytest fts_examples -v --maxfail=1 --durations=0
+        python -m pytest fts_examples -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
       displayName: 'Testing: examples'
 
     # - script: |
