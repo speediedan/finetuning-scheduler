@@ -103,7 +103,7 @@ def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_fi
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 @RunIf(min_gpus=1, skip_windows=True)
 @pytest.mark.parametrize("nb_name", ["fts_superglue_nb"], ids=["fts_superglue_nb"])
-def test_fts_superglue_nb(nb_name):
+def test_fts_superglue_nb(recwarn, nb_name):
     # simple sanity check that the notebook-based version of the example builds and executes successfully
     test_example_base = os.path.join(os.path.dirname(__file__), "ipynb_src")
     example_script = os.path.join(test_example_base, f"{nb_name}.py")
@@ -119,3 +119,6 @@ def test_fts_superglue_nb(nb_name):
     for f in [example_ipynb, generated_schedule]:
         os.remove(f)
         assert not os.path.exists(f)
+    # ensure no unexpected warnings detected
+    matched = [any([re.compile(w).search(w_msg.message.args[0]) for w in ADV_EXPECTED_WARNS]) for w_msg in recwarn.list]
+    assert all(matched)
