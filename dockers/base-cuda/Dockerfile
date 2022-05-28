@@ -32,7 +32,8 @@ ENV \
     TORCH_CUDA_ARCH_LIST="3.7;5.0;6.0;7.0;7.5;8.0" \
     MKL_THREADING_LAYER=${MKL_THREADING_LAYER} \
     MAKEFLAGS="-j2"
-
+# temporary fix for https://github.com/NVIDIA/nvidia-docker/issues/1631
+RUN apt-key adv --fetch-keys https://developer.download.nvidia.cn/compute/cuda/repos/ubuntu2004/x86_64/3bf863cc.pub
 RUN apt-get update -qq --fix-missing  && \
     apt-get install -y --no-install-recommends \
         build-essential \
@@ -92,7 +93,7 @@ RUN \
 
 RUN \
     # install FairScale
-    pip install fairscale==0.4.5 && \
+    pip install "fairscale>=0.4.5,<=0.4.6" && \
     python -c "import fairscale; print(fairscale.__version__)"
 
 # RUN \ # removing deepspeed from extras unless/until add optimizer pg interface added to DS API

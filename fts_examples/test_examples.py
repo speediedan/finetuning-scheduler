@@ -66,7 +66,7 @@ def test_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
         f"--trainer.default_root_dir={tmpdir.strpath}",
         "--trainer.max_epochs=1",
         "--trainer.limit_train_batches=2",
-        "--trainer.gpus=1",
+        "--trainer.devices=1",
     ]
     monkeypatch.setattr("sys.argv", [example_script, "fit", "--config"] + config_loc + cli_args)
     cli_main()
@@ -91,7 +91,7 @@ def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_fi
         f"--trainer.default_root_dir={tmpdir.strpath}",
         "--trainer.max_epochs=10",
         "--trainer.limit_train_batches=2",
-        "--trainer.gpus=1",
+        "--trainer.devices=1",
     ]
     monkeypatch.setattr("sys.argv", [example_script, "fit", "--config"] + config_loc + cli_args)
     cli_main()
