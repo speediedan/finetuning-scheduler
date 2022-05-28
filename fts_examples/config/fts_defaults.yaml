@@ -29,8 +29,7 @@ model:
       name: CosineAnnealingWithWarmRestartsLR
 trainer:
   max_epochs: 1000
-  gpus: -1
-  auto_select_gpus: true
+  accelerator: gpu
   strategy: ddp_find_unused_parameters_false
   precision: 16
   logger:

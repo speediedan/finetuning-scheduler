@@ -20,16 +20,21 @@ pr:
 
 jobs:
   - job: pytest
+    strategy:
+      matrix:
+        'PyTorch - LTS':
+          image: "speediedan/finetuning-scheduler:py3.9-pt1.8-azpl-init"
+        'PyTorch - stable':
+          image: "speediedan/finetuning-scheduler:py3.9-pt1.11-azpl-init"
     # how long to run the job before automatically cancelling
-    timeoutInMinutes: "20"
+    timeoutInMinutes: "100"
     # how much time to give 'run always even if cancelled tasks' before stopping them
     cancelTimeoutInMinutes: "2"
 
     pool: default
 
     container:
-      # run on torch 1.8 as it's the LTS version
-      image: "speediedan/finetuning-scheduler:py3.9-pt1.8-azpl-init"
+      image: $(image)
       mapDockerSocket: false
       volumes:
       - /var/run/user/998/docker.sock:/var/run/docker.sock
