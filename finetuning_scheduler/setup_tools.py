@@ -12,18 +12,27 @@
 # limitations under the License.
 import os
 import re
-from typing import List
+from typing import List, Optional
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
-_TEST_HELPERS = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tests/helpers")
+_TH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tests/helpers")
 
 
-def _load_requirements(path_dir: str, file_name: str = "requirements.txt", comment_char: str = "#") -> List[str]:
+def _load_requirements(
+    path_dir: str, file_name: str = "requirements.txt", comment_char: str = "#", pl_commit: Optional[str] = None
+) -> List[str]:
     """Load requirements from a file.
 
-    >>> _load_requirements(_TEST_HELPERS, file_name="direct_dep_req.txt")  # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
-    direct dependency insallation 'http://github.com/user/repo/tarball/master' will be skipped
-    ['...pytorch-lightning...']
+    >>> _load_requirements(_TH, file_name="req.txt")  # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+    direct dependency req 'git+https://github.com/t/test.git@test' has been pruned from requirements.txt list
+    direct dependency req 'http://github.com/user/repo/tarball/master' has been pruned from requirements.txt list
+    ['ok']
+
+    >>> _load_requirements(_TH, file_name="req.txt", pl_commit='ok')  # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+    direct dependency req 'git+https://github.com/t/test.git@test' has been pruned from requirements.txt list
+    direct dependency req 'http://github.com/user/repo/tarball/master' has been pruned from requirements.txt list
+    attempting dev setup with specific pytorch lightning commit: ok
+    ['ok', 'pytorch-lightning @ git+https://github.com/PyTorchLightning/pytorch-lightning.git@ok#egg=pytorch-lightning']
     """
     with open(os.path.join(path_dir, file_name)) as file:
         lines = [ln.strip() for ln in file.readlines()]
@@ -33,11 +42,17 @@ def _load_requirements(path_dir: str, file_name: str = "requirements.txt", comme
         if comment_char in ln:
             ln = ln[: ln.index(comment_char)].strip()
         # skip directly installed dependencies
-        if ln.startswith("http") or "@http" in ln:
-            print(f"direct dependency insallation '{ln}' will be skipped")
+        if ln.startswith(("http", "git+")) or "@http" in ln:
+            print(f"direct dependency req '{ln}' has been pruned from requirements.txt list")
             continue
         if ln:  # if requirement is not empty
             reqs.append(ln)
+    if pl_commit:
+        print(f"attempting dev setup with specific pytorch lightning commit: {pl_commit}")
+        pldev_base = "pytorch-lightning @ git+https://github.com/PyTorchLightning/pytorch-lightning.git@"
+        pldev_egg = "#egg=pytorch-lightning"
+        pldev_setup_req = pldev_base + pl_commit + pldev_egg
+        reqs.append(pldev_setup_req)
     return reqs
 
 
