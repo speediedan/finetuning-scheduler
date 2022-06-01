@@ -660,6 +660,7 @@ EXPECTED_WARNS = [
     "`max_epochs` was not",
     "that ended mid-epoch",
     "The dirpath has changed from",
+    "Torchmetrics v0.9",  # temporarily allow until _ResultMetric updated
 ]
 EXPECTED_TRAIN_CHK_WARNS = ["could not find the monitored key", "callbacks used to create"]
 EXPECTED_DIRPATH = "exists and is not empty"

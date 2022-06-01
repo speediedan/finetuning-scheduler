@@ -37,6 +37,7 @@ EXPECTED_WARNS = [
     "`np.object` is a deprecated alias",
     "`np.int` is a deprecated alias",
     "sentencepiece tokenizer that you are converting",
+    "Torchmetrics v0.9",  # temporarily allow until _ResultMetric updated
 ]
 MIN_VERSION_WARNS = "1.8"
 MAX_VERSION_WARNS = "1.11"
