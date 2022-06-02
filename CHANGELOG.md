@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [0.1.5] - 2022-06-02
+
+### Added
+
+- Bumped latest tested PL patch version to 1.6.4
+- Added basic notebook-based example tests a new ipynb-specific extra
+- Updated docker definitions
+- Extended multi-gpu testing to include both oldest and latest supported PyTorch versions
+- Enhanced requirements parsing functionality
+### Fixed
+- cleaned up acknowledged warnings in multi-gpu example testing
+### Changed
+
+### Deprecated
+
 ## [0.1.4] - 2022-05-24
 
 ### Added
