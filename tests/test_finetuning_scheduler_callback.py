@@ -23,6 +23,8 @@ import torch.nn.functional as F
 import yaml
 from pytorch_lightning import LightningModule, seed_everything, Trainer
 from pytorch_lightning.callbacks import Callback, EarlyStopping, LearningRateMonitor
+from pytorch_lightning.strategies.single_device import SingleDeviceStrategy
+from pytorch_lightning.strategies.strategy_registry import StrategyRegistry
 from pytorch_lightning.utilities import _StrategyType
 from pytorch_lightning.utilities.cloud_io import get_filesystem
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
@@ -107,6 +109,22 @@ class ConvBlockParam(nn.Module):
         return self.bn(x)
 
 
+class TestStrategy(SingleDeviceStrategy):
+
+    strategy_name = "test_strategy"
+
+    def __init__(self, param1, param2):
+        super().__init__()
+        self.param1 = param1
+        self.param2 = param2
+        self._launcher = None
+
+
+strategy_name = "test_strategy"
+strategy_description = "Test Strategy"
+StrategyRegistry.register(strategy_name, TestStrategy, description=strategy_description, param1="abc", param2=123)
+
+
 class FinetuningSchedulerBoringModel(BoringModel):
     """Extend :class:`~tests.helpers.BoringModel` to facilitate testing of
     :class:`~finetuning_scheduler.FinetuningScheduler` by ensuring deterministic divergence
@@ -139,6 +157,9 @@ class FinetuningSchedulerBoringModel(BoringModel):
         return [optimizer], [lr_scheduler]
 
 
+MOCK_STRATEGY_MAPPING = {"ddp2_wcpu": (_StrategyType.DDP2, False), "allow_untest": ("single_tpu", True)}
+
+
 class TestFinetuningScheduler(FinetuningScheduler):
     """Extends :class:`~finetuning_scheduler.FinetuningScheduler` to facilitate intra- fit state inspection during
     testing of scheduled finetuning."""
@@ -147,22 +168,25 @@ class TestFinetuningScheduler(FinetuningScheduler):
         self,
         expected_state: Optional[Dict] = None,
         lrs_state: Optional[Dict] = None,
-        mock_strategy_wcpu: bool = False,
+        mock_strategy: Optional[str] = None,
         *args,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.expected_state = expected_state
         self.lrs_state = lrs_state
-        self.mock_strategy_wcpu = mock_strategy_wcpu
+        self.mock_strategy = mock_strategy
         self.best_ckpt_test_weight = None
         self.restored_best_cnt = 0
         self.was_global_zero = True
 
     def setup(self, trainer, pl_module, stage: Optional[str] = None) -> None:
-        if self.mock_strategy_wcpu:
-            trainer.strategy.strategy_name = _StrategyType.DDP2
-        return super().setup(trainer, pl_module, stage)
+        if self.mock_strategy:
+            trainer.strategy.strategy_name = MOCK_STRATEGY_MAPPING[self.mock_strategy][0]
+            self.allow_untested = MOCK_STRATEGY_MAPPING[self.mock_strategy][1]
+        super().setup(trainer, pl_module, stage)
+        if self.allow_untested:
+            raise SystemExit()
 
     def state_dict(self) -> Dict[str, Any]:
         self.best_ckpt_test_weight = self.pl_module._modules["layer"]._modules["3"].bias.data.detach().clone()
@@ -970,25 +994,35 @@ def test_finetuningscheduling_invalid_schedules(tmpdir, invalid_schedules, sched
 
 
 @pytest.mark.parametrize(
-    "strategy, gpus, plugins, ismock",
+    "strategy, gpus, plugins, mockconf",
     [
-        pytest.param("ddp2", None, None, True),
-        pytest.param("ddp2", 1, None, False, marks=RunIf(min_gpus=1)),
-        pytest.param("ddp_fully_sharded", 1, None, False, marks=RunIf(fairscale_fully_sharded=True, min_gpus=1)),
-        pytest.param("horovod", None, None, False, marks=RunIf(horovod=True, min_gpus=1)),
-        pytest.param("deepspeed_stage_2", 1, None, False, marks=RunIf(deepspeed=True, min_gpus=1)),
+        pytest.param("cust_stgy", None, None, "allow_untest"),
+        pytest.param("ddp2", None, None, "ddp2_wcpu"),
+        pytest.param("ddp2", 1, None, None, marks=RunIf(min_gpus=1)),
+        pytest.param("ddp_fully_sharded", 1, None, None, marks=RunIf(fairscale_fully_sharded=True, min_gpus=1)),
+        pytest.param("horovod", None, None, None, marks=RunIf(horovod=True, min_gpus=1)),
+        pytest.param("deepspeed_stage_2", 1, None, None, marks=RunIf(deepspeed=True, min_gpus=1)),
     ],
-    ids=["cpu_mock", "ddp2", "ddp_fully_sharded", "horovod", "deepspeed_stage_2"],
+    ids=["cust_stgy", "cpu_mock", "ddp2", "ddp_fully_sharded", "horovod", "deepspeed_stage_2"],
 )
-def test_finetuningscheduling_distributed_compat(tmpdir, strategy, gpus, plugins, ismock):
+def test_finetuningscheduling_distributed_compat(tmpdir, strategy, gpus, plugins, mockconf):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly raised
-    for currently unsupported plugins."""
-    fts_args = {"mock_strategy_wcpu": True} if ismock else {}
-    callbacks = [TestFinetuningScheduler(**fts_args)]
+    for currently unsupported strategies."""
+    if mockconf == "allow_untest":
+        expected_err = "some error"
+        expected_warn = "Allowing untested strategy"
+        strategy = "test_strategy"
+        raise_cond = {"expected_exception": BaseException}
+    else:
+        expected_err = "has not yet been adapted"
+        expected_warn = "*"
+        raise_cond = {"expected_exception": MisconfigurationException, "match": expected_err}
+    callbacks = [TestFinetuningScheduler(mock_strategy=mockconf)]
     model = FinetuningSchedulerBoringModel()
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy=strategy, gpus=gpus, plugins=plugins)
-    with pytest.raises(MisconfigurationException, match="has not yet been adapted for the specified distributed"):
-        trainer.fit(model)
+    with pytest.raises(**raise_cond):
+        with pytest.warns(UserWarning, match=expected_warn):
+            trainer.fit(model)
 
 
 def test_finetuningscheduling_optimizer_compat(tmpdir):
