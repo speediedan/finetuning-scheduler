@@ -279,6 +279,18 @@ configurations.
       * :external+pl:class:`~pytorch_lightning.strategies.sharded_spawn.DDPSpawnShardedStrategy`
       * :external+pl:class:`~pytorch_lightning.strategies.dp.DataParallelStrategy`
 
+.. tip::
+    Custom or officially unsupported strategies can be used by setting
+    :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.allow_untested` to ``True``.
+
+    Some officially unsupported strategies may work unaltered and are only unsupported due to
+    the ``Finetuning Scheduler`` project's lack of CI/testing resources for that strategy (e.g.
+    ``single_tpu``).
+
+    Most unsupported strategies, however, are currently unsupported because they require varying degrees of modification
+    to be compatible (e.g. ``deepspeed`` requires an ``add_param_group`` method, ``tpu_spawn`` an override of the
+    current broadcast method to include python objects).
+
 ----------
 
 .. _scheduled-finetuning-superglue:

@@ -25,7 +25,7 @@ from pytorch_lightning.callbacks import BaseFinetuning
 from pytorch_lightning.trainer.states import TrainerFn
 from pytorch_lightning.utilities import _StrategyType, rank_zero_info
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
-from pytorch_lightning.utilities.rank_zero import rank_zero_debug
+from pytorch_lightning.utilities.rank_zero import rank_zero_debug, rank_zero_warn
 from torch.optim.optimizer import Optimizer
 
 from finetuning_scheduler.fts_supporters import (
@@ -80,6 +80,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         gen_ft_sched_only: bool = False,
         epoch_transitions_only: bool = False,
         reinit_lr_cfg: Optional[Dict] = None,
+        allow_untested: bool = False,
     ):
         r"""
         Define and configure a scheduled finetuning training session.
@@ -137,6 +138,21 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                                 frequency: 1
                                 name: Implicit_Reinit_LR_Scheduler
 
+            allow_untested: If ``True``, allows the use of custom or unsupported training strategies (e.g.
+                ``single_tpu``, ``MyCustomStrategy``). Defaults to ``False``.
+
+                .. note:: Custom or officially unsupported strategies can be used by setting
+                    :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.allow_untested` to ``True``.
+
+                    Some officially unsupported strategies may work unaltered and are only unsupported due to
+                    the ``Finetuning Scheduler`` project's lack of CI/testing resources for that strategy (e.g.
+                    ``single_tpu``).
+
+                    Most unsupported strategies, however, are currently unsupported because they require varying degrees
+                    of modification to be compatible (e.g. ``deepspeed`` requires an ``add_param_group`` method,
+                    ``tpu_spawn`` an override of the current broadcast method to include python objects).
+
+
         Attributes:
             _fts_state: The internal finetuning scheduler state.
         """
@@ -149,6 +165,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         self.gen_ft_sched_only = gen_ft_sched_only
         self.epoch_transitions_only = epoch_transitions_only
         self.reinit_lr_cfg = reinit_lr_cfg
+        self.allow_untested = allow_untested
         self.pl_module: pl.LightningModule
 
     @property
@@ -336,11 +353,18 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         assert pl_module is not None and pl_module.trainer is not None
         supported = [t.lower() for t in self._supported_strategy_types()]
         if strategy.strategy_name and strategy.strategy_name not in supported:  # type: ignore[attr-defined]
-            raise MisconfigurationException(
-                "FTS is currently experimental and has not yet been adapted for the"
-                " specified distributed strategy please select from currently"
-                f" compatible distributed strategies ({supported})"
-            )
+            if not self.allow_untested:
+                raise MisconfigurationException(
+                    "FTS is currently experimental and has not yet been adapted for the"
+                    " specified distributed strategy please select from currently"
+                    f" compatible distributed strategies ({supported})"
+                )
+            else:
+                warn_msg = (
+                    f"Allowing untested strategy '{strategy.strategy_name}' "  # type: ignore[attr-defined]
+                    f"because ``allow_untested`` is ``True``."
+                )
+                rank_zero_warn(warn_msg)
         if self.gen_ft_sched_only:
             if trainer.is_global_zero:
                 assert trainer.log_dir is not None
