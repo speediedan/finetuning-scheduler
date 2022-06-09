@@ -5,7 +5,7 @@ pandoc>=1.0
 docutils>=0.16
 sphinxcontrib-fulltoc>=1.0
 sphinxcontrib-mockautodoc
-sphinx-autodoc-typehints>=1.0,<1.15  # v1.15 failing on main (#11405)
+sphinx-autodoc-typehints>=1.11,<1.15  # v1.15 failing on main (#11405)
 sphinx-paramlinks>=0.5.1
 sphinx-togglebutton>=0.2
 sphinx-copybutton>=0.3
