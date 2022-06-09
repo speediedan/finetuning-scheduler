@@ -93,7 +93,7 @@ RUN \
 
 RUN \
     # install FairScale
-    pip install "fairscale>=0.4.5,<=0.4.6" && \
+    pip install "fairscale>=0.4.5" && \
     python -c "import fairscale; print(fairscale.__version__)"
 
 # RUN \ # removing deepspeed from extras unless/until add optimizer pg interface added to DS API

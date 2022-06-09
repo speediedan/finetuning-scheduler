@@ -1,6 +1,6 @@
 # extended list of package dependencies to reach full functionality
 
-omegaconf>=2.0.5
-jsonargparse[signatures]>=4.0.4
-rich>=10.2.2
-fairscale>=0.4.5, <=0.4.6
+omegaconf>=2.1.0
+jsonargparse[signatures]>=4.9.0
+rich>=10.2.2,!=10.15.*
+fairscale>=0.4.5

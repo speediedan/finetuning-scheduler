@@ -4,4 +4,4 @@ datasets
 transformers>=4.18.0
 scikit-learn
 sentencepiece
-jsonargparse[signatures]>=4.0.4
+jsonargparse[signatures]>=4.9.0
