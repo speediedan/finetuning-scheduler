@@ -80,7 +80,7 @@ setup(
     python_requires=">=3.7",
     setup_requires=[],
     # install_requires=setup_tools._load_requirements(_PATH_ROOT),
-    install_requires=setup_tools._load_requirements(_PATH_ROOT, pl_commit="c1f05021ff0093f720770a6065ab62a70c535add"),
+    install_requires=setup_tools._load_requirements(_PATH_ROOT, pl_commit="bfa8b7be2d99b980afa62f5cb0433326bcfd2ef0"),
     extras_require=extras,
     project_urls={
         "Bug Tracker": "https://github.com/speediedan/finetuning-scheduler/issues",
