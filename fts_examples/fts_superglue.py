@@ -259,10 +259,6 @@ class RteBoolqModule(pl.LightningModule):
                 step=self.global_step,
             )
 
-    def training_epoch_end(self, outputs: List[Any]) -> None:
-        loss = torch.stack([x["loss"] for x in outputs]).mean()
-        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
-
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         outputs = self(**batch)
         val_loss, logits = outputs[:2]
