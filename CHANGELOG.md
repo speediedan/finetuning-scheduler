@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [0.1.7] - 2022-06-10
+### Fixed
+- bump omegaconf version requirement in examples reqs (in addition to extra reqs) due to omegaconf bug
+
+### Added
+
+### Changed
+
+### Deprecated
+
+## [0.1.6] - 2022-06-10
+
+### Added
+
+- Enable use of untested strategies with new flag and user warning
+- Update various dependency minimum versions
+- Minor example logging update
+
+### Fixed
+- minor privacy policy link update
+- bump omegaconf version requirement due to omegaconf bug
+
+### Changed
+
+### Deprecated
+
 ## [0.1.5] - 2022-06-02
 
 ### Added
