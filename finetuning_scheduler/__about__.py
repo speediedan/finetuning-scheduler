@@ -1,13 +1,13 @@
 import time
 
 _this_year = time.strftime("%Y")
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 __author__ = "Dan Dale"
 __author_email__ = "danny.dale@gmail.com"
 __license__ = "Apache-2.0"
 __copyright__ = f"Copyright (c) 2021-{_this_year}, {__author__}"
 __homepage__ = "https://github.com/speediedan/finetuning-scheduler"
-__docs_url__ = "https://finetuning-scheduler.readthedocs.io/en/latest/"
+__docs_url__ = "https://finetuning-scheduler.readthedocs.io/en/stable/"
 # this has to be simple string, see: https://github.com/pypa/twine/issues/522
 __docs__ = "A PyTorch Lightning extension that enhances model experimentation with flexible finetuning schedules."
 __long_docs__ = """
@@ -31,7 +31,7 @@ final phase of the schedule has its stopping criteria met.
 Documentation
 -------------
 - https://finetuning-scheduler.readthedocs.io/en/stable/
-- https://finetuning-scheduler.readthedocs.io/en/0.1.5/
+- https://finetuning-scheduler.readthedocs.io/en/0.1.6/
 """
 
 __all__ = ["__author__", "__author_email__", "__copyright__", "__docs__", "__homepage__", "__license__", "__version__"]
