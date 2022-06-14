@@ -81,6 +81,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         epoch_transitions_only: bool = False,
         reinit_lr_cfg: Optional[Dict] = None,
         allow_untested: bool = False,
+        apply_lambdas_new_pgs: bool = False,
     ):
         r"""
         Define and configure a scheduled finetuning training session.
@@ -151,6 +152,10 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                     Most unsupported strategies, however, are currently unsupported because they require varying degrees
                     of modification to be compatible (e.g. ``deepspeed`` requires an ``add_param_group`` method,
                     ``tpu_spawn`` an override of the current broadcast method to include python objects).
+            apply_lambdas_new_pgs: If ``True``, applies most recent lambda in lambda_lr list to newly added optimizer
+                groups for lr schedulers that have a lambda_lr attribute. Only applies to phases without reinitialized
+                lr schedulers. Phases with lr scheduler reinitialization configs will always apply the specified
+                lambdas. Defaults to ``False``.
 
 
         Attributes:
@@ -166,6 +171,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         self.epoch_transitions_only = epoch_transitions_only
         self.reinit_lr_cfg = reinit_lr_cfg
         self.allow_untested = allow_untested
+        self.apply_lambdas_new_pgs = apply_lambdas_new_pgs
         self.pl_module: pl.LightningModule
 
     @property
@@ -263,18 +269,33 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                 _, self._fts_state._curr_thawed_params = FinetuningScheduler.exec_ft_phase(
                     self.pl_module, thaw_pl=next_tl["params"]
                 )
-                new_scheduler_cfg = self.reinit_lr_cfg or next_tl.get("new_lr_scheduler", None)
-                if new_scheduler_cfg:
-                    self.reinit_lr_scheduler(
-                        new_lr_scheduler=new_scheduler_cfg, trainer=self.pl_module.trainer, optimizer=optimizer
-                    )
                 FinetuningScheduler.add_optimizer_groups(
                     module=self.pl_module,
                     optimizer=optimizer,
                     thawed_pl=next_tl["params"],
                     lr=next_tl["lr"],
                     no_decay=getattr(self.pl_module, "no_decay", None),
+                    apply_lambdas=self.apply_lambdas_new_pgs,
                 )
+                new_scheduler_cfg = self.reinit_lr_cfg or next_tl.get("new_lr_scheduler", None)
+                if new_scheduler_cfg:
+                    self.reinit_lr_scheduler(
+                        new_lr_scheduler=new_scheduler_cfg, trainer=self.pl_module.trainer, optimizer=optimizer
+                    )
+                else:
+                    for config in self.pl_module.trainer.lr_scheduler_configs:
+                        show_warn_lambdas = (
+                            hasattr(config.scheduler, "lr_lambdas")
+                            and config.scheduler.lr_lambdas[-1] is not None  # type: ignore[union-attr]
+                            and not self.apply_lambdas_new_pgs
+                        )
+                        if show_warn_lambdas:
+                            rank_zero_warn(
+                                "The lr scheduler used in this phase has lr_lambdas but will use a "
+                                "configured lr for new parameter groups because `apply_lambdas_new_pgs` is "
+                                "set to the default of `False`. If you would like new groups to have lr "
+                                "lambdas applied, set `apply_lambdas_new_pgs` to `True`."
+                            )
 
     def restore_best_ckpt(self) -> None:
         """Restore the current best model checkpoint, according to
@@ -315,8 +336,16 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
 
         assert self.pl_module.trainer.state.fn is not None
         if self.pl_module.trainer.state.fn == TrainerFn.FITTING:
-            # restore optimizers and schedulers state
-            checkpoint_connector.restore_optimizers_and_schedulers()
+            try:
+                # restore optimizers and schedulers state
+                checkpoint_connector.restore_optimizers_and_schedulers()
+            except KeyError:
+                assert isinstance(self.ft_schedule, dict)
+                if self.ft_schedule[self.curr_depth].get("new_lr_scheduler", None):
+                    rank_zero_warn(
+                        "incompatible checkpoint detected but attempting to proceed with next phase of training since "
+                        "we're reinitializing the lr scheduler."
+                    )
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
         """Validate a compatible :external+pl:class:`~pytorch_lightning.strategies.Strategy` strategy is being used and

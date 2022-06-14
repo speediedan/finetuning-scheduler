@@ -571,6 +571,40 @@ class ScheduleParsingMixin(ABC):
             )
         self._lr_scheduler_init_validation(lr_reinit_phases)
 
+    def _convert_phase_keys(self) -> None:
+        assert isinstance(self.ft_schedule, Dict)
+        try:
+            orig_keys = set(self.ft_schedule.keys())
+            self.ft_schedule = {int(k): v for k, v in self.ft_schedule.items()}
+            key_diff = set(self.ft_schedule.keys()) ^ orig_keys
+            if key_diff:
+                rank_zero_warn(
+                    "Note, the specified finetuning schedule had non-integer keys implicitly converted to "
+                    f"integers. Key diff: {key_diff}"
+                )
+                self._rewrite_schedule()
+        except ValueError as value_err:
+            raise MisconfigurationException(
+                "The supplied schedule was found to use one or more keys that were not convertible to integers. "
+                f"The encountered error was: {value_err}"
+            )
+
+    def _rewrite_schedule(self, err_msg: Optional[str] = None) -> None:
+        assert self.pl_module.trainer is not None and self.pl_module.trainer.log_dir is not None
+        assert isinstance(self.ft_schedule, Dict)
+        rewrite_dest = None
+        # write the reconfigured schedule to our log directory to allow user validation
+        rewrite_dest = ScheduleImplMixin.save_schedule(
+            f"{self.pl_module.__class__.__name__}_ft_schedule_valid.yaml",
+            self.ft_schedule,
+            self.pl_module.trainer.log_dir,
+        )
+        if err_msg:
+            raise MisconfigurationException(
+                err_msg + f"and has thus been reconfigured and saved to '{rewrite_dest}'. Please validate the "
+                "reconfigured schedule and restart training with a valid schedule."
+            )
+
     def _validate_schedule_keys(self) -> None:
         """Ensures schedule keys are integers, zero-based and contiguous. If the schedule does not meet these
         requirements, attempts to transform the passed schedule to meet them and writes the candidate schedule out
@@ -580,28 +614,15 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: Raised if the schedule contains non-integer keys and/or non-zero-based and
                 contiguous keys.
         """
-        assert self.pl_module.trainer is not None
-        assert self.pl_module.trainer.log_dir is not None
+        assert self.pl_module.trainer is not None and self.pl_module.trainer.log_dir is not None
         assert isinstance(self.ft_schedule, Dict)
-        all_ints = all([isinstance(k, int) for k in self.ft_schedule.keys()])
+        self._convert_phase_keys()
         contiguous = len(self.ft_schedule.keys()) == (max(self.ft_schedule.keys()) + 1)
-        rewrite_dest = None
-        if not (all_ints and contiguous):
+        if not contiguous:
             for i, k in enumerate(sorted(self.ft_schedule.keys())):
                 self.ft_schedule[i] = self.ft_schedule.pop(k)
-            # write the reconfigured schedule to our log directory to allow user validation
-            rewrite_dest = ScheduleImplMixin.save_schedule(
-                f"{self.pl_module.__class__.__name__}_ft_schedule_valid.yaml",
-                self.ft_schedule,
-                self.pl_module.trainer.log_dir,
-            )
-            err_msg = "The supplied schedule was found to"
-            reason_msg = " use non-integer keys " if not all_ints else " have non-contiguous or non-zero-indexed keys "
-            raise MisconfigurationException(
-                err_msg + reason_msg + "and has thus been reconfigured and saved to "
-                f"'{rewrite_dest}'. Please validate the reconfigured schedule and restart "
-                "training with a valid schedule."
-            )
+            err_msg = "The supplied schedule was found to have non-contiguous or non-zero-indexed keys "
+            self._rewrite_schedule(err_msg=err_msg)
 
     def _validate_epoch_transitions(self) -> None:
         """If not composing :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` and epoch-driven
@@ -1053,6 +1074,7 @@ class ScheduleImplMixin(ABC):
         no_decay: Optional[list] = None,
         lr: Optional[float] = None,
         initial_denom_lr: float = 10.0,
+        apply_lambdas: bool = False,
     ) -> None:
         """Add optimizer parameter groups associated with the next scheduled finetuning depth/level and extend the
         relevent :paramref:`~pytorch_lighting.trainer.trainer.Trainer.lr_scheduler_configs`.
@@ -1069,6 +1091,7 @@ class ScheduleImplMixin(ABC):
                 the ``lr`` of the first scheduled finetuning depth will be used. Defaults to ``None``.
             initial_denom_lr: The scaling factor by which to scale the initial learning rate for new
                 parameter groups when no initial learning rate is specified. Defaults to 10.0.
+            apply_lambdas: Whether to apply lr lambdas to newly added groups. Defaults to False.
         """
         if len(thawed_pl) == 0:
             rank_zero_warn("No thawed parameters passed so no new optimizer groups will be added.")
@@ -1076,44 +1099,48 @@ class ScheduleImplMixin(ABC):
             params_lr = optimizer.param_groups[0]["lr"] if lr is None else float(lr)
             denom_lr = initial_denom_lr if lr is None else 1.0
             lr_factor = params_lr / denom_lr
-            added_pgs = 0
-            if no_decay:
-                optimizer.add_param_group(
-                    {
-                        "params": [
-                            p
-                            for n, p in module.named_parameters()
-                            if not any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
-                        ],
-                        "lr": lr_factor,
-                        "initial_lr": lr_factor,
-                    }
-                )
-                optimizer.add_param_group(
-                    {
-                        "params": [
-                            p
-                            for n, p in module.named_parameters()
-                            if any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
-                        ],
-                        "weight_decay": 0.0,
-                        "lr": lr_factor,
-                        "initial_lr": lr_factor,
-                    }
-                )
-                added_pgs = 2
-            else:
-                optimizer.add_param_group(
-                    {
-                        "params": [p for n, p in module.named_parameters() if n in thawed_pl and p.requires_grad],
-                        "lr": lr_factor,
-                        "initial_lr": lr_factor,
-                    }
-                )
-                added_pgs = 1
-            # extend base_lrs for added groups
+            orig_lr_factor = lr_factor
             for config in module.trainer.lr_scheduler_configs:  # type: ignore[union-attr]
-                config.scheduler.base_lrs.extend([lr_factor] * added_pgs)
+                if hasattr(config.scheduler, "lr_lambdas") and config.scheduler.lr_lambdas and apply_lambdas:
+                    lr_factor = lr_factor * config.scheduler.lr_lambdas[-1](config.scheduler.last_epoch)
+                added_pgs = 0
+                if no_decay:
+                    optimizer.add_param_group(
+                        {
+                            "params": [
+                                p
+                                for n, p in module.named_parameters()
+                                if not any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
+                            ],
+                            "lr": lr_factor,
+                            "initial_lr": lr_factor,
+                        }
+                    )
+                    optimizer.add_param_group(
+                        {
+                            "params": [
+                                p
+                                for n, p in module.named_parameters()
+                                if any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
+                            ],
+                            "weight_decay": 0.0,
+                            "lr": lr_factor,
+                            "initial_lr": lr_factor,
+                        }
+                    )
+                    added_pgs = 2
+                else:
+                    optimizer.add_param_group(
+                        {
+                            "params": [p for n, p in module.named_parameters() if n in thawed_pl and p.requires_grad],
+                            "lr": lr_factor,
+                            "initial_lr": lr_factor,
+                        }
+                    )
+                    added_pgs = 1
+                config.scheduler.base_lrs.extend([orig_lr_factor] * added_pgs)
+                if hasattr(config.scheduler, "lr_lambdas"):
+                    config.scheduler.lr_lambdas.extend([config.scheduler.lr_lambdas[-1]] * added_pgs)
 
     @staticmethod
     def sync(objs: Tuple, asets: Tuple, agg_func: Callable = max) -> None:

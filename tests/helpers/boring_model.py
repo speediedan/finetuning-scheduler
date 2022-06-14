@@ -14,7 +14,20 @@ from typing import Optional
 
 import torch
 from pytorch_lightning import LightningDataModule, LightningModule
+from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Dataset, IterableDataset, Subset
+
+
+class LinearWarmupLR(LambdaLR):
+    def __init__(self, optimizer, num_warmup_steps, num_training_steps, last_epoch=-1):
+        def lr_lambda(current_step: int):
+            if current_step < num_warmup_steps:
+                return float(current_step) / float(max(1, num_warmup_steps))
+            return max(
+                0.0, float(num_training_steps - current_step) / float(max(1, num_training_steps - num_warmup_steps))
+            )
+
+        super().__init__(optimizer, lr_lambda, last_epoch)
 
 
 class RandomDictDataset(Dataset):
