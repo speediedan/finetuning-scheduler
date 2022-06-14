@@ -212,7 +212,7 @@ class TestFinetuningScheduler(FinetuningScheduler):
             trainer.checkpoint_callback.current_ckpt_depth,
             trainer.checkpoint_callback.best_ckpt_depth,
         )
-        lrs_state = tuple(round(pg["lr"], 6) for pg in trainer.optimizers[0].param_groups)
+        lrs_state = tuple(round(pg["lr"], 9) for pg in trainer.optimizers[0].param_groups)
         if self.expected_state:
             assert current_state == self.expected_state[state_key]
         if self.lrs_state:
@@ -253,6 +253,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         trainer.fit(model)
     mod_sched_dict = get_fts(trainer).load_yaml_schedule(unmod_schedule_file)
     reinitlr_sched_dict = deepcopy(mod_sched_dict)
+    lambdalr_sched_dict = deepcopy(mod_sched_dict)
     mod_sched_dict[0]["params"].extend(mod_sched_dict.pop(1)["params"])
     mod_sched_dict[0]["max_transition_epoch"] = 3
     mod_sched_dict[1] = mod_sched_dict.pop(2)
@@ -278,7 +279,23 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
         "init_pg_lrs": [1.0e-06, 2.0e-06],
     }
-    return unmod_schedule_file, mod_sched_dict, epoch_only_sched, reinitlr_sched_dict
+    lambdalr_sched_dict[1]["new_lr_scheduler"] = {
+        "lr_scheduler_init": {
+            "class_path": "tests.helpers.boring_model.LinearWarmupLR",
+            "init_args": {"num_warmup_steps": 100, "num_training_steps": 1000},
+        },
+        "pl_lrs_cfg": {"interval": "step", "frequency": 1, "name": "Custom_Reinit_LR"},
+    }
+    lambdalr_sched_dict[2]["lr"] = 3.0e-06
+    lambdalr_sched_dict[2]["new_lr_scheduler"] = {
+        "lr_scheduler_init": {
+            "class_path": "tests.helpers.boring_model.LinearWarmupLR",
+            "init_args": {"num_warmup_steps": 100, "num_training_steps": 1000},
+        },
+        "pl_lrs_cfg": {"interval": "step", "frequency": 1, "name": "Custom_Reinit_LR"},
+        "init_pg_lrs": [1.0e-06, 2.0e-06],
+    }
+    return unmod_schedule_file, mod_sched_dict, epoch_only_sched, reinitlr_sched_dict, lambdalr_sched_dict
 
 
 @pytest.fixture(scope="function")
@@ -306,6 +323,11 @@ def invalid_schedules(tmpdir_factory) -> Dict:
   - layer.missing.weight"""
     non_integer_phase = """
 1.1:
+  params:
+  - layer.1.bias
+  - layer.1.weight"""
+    non_integer_conv_phase = """
+'b':
   params:
   - layer.1.bias
   - layer.1.weight"""
@@ -456,6 +478,17 @@ def invalid_schedules(tmpdir_factory) -> Dict:
       init_args:
         step_size: 1
 """
+    valid_nonint = """
+'1':
+  params:
+  - layer.1.bias
+  - layer.1.weight
+  new_lr_scheduler:
+    lr_scheduler_init:
+      class_path: torch.optim.lr_scheduler.StepLR
+      init_args:
+        step_size: 1
+"""
     invalid_sched = {}
     invalid_sched["missing_param"] = valid_sched_start + missing_param + valid_sched_end
     invalid_sched["non_integer"] = valid_sched_start + non_integer_phase + valid_sched_end
@@ -475,7 +508,9 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     invalid_sched["extra_plrs_key"] = valid_sched_start + extra_plrs_key
     invalid_sched["num_pg_w"] = valid_sched_start + num_pg_match
     invalid_sched["ext_opt_key"] = valid_sched_start + extra_optimizer_key
+    invalid_sched["non_conv_int"] = valid_sched_start + non_integer_conv_phase + valid_sched_end
     invalid_sched["cflict_reinit"] = valid_sched_start + valid_depth1  # pass a valid schedule but conflicting fts arg
+    invalid_sched["valid_nonint"] = valid_sched_start + valid_nonint  # pass a valid sched that needs silent conversion
     tmpdir = Path(tmpdir_factory.getbasetemp())
     for k, v in invalid_sched.items():
         ft_schedule_yaml = tmpdir / f"{k}.yaml"
@@ -776,6 +811,7 @@ IMP_REINIT_LR_CFG = {
     "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
 }
 
+
 EXPECTED_LR_STATE = {
     (False, False): {
         "max_depth": 3,
@@ -783,10 +819,10 @@ EXPECTED_LR_STATE = {
         1: (0.0007,),
         2: (0.00049,),
         3: (0.000343,),
-        4: (0.00024,),
-        5: (0.00024, 1e-05),
-        6: (0.00024, 1e-05, 1e-05),
-        7: (0.00024, 1e-05, 1e-05, 1e-05),
+        4: (0.0002401,),
+        5: (0.0002401, 1e-05),
+        6: (0.0002401, 1e-05, 1e-05),
+        7: (0.0002401, 1e-05, 1e-05, 1e-05),
     },
     (True, False): {
         "max_depth": 2,
@@ -794,8 +830,8 @@ EXPECTED_LR_STATE = {
         1: (0.0007,),
         2: (0.00049,),
         3: (0.000343, 1e-06),
-        4: (0.00024, 1e-06),
-        5: (0.00024, 1e-06, 1e-05),
+        4: (0.0002401, 7e-07),
+        5: (0.0002401, 7e-07, 1e-05),
     },
     (True, True): {
         "max_depth": 3,
@@ -803,7 +839,7 @@ EXPECTED_LR_STATE = {
         1: (0.0007,),
         2: (0.00049,),
         3: (0.000343,),
-        4: (0.00024,),
+        4: (0.0002401,),
         5: (0.001, 1e-05),
         6: (1e-06, 2e-06, 3e-06),
         7: (1e-06, 2e-06, 3e-06, 1e-05),
@@ -814,7 +850,7 @@ EXPECTED_LR_STATE = {
         1: (0.0007,),
         2: (0.00049,),
         3: (0.000343,),
-        4: (0.00024,),
+        4: (0.0002401,),
         5: (0.001, 1e-05),
         6: (0.001, 1e-05, 1e-05),
         7: (0.001, 1e-05, 1e-05, 1e-05),
@@ -851,6 +887,94 @@ def test_finetuningscheduling_reinitlr(tmpdir, boring_ft_schedule, explicit_mode
     assert finetuningscheduler_callback.depth_remaining == 0
     assert finetuningscheduler_callback.curr_depth == EXPECTED_LR_STATE[(explicit_mode, reinit_lr)]["max_depth"]
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+
+
+IMP_REINIT_LAMBDALR_CFG = {
+    "lr_scheduler_init": {
+        "class_path": "tests.helpers.boring_model.LinearWarmupLR",
+        "init_args": {"num_warmup_steps": 100, "num_training_steps": 1000},
+    },
+    "pl_lrs_cfg": {"interval": "step", "frequency": 1, "name": "Custom_Reinit_LR"},
+}
+
+
+EXPECTED_LAMBDALR_STATE = {
+    (True, True): {
+        "max_depth": 3,
+        0: (0.001,),
+        1: (0.0007,),
+        2: (0.00049,),
+        3: (0.000343,),
+        4: (0.0002401,),
+        5: (0.0, 0.0),
+        6: (0.0, 0.0, 0.0),
+        7: (0.0, 0.0, 0.0, 0.0),
+    },
+    (True, False): {
+        "max_depth": 3,
+        0: (0.001,),
+        1: (0.0007,),
+        2: (0.00049,),
+        3: (0.000343,),
+        4: (0.0002401,),
+        5: (0.0, 0.0),
+        6: (0.0, 0.0, 0.0),
+        7: (0.0, 0.0, 0.0, 1e-05),
+    },
+    (False, False): {
+        "max_depth": 3,
+        0: (0.001,),
+        1: (0.0007,),
+        2: (0.00049,),
+        3: (0.000343,),
+        4: (0.0002401,),
+        5: (0.0, 0.0),
+        6: (0.0, 0.0, 0.0),
+        7: (0.0, 0.0, 0.0, 0.0),
+    },
+}
+
+
+@pytest.mark.parametrize(
+    "explicit_mode, lam_mode, w_expected",
+    [
+        (True, True, ("incompatible checkpoint detected",)),
+        (True, False, ("incompatible checkpoint detected", "this phase has lr_lambdas")),
+        (False, False, None),
+    ],
+    ids=["explicit_extend_lams", "explicit_nonew_lams", "imp_lamlr"],
+)
+def test_finetuningscheduling_reinitlr_lambda(
+    tmpdir, recwarn, boring_ft_schedule, explicit_mode: bool, lam_mode: bool, w_expected
+):
+    """Inspect learning rate scheduler state within the training process to ensure it is taking the expected path
+    in both explicit and implict finetuning modes."""
+    seed_everything(42)
+    reinit_lr_cfg = None
+    if explicit_mode:
+        ft_schedule = boring_ft_schedule[4]
+    else:
+        reinit_lr_cfg = IMP_REINIT_LAMBDALR_CFG
+        ft_schedule = None
+
+    model = FinetuningSchedulerBoringModel()
+    callbacks = [
+        TestFinetuningScheduler(
+            lrs_state=EXPECTED_LAMBDALR_STATE[(explicit_mode, lam_mode)],
+            reinit_lr_cfg=reinit_lr_cfg,
+            ft_schedule=ft_schedule,
+            apply_lambdas_new_pgs=lam_mode,
+        ),
+        FTSEarlyStopping(monitor="val_loss", patience=1),
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer.fit(model)
+    finetuningscheduler_callback = get_fts(trainer)
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == EXPECTED_LAMBDALR_STATE[(explicit_mode, lam_mode)]["max_depth"]
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+    if w_expected:
+        assert all([any([re.compile(w_msg).search(w.message.args[0]) for w in recwarn.list]) for w_msg in w_expected])
 
 
 @pytest.mark.parametrize(
@@ -941,10 +1065,12 @@ def test_finetuningscheduling_misconfiguration(tmpdir, callbacks: List[Callback]
         ("imp_lrs_fail", ("Could not import specified LR scheduler", None)),
         ("lrs_init_fail", ("Could not configure the specified LR scheduler", None)),
         ("cflict_reinit", ("Specifying both `ft_schedule` and `reinit_lr_cfg` is an invalid", None)),
+        ("valid_nonint", (None, None)),
         ("extra_plrs_key", ("Found unsupported keys in the lr scheduler dict", None)),
         ("num_pg_w", ("ensure the number of specified parameter groups matches", None)),
         ("ext_opt_key", ("the existing optimizer and all associated parameter", None)),
-        ("non_integer", ("non-integer keys", "layer.1.bias")),
+        ("non_integer", ("had non-integer keys", None)),
+        ("non_conv_int", ("not convertible to", None)),
         ("non_contiguous", ("non-contiguous or non-zero-indexed keys", "layer.0.bias")),
     ],
     ids=[
@@ -962,10 +1088,12 @@ def test_finetuningscheduling_misconfiguration(tmpdir, callbacks: List[Callback]
         "imp_lrs_fail",
         "lrs_init_fail",
         "cflict_reinit",
+        "valid_nonint",
         "extra_plrs_key",
         "num_pg_w",
         "ext_opt_key",
         "non_int",
+        "non_conv_int",
         "non_contig",
     ],
 )
@@ -979,9 +1107,11 @@ def test_finetuningscheduling_invalid_schedules(tmpdir, invalid_schedules, sched
     callbacks = [FinetuningScheduler(**fts_args)]
     model = FinetuningSchedulerBoringModel()
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
-    if schedule_key in ("lr_phase0", "extra_plrs_key", "num_pg_w", "ext_opt_key"):
+    if schedule_key in ("lr_phase0", "extra_plrs_key", "num_pg_w", "ext_opt_key", "non_integer"):
         with pytest.warns(Warning, match=expected[0]):
             trainer.fit(model)
+    elif schedule_key in ("valid_nonint"):
+        trainer.fit(model)
     else:
         with pytest.raises(MisconfigurationException, match=expected[0]):
             trainer.fit(model)
