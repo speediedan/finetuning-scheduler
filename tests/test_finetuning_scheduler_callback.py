@@ -948,7 +948,8 @@ def test_finetuningscheduling_reinitlr_lambda(
     tmpdir, recwarn, boring_ft_schedule, explicit_mode: bool, lam_mode: bool, w_expected
 ):
     """Inspect learning rate scheduler state within the training process to ensure it is taking the expected path
-    in both explicit and implict finetuning modes."""
+    in both explicit and implict finetuning modes when using lambdalr lr schedulers (including when reinitializing
+    with them)."""
     seed_everything(42)
     reinit_lr_cfg = None
     if explicit_mode:
