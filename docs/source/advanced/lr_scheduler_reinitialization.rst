@@ -191,6 +191,15 @@ below, lr schedulers specified in different finetuning phases can be of differin
 Once a new lr scheduler is re-initialized, it will continue to be used for subsequent phases unless replaced with
 another lr scheduler configuration defined in a subsequent schedule phase.
 
+.. tip::
+
+    If you have specified an lr scheduler with an ``lr_lambdas`` attribute in any phase,
+    (e.g. :external+torch:class:`~torch.optim.lr_scheduler.LambdaLR`) you can have the last configured lambda
+    automatically applied to new groups in subsequent phases by setting the
+    :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.apply_lambdas_new_pgs` parameter to ``True``. Note this
+    option will only affect phases without reinitialized lr schedulers. Phases with defined lr scheduler
+    reinitialization configs will always apply the specified config, including new lambdas if provided.
+
 .. _implicit lr reinitialization schedule:
 
 LR Scheduler Reinitialization With Generated (Implicit Mode) Finetuning Schedules

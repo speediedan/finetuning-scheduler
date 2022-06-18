@@ -572,6 +572,11 @@ class ScheduleParsingMixin(ABC):
         self._lr_scheduler_init_validation(lr_reinit_phases)
 
     def _convert_phase_keys(self) -> None:
+        """Ensures phase keys are integers, converting them to integers if possible and raising an error otherwise.
+
+        Raises:
+            MisconfigurationException: If the phase keys provided in the schedule are not convertible to integers.
+        """
         assert isinstance(self.ft_schedule, Dict)
         try:
             orig_keys = set(self.ft_schedule.keys())
@@ -590,6 +595,17 @@ class ScheduleParsingMixin(ABC):
             )
 
     def _rewrite_schedule(self, err_msg: Optional[str] = None) -> None:
+        """Saves a reconfigured schedule to ``Trainer.log_dir`` and optionally raises an error message if
+        specified.
+
+        Args:
+            err_msg (Optional[str], optional): The error message that should be raised after saving the transformed
+            schedule. Defaults to None.
+
+        Raises:
+            MisconfigurationException: Provides the specified error message if the caller specifies one. e.g. if the
+                schedule contains (non-convertible) non-integer keys and/or non-zero-based and contiguous keys.
+        """
         assert self.pl_module.trainer is not None and self.pl_module.trainer.log_dir is not None
         assert isinstance(self.ft_schedule, Dict)
         rewrite_dest = None
@@ -606,13 +622,10 @@ class ScheduleParsingMixin(ABC):
             )
 
     def _validate_schedule_keys(self) -> None:
-        """Ensures schedule keys are integers, zero-based and contiguous. If the schedule does not meet these
-        requirements, attempts to transform the passed schedule to meet them and writes the candidate schedule out
-        for subsequent user validation.
+        """Ensures schedule keys are integers, zero-based and contiguous.
 
-        Raises:
-            MisconfigurationException: Raised if the schedule contains non-integer keys and/or non-zero-based and
-                contiguous keys.
+        If the schedule does not meet these requirements, attempts to transform the passed schedule to meet them and
+        writes the candidate schedule out for subsequent user validation.
         """
         assert self.pl_module.trainer is not None and self.pl_module.trainer.log_dir is not None
         assert isinstance(self.ft_schedule, Dict)
