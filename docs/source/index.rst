@@ -301,7 +301,7 @@ A demonstration of the scheduled finetuning callback
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` using the
 `RTE <https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte>`_ and
 `BoolQ <https://github.com/google-research-datasets/boolean-questions>`_ tasks of the
-`SuperGLUE <https://super.gluebenchmark.com/>`_ benchmark and the :doc:`LightningCLI<cli/lightning_cli>`
+`SuperGLUE <https://super.gluebenchmark.com/>`_ benchmark and the :doc:`LightningCLI<common/lightning_cli>`
 is available under ``./fts_examples/``.
 
 Since this CLI-based example requires a few additional packages (e.g. ``transformers``, ``sentencepiece``), you
@@ -458,7 +458,7 @@ Footnotes
    :caption: Examples
 
    Notebook-based Finetuning Scheduler tutorial <https://lightning-ai.github.io/tutorials/notebooks/lightning_examples/finetuning-scheduler.html>
-   CLI-based Finetuning Scheduler tutorial <https://finetuning-scheduler.readthedocs.io/en/latest/#example-scheduled-finetuning-for-superglue>
+   CLI-based Finetuning Scheduler tutorial <https://finetuning-scheduler.readthedocs.io/en/stable/#example-scheduled-finetuning-for-superglue>
 
 .. toctree::
    :maxdepth: 1
