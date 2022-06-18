@@ -16,6 +16,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 ### Changed
 
 - updated PL links for new lightning-ai github urls
+- added a minimum hydra requirement for cli usage (due to omegaconf version incompatibility)
+- separated cli requirements
+
 ### Deprecated
 
 ## [0.1.7] - 2022-06-10

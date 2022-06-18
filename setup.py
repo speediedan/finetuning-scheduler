@@ -41,7 +41,10 @@ extras = {
     "extra": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="extra.txt"),
     "test": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="test.txt"),
     "ipynb": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="ipynb.txt"),
+    "cli": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="cli.txt"),
 }
+for ex in ["extra", "examples"]:
+    extras[ex].extend(extras["cli"])
 extras["dev"] = extras["extra"] + extras["test"] + extras["ipynb"]
 extras["all"] = extras["dev"] + extras["examples"]
 

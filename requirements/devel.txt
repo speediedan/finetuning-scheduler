@@ -12,3 +12,6 @@
 
 # install all extra dependencies for running notebook-based example tests
 -r ./ipynb.txt
+
+# install all extra dependencies required for cli
+-r ./cli.txt
