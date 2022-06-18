@@ -89,7 +89,8 @@ Specifying a Finetuning Schedule
 
 To specify a finetuning schedule, it's convenient to first generate the default schedule and then alter the
 thawed/unfrozen parameter groups associated with each finetuning phase as desired. Finetuning phases are zero-indexed
-and executed in ascending order.
+and executed in ascending order. In addition to being zero-indexed, finetuning phase keys should be contiguous and
+either integers or convertible to integers via ``int()``.
 
 1. First, generate the default schedule to ``Trainer.log_dir``. It will be named after your
    :external+pl:class:`~pytorch_lightning.core.lightning.LightningModule` subclass with the suffix

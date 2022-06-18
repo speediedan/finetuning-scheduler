@@ -4,8 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [0.1.8] - 2022-MM-DD
+
+### Added
+
+- enhanced support and testing for lr schedulers with lr_lambdas attributes
+- accept and automatically convert schedules with non-integer phase keys (that are convertible to integers) to integers
+
+### Fixed
+
+### Changed
+
+- updated PL links for new lightning-ai github urls
+### Deprecated
+
 ## [0.1.7] - 2022-06-10
 ### Fixed
+
 - bump omegaconf version requirement in examples reqs (in addition to extra reqs) due to omegaconf bug
 
 ### Added
