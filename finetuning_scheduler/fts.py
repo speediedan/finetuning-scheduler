@@ -152,11 +152,10 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                     Most unsupported strategies, however, are currently unsupported because they require varying degrees
                     of modification to be compatible (e.g. ``deepspeed`` requires an ``add_param_group`` method,
                     ``tpu_spawn`` an override of the current broadcast method to include python objects).
-            apply_lambdas_new_pgs: If ``True``, applies most recent lambda in lambda_lr list to newly added optimizer
-                groups for lr schedulers that have a lambda_lr attribute. Only applies to phases without reinitialized
-                lr schedulers. Phases with lr scheduler reinitialization configs will always apply the specified
-                lambdas. Defaults to ``False``.
-
+            apply_lambdas_new_pgs: If ``True``, applies most recent lambda in ``lr_lambdas`` list to newly added
+                optimizer groups for lr schedulers that have a ``lr_lambdas`` attribute. Note this option only applies
+                to phases without reinitialized lr schedulers. Phases with defined lr scheduler reinitialization configs
+                will always apply the specified lambdas. Defaults to ``False``.
 
         Attributes:
             _fts_state: The internal finetuning scheduler state.
