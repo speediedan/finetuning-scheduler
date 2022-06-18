@@ -1,0 +1,3 @@
+jsonargparse[signatures]>=4.9.0
+omegaconf>=2.1.0
+hydra-core>=1.1.0
