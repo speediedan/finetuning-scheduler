@@ -32,7 +32,7 @@ def _load_requirements(
     direct dependency req 'git+https://github.com/t/test.git@test' has been pruned from requirements.txt list
     direct dependency req 'http://github.com/user/repo/tarball/master' has been pruned from requirements.txt list
     attempting dev setup with specific pytorch lightning commit: ok
-    ['ok', 'pytorch-lightning @ git+https://github.com/PyTorchLightning/pytorch-lightning.git@ok#egg=pytorch-lightning']
+    ['ok', 'pytorch-lightning @ git+https://github.com/Lightning-AI/lightning.git@ok#egg=pytorch-lightning']
     """
     with open(os.path.join(path_dir, file_name)) as file:
         lines = [ln.strip() for ln in file.readlines()]
@@ -49,7 +49,7 @@ def _load_requirements(
             reqs.append(ln)
     if pl_commit:
         print(f"attempting dev setup with specific pytorch lightning commit: {pl_commit}")
-        pldev_base = "pytorch-lightning @ git+https://github.com/PyTorchLightning/pytorch-lightning.git@"
+        pldev_base = "pytorch-lightning @ git+https://github.com/Lightning-AI/lightning.git@"
         pldev_egg = "#egg=pytorch-lightning"
         pldev_setup_req = pldev_base + pl_commit + pldev_egg
         reqs.append(pldev_setup_req)
