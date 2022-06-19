@@ -42,6 +42,7 @@ from pytorch_lightning.utilities.cloud_io import get_filesystem
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
 from pytorch_lightning.utilities.types import _LRScheduler, LRSchedulerConfig
+from torch import Tensor
 from torch.nn import Module
 from torch.optim.optimizer import Optimizer
 
@@ -186,6 +187,8 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         self.es_phase_complete = True
         self.final_phase = True
         self.finetuningscheduler_callback = None
+        self._check_on_train_epoch_end: Optional[bool]
+        self.best_score: Tensor
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
         """Ensure a :class:`~finetuning_scheduler.fts.FinetuningScheduler` is provided before beginning
@@ -282,6 +285,12 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         self.current_ckpt_depth = 0
         self.best_ckpt_depth = 0
         self.finetuningscheduler_callback = None
+        self._save_on_train_epoch_end: Optional[bool]
+        self.best_model_path: str
+        self.kth_best_model_path: str
+        self.last_model_path: str
+        self.best_k_models: Dict
+        self.kth_value: Tensor
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
         """Verify a valid callback configuration is present before beginning training.
