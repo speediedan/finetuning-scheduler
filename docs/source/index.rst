@@ -253,7 +253,7 @@ sessions.
 
     Note that similar to the behavior of
     :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`,
-    (`specifically this PR <https://github.com/PyTorchLightning/pytorch-lightning/pull/12045>`_), when resuming training
+    (`specifically this PR <https://github.com/Lightning-AI/lightning/pull/12045>`_), when resuming training
     with a different :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` ``dirpath`` from the provided
     checkpoint, the new training session's checkpoint state will be re-initialized at the resumption depth with the
     provided checkpoint being set as the best checkpoint.
