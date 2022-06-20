@@ -150,7 +150,7 @@
 # trainer.fit(..., ckpt_path="some/path/to/my_kth_best_checkpoint.ckpt")
 # ```
 #
-# Note that similar to the behavior of [ModelCheckpoint](https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.callbacks.ModelCheckpoint.html), (specifically [this PR](https://github.com/PyTorchLightning/pytorch-lightning/pull/12045)),
+# Note that similar to the behavior of [ModelCheckpoint](https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.callbacks.ModelCheckpoint.html), (specifically [this PR](https://github.com/Lightning-AI/lightning/pull/12045)),
 # when resuming training with a different [FTSCheckpoint](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts_supporters.html#finetuning_scheduler.fts_supporters.FTSCheckpoint) ``dirpath`` from the provided
 # checkpoint, the new training session's checkpoint state will be re-initialized at the resumption depth with the provided checkpoint being set as the best checkpoint.
 
@@ -532,7 +532,7 @@ optimizer_init = {"weight_decay": 1e-05, "eps": 1e-07, "lr": 1e-05}
 # value. The importance of initial warmup is reduced due to the innate warmup effect of Adam bias correction [[5]](#f3)
 # and the gradual thawing we are performing. Note that commonly used LR schedulers that depend on providing
 # max_iterations/epochs (e.g. the
-# [CosineWarmupScheduler](https://github.com/PyTorchLightning/lightning-tutorials/blob/0c325829101d5a6ebf32ed99bbf5b09badf04a59/course_UvA-DL/05-transformers-and-MH-attention/Transformers_MHAttention.py#L688)
+# [CosineWarmupScheduler](https://github.com/Lightning-AI/tutorials/blob/0c325829101d5a6ebf32ed99bbf5b09badf04a59/course_UvA-DL/05-transformers-and-MH-attention/Transformers_MHAttention.py#L688)
 # used in other pytorch-lightning tutorials) also work with FinetuningScheduler. Though the LR scheduler is theoretically
 # justified [(Loshchilov & Hutter, 2016)](#f4), the particular values provided here are primarily empircally driven.
 #
