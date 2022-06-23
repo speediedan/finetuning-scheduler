@@ -1,9 +1,9 @@
 .. _governance:
 
-Finetuning Scheduler Governance
-###############################
+Fine-Tuning Scheduler Governance
+################################
 
-This document describes governance processes we follow in developing the Finetuning Scheduler.
+This document describes governance processes we follow in developing the Fine-Tuning Scheduler.
 
 Persons of Interest
 *******************
@@ -12,9 +12,9 @@ Persons of Interest
 
 BDFL
 ----
-Role: All final decisions related to Finetuning Scheduler.
+Role: All final decisions related to Fine-Tuning Scheduler.
 
-- Dan Dale (`speediedan <https://github.com/speediedan>`_) (Finetuning Scheduler author)
+- Dan Dale (`speediedan <https://github.com/speediedan>`_) (Fine-Tuning Scheduler author)
 
 Releases
 ********

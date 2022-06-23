@@ -225,7 +225,7 @@ class TestFinetuningScheduler(FinetuningScheduler):
 
 @pytest.fixture(scope="function")
 def ckpt_set(tmpdir_factory) -> Dict:
-    """A fixture that generates a 'best' and 'kth' checkpoint to be used in scheduled finetuning resumption
+    """A fixture that generates a 'best' and 'kth' checkpoint to be used in scheduled fine-tuning resumption
     testing."""
     seed_everything(42)
     callbacks = [
@@ -241,7 +241,7 @@ def ckpt_set(tmpdir_factory) -> Dict:
 
 @pytest.fixture(scope="function")
 def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
-    """Generates a default finetuning schedule for 'implicit' testing, a modified one for 'explicit' mode and an
+    """Generates a default fine-tuning schedule for 'implicit' testing, a modified one for 'explicit' mode and an
     epoch-driven transitions only one for epoch_transitions_only testing."""
     seed_everything(42)
     callbacks = [FinetuningScheduler(gen_ft_sched_only=True)]
@@ -522,7 +522,7 @@ def invalid_schedules(tmpdir_factory) -> Dict:
 
 
 class ComplexNestedModel(LightningModule):
-    """A nested model with a parent (non-leaf) module parameter to validate scheduled finetuning with such
+    """A nested model with a parent (non-leaf) module parameter to validate scheduled fine-tuning with such
     architectures."""
 
     def __init__(self):
@@ -572,7 +572,7 @@ class ComplexNestedModel(LightningModule):
     ids=["dist_boring", "Boring", "ParityRNN", "ComplexNested"],
 )
 def test_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expected: Tuple):
-    """Validate the default finetuning schedule generation."""
+    """Validate the default fine-tuning schedule generation."""
     seed_everything(42)
     callbacks = [FinetuningScheduler(gen_ft_sched_only=True)]
     trainer_opts = {"default_root_dir": tmpdir, "callbacks": callbacks}
@@ -609,8 +609,8 @@ EXPECTED_EXPIMP_RESULTS = {
 @pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
 @pytest.mark.parametrize("max_depth", [-1, 0, 2, 999], ids=["default", "maxdepth0", "maxdepth2", "maxdepth999"])
 def test_finetuningscheduling_explicit_implicit(tmpdir, boring_ft_schedule, explicit_mode: bool, max_depth: int):
-    """Validate scheduled finetuning works as expected in 'explicit' and 'implicit' modes in the context of various
-    max_depth specifications."""
+    """Validate scheduled fine-tuning works as expected in 'explicit' and 'implicit' modes in the context of
+    various max_depth specifications."""
     seed_everything(42)
     ft_schedule = boring_ft_schedule[1] if explicit_mode else None
     callbacks = [
@@ -655,7 +655,7 @@ EXPECTED_DECAY_RESULTS = {
 @pytest.mark.parametrize("nodecay_mode", [False, True], ids=["alldecay", "nodecay"])
 @pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
 def test_finetuningscheduling_decay(tmpdir, boring_ft_schedule, explicit_mode: bool, nodecay_mode: bool):
-    """Validate scheduled finetuning works as expected in 'explicit' and 'implicit' modes in the context of
+    """Validate scheduled fine-tuning works as expected in 'explicit' and 'implicit' modes in the context of
     different nodecay list settings.
 
     Separately parameterized from :meth:`test_finetuningscheduling_explicit_implicit` to avoid
@@ -732,7 +732,7 @@ EXPECTED_DIRPATH = "exists and is not empty"
 def test_fts_callback_resume(
     tmpdir, ckpt_set, recwarn, diff_dirpath: bool, train_chk_mode: Optional[bool], ckpt: str, max_depth: int
 ):
-    """Validate scheduled finetuning resumption functions as expected from both 'best' and 'kth'(not-best)
+    """Validate scheduled fine-tuning resumption functions as expected from both 'best' and 'kth'(not-best)
     checkpoints in both train/val stage check modes with and without max_depth specified."""
     resume_warns = EXPECTED_WARNS
     dirpath = None if diff_dirpath else Path(ckpt_set["best"]).parent
@@ -784,7 +784,7 @@ EXPECTED_INTRAFIT_STATE = {
 
 @pytest.mark.parametrize("restore_best", [True, False], ids=["default", "norestorebest"])
 def test_finetuningscheduling_intrafit(tmpdir, restore_best: bool):
-    """Inspect scheduled finetuning state within the training process to ensure it is taking the expected path in
+    """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
     both restore_best modes."""
     seed_everything(42)
     model = FinetuningSchedulerBoringModel()
@@ -862,7 +862,7 @@ EXPECTED_LR_STATE = {
 @pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
 def test_finetuningscheduling_reinitlr(tmpdir, boring_ft_schedule, explicit_mode: bool, reinit_lr: bool):
     """Inspect learning rate scheduler state within the training process to ensure it is taking the expected path
-    in both explicit and implict finetuning modes."""
+    in both explicit and implict fine-tuning modes."""
     seed_everything(42)
     reinit_lr_cfg = None
     if explicit_mode:
@@ -948,7 +948,7 @@ def test_finetuningscheduling_reinitlr_lambda(
     tmpdir, recwarn, boring_ft_schedule, explicit_mode: bool, lam_mode: bool, w_expected
 ):
     """Inspect learning rate scheduler state within the training process to ensure it is taking the expected path
-    in both explicit and implict finetuning modes when using lambdalr lr schedulers (including when reinitializing
+    in both explicit and implict fine-tuning modes when using lambdalr lr schedulers (including when reinitializing
     with them)."""
     seed_everything(42)
     reinit_lr_cfg = None
@@ -1019,7 +1019,7 @@ def test_finetuningscheduling_opt_warns():
         ),
         ([FinetuningScheduler(), FinetuningScheduler(), FTSCheckpoint(monitor="val_loss")], "multiple Finetuning"),
         ([FinetuningScheduler(), FTSCheckpoint(monitor=None)], "but has no quantity to monitor"),
-        ([FinetuningScheduler(ft_schedule="/tmp/fnf")], "Could not find specified finetuning scheduling file"),
+        ([FinetuningScheduler(ft_schedule="/tmp/fnf")], "Could not find specified fine-tuning scheduling file"),
         (
             [
                 FinetuningScheduler(
@@ -1055,7 +1055,7 @@ def test_finetuningscheduling_misconfiguration(tmpdir, callbacks: List[Callback]
         ("missing_param", ("did not match any named", None)),
         ("non_disjoint", ("Phases are not disjoint", None)),
         ("dup_key", ("Duplicate key", None)),
-        ("lr_phase0", ("A lr for finetuning phase 0", None)),
+        ("lr_phase0", ("A lr for fine-tuning phase 0", None)),
         ("invalid_lr", ("convertable to a float", None)),
         pytest.param("unsupp_rlrs", ("provided lr scheduler type ", None), marks=RunIf(min_torch="1.10")),
         ("invalid_plrs", ("key in lr scheduler dict must be", None)),
@@ -1181,7 +1181,7 @@ def test_finetuningscheduling_optimizer_compat(tmpdir):
     ids=["eponly", "noeponly"],
 )
 def test_finetuningscheduling_epoch_trans_only(tmpdir, boring_ft_schedule, epoch_only_cfg: bool, expected_state: Tuple):
-    """Validate scheduled finetuning works as expected in 'epoch_transitions_only' mode while raising the
+    """Validate scheduled fine-tuning works as expected in 'epoch_transitions_only' mode while raising the
     appropriate exception/warning with respect to epoch_transitions_only scheduling and early stopping
     respectively."""
     seed_everything(42)

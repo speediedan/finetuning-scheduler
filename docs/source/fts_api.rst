@@ -1,5 +1,5 @@
-Finetuning Scheduler API
-========================
+Fine-Tuning Scheduler API
+=========================
 
 .. currentmodule:: finetuning_scheduler
 

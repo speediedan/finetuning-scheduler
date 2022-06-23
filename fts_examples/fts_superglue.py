@@ -9,8 +9,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""A demonstration of the scheduled finetuning callback
-:ref:`FinetuningScheduler<advanced/finetuning_scheduler:Finetuning Scheduler>` using the
+"""A demonstration of the scheduled fine-tuning callback
+:ref:`FinetuningScheduler<advanced/finetuning_scheduler:Fine-Tuning Scheduler>` using the
 `RTE <https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte>`_ and
 `BoolQ <https://github.com/google-research-datasets/boolean-questions>`_ tasks of the
 `SuperGLUE <https://super.gluebenchmark.com/>`_ benchmark and the :ref:`LightningCLI<common/lightning_cli:LightningCLI>`
@@ -21,13 +21,13 @@ adjust the configuration files referenced below as desired for other configurati
 
 .. code-block:: bash
 
-    # Generate a baseline without scheduled finetuning enabled:
+    # Generate a baseline without scheduled fine-tuning enabled:
     python fts_superglue.py fit --config config/nofts_baseline.yaml
 
-    # Train with the default finetuning schedule:
+    # Train with the default fine-tuning schedule:
     python fts_superglue.py fit --config config/fts_implicit.yaml
 
-    # Train with a non-default finetuning schedule:
+    # Train with a non-default fine-tuning schedule:
     python fts_superglue.py fit --config config/fts_explicit.yaml
 """
 
@@ -42,9 +42,9 @@ from pytorch_lightning.utilities import rank_zero_warn
 from pytorch_lightning.utilities.cli import LightningCLI
 from torch.utils.data import DataLoader
 
-from finetuning_scheduler.fts import FinetuningScheduler
+import finetuning_scheduler as fts
 from fts_examples import _HF_AVAILABLE, _SP_AVAILABLE
-from fts_examples.cli_experiment_utils import collect_env_info, instantiate_registered_class
+from fts_examples.cli_experiment_utils import collect_env_info, instantiate_class
 
 if _HF_AVAILABLE:
     import datasets
@@ -186,7 +186,7 @@ class RteBoolqModule(pl.LightningModule):
         log_env_details: bool = True,
     ):
         """In this example, this :class:`~pytorch_lightning.core.lightning.LightningModule` is initialized by composing
-        the ./config/fts_defaults.yaml default configuration with various scheduled finetuning yaml configurations
+        the ./config/fts_defaults.yaml default configuration with various scheduled fine-tuning yaml configurations
         via the :class:`~pytorch_lightning.utilities.cli.LightningCLI` but it can be used like any other
         :class:`~pytorch_lightning.core.lightning.LightningModule` as well.
 
@@ -239,9 +239,9 @@ class RteBoolqModule(pl.LightningModule):
         self.no_decay = ["bias", "LayerNorm.weight"]
 
     @property
-    def finetuningscheduler_callback(self) -> Optional[FinetuningScheduler]:  # type: ignore
-        fts = [c for c in self.trainer.callbacks if isinstance(c, FinetuningScheduler)]  # type: ignore
-        return fts[0] if fts else None
+    def finetuningscheduler_callback(self) -> Optional[fts.FinetuningScheduler]:  # type: ignore
+        fts_callback = [c for c in self.trainer.callbacks if isinstance(c, fts.FinetuningScheduler)]  # type: ignore
+        return fts_callback[0] if fts_callback else None
 
     def forward(self, **inputs):
         return self.model(**inputs)
@@ -303,9 +303,9 @@ class RteBoolqModule(pl.LightningModule):
         # but in this case we pass a list of parameter groups to ensure weight_decay is
         # not applied to the bias parameter (for completeness, in this case it won't make much
         # performance difference)
-        optimizer = instantiate_registered_class(args=self._init_param_groups(), init=self.hparams.optimizer_init)
+        optimizer = instantiate_class(args=self._init_param_groups(), init=self.hparams.optimizer_init)
         scheduler = {
-            "scheduler": instantiate_registered_class(args=optimizer, init=self.hparams.lr_scheduler_init),
+            "scheduler": instantiate_class(args=optimizer, init=self.hparams.lr_scheduler_init),
             **self.hparams.pl_lrs_cfg,
         }
         return [optimizer], [scheduler]

@@ -1,8 +1,8 @@
 """
-Finetuning Scheduler
+Fine-Tuning Scheduler
 =====================
 
-Package used to implement multi-phase finetuned training schedules
+Package used to implement multi-phase fine-tuned training schedules
 
 """
 from finetuning_scheduler.__about__ import *  # noqa: F401, F403

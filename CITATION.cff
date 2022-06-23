@@ -1,26 +1,26 @@
 cff-version: 1.2.0
 message: "If you want to cite this extension, feel free to use this 😊"
-title: "Finetuning Scheduler"
-abstract: "A PyTorch Lightning extension that enhances model experimentation with flexible finetuning schedules."
+title: "Fine-Tuning Scheduler"
+abstract: "A PyTorch Lightning extension that enhances model experimentation with flexible fine-tuning schedules."
 date-released: 2022-02-04
 authors:
   - family-names: "Dale"
     given-names: "Dan"
 version: 0.1.7
 identifiers:
-  - description: "Finetuning Scheduler (all versions)"
+  - description: "Fine-Tuning Scheduler (all versions)"
     type: doi
     value: 10.5281/zenodo.6463952
-  - description: "Finetuning Scheduler (v0.1.1)"
+  - description: "Fine-Tuning Scheduler (v0.1.1)"
     type: doi
     value: 10.5281/zenodo.6463992
-  - description: "Finetuning Scheduler (v0.1.2)"
+  - description: "Fine-Tuning Scheduler (v0.1.2)"
     type: doi
     value: 10.5281/zenodo.6499358
-  - description: "Finetuning Scheduler (v0.1.3)"
+  - description: "Fine-Tuning Scheduler (v0.1.3)"
     type: doi
     value: 10.5281/zenodo.6518977
-  - description: "Finetuning Scheduler (v0.1.4)"
+  - description: "Fine-Tuning Scheduler (v0.1.4)"
     type: doi
     value: 10.5281/zenodo.6578519
   - description: "Finetuning Scheduler (v0.1.5)"
@@ -36,5 +36,5 @@ keywords:
   - machine learning
   - deep learning
   - artificial intelligence
-  - finetuning
   - fine-tuning
+  - finetuning

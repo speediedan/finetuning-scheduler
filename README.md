@@ -2,7 +2,7 @@
 
 <img src="docs/source/_static/images/logos/logo_fts.png" width="400px">
 
-**A PyTorch Lightning extension that enhances model experimentation with flexible finetuning schedules.**
+**A PyTorch Lightning extension that enhances model experimentation with flexible fine-tuning schedules.**
 
 ______________________________________________________________________
 
@@ -29,11 +29,11 @@ ______________________________________________________________________
 
 [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) is simple to use yet powerful, offering a number of features that facilitate model research and exploration:
 
-- easy specification of flexible finetuning schedules with explicit or regex-based parameter selection
+- easy specification of flexible fine-tuning schedules with explicit or regex-based parameter selection
   - implicit schedules for initial/naive model exploration
   - explicit schedules for performance tuning, fine-grained behavioral experimentation and computational efficiency
-- automatic restoration of best per-phase checkpoints driven by iterative application of early-stopping criteria to each finetuning phase
-- composition of early-stopping and manually-set epoch-driven finetuning phase transitions
+- automatic restoration of best per-phase checkpoints driven by iterative application of early-stopping criteria to each fine-tuning phase
+- composition of early-stopping and manually-set epoch-driven fine-tuning phase transitions
 
 ______________________________________________________________________
 
@@ -94,7 +94,7 @@ python -m pip install -e ".[all]" -r requirements/docs.txt
 
 <!-- end skipping PyPI description -->
 
-### Step 1: Import the FinetuningScheduler callback and start finetuning!
+### Step 1: Import the FinetuningScheduler callback and start fine-tuning!
 
 ```python
 from pytorch_lightning import Trainer
@@ -103,27 +103,27 @@ from finetuning_scheduler import FinetuningScheduler
 trainer = Trainer(callbacks=[FinetuningScheduler()])
 ```
 
-Get started by following [the Finetuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/stable/index.html#scheduled-finetuning-superglue) or by following the [notebook-based](https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html) Finetuning Scheduler tutorial.
+Get started by following [the Fine-Tuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/latest/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/latest/index.html#scheduled-finetuning-superglue) or by following the [notebook-based](https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html) Fine-Tuning Scheduler tutorial.
 
 ______________________________________________________________________
 
 ## Examples
 
-### Scheduled Finetuning For SuperGLUE
+### Scheduled Fine-Tuning For SuperGLUE
 
 - [Notebook-based Tutorial](https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html)
-- [CLI-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/stable/#scheduled-finetuning-superglue)
+- [CLI-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/latest/#scheduled-finetuning-superglue)
 
 ______________________________________________________________________
 
 ## Continuous Integration
 
-Finetuning Scheduler is rigorously tested across multiple CPUs, GPUs and against major Python and PyTorch versions. Each Finetuning Scheduler minor release (major.minor.patch) is paired with a PyTorch Lightning minor release (e.g. Finetuning Scheduler 0.1 depends upon PyTorch Lightning 1.6).
+Fine-Tuning Scheduler is rigorously tested across multiple CPUs, GPUs and against major Python and PyTorch versions. Each Fine-Tuning Scheduler minor release (major.minor.patch) is paired with a PyTorch Lightning minor release (e.g. Fine-Tuning Scheduler 0.1 depends upon PyTorch Lightning 1.6).
 
-To ensure maximum stability, the latest PyTorch Lightning patch release fully tested with Finetuning Scheduler is set as a maximum dependency in Finetuning Scheduler's requirements.txt (e.g. \<= 1.6.1). If you'd like to test a specific PyTorch Lightning patch version greater than that currently in Finetuning Scheduler's requirements.txt, it will likely work but you should install Finetuning Scheduler from source and update the requirements.txt as desired.
+To ensure maximum stability, the latest PyTorch Lightning patch release fully tested with Fine-Tuning Scheduler is set as a maximum dependency in Fine-Tuning Scheduler's requirements.txt (e.g. \<= 1.6.1). If you'd like to test a specific PyTorch Lightning patch version greater than that currently in Fine-Tuning Scheduler's requirements.txt, it will likely work but you should install Fine-Tuning Scheduler from source and update the requirements.txt as desired.
 
 <details>
-  <summary>Current build statuses for Finetuning Scheduler </summary>
+  <summary>Current build statuses for Fine-Tuning Scheduler </summary>
 
 |   System / PyTorch ver   |                                                                                                               1.8 (LTS, min. req.)                                                                                                               |                                                                                                      1.11 (latest)                                                                                                       |
 | :----------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
@@ -138,20 +138,20 @@ To ensure maximum stability, the latest PyTorch Lightning patch release fully te
 
 ## Community
 
-Finetuning Scheduler is developed and maintained by the community in close communication with the [PyTorch Lightning team](https://pytorch-lightning.readthedocs.io/en/latest/governance.html#leads). Thanks to everyone in the community for their tireless effort building and improving the immensely useful core PyTorch Lightning project.
+Fine-Tuning Scheduler is developed and maintained by the community in close communication with the [PyTorch Lightning team](https://pytorch-lightning.readthedocs.io/en/latest/governance.html#leads). Thanks to everyone in the community for their tireless effort building and improving the immensely useful core PyTorch Lightning project.
 
-PR's welcome! Please see the [contributing guidelines](https://finetuning-scheduler.readthedocs.io/en/stable/generated/CONTRIBUTING.html) (which are essentially the same as PyTorch Lightning's).
+PR's welcome! Please see the [contributing guidelines](https://finetuning-scheduler.readthedocs.io/en/latest/generated/CONTRIBUTING.html) (which are essentially the same as PyTorch Lightning's).
 
 ______________________________________________________________________
 
-## Citing Finetuning Scheduler
+## Citing Fine-Tuning Scheduler
 
 Please cite:
 
 ```tex
 @misc{Dan_Dale_2022_6463952,
     author       = {Dan Dale},
-    title        = {{Finetuning Scheduler}},
+    title        = {{Fine-Tuning Scheduler}},
     month        = Feb,
     year         = 2022,
     doi          = {10.5281/zenodo.6463952},
