@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/source/_static/images/logos/logo_fts.png" width="400px">
+<img src="docs/source/_static/images/logos/logo_fts.png" width="401px">
 
 **A PyTorch Lightning extension that enhances model experimentation with flexible fine-tuning schedules.**
 

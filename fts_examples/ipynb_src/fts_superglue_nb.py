@@ -13,7 +13,7 @@
 # %% [markdown]
 # ## Scheduled Fine-Tuning with the Fine-Tuning Scheduler Extension
 #
-# ![Fine-Tuning Scheduler logo](logo_fts.png){height="58px" width="401px"}
+# ![Fine-Tuning Scheduler logo](logo_fts.png){height="55px" width="401px"}
 #
 # The [Fine-Tuning Scheduler](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) extension accelerates and enhances model experimentation with flexible fine-tuning schedules.
 #

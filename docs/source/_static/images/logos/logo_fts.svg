@@ -7,13 +7,16 @@
    xmlns="http://www.w3.org/2000/svg"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   width="300"
-   height="50"
-   viewBox="0 0 1050.87 139.84"
+   width="307"
+   height="46"
+   viewBox="0 0 1075.3903 128.6528"
    version="1.1"
    id="svg8"
    inkscape:version="0.92.5 (2060ec1f9f, 2020-04-08)"
-   sodipodi:docname="logo_fts.svg">
+   sodipodi:docname="logo_fts.svg"
+   inkscape:export-filename="/run/user/1000/gvfs/sftp:host=speediedl/home/speediedan/repos/finetuning-scheduler/docs/source/_static/images/logos/logo_fts.png"
+   inkscape:export-xdpi="126.51468"
+   inkscape:export-ydpi="126.51468">
   <defs
      id="defs2" />
   <sodipodi:namedview
@@ -24,7 +27,7 @@
      inkscape:pageopacity="0.0"
      inkscape:pageshadow="2"
      inkscape:zoom="1.979899"
-     inkscape:cx="279.37328"
+     inkscape:cx="109.66766"
      inkscape:cy="73.880283"
      inkscape:document-units="mm"
      inkscape:current-layer="g930"
@@ -34,10 +37,10 @@
      fit-margin-left="0"
      fit-margin-right="0"
      fit-margin-bottom="0"
-     inkscape:window-width="1889"
+     inkscape:window-width="2184"
      inkscape:window-height="644"
-     inkscape:window-x="501"
-     inkscape:window-y="238"
+     inkscape:window-x="2033"
+     inkscape:window-y="312"
      inkscape:window-maximized="0"
      viewbox-width="1050.87" />
   <metadata
@@ -48,7 +51,7 @@
         <dc:format>image/svg+xml</dc:format>
         <dc:type
            rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
-        <dc:title></dc:title>
+        <dc:title />
       </cc:Work>
     </rdf:RDF>
   </metadata>
@@ -56,7 +59,7 @@
      inkscape:label="Layer 1"
      inkscape:groupmode="layer"
      id="layer1"
-     transform="translate(249.78138,125.33605)">
+     transform="translate(249.78138,111.32445)">
     <g
        transform="matrix(0.76597759,0,0,0.69422235,-175.77072,-516.88606)"
        id="g930"
@@ -65,7 +68,9 @@
        viewBox="0 0 644.18524 111.87158">
       <g
          id="g889"
-         transform="matrix(-0.13592136,-0.3100443,0.3947227,-0.1650825,398.43619,857.56556)">
+         transform="matrix(-0.13592136,-0.3100443,0.3947227,-0.1650825,483.89766,883.05065)"
+         inkscape:export-xdpi="96.774956"
+         inkscape:export-ydpi="96.774956">
         <g
            id="g1107"
            transform="matrix(0.67933325,0.59109595,-0.89191291,0.62396782,404.94114,313.79249)"
@@ -150,7 +155,9 @@
          style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:114.82363129px;line-height:1.25;font-family:'Latin Modern Roman Slanted';-inkscape-font-specification:'Latin Modern Roman Slanted, Bold';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-feature-settings:normal;text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#000000;fill-opacity:1;stroke:none"
          x="-95.492805"
          y="706.37292"
-         id="text920"><tspan
+         id="text920"
+         inkscape:export-xdpi="96.774956"
+         inkscape:export-ydpi="96.774956"><tspan
            sodipodi:role="line"
            x="-95.492805"
            y="706.37292"
