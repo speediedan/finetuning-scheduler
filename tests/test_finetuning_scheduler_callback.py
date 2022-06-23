@@ -555,7 +555,7 @@ class ComplexNestedModel(LightningModule):
             FinetuningSchedulerBoringModel(),
             True,
             (4, ["layer.2.bias", "layer.2.weight"], ["layer.0.bias", "layer.0.weight"]),
-            marks=RunIf(min_gpus=2),
+            marks=RunIf(min_cuda_gpus=2),
         ),
         (
             FinetuningSchedulerBoringModel(),
@@ -1129,10 +1129,10 @@ def test_finetuningscheduling_invalid_schedules(tmpdir, invalid_schedules, sched
     [
         pytest.param("cust_stgy", None, None, "allow_untest"),
         pytest.param("ddp2", None, None, "ddp2_wcpu"),
-        pytest.param("ddp2", 1, None, None, marks=RunIf(min_gpus=1)),
-        pytest.param("ddp_fully_sharded", 1, None, None, marks=RunIf(fairscale_fully_sharded=True, min_gpus=1)),
-        pytest.param("horovod", None, None, None, marks=RunIf(horovod=True, min_gpus=1)),
-        pytest.param("deepspeed_stage_2", 1, None, None, marks=RunIf(deepspeed=True, min_gpus=1)),
+        pytest.param("ddp2", 1, None, None, marks=RunIf(min_cuda_gpus=1)),
+        pytest.param("ddp_fully_sharded", 1, None, None, marks=RunIf(fairscale_fully_sharded=True, min_cuda_gpus=1)),
+        pytest.param("horovod", None, None, None, marks=RunIf(horovod=True, min_cuda_gpus=1)),
+        pytest.param("deepspeed_stage_2", 1, None, None, marks=RunIf(deepspeed=True, min_cuda_gpus=1)),
     ],
     ids=["cust_stgy", "cpu_mock", "ddp2", "ddp_fully_sharded", "horovod", "deepspeed_stage_2"],
 )
@@ -1276,7 +1276,7 @@ def test_early_stopping_thresholds(tmpdir, stopping_threshold, divergence_thesho
     assert trainer.current_epoch - 1 == expected_epoch, "early_stopping failed"
 
 
-@RunIf(standalone=True, min_gpus=2)
+@RunIf(standalone=True, min_cuda_gpus=2)
 def test_fts_multi_dp(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'dp'
     distributed context."""
@@ -1291,7 +1291,7 @@ def test_fts_multi_dp(tmpdir):
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
-@RunIf(standalone=True, min_gpus=2)
+@RunIf(standalone=True, min_cuda_gpus=2)
 def test_fts_multi_ddp(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp'
     distributed context."""
@@ -1306,7 +1306,7 @@ def test_fts_multi_ddp(tmpdir):
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
-@RunIf(standalone=True, fairscale=True, min_gpus=2)
+@RunIf(standalone=True, fairscale=True, min_cuda_gpus=2)
 def test_fts_multi_ddp_sharded(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_sharded'
     distributed context."""
@@ -1321,7 +1321,7 @@ def test_fts_multi_ddp_sharded(tmpdir):
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
-@RunIf(standalone=True, min_gpus=2)
+@RunIf(standalone=True, min_cuda_gpus=2)
 def test_fts_multi_ddp_spawn(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_spawn'
     distributed context."""
@@ -1333,7 +1333,7 @@ def test_fts_multi_ddp_spawn(tmpdir):
     assert trainer.callback_metrics["val_loss"] < 0.1
 
 
-@RunIf(standalone=True, min_gpus=2)
+@RunIf(standalone=True, min_cuda_gpus=2)
 def test_fts_multi_ddp_sharded_spawn(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported
     'ddp_sharded_spawn' distributed context."""
