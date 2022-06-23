@@ -1,4 +1,4 @@
 #pytorch-lightning>=1.6.0,<=1.6.3
 # currently working off of pl dev master
-git+https://github.com/Lightning-AI/lightning.git@554056c21ae191b7bd2ea669d9ac84917dacdc6d#egg=pytorch-lightning
+git+https://github.com/Lightning-AI/lightning.git@887dc0ff8cb05bf141e6f7e967d6a595c948943a#egg=pytorch-lightning
 torch>=1.9.*

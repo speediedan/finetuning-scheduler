@@ -3,19 +3,15 @@ import sys
 from collections import namedtuple
 from typing import Any, Dict, Optional, Tuple, Union
 
-from pytorch_lightning.utilities.cli import _Registry, CALLBACK_REGISTRY
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from torch.utils import collect_env
 
-MOCK_REGISTRY = _Registry()
 
-
-def instantiate_registered_class(init: Dict[str, Any], args: Optional[Union[Any, Tuple[Any, ...]]] = None) -> Any:
-    """Instantiates a class with the given args and init. Accepts class definitions in the form of a "class_path"
-    or "callback_key" associated with a _Registry.
+def instantiate_class(init: Dict[str, Any], args: Optional[Union[Any, Tuple[Any, ...]]] = None) -> Any:
+    """Instantiates a class with the given args and init. Accepts class definitions with a "class_path".
 
     Args:
-        init: Dict of the form {"class_path":... or "callback_key":..., "init_args":...}.
+        init: Dict of the form {"class_path":..., "init_args":...}.
         args: Positional arguments required for instantiation.
 
     Returns:
@@ -33,18 +29,8 @@ def instantiate_registered_class(init: Dict[str, Any], args: Optional[Union[Any,
             class_module, class_name = init["class_path"].rsplit(".", 1)
         else:  # class is expected to be locally defined
             args_class = globals()[init["class_path"]]
-    elif init.get("callback_key", None):
-        callback_path = CALLBACK_REGISTRY.get(init["callback_key"], None) or MOCK_REGISTRY.get(
-            init["callback_key"], None
-        )
-        assert callback_path, MisconfigurationException(
-            f'specified callback_key {init["callback_key"]} has not been registered'
-        )
-        class_module, class_name = callback_path.__module__, callback_path.__name__
     else:
-        raise MisconfigurationException(
-            "Neither a class_path nor callback_key were included in a configuration that" "requires one"
-        )
+        raise MisconfigurationException("A class_path was not included in a configuration that requires one")
     if not shortcircuit_local:
         module = __import__(class_module, fromlist=[class_name])
         args_class = getattr(module, class_name)

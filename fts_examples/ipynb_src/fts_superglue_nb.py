@@ -179,19 +179,16 @@
 import os
 import warnings
 from datetime import datetime
-from importlib import import_module
 from typing import Any, Dict, List, Optional
 
+import sentencepiece as sp  # noqa: F401 # isort: split
 import datasets
-
-import sentencepiece as sp  # isort: split
 import pytorch_lightning as pl
 import torch
+from datasets import logging as datasets_logging
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers.tensorboard import TensorBoardLogger
 from pytorch_lightning.utilities import rank_zero_warn
-from pytorch_lightning.utilities.cli import _Registry
-from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from torch.optim.adamw import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.data import DataLoader
@@ -200,38 +197,24 @@ from transformers import logging as transformers_logging
 from transformers.tokenization_utils_base import BatchEncoding
 
 # %%
-# a couple helper functions to prepare code to work with a user module registry
-MOCK_REGISTRY = _Registry()
+# Import the `FinetuningScheduler` PyTorch Lightning extension module we want to use. This will import all necessary callbacks.
+import finetuning_scheduler as fts
 
-
-def mock_register_module(key: str, require_fqn: bool = False) -> List:
-    if key.lower() == "finetuningscheduler":
-        mod = import_module("finetuning_scheduler")
-        MOCK_REGISTRY.register_classes(mod, pl.callbacks.Callback)
-    else:
-        raise MisconfigurationException(f"user module key '{key}' not found")
-    registered_list = []
-    # make registered class available by unqualified class name by default
-    if not require_fqn:
-        for n, c in MOCK_REGISTRY.items():
-            globals()[f"{n}"] = c
-        registered_list = ", ".join([n for n in MOCK_REGISTRY.names])
-    else:
-        registered_list = ", ".join([c.__module__ + "." + c.__name__ for c in MOCK_REGISTRY.classes])
-    print(f"Imported and registered the following callbacks: {registered_list}")
-
-
-# %%
-# Load the `FinetuningScheduler` PyTorch Lightning extension module we want to use. This will import all necessary callbacks.
-mock_register_module("finetuningscheduler")
 # set notebook-level variables
 TASK_NUM_LABELS = {"boolq": 2, "rte": 2}
 DEFAULT_TASK = "rte"
 
-transformers_logging.set_verbosity_error()
+# reduce hf logging verbosity to focus on tutorial-relevant code/messages
+for hflogger in [transformers_logging, datasets_logging]:
+    hflogger.set_verbosity_error()
 # ignore warnings related tokenizers_parallelism/DataLoader parallelism trade-off and
 # expected logging behavior
-for warnf in [".*does not have many workers*", ".*The number of training samples.*"]:
+for warnf in [
+    ".*does not have many workers.*",
+    ".*The number of training samples.*",
+    ".*converting to a fast.*",
+    ".*number of training batches.*",
+]:
     warnings.filterwarnings("ignore", warnf)
 
 
@@ -386,9 +369,9 @@ class RteBoolqModule(pl.LightningModule):
         self.no_decay = ["bias", "LayerNorm.weight"]
 
     @property
-    def finetuningscheduler_callback(self) -> FinetuningScheduler:  # type: ignore
-        fts = [c for c in self.trainer.callbacks if isinstance(c, FinetuningScheduler)]  # type: ignore
-        return fts[0] if fts else None
+    def finetuningscheduler_callback(self) -> fts.FinetuningScheduler:
+        fts_callback = [c for c in self.trainer.callbacks if isinstance(c, fts.FinetuningScheduler)]
+        return fts_callback[0] if fts_callback else None
 
     def forward(self, **inputs):
         return self.model(**inputs)
@@ -567,9 +550,9 @@ earlystopping_kwargs = {"monitor": "val_loss", "min_delta": 0.001, "patience": 2
 checkpoint_kwargs = {"monitor": "val_loss", "save_top_k": 1}
 fts_kwargs = {"max_depth": 1}
 callbacks = [
-    FinetuningScheduler(ft_schedule=ft_schedule_name, **fts_kwargs),  # type: ignore
-    FTSEarlyStopping(**earlystopping_kwargs),  # type: ignore
-    FTSCheckpoint(**checkpoint_kwargs),  # type: ignore
+    fts.FinetuningScheduler(ft_schedule=ft_schedule_name, **fts_kwargs),
+    fts.FTSEarlyStopping(**earlystopping_kwargs),
+    fts.FTSCheckpoint(**checkpoint_kwargs),
 ]
 
 # %%
@@ -626,9 +609,9 @@ train()
 # %%
 nofts_callbacks = [EarlyStopping(**earlystopping_kwargs), ModelCheckpoint(**checkpoint_kwargs)]
 fts_implicit_callbacks = [
-    FinetuningScheduler(**fts_kwargs),  # type: ignore
-    FTSEarlyStopping(**earlystopping_kwargs),  # type: ignore
-    FTSCheckpoint(**checkpoint_kwargs),  # type: ignore
+    fts.FinetuningScheduler(**fts_kwargs),
+    fts.FTSEarlyStopping(**earlystopping_kwargs),
+    fts.FTSCheckpoint(**checkpoint_kwargs),
 ]
 scenario_callbacks = {"nofts_baseline": nofts_callbacks, "fts_implicit": fts_implicit_callbacks}
 

@@ -109,17 +109,14 @@ def test_fts_superglue_nb(recwarn, nb_name):
     test_example_base = os.path.join(os.path.dirname(__file__), "ipynb_src")
     example_script = os.path.join(test_example_base, f"{nb_name}.py")
     command = ["python", "-m", "jupytext", "--set-formats", "ipynb,py:percent", example_script]
-    exitcode = subprocess.call(command)
-    assert exitcode == 0
+    cp = subprocess.run(command)
+    assert cp.returncode == 0
     example_ipynb = os.path.join(test_example_base, f"{nb_name}.ipynb")
     assert os.path.exists(example_ipynb)
     command = ["python", "-m", "pytest", "--nbval", "-v", example_ipynb]
-    exitcode = subprocess.call(command)
-    assert exitcode == 0
+    cp = subprocess.run(command, capture_output=True)
+    assert cp.returncode == 0
     generated_schedule = os.path.join(test_example_base, "RteBoolqModule_ft_schedule_deberta_base.yaml")
     for f in [example_ipynb, generated_schedule]:
         os.remove(f)
         assert not os.path.exists(f)
-    # ensure no unexpected warnings detected
-    matched = [any([re.compile(w).search(w_msg.message.args[0]) for w in ADV_EXPECTED_WARNS]) for w_msg in recwarn.list]
-    assert all(matched)
