@@ -1,8 +1,8 @@
 # Contributing
 
-Welcome to the community! Finetuning Scheduler extends the most advanced DL research platform on the planet (PyTorch Lightning) and strives to support the latest, best practices and integrations that the amazing PyTorch team and other research organizations roll out!
+Welcome to the community! Fine-Tuning Scheduler extends the most advanced DL research platform on the planet (PyTorch Lightning) and strives to support the latest, best practices and integrations that the amazing PyTorch team and other research organizations roll out!
 
-As Finetuning Scheduler is an extension of PyTorch Lightning, the remainder of the contribution guidelines conform to (and many are drawn from) the PyTorch Lightning [contribution documentation](https://pytorch-lightning.readthedocs.io/en/latest/generated/CONTRIBUTING.html).
+As Fine-Tuning Scheduler is an extension of PyTorch Lightning, the remainder of the contribution guidelines conform to (and many are drawn from) the PyTorch Lightning [contribution documentation](https://pytorch-lightning.readthedocs.io/en/latest/generated/CONTRIBUTING.html).
 
 A giant thank you to the [PyTorch Lightning team](https://pytorch-lightning.readthedocs.io/en/latest/governance.html#leads) for their tireless effort building the immensely useful PyTorch Lightning project and their thoughtful feedback on and review of this extension.
 
@@ -13,7 +13,7 @@ Any additions or improvements should minimize the things the user needs to remem
 
 ## Design Principles
 
-We encourage all sorts of contributions you're interested in adding! When coding for Finetuning Scheduler, please follow these principles.
+We encourage all sorts of contributions you're interested in adding! When coding for Fine-Tuning Scheduler, please follow these principles.
 
 ### No PyTorch Interference
 
@@ -33,9 +33,9 @@ Treat code changes the way you treat a startup: validate that it's a needed feat
 
 ### Backward-compatible API
 
-We all hate updating our deep learning packages because we don't want to refactor a bunch of stuff. With the Finetuning Scheduler, we make sure every change we make which could break an API is backward compatible with good deprecation warnings.
+We all hate updating our deep learning packages because we don't want to refactor a bunch of stuff. With the Fine-Tuning Scheduler, we make sure every change we make which could break an API is backward compatible with good deprecation warnings.
 
-**You shouldn't be afraid to upgrade the Finetuning Scheduler :)**
+**You shouldn't be afraid to upgrade the Fine-Tuning Scheduler :)**
 
 ### Gain User Trust
 
@@ -83,7 +83,7 @@ _**Note**, even if you do not find the solution, sending a PR with a test coveri
 
 ### Test cases:
 
-Want to keep Finetuning Scheduler healthy? Love seeing those green tests? So do we! How to we keep it that way? We write tests! We value tests contribution even more than new features.
+Want to keep Fine-Tuning Scheduler healthy? Love seeing those green tests? So do we! How to we keep it that way? We write tests! We value tests contribution even more than new features.
 
 ______________________________________________________________________
 
@@ -194,8 +194,8 @@ We welcome any useful contribution! For your convenience here's a recommended wo
 1. Think about what you want to do - fix a bug, repair docs, etc. If you want to implement a new feature or enhance an existing one.
 
    - Start by opening a GitHub issue to explain the feature and the motivation.
-     In the case of features, ask yourself first - Is this NECESSARY for Finetuning Scheduler? There are some PRs that are just
-     purely about adding engineering complexity which has no place in Finetuning Scheduler.
+     In the case of features, ask yourself first - Is this NECESSARY for Fine-Tuning Scheduler? There are some PRs that are just
+     purely about adding engineering complexity which has no place in Fine-Tuning Scheduler.
    - Core contributors will take a look (it might take some time - we are often overloaded with issues!) and discuss it.
    - Once an agreement was reached - start coding.
 
@@ -243,7 +243,7 @@ We recommend you follow this convention `<type>/<issue-id>_<short-name>` where t
 
 #### How to add new tests?
 
-We are using [pytest](https://docs.pytest.org/en/stable/) with Finetuning Scheduler.
+We are using [pytest](https://docs.pytest.org/en/stable/) with Fine-Tuning Scheduler.
 
 Here is the process to create a new test
 

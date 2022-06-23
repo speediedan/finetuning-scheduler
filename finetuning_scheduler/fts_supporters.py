@@ -10,10 +10,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 r"""
-Finetuning Scheduler Supporters
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Fine-Tuning Scheduler Supporters
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Classes composed to support scheduled finetuning
+Classes composed to support scheduled fine-tuning
 
 """
 import itertools
@@ -151,7 +151,7 @@ class CallbackResolverMixin(ABC):
 class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
     r"""
     Extends/specializes :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` to facilitate
-    multi-phase scheduled finetuning.
+    multi-phase scheduled fine-tuning.
 
     Adds :attr:`es_phase_complete`, :attr:`final_phase` and :attr:`finetuningscheduler_callback` attributes and modifies
     ``EarlyStopping._evaluate_stopping_criteria`` to enable multi-phase behavior. Usage of
@@ -253,7 +253,7 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
 class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
     r"""
     Extends/specializes :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint` to facilitate
-    multi-phase scheduled finetuning. Overrides the
+    multi-phase scheduled fine-tuning. Overrides the
     ``state_dict`` and ``load_state_dict`` hooks to maintain additional state (:attr:`current_ckpt_depth`,
     :attr:`best_ckpt_depth`, :attr:`finetuningscheduler_callback`). Usage of
     :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is identical to
@@ -411,7 +411,7 @@ class UniqueKeyLoader(yaml.SafeLoader):
 
 
 class ScheduleParsingMixin(ABC):
-    """Functionality for parsing and validating finetuning schedules."""
+    """Functionality for parsing and validating fine-tuning schedules."""
 
     # proper initialization of these variables should be done in the child class
     pl_module: pl.LightningModule
@@ -419,7 +419,7 @@ class ScheduleParsingMixin(ABC):
     reinit_lr_cfg: Optional[Dict]
 
     def _validate_ft_sched(self) -> Tuple[int, int]:
-        """Ensure the explicitly specified finetuning schedule has a valid configuration.
+        """Ensure the explicitly specified fine-tuning schedule has a valid configuration.
 
         Returns:
             Tuple[int, int]: A tuple of ints specifying:
@@ -494,8 +494,8 @@ class ScheduleParsingMixin(ABC):
 
         Args:
             target_sched (Dict): The provided lr scheduler reinitialization configuration for either an implicit mode
-                finetuning schedule (passed via `reinit_lr_cfg`) or for a given explicity mode finetuning phase (passed
-                via `new_lr_scheduler` for a given phase)
+                fine-tuning schedule (passed via `reinit_lr_cfg`) or for a given explicity mode fine-tuning phase
+                (passed via `new_lr_scheduler` for a given phase)
             depth (Optional[int], optional): If parsing an explicit schedule, the current phase. Defaults to None.
 
         Raises:
@@ -510,7 +510,7 @@ class ScheduleParsingMixin(ABC):
             raise MisconfigurationException(
                 "Specifying a `init_pg_lrs` key in the lr scheduler configuration passed via `reinit_lr_cfg` (i.e. "
                 "implicit mode training) is not a valid configuration since the same lr scheduler configuration "
-                "is intended to be reinitialized at every finetuning phase with implicit mode finetuning."
+                "is intended to be reinitialized at every fine-tuning phase with implicit mode fine-tuning."
             )
         # validate lr_scheduler_init config
         if "lr_scheduler_init" not in target_sched.keys():
@@ -546,7 +546,7 @@ class ScheduleParsingMixin(ABC):
 
     def _lr_scheduler_init_validation(self, lr_reinit_phases: Dict) -> None:
         """Trigger lr scheduler reinitialization configuration validation for all provided configurations. This
-        will be a single configuration for implicit mode finetuning or n configurations for explicit mode.
+        will be a single configuration for implicit mode fine-tuning or n configurations for explicit mode.
 
         Args:
             lr_reinit_phases (Dict): Dictionary of lr scheduler reinitialization configurations to parse/validate
@@ -593,7 +593,7 @@ class ScheduleParsingMixin(ABC):
             key_diff = set(self.ft_schedule.keys()) ^ orig_keys
             if key_diff:
                 rank_zero_warn(
-                    "Note, the specified finetuning schedule had non-integer keys implicitly converted to "
+                    "Note, the specified fine-tuning schedule had non-integer keys implicitly converted to "
                     f"integers. Key diff: {key_diff}"
                 )
                 self._rewrite_schedule()
@@ -687,7 +687,7 @@ class ScheduleParsingMixin(ABC):
         else:
             if self.ft_schedule[depth].get("lr", None):
                 rank_zero_warn(
-                    f"A lr for finetuning phase 0 has been specified ({self.ft_schedule[0]['lr']}). This"
+                    f"A lr for fine-tuning phase 0 has been specified ({self.ft_schedule[0]['lr']}). This"
                     " lr will be overridden by the lr specified via the initial optimizer configuration"
                     " (typically in `configure_optimizers()`)."
                 )
@@ -847,7 +847,7 @@ class ScheduleParsingMixin(ABC):
 
     @staticmethod
     def _lr_scheduler_sanity_chk(lr_scheduler_init: Dict) -> None:
-        """Before beginning execution of defined finetuning schedule, perform a sanity check of the specified lr
+        """Before beginning execution of defined fine-tuning schedule, perform a sanity check of the specified lr
         scheduler reinitialization configuration. To the extent reasonable (i.e. without simulating the entire
         training path), if the provided lr scheduler reinitialization configuration is expected to fail, it is
         user-friendly to provide this feedback to the user before training begins.
@@ -883,7 +883,7 @@ class ScheduleParsingMixin(ABC):
 
 
 class ScheduleImplMixin(ABC):
-    """Functionality for generating and executing finetuning schedules."""
+    """Functionality for generating and executing fine-tuning schedules."""
 
     # proper initialization of these variables should be done in the child class
     pl_module: pl.LightningModule
@@ -898,10 +898,10 @@ class ScheduleImplMixin(ABC):
         pass
 
     def init_fts(self) -> None:
-        """Initializes the finetuning schedule and prepares the first scheduled level
-        1. Generate the default finetuning schedule and/or load it into
+        """Initializes the fine-tuning schedule and prepares the first scheduled level
+        1. Generate the default fine-tuning schedule and/or load it into
         :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.ft_schedule`.
-        2. Prepare the first scheduled finetuning level, unfreezing the relevant parameters."""
+        2. Prepare the first scheduled fine-tuning level, unfreezing the relevant parameters."""
         self.init_ft_sched()
         assert isinstance(self.ft_schedule, Dict)
         _, self._fts_state._curr_thawed_params = self.exec_ft_phase(
@@ -909,17 +909,17 @@ class ScheduleImplMixin(ABC):
         )
 
     def gen_or_load_sched(self) -> None:
-        """Load an explicitly specified finetuning schedule if one provided, otherwise generate a default one."""
+        """Load an explicitly specified fine-tuning schedule if one provided, otherwise generate a default one."""
         assert self.pl_module.trainer is not None
         if not self.ft_schedule and self.max_depth == -1:
-            rank_zero_info("No finetuning schedule provided, max_depth set to -1 so iteratively thawing entire model")
+            rank_zero_info("No fine-tuning schedule provided, max_depth set to -1 so iteratively thawing entire model")
         assert self.pl_module.trainer.log_dir is not None
         if self.ft_schedule and self.reinit_lr_cfg:
             error_msg = (
                 "Specifying both `ft_schedule` and `reinit_lr_cfg` is an invalid configuration. `reinit_lr_cfg` "
                 "specifies an lr scheduler configuration to reinitialize with at every new phase of an implicitly "
-                "defined finetuning shedule whereas `ft_schedule` is an explicity defined schedule. To reinitialize "
-                "a given lr scheduler configuration with an explicit finetuning schedule, please add the desired "
+                "defined fine-tuning shedule whereas `ft_schedule` is an explicity defined schedule. To reinitialize "
+                "a given lr scheduler configuration with an explicit fine-tuning schedule, please add the desired "
                 "lr scheduler configurations to your explicit schedule using the `new_lr_scheduler` key of the "
                 "relevant phases."
             )
@@ -942,7 +942,7 @@ class ScheduleImplMixin(ABC):
             self.ft_schedule = self.pl_module.trainer.strategy.broadcast(self.ft_schedule)
 
     def init_ft_sched(self) -> None:
-        """Generate the default finetuning schedule and/or load it into
+        """Generate the default fine-tuning schedule and/or load it into
         :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.ft_schedule`. Broadcast the
         schedule to ensure it is available for use in a distributed context."""
         self.gen_or_load_sched()
@@ -973,7 +973,7 @@ class ScheduleImplMixin(ABC):
                 ``Trainer.log_dir``.
         """
         default_ft_schedule = self.gen_ft_schedule(self.pl_module, sched_dir)
-        rank_zero_info(f"Generated default finetuning schedule '{default_ft_schedule}' for iterative finetuning")
+        rank_zero_info(f"Generated default fine-tuning schedule '{default_ft_schedule}' for iterative fine-tuning")
         self.ft_schedule = self.load_yaml_schedule(default_ft_schedule)
 
     @staticmethod
@@ -997,15 +997,15 @@ class ScheduleImplMixin(ABC):
         with fs.open(ft_schedule_yaml, "w", newline="") as fp:
             yaml.dump(layer_config, fp)
         assert os.access(ft_schedule_yaml, os.F_OK)
-        rank_zero_info(f"Finetuning schedule dumped to {ft_schedule_yaml}.")
+        rank_zero_info(f"fine-tuning schedule dumped to {ft_schedule_yaml}.")
         return ft_schedule_yaml
 
     @staticmethod
     def gen_ft_schedule(module: Module, dump_loc: Union[str, os.PathLike]) -> os.PathLike:
-        """Generate the default finetuning schedule using a naive, 2-parameters per-level heuristic.
+        """Generate the default fine-tuning schedule using a naive, 2-parameters per-level heuristic.
 
         Args:
-            module (:class:`~torch.nn.Module`): The :class:`~torch.nn.Module` for which a finetuning schedule will be
+            module (:class:`~torch.nn.Module`): The :class:`~torch.nn.Module` for which a fine-tuning schedule will be
                 generated
             dump_loc: The directory to which the generated schedule (.yaml) should be written
         Returns:
@@ -1013,11 +1013,11 @@ class ScheduleImplMixin(ABC):
             :external+pl:class:`~pytorch_lightning.core.module.LightningModule` subclass in use with the suffix
             ``_ft_schedule.yaml``)
         """
-        # Note: This initial default finetuning schedule generation approach is intentionally simple/naive but is
+        # Note: This initial default fine-tuning schedule generation approach is intentionally simple/naive but is
         # effective for a suprising fraction of models. Future versions of this callback may use module introspection to
         # generate default schedules that better accommodate more complex structures and specific architectures if the
         # callback proves sufficiently useful.
-        log.info(f"Proceeding with dumping default finetuning schedule for {module.__class__.__name__}")
+        log.info(f"Proceeding with dumping default fine-tuning schedule for {module.__class__.__name__}")
         param_lists: List = []
         cur_group: List = []
         model_params = list(module.named_parameters())[::-1]
@@ -1042,20 +1042,20 @@ class ScheduleImplMixin(ABC):
         """Load a schedule defined in a .yaml file and transform it into a dictionary.
 
         Args:
-            schedule_yaml_file (str): The .yaml finetuning schedule file
+            schedule_yaml_file (str): The .yaml fine-tuning schedule file
 
         Raises:
             MisconfigurationException: If the specified schedule file is not found
 
         Returns:
-            Dict: the Dict representation of the finetuning schedule
+            Dict: the Dict representation of the fine-tuning schedule
         """
         try:
             with open(schedule_yaml_file) as df:
                 schedule_dict = yaml.load(df, Loader=UniqueKeyLoader)
         except FileNotFoundError as fnf:
             error_msg = (
-                f"Could not find specified finetuning scheduling file '{schedule_yaml_file}': {fnf}."
+                f"Could not find specified fine-tuning scheduling file '{schedule_yaml_file}': {fnf}."
                 f"Please reconfigure and try again."
             )
             rank_zero_warn(error_msg)
@@ -1072,7 +1072,7 @@ class ScheduleImplMixin(ABC):
     def thaw_to_depth(self, depth: int = None) -> None:
         """Thaw/unfreeze the current
         :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.pl_module` to the specified
-        finetuning depth (aka level)
+        fine-tuning depth (aka level)
 
         Args:
             depth: The depth/level to which the
@@ -1098,7 +1098,7 @@ class ScheduleImplMixin(ABC):
         initial_denom_lr: float = 10.0,
         apply_lambdas: bool = False,
     ) -> None:
-        """Add optimizer parameter groups associated with the next scheduled finetuning depth/level and extend the
+        """Add optimizer parameter groups associated with the next scheduled fine-tuning depth/level and extend the
         relevent :paramref:`~pytorch_lighting.trainer.trainer.Trainer.lr_scheduler_configs`.
 
         Args:
@@ -1110,7 +1110,7 @@ class ScheduleImplMixin(ABC):
             no_decay: A list of parameters that should always have weight_decay set to 0. e.g.:
                 ["bias", "LayerNorm.weight"]. Defaults to ``None``.
             lr: The initial learning rate for the new parameter group(s). If not specified,
-                the ``lr`` of the first scheduled finetuning depth will be used. Defaults to ``None``.
+                the ``lr`` of the first scheduled fine-tuning depth will be used. Defaults to ``None``.
             initial_denom_lr: The scaling factor by which to scale the initial learning rate for new
                 parameter groups when no initial learning rate is specified. Defaults to 10.0.
             apply_lambdas: Whether to apply lr lambdas to newly added groups. Defaults to False.
@@ -1216,7 +1216,7 @@ class CallbackDepMixin(ABC):
 
     def _inspect_callback_deps(self, trainer: "pl.Trainer") -> List[bool]:
         """Inspect the trainer :paramref:`~pytorch_lighting.trainer.trainer.Trainer.callbacks` for earlystopping
-        and scheduled finetuning capabilities.
+        and scheduled fine-tuning capabilities.
 
         Args:
             trainer (pl.Trainer):  The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object to
@@ -1268,7 +1268,7 @@ class CallbackDepMixin(ABC):
         if not any([has_es_fts, self.epoch_transitions_only, self.gen_ft_sched_only]):  # type: ignore[attr-defined]
             if has_es_base:
                 rank_zero_warn(
-                    f"{self.__class__.__name__} currently depends upon a finetuning schedule "
+                    f"{self.__class__.__name__} currently depends upon a fine-tuning schedule "
                     "capable EarlyStopping callback such as FTSEarlyStopping. Substituting current "
                     "EarlyStopping for FTSCheckpoint"
                 )
@@ -1289,7 +1289,7 @@ class CallbackDepMixin(ABC):
         if not has_ckpt_fts:
             if has_ckpt_base:
                 rank_zero_warn(
-                    f"{self.__class__.__name__} currently depends upon a finetuning schedule "
+                    f"{self.__class__.__name__} currently depends upon a fine-tuning schedule "
                     "capable ModelCheckpoint callback such as FTSCheckpoint. Substituting current "
                     "ModelCheckpoint for FTSCheckpoint"
                 )

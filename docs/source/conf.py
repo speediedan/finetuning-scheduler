@@ -57,7 +57,7 @@ _transform_changelog(os.path.join(PATH_ROOT, "CHANGELOG.md"), os.path.join(PATH_
 
 # -- Project information -----------------------------------------------------
 
-project = "Finetuning Scheduler"
+project = "Fine-Tuning Scheduler"
 copyright = about.__copyright__
 author = about.__author__
 

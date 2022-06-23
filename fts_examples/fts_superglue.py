@@ -9,8 +9,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""A demonstration of the scheduled finetuning callback
-:ref:`FinetuningScheduler<advanced/finetuning_scheduler:Finetuning Scheduler>` using the
+"""A demonstration of the scheduled fine-tuning callback
+:ref:`FinetuningScheduler<advanced/finetuning_scheduler:Fine-Tuning Scheduler>` using the
 `RTE <https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte>`_ and
 `BoolQ <https://github.com/google-research-datasets/boolean-questions>`_ tasks of the
 `SuperGLUE <https://super.gluebenchmark.com/>`_ benchmark and the :ref:`LightningCLI<common/lightning_cli:LightningCLI>`
@@ -21,13 +21,13 @@ adjust the configuration files referenced below as desired for other configurati
 
 .. code-block:: bash
 
-    # Generate a baseline without scheduled finetuning enabled:
+    # Generate a baseline without scheduled fine-tuning enabled:
     python fts_superglue.py fit --config config/nofts_baseline.yaml
 
-    # Train with the default finetuning schedule:
+    # Train with the default fine-tuning schedule:
     python fts_superglue.py fit --config config/fts_implicit.yaml
 
-    # Train with a non-default finetuning schedule:
+    # Train with a non-default fine-tuning schedule:
     python fts_superglue.py fit --config config/fts_explicit.yaml
 """
 
@@ -167,7 +167,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
 
 
 class RteBoolqModule(pl.LightningModule):
-    """A :class:`~pytorch_lightning.core.module.LightningModule` that can be used to finetune a foundational model
+    """A :class:`~pytorch_lightning.core.module.LightningModule` that can be used to fine-tune a foundational model
     on either the RTE or BoolQ `SuperGLUE <https://super.gluebenchmark.com/>`_ tasks using Hugging Face
     implementations of a given model and the `SuperGLUE Hugging Face dataset.
 
@@ -186,7 +186,7 @@ class RteBoolqModule(pl.LightningModule):
         log_env_details: bool = True,
     ):
         """In this example, this :class:`~pytorch_lightning.core.module.LightningModule` is initialized by composing
-        the ./config/fts_defaults.yaml default configuration with various scheduled finetuning yaml configurations
+        the ./config/fts_defaults.yaml default configuration with various scheduled fine-tuning yaml configurations
         via the :class:`~pytorch_lightning.utilities.cli.LightningCLI` but it can be used like any other
         :class:`~pytorch_lightning.core.module.LightningModule` as well.
 

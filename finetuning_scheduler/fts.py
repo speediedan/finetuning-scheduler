@@ -10,10 +10,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 r"""
-Finetuning Scheduler
-^^^^^^^^^^^^^^^^^^^^
+Fine-Tuning Scheduler
+^^^^^^^^^^^^^^^^^^^^^
 
-Used to implement flexible finetuning training schedules
+Used to implement flexible fine-tuning training schedules
 
 """
 import logging
@@ -41,14 +41,14 @@ log = logging.getLogger(__name__)
 
 class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMixin):
     r"""
-    This callback enables flexible, multi-phase, scheduled finetuning of foundational models. Gradual unfreezing/thawing
-    can help maximize foundational model knowledge retention while allowing (typically upper layers of) the model to
-    optimally adapt to new tasks during transfer learning.
-    :class:`~finetuning_scheduler.fts.FinetuningScheduler` orchestrates the gradual
-    unfreezing of models via a finetuning schedule that is either implicitly generated (the default) or explicitly
-    provided by the user (more computationally efficient).
+    This callback enables flexible, multi-phase, scheduled fine-tuning of foundational models. Gradual
+    unfreezing/thawing can help maximize foundational model knowledge retention while allowing (typically upper layers
+    of) the model to optimally adapt to new tasks during transfer learning.
+    :class:`~finetuning_scheduler.fts.FinetuningScheduler` orchestrates the gradual unfreezing of models via a
+    fine-tuning schedule that is either implicitly generated (the default) or explicitly provided by the user (more
+    computationally efficient).
 
-    Finetuning phase transitions are driven by
+    Fine-tuning phase transitions are driven by
     :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria (a multi-phase
     extension of :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`), user-specified epoch
     transitions or a composition of the two (the default mode). A
@@ -58,11 +58,11 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
 
     Schedule definition is facilitated via
     :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.gen_ft_schedule` which dumps
-    a default finetuning schedule (by default using a naive, 2-parameters per level heuristic) which can be adjusted as
-    desired by the user and subsuquently passed to the callback. Implicit finetuning mode generates the default schedule
-    and proceeds to finetune according to the generated schedule. Implicit finetuning will often be less computationally
-    efficient than explicit finetuning but can often serve as a good baseline for subsquent explicit schedule refinement
-    and can marginally outperform many explicit schedules.
+    a default fine-tuning schedule (by default using a naive, 2-parameters per level heuristic) which can be adjusted as
+    desired by the user and subsuquently passed to the callback. Implicit fine-tuning mode generates the default
+    schedule and proceeds to fine-tune according to the generated schedule. Implicit fine-tuning will often be less
+    computationally efficient than explicit fine-tuning but can often serve as a good baseline for subsquent explicit
+    schedule refinement and can marginally outperform many explicit schedules.
 
     Example::
 
@@ -84,29 +84,29 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         apply_lambdas_new_pgs: bool = False,
     ):
         r"""
-        Define and configure a scheduled finetuning training session.
+        Define and configure a scheduled fine-tuning training session.
 
         Args:
-            ft_schedule: The finetuning schedule to be executed. Usually will be a .yaml file path but can also be a
+            ft_schedule: The fine-tuning schedule to be executed. Usually will be a .yaml file path but can also be a
                 properly structured Dict. See
-                :ref:`Specifying a Finetuning Schedule<index:Specifying a Finetuning Schedule>`
+                :ref:`Specifying a Fine-Tuning Schedule<index:Specifying a fine-tuning schedule>`
                 for the basic schedule format. See
                 :ref:`LR Scheduler Reinitialization<explicit-lr-reinitialization-schedule>` for more complex
                 schedule configurations (including per-phase LR scheduler reinitialization). If a schedule is not
-                provided, will generate and execute a default finetuning schedule using the provided
+                provided, will generate and execute a default fine-tuning schedule using the provided
                 :external+pl:class:`~pytorch_lightning.core.module.LightningModule`. See
-                :ref:`the default schedule<index:The Default Finetuning Schedule>`. Defaults to ``None``.
-            max_depth: Maximum schedule depth to which the defined finetuning schedule should be executed. Specifying -1
-                or an integer > (number of defined schedule layers) will result in the entire finetuning schedule being
-                executed. Defaults to -1.
+                :ref:`the default schedule<index:The Default Fine-Tuning Schedule>`. Defaults to ``None``.
+            max_depth: Maximum schedule depth to which the defined fine-tuning schedule should be executed. Specifying
+                -1 or an integer > (number of defined schedule layers) will result in the entire fine-tuning schedule
+                being executed. Defaults to -1.
             base_max_lr: The default maximum learning rate to use for the parameter groups associated with each
-                scheduled finetuning depth if not explicitly specified in the finetuning schedule. If overridden to
-                ``None``, will be set to the ``lr`` of the first scheduled finetuning depth scaled by 1e-1. Defaults to
+                scheduled fine-tuning depth if not explicitly specified in the fine-tuning schedule. If overridden to
+                ``None``, will be set to the ``lr`` of the first scheduled fine-tuning depth scaled by 1e-1. Defaults to
                 1e-5.
             restore_best: If ``True``, restore the best available (defined by the
                 :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint`) checkpoint
-                before finetuning depth transitions. Defaults to ``True``.
-            gen_ft_sched_only: If ``True``, generate the default finetuning schedule to ``Trainer.log_dir`` (it will be
+                before fine-tuning depth transitions. Defaults to ``True``.
+            gen_ft_sched_only: If ``True``, generate the default fine-tuning schedule to ``Trainer.log_dir`` (it will be
                 named after your :external+pl:class:`~pytorch_lightning.core.module.LightningModule` subclass with
                 the suffix ``_ft_schedule.yaml``) and exit without training. Typically used to generate a default
                 schedule that will be adjusted by the user before training. Defaults to ``False``.
@@ -146,7 +146,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                     :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.allow_untested` to ``True``.
 
                     Some officially unsupported strategies may work unaltered and are only unsupported due to
-                    the ``Finetuning Scheduler`` project's lack of CI/testing resources for that strategy (e.g.
+                    the ``Fine-Tuning Scheduler`` project's lack of CI/testing resources for that strategy (e.g.
                     ``single_tpu``).
 
                     Most unsupported strategies, however, are currently unsupported because they require varying degrees
@@ -158,7 +158,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                 will always apply the specified lambdas. Defaults to ``False``.
 
         Attributes:
-            _fts_state: The internal finetuning scheduler state.
+            _fts_state: The internal :class:`~finetuning_scheduler.fts.FinetuningScheduler` state.
         """
         super().__init__()
         self._fts_state = FTSState()
@@ -175,19 +175,19 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
 
     @property
     def curr_depth(self) -> int:
-        """Index of the finetuning schedule depth currently being trained.
+        """Index of the fine-tuning schedule depth currently being trained.
 
         Returns:
-            int: The index of the current finetuning training depth
+            int: The index of the current fine-tuning training depth
         """
         return self._fts_state._curr_depth
 
     @property
     def depth_remaining(self) -> int:
-        """Remaining number of finetuning training levels in the schedule.
+        """Remaining number of fine-tuning training levels in the schedule.
 
         Returns:
-            int: The number of remaining finetuning training levels
+            int: The number of remaining fine-tuning training levels
         """
         return max(self.max_depth - self._fts_state._curr_depth, 0)
 
@@ -204,8 +204,8 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         )
 
     def freeze_before_training(self, pl_module: "pl.LightningModule") -> None:
-        """Freezes all model parameters so that parameter subsets can be subsequently thawed according to the
-        finetuning schedule.
+        """Freezes all model parameters so that parameter subsets can be subsequently thawed according to the fine-
+        tuning schedule.
 
         Args:
             pl_module (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The target
@@ -214,7 +214,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         self.freeze(modules=pl_module)
 
     def step(self) -> None:
-        """Prepare and execute the next scheduled finetuning level
+        """Prepare and execute the next scheduled fine-tuning level
         1. Restore the current best model checkpoint if appropriate
         2. Thaw model parameters according the the defined schedule
         3. Synchronize the states of :external+pl:class:`~pytorch_lightning.loops.FitLoop` and
@@ -223,7 +223,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         .. note::
 
             The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback initially
-            only supports single-schedule/optimizer finetuning configurations
+            only supports single-schedule/optimizer fine-tuning configurations
         """
         assert self.pl_module.trainer is not None
         if not self._fts_state._resume_fit_from_ckpt:
@@ -242,14 +242,14 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         rank_zero_info(f"Multi-phase fine-tuned training continuing at level {self.curr_depth}.")
 
     def step_pg(self, optimizer: Optimizer, depth: int, depth_sync: bool = True) -> None:
-        """Configure optimizer parameter groups for the next scheduled finetuning level, adding parameter groups
+        """Configure optimizer parameter groups for the next scheduled fine-tuning level, adding parameter groups
         beyond the restored optimizer state up to
         :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.current_depth`
 
         Args:
             optimizer (:class:`~torch.optim.Optimizer`): The :class:`~torch.optim.Optimizer` to which parameter groups
                 will be configured and added.
-            depth: The maximum index of the finetuning schedule for which to configure the optimizer parameter
+            depth: The maximum index of the fine-tuning schedule for which to configure the optimizer parameter
                 groups.
             depth_sync: If ``True``, configure optimizer parameter groups for all depth indices greater
                 than the restored checkpoint. If ``False``, configure groups only for the specified depth. Defaults to
@@ -349,7 +349,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
         """Validate a compatible :external+pl:class:`~pytorch_lightning.strategies.Strategy` strategy is being used and
         ensure all :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback dependencies are met. If a valid
-        configuration is present, then either dump the default finetuning schedule OR
+        configuration is present, then either dump the default fine-tuning schedule OR
         1. configure the :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping`
         callback (if relevant)
         2. initialize the :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`
@@ -365,7 +365,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
             stage: The ``RunningStage.{SANITY_CHECKING,TRAINING,VALIDATING}``. Defaults to None.
 
         Raises:
-            SystemExit: Gracefully exit before training if only generating and not executing a finetuning schedule.
+            SystemExit: Gracefully exit before training if only generating and not executing a fine-tuning schedule.
             MisconfigurationException: If the
                 :external+pl:class:`~pytorch_lightning.strategies.Strategy` strategy being used is not currently
                 compatible with the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback.
@@ -396,7 +396,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
             if trainer.is_global_zero:
                 assert trainer.log_dir is not None
                 _ = self.gen_ft_schedule(pl_module, trainer.log_dir)
-                log.info("Bypassing training, generating finetuning schedule for review and subsequent finetuning")
+                log.info("Bypassing training, generating fine-tuning schedule for review and subsequent fine-tuning")
             raise SystemExit()
         else:
             if not self.epoch_transitions_only:
@@ -502,7 +502,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
     def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
         """Before beginning a training epoch, configure the internal
         :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`, prepare the next
-        scheduled finetuning level and store the updated optimizer configuration before continuing training
+        scheduled fine-tuning level and store the updated optimizer configuration before continuing training
 
         Args:
             trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The
@@ -522,7 +522,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
             self._fts_state._curr_depth += 1  # increment depth
             self.step()
             rank_zero_debug(
-                f"Current parameters thawed by the finetuning scheduler: {self._fts_state._curr_thawed_params}. "
+                f"Current parameters thawed by the Fine-Tuning Scheduler: {self._fts_state._curr_thawed_params}. "
                 f"Current depth is {self.curr_depth}."
             )
             if not self.epoch_transitions_only:
@@ -544,7 +544,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
     def on_before_zero_grad(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", optimizer: Optimizer) -> None:
         """Afer the latest optimizer step, update the
         :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`, incrementing the
-        global finetuning steps taken
+        global fine-tuning steps taken
 
         Args:
             trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The

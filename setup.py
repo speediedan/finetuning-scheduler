@@ -79,7 +79,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     zip_safe=False,
-    keywords=["deep learning", "pytorch", "AI", "machine learning", "pytorch lightning", "finetuning"],
+    keywords=["deep learning", "pytorch", "AI", "machine learning", "pytorch lightning", "fine-tuning", "finetuning"],
     python_requires=">=3.7",
     setup_requires=[],
     # install_requires=setup_tools._load_requirements(_PATH_ROOT),
