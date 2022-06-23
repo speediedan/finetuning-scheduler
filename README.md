@@ -103,7 +103,7 @@ from finetuning_scheduler import FinetuningScheduler
 trainer = Trainer(callbacks=[FinetuningScheduler()])
 ```
 
-Get started by following [the Fine-Tuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/latest/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/latest/index.html#scheduled-finetuning-superglue) or by following the [notebook-based](https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html) Fine-Tuning Scheduler tutorial.
+Get started by following [the Fine-Tuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/stable/index.html#scheduled-finetuning-superglue) or by following the [notebook-based](https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html) Fine-Tuning Scheduler tutorial.
 
 ______________________________________________________________________
 
@@ -112,7 +112,7 @@ ______________________________________________________________________
 ### Scheduled Fine-Tuning For SuperGLUE
 
 - [Notebook-based Tutorial](https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html)
-- [CLI-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/latest/#scheduled-finetuning-superglue)
+- [CLI-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/stable/#scheduled-finetuning-superglue)
 
 ______________________________________________________________________
 
@@ -140,7 +140,7 @@ To ensure maximum stability, the latest PyTorch Lightning patch release fully te
 
 Fine-Tuning Scheduler is developed and maintained by the community in close communication with the [PyTorch Lightning team](https://pytorch-lightning.readthedocs.io/en/latest/governance.html#leads). Thanks to everyone in the community for their tireless effort building and improving the immensely useful core PyTorch Lightning project.
 
-PR's welcome! Please see the [contributing guidelines](https://finetuning-scheduler.readthedocs.io/en/latest/generated/CONTRIBUTING.html) (which are essentially the same as PyTorch Lightning's).
+PR's welcome! Please see the [contributing guidelines](https://finetuning-scheduler.readthedocs.io/en/stable/generated/CONTRIBUTING.html) (which are essentially the same as PyTorch Lightning's).
 
 ______________________________________________________________________
 
