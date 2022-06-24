@@ -199,11 +199,11 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
             self._check_on_train_epoch_end = False
         super().setup(trainer, pl_module, stage)
 
-    def _evaluate_stopping_criteria(self, current: torch.Tensor) -> Tuple[bool, Optional[str]]:
+    def _evaluate_stopping_criteria(self, current: Tensor) -> Tuple[bool, Optional[str]]:
         """Evaluate whether and why to stop the current training session.
 
         Args:
-            current (torch.Tensor): The current monitored value to be evaluated
+            current (Tensor): The current monitored value to be evaluated
 
         Returns:
             Tuple[bool, Optional[str]]: Whether the training session should stop and if so, the reason why.
