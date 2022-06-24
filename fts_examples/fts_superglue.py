@@ -44,7 +44,7 @@ from torch.utils.data import DataLoader
 
 import finetuning_scheduler as fts
 from fts_examples import _HF_AVAILABLE, _SP_AVAILABLE
-from fts_examples.cli_experiment_utils import collect_env_info, instantiate_class
+from fts_examples.cli_experiment_utils import collect_env_info, instantiate_registered_class
 
 if _HF_AVAILABLE:
     import datasets
@@ -303,9 +303,9 @@ class RteBoolqModule(pl.LightningModule):
         # but in this case we pass a list of parameter groups to ensure weight_decay is
         # not applied to the bias parameter (for completeness, in this case it won't make much
         # performance difference)
-        optimizer = instantiate_class(args=self._init_param_groups(), init=self.hparams.optimizer_init)
+        optimizer = instantiate_registered_class(args=self._init_param_groups(), init=self.hparams.optimizer_init)
         scheduler = {
-            "scheduler": instantiate_class(args=optimizer, init=self.hparams.lr_scheduler_init),
+            "scheduler": instantiate_registered_class(args=optimizer, init=self.hparams.lr_scheduler_init),
             **self.hparams.pl_lrs_cfg,
         }
         return [optimizer], [scheduler]
