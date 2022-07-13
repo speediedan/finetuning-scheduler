@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [0.1.8] - 2022-MM-DD
+## [0.1.8] - 2022-07-13
 
 ### Added
 
@@ -13,11 +13,17 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- pinned jsonargparse to be <= 4.10.1 due to regression with PTL cli with 4.10.2
 ### Changed
 
 - updated PL links for new lightning-ai github urls
 - added a minimum hydra requirement for cli usage (due to omegaconf version incompatibility)
 - separated cli requirements
+- replace closed compound instances of `finetuning` with the hyphenated compound version `fine-tuning` in textual
+  contexts. (The way language evolves, `fine-tuning` will eventually become `finetuning` but it seems like the research
+  community prefers the hyphenated form for now.)
+- update fine-tuning scheduler logo for hyphenation
+- update strategy resolution in test helper module runif
 
 ### Deprecated
 
