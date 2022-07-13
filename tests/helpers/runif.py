@@ -18,20 +18,39 @@ import pytest
 import torch
 from packaging.version import Version
 from pkg_resources import get_distribution
-from pytorch_lightning.callbacks.progress.rich_progress import _RICH_AVAILABLE
-from pytorch_lightning.overrides.fairscale import _FAIRSCALE_AVAILABLE, _FAIRSCALE_FULLY_SHARDED_AVAILABLE
-from pytorch_lightning.strategies.bagua import _BAGUA_AVAILABLE
-from pytorch_lightning.utilities import (
-    _APEX_AVAILABLE,
-    _DEEPSPEED_AVAILABLE,
-    _HOROVOD_AVAILABLE,
-    _HPU_AVAILABLE,
-    _IPU_AVAILABLE,
-    _OMEGACONF_AVAILABLE,
-    _TORCH_GREATER_EQUAL_1_10,
-    _TORCH_QUANTIZE_AVAILABLE,
-    _TPU_AVAILABLE,
-)
+
+if Version(get_distribution("pytorch_lightning").version) >= Version("1.6.5"):
+    from pytorch_lightning.callbacks.progress.rich_progress import _RICH_AVAILABLE
+    from pytorch_lightning.overrides.fairscale import _FAIRSCALE_AVAILABLE, _FAIRSCALE_FULLY_SHARDED_AVAILABLE
+    from pytorch_lightning.strategies.bagua import _BAGUA_AVAILABLE
+    from pytorch_lightning.utilities import (
+        _APEX_AVAILABLE,
+        _DEEPSPEED_AVAILABLE,
+        _HOROVOD_AVAILABLE,
+        _HPU_AVAILABLE,
+        _IPU_AVAILABLE,
+        _OMEGACONF_AVAILABLE,
+        _TORCH_GREATER_EQUAL_1_10,
+        _TORCH_QUANTIZE_AVAILABLE,
+        _TPU_AVAILABLE,
+    )
+else:
+    from pytorch_lightning.utilities import (
+        _APEX_AVAILABLE,
+        _BAGUA_AVAILABLE,
+        _DEEPSPEED_AVAILABLE,
+        _FAIRSCALE_AVAILABLE,
+        _FAIRSCALE_FULLY_SHARDED_AVAILABLE,
+        _HOROVOD_AVAILABLE,
+        _HPU_AVAILABLE,
+        _IPU_AVAILABLE,
+        _OMEGACONF_AVAILABLE,
+        _RICH_AVAILABLE,
+        _TORCH_GREATER_EQUAL_1_10,
+        _TORCH_QUANTIZE_AVAILABLE,
+        _TPU_AVAILABLE,
+    )
+
 
 _HOROVOD_NCCL_AVAILABLE = False
 if _HOROVOD_AVAILABLE:
