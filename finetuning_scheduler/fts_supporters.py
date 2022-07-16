@@ -167,6 +167,8 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
        :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` is in beta and subject to change. For detailed
        usage information, see :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`.
     """
+    _check_on_train_epoch_end: Optional[bool]
+    best_score: Tensor
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """
@@ -187,8 +189,6 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         self.es_phase_complete = True
         self.final_phase = True
         self.finetuningscheduler_callback = None
-        self._check_on_train_epoch_end: Optional[bool]
-        self.best_score: Tensor
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
         """Ensure a :class:`~finetuning_scheduler.fts.FinetuningScheduler` is provided before beginning
@@ -265,6 +265,12 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is in beta and subject to change. For detailed usage
         information, see :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`.
     """
+    _save_on_train_epoch_end: Optional[bool]
+    best_model_path: str
+    kth_best_model_path: str
+    last_model_path: str
+    best_k_models: Dict
+    kth_value: Tensor
 
     def __init__(self, *args: Any, **kwargs: Any):
         """
@@ -276,8 +282,8 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             finetuningscheduler_callback (pytorch_lightning.callbacks.Callback):
                 Reference to the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
                 callback being used.
-            save_on_train_epoch_end (bool): Whether to run checkpointing at the end of the training epoch. If this is
-                ``False``, then the check runs at the end of the validation. Defaults to ``None`` similar to
+            save_on_train_epoch_end (Optional[bool]): Whether to run checkpointing at the end of the training epoch.
+                If this is ``False``, then the check runs at the end of the validation. Defaults to ``None`` similar to
                 :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint` but is set to
                 ``False`` during setup unless overridden.
         """
@@ -285,12 +291,6 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         self.current_ckpt_depth = 0
         self.best_ckpt_depth = 0
         self.finetuningscheduler_callback = None
-        self._save_on_train_epoch_end: Optional[bool]
-        self.best_model_path: str
-        self.kth_best_model_path: str
-        self.last_model_path: str
-        self.best_k_models: Dict
-        self.kth_value: Tensor
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
         """Verify a valid callback configuration is present before beginning training.
