@@ -82,8 +82,10 @@ setup(
     keywords=["deep learning", "pytorch", "AI", "machine learning", "pytorch lightning", "fine-tuning", "finetuning"],
     python_requires=">=3.7",
     setup_requires=[],
-    # install_requires=setup_tools._load_requirements(_PATH_ROOT),
-    install_requires=setup_tools._load_requirements(_PATH_ROOT, pl_commit="887dc0ff8cb05bf141e6f7e967d6a595c948943a"),
+    # install_requires=setup_tools._load_requirements(_PATH_REQUIRE),
+    install_requires=setup_tools._load_requirements(
+        _PATH_REQUIRE, pl_commit="c3299d2c595d764707d31da1061611a73d4301f7"
+    ),
     extras_require=extras,
     project_urls={
         "Bug Tracker": "https://github.com/speediedan/finetuning-scheduler/issues",
