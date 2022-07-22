@@ -42,3 +42,10 @@ exclude = ['tests/.*']
 # mypy | tr ':' ' ' |  awk '{print $1}' | sort | uniq | sed 's/\.py//g' | sed 's|\/|\.|g' | xargs -I {} echo '"{}",'
 # module = []
 # ignore_errors = "True"
+
+[tool.jupytext]
+notebook_metadata_filter = "-all"
+
+[tool.jupytext.formats]
+"notebooks/" = "ipynb"
+"scripts/" = "py"
