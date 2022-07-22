@@ -18,22 +18,12 @@ import pytest
 import torch
 from packaging.version import Version
 from pkg_resources import get_distribution
+from pytorch_lightning.overrides.fairscale import _FAIRSCALE_AVAILABLE
 from pytorch_lightning.strategies.deepspeed import _DEEPSPEED_AVAILABLE
 from pytorch_lightning.utilities.imports import (
-    _APEX_AVAILABLE,
-    _BAGUA_AVAILABLE,
-    _FAIRSCALE_AVAILABLE,
     _FAIRSCALE_FULLY_SHARDED_AVAILABLE,
-    _HIVEMIND_AVAILABLE,
     _HOROVOD_AVAILABLE,
-    _HPU_AVAILABLE,
-    _IPU_AVAILABLE,
-    _OMEGACONF_AVAILABLE,
-    _PSUTIL_AVAILABLE,
-    _RICH_AVAILABLE,
     _TORCH_GREATER_EQUAL_1_10,
-    _TORCH_QUANTIZE_AVAILABLE,
-    _TPU_AVAILABLE,
 )
 
 _HOROVOD_NCCL_AVAILABLE = False
@@ -66,12 +56,7 @@ class RunIf:
         min_torch: Optional[str] = None,
         max_torch: Optional[str] = None,
         min_python: Optional[str] = None,
-        quantization: bool = False,
-        amp_apex: bool = False,
         bf16_cuda: bool = False,
-        tpu: bool = False,
-        ipu: bool = False,
-        hpu: bool = False,
         horovod: bool = False,
         horovod_nccl: bool = False,
         skip_windows: bool = False,
@@ -79,40 +64,27 @@ class RunIf:
         fairscale: bool = False,
         fairscale_fully_sharded: bool = False,
         deepspeed: bool = False,
-        rich: bool = False,
-        omegaconf: bool = False,
         slow: bool = False,
-        bagua: bool = False,
-        psutil: bool = False,
-        hivemind: bool = False,
         **kwargs,
     ):
         """
         Args:
             *args: Any :class:`pytest.mark.skipif` arguments.
-            min_cuda_gpus: Require this number of gpus.
+            min_cuda_gpus: Require this number of gpus and that the ``PL_RUN_CUDA_TESTS=1`` environment variable is set.
             min_torch: Require that PyTorch is greater or equal than this version.
             max_torch: Require that PyTorch is less than this version.
             min_python: Require that Python is greater or equal than this version.
-            quantization: Require that `torch.quantization` is available.
-            amp_apex: Require that NVIDIA/apex is installed.
             bf16_cuda: Require that CUDA device supports bf16.
-            tpu: Require that TPU is available.
-            ipu: Require that IPU is available.
-            hpu: Require that HPU is available.
             horovod: Require that Horovod is installed.
             horovod_nccl: Require that Horovod is installed with NCCL support.
             skip_windows: Skip for Windows platform.
             standalone: Mark the test as standalone, our CI will run it in a separate process.
+                This requires that the ``PL_RUN_STANDALONE_TESTS=1`` environment variable is set.
             fairscale: Require that facebookresearch/fairscale is installed.
             fairscale_fully_sharded: Require that `fairscale` fully sharded support is available.
             deepspeed: Require that microsoft/DeepSpeed is installed.
-            rich: Require that willmcgugan/rich is installed.
-            omegaconf: Require that omry/omegaconf is installed.
             slow: Mark the test as slow, our CI will run it in a separate job.
-            bagua: Require that BaguaSys/bagua is installed.
-            psutil: Require that psutil is installed.
-            hivemind: Require that Hivemind is installed.
+                This requires that the ``PL_RUN_SLOW_TESTS=1`` environment variable is set.
             **kwargs: Any :class:`pytest.mark.skipif` keyword arguments.
         """
         conditions = []
@@ -121,6 +93,8 @@ class RunIf:
         if min_cuda_gpus:
             conditions.append(torch.cuda.device_count() < min_cuda_gpus)
             reasons.append(f"GPUs>={min_cuda_gpus}")
+            # used in conftest.py::pytest_collection_modifyitems
+            kwargs["min_cuda_gpus"] = True
 
         if min_torch:
             torch_version = get_distribution("torch").version
@@ -136,15 +110,6 @@ class RunIf:
             py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
             conditions.append(Version(py_version) < Version(min_python))
             reasons.append(f"python>={min_python}")
-
-        if quantization:
-            _miss_default = "fbgemm" not in torch.backends.quantized.supported_engines
-            conditions.append(not _TORCH_QUANTIZE_AVAILABLE or _miss_default)
-            reasons.append("PyTorch quantization")
-
-        if amp_apex:
-            conditions.append(not _APEX_AVAILABLE)
-            reasons.append("NVIDIA Apex")
 
         if bf16_cuda:
             try:
@@ -164,20 +129,6 @@ class RunIf:
             conditions.append(sys.platform == "win32")
             reasons.append("unimplemented on Windows")
 
-        if tpu:
-            conditions.append(not _TPU_AVAILABLE)
-            reasons.append("TPU")
-
-        if ipu:
-            env_flag = os.getenv("PL_RUN_IPU_TESTS", "0")
-            conditions.append(env_flag != "1" or not _IPU_AVAILABLE)
-            reasons.append("IPU")
-            kwargs["ipu"] = True
-
-        if hpu:
-            conditions.append(not _HPU_AVAILABLE)
-            reasons.append("HPU")
-
         if horovod:
             conditions.append(not _HOROVOD_AVAILABLE)
             reasons.append("Horovod")
@@ -190,7 +141,7 @@ class RunIf:
             env_flag = os.getenv("PL_RUN_STANDALONE_TESTS", "0")
             conditions.append(env_flag != "1")
             reasons.append("Standalone execution")
-            # used in tests/conftest.py::pytest_collection_modifyitems
+            # used in conftest.py::pytest_collection_modifyitems
             kwargs["standalone"] = True
 
         if fairscale:
@@ -205,32 +156,12 @@ class RunIf:
             conditions.append(not _DEEPSPEED_AVAILABLE)
             reasons.append("Deepspeed")
 
-        if rich:
-            conditions.append(not _RICH_AVAILABLE)
-            reasons.append("Rich")
-
-        if omegaconf:
-            conditions.append(not _OMEGACONF_AVAILABLE)
-            reasons.append("omegaconf")
-
         if slow:
             env_flag = os.getenv("PL_RUN_SLOW_TESTS", "0")
             conditions.append(env_flag != "1")
             reasons.append("Slow test")
             # used in tests/conftest.py::pytest_collection_modifyitems
             kwargs["slow"] = True
-
-        if bagua:
-            conditions.append(not _BAGUA_AVAILABLE or sys.platform in ("win32", "darwin"))
-            reasons.append("Bagua")
-
-        if psutil:
-            conditions.append(not _PSUTIL_AVAILABLE)
-            reasons.append("psutil")
-
-        if hivemind:
-            conditions.append(not _HIVEMIND_AVAILABLE or sys.platform in ("win32", "darwin"))
-            reasons.append("Hivemind")
 
         reasons = [rs for cond, rs in zip(conditions, reasons) if cond]
         return pytest.mark.skipif(
