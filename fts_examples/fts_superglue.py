@@ -249,7 +249,7 @@ class RteBoolqModule(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         outputs = self(**batch)
         loss = outputs[0]
-        self.log("train_loss", loss)
+        self.log("train_loss", loss, sync_dist=True)
         return loss
 
     def on_train_epoch_start(self) -> None:
@@ -267,9 +267,9 @@ class RteBoolqModule(pl.LightningModule):
         elif self.num_labels == 1:
             preds = logits.squeeze()
         labels = batch["labels"]
-        self.log("val_loss", val_loss, prog_bar=True)
+        self.log("val_loss", val_loss, prog_bar=True, sync_dist=True)
         metric_dict = self.metric.compute(predictions=preds, references=labels)
-        self.log_dict(metric_dict, prog_bar=True)
+        self.log_dict(metric_dict, prog_bar=True, sync_dist=True)
 
     def _init_param_groups(self) -> List[Dict]:
         """Initialize the parameter groups. Used to ensure weight_decay is not applied to our specified bias
