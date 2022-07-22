@@ -797,12 +797,7 @@ class ScheduleParsingMixin(ABC):
     @staticmethod
     def _is_supported_reinit_lr(lr_class: Type[_LRScheduler]) -> None:
         """Evaulate whether the provided lr scheduler is currently supported in a lr scheduler reinitialization
-        context.
-
-        .. note::
-        This may be changed from a nominal subtype approach to a protocol/structural subtype design once Python >=
-            3.8 is required
-        """
+        context."""
         if _TORCH_GREATER_EQUAL_1_10:
             from torch.optim.lr_scheduler import ChainedScheduler, SequentialLR
 
