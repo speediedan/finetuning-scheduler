@@ -25,7 +25,6 @@ from pytorch_lightning import LightningModule, seed_everything, Trainer
 from pytorch_lightning.callbacks import Callback, EarlyStopping, LearningRateMonitor
 from pytorch_lightning.strategies.single_device import SingleDeviceStrategy
 from pytorch_lightning.strategies.strategy_registry import StrategyRegistry
-from pytorch_lightning.utilities import _StrategyType
 from pytorch_lightning.utilities.cloud_io import get_filesystem
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from torch import nn
@@ -157,7 +156,7 @@ class FinetuningSchedulerBoringModel(BoringModel):
         return [optimizer], [lr_scheduler]
 
 
-MOCK_STRATEGY_MAPPING = {"ddp2_wcpu": (_StrategyType.DDP2, False), "allow_untest": ("single_tpu", True)}
+MOCK_STRATEGY_MAPPING = {"mock_stgy": ("single_tpu", False), "allow_untest": ("single_tpu", True)}
 
 
 class TestFinetuningScheduler(FinetuningScheduler):
@@ -1128,13 +1127,12 @@ def test_finetuningscheduling_invalid_schedules(tmpdir, invalid_schedules, sched
     "strategy, gpus, plugins, mockconf",
     [
         pytest.param("cust_stgy", None, None, "allow_untest"),
-        pytest.param("ddp2", None, None, "ddp2_wcpu"),
-        pytest.param("ddp2", 1, None, None, marks=RunIf(min_cuda_gpus=1)),
+        pytest.param("ddp", None, None, "mock_stgy"),
         pytest.param("ddp_fully_sharded", 1, None, None, marks=RunIf(fairscale_fully_sharded=True, min_cuda_gpus=1)),
         pytest.param("horovod", None, None, None, marks=RunIf(horovod=True, min_cuda_gpus=1)),
         pytest.param("deepspeed_stage_2", 1, None, None, marks=RunIf(deepspeed=True, min_cuda_gpus=1)),
     ],
-    ids=["cust_stgy", "cpu_mock", "ddp2", "ddp_fully_sharded", "horovod", "deepspeed_stage_2"],
+    ids=["cust_stgy", "mock_stgy", "ddp_fully_sharded", "horovod", "deepspeed_stage_2"],
 )
 def test_finetuningscheduling_distributed_compat(tmpdir, strategy, gpus, plugins, mockconf):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly raised
