@@ -84,7 +84,7 @@ setup(
     setup_requires=[],
     # install_requires=setup_tools._load_requirements(_PATH_REQUIRE),
     install_requires=setup_tools._load_requirements(
-        _PATH_REQUIRE, pl_commit="c3299d2c595d764707d31da1061611a73d4301f7"
+        _PATH_REQUIRE, pl_commit="511875e5675b0543d89e2aae3950a7834b35238e"
     ),
     extras_require=extras,
     project_urls={
