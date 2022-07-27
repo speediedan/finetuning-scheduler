@@ -39,7 +39,7 @@ from typing import Any, Dict, List, Optional
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.utilities import rank_zero_warn
-from pytorch_lightning.utilities.cli import LightningCLI
+from pytorch_lightning.cli import LightningCLI
 from torch.utils.data import DataLoader
 
 import finetuning_scheduler as fts
@@ -187,7 +187,7 @@ class RteBoolqModule(pl.LightningModule):
     ):
         """In this example, this :class:`~pytorch_lightning.core.module.LightningModule` is initialized by composing
         the ./config/fts_defaults.yaml default configuration with various scheduled fine-tuning yaml configurations
-        via the :class:`~pytorch_lightning.utilities.cli.LightningCLI` but it can be used like any other
+        via the :class:`~pytorch_lightning.cli.LightningCLI` but it can be used like any other
         :class:`~pytorch_lightning.core.module.LightningModule` as well.
 
         Args:
@@ -312,7 +312,7 @@ class RteBoolqModule(pl.LightningModule):
 
 
 class CustLightningCLI(LightningCLI):
-    """Customize the :class:`~pytorch_lightning.utilities.cli.LightningCLI` to ensure the
+    """Customize the :class:`~pytorch_lightning.cli.LightningCLI` to ensure the
     :class:`~pytorch_lighting.core.LightningDataModule` and :class:`~pytorch_lightning.core.module.LightningModule`
     use the same Hugging Face model, SuperGLUE task and custom logging tag."""
 

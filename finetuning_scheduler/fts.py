@@ -124,7 +124,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                 optionally include arguments to pass to PyTorch Lightning's lr scheduler configuration
                 :class:`~pytorch_lightning.utilities.types.LRSchedulerConfig` in the ``pl_lrs_cfg`` dictionary. By way
                 of example, one could configure this dictionary via the
-                :external+pl:class:`~pytorch_lightning.utilities.cli.LightningCLI` with the following:
+                :external+pl:class:`~pytorch_lightning.cli.LightningCLI` with the following:
 
                 .. code-block:: yaml
 
