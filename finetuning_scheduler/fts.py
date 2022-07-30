@@ -236,7 +236,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
             self.thaw_to_depth()
         if self.depth_remaining == 0 and not self.epoch_transitions_only:
             assert self.pl_module.trainer.early_stopping_callback is not None
-            self.pl_module.trainer.early_stopping_callback.final_phase = True
+            self.pl_module.trainer.early_stopping_callback.final_phase = True  # type: ignore[attr-defined]
         assert self._fts_state._ft_sync_objects is not None
         FinetuningScheduler.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
         rank_zero_info(f"Multi-phase fine-tuned training continuing at level {self.curr_depth}.")
@@ -285,7 +285,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                     for config in self.pl_module.trainer.lr_scheduler_configs:
                         show_warn_lambdas = (
                             hasattr(config.scheduler, "lr_lambdas")
-                            and config.scheduler.lr_lambdas[-1] is not None
+                            and config.scheduler.lr_lambdas[-1] is not None  # type: ignore[union-attr]
                             and not self.apply_lambdas_new_pgs
                         )
                         if show_warn_lambdas:
@@ -310,7 +310,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
             )
         # we're restoring everything but callbacks and loops, otherwise, checkpoint_connector.restore() could be used
         assert self.pl_module.trainer.checkpoint_callback is not None
-        checkpoint_path = self.pl_module.trainer.checkpoint_callback.best_model_path
+        checkpoint_path = self.pl_module.trainer.checkpoint_callback.best_model_path  # type: ignore[attr-defined]
         self.pl_module.trainer._checkpoint_connector.resume_start(checkpoint_path=checkpoint_path)
         self.pl_module.trainer._checkpoint_connector.restore_datamodule()
         self.pl_module.trainer._checkpoint_connector.restore_model()
@@ -375,12 +375,12 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         # if we added callbacks for the user after the setup hooks loop was initiated from trainer, we'll need to
         # explicitly call the setup hooks for those added callbacks
         if added_ckpt_fts:
-            trainer.checkpoint_callback.setup(trainer, pl_module, stage)
+            trainer.checkpoint_callback.setup(trainer, pl_module, stage)  # type: ignore[union-attr]
         if added_es_fts:
-            trainer.early_stopping_callback.setup(trainer, pl_module, stage)
+            trainer.early_stopping_callback.setup(trainer, pl_module, stage)  # type: ignore[union-attr]
         assert pl_module is not None and pl_module.trainer is not None
         supported = [t.lower() for t in self._supported_strategy_types()]
-        if strategy.strategy_name and strategy.strategy_name not in supported:
+        if strategy.strategy_name and strategy.strategy_name not in supported:  # type: ignore[attr-defined]
             if not self.allow_untested:
                 raise MisconfigurationException(
                     "FTS is has not yet been adapted for or rigorously tested using the specified distributed strategy."
@@ -390,7 +390,8 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                 )
             else:
                 warn_msg = (
-                    f"Allowing untested strategy '{strategy.strategy_name}' " f"because ``allow_untested`` is ``True``."
+                    "Allowing untested strategy"
+                    f" '{strategy.strategy_name}' because ``allow_untested`` is ``True``."  # type: ignore[attr-defined]
                 )
                 rank_zero_warn(warn_msg)
         if self.gen_ft_sched_only:
@@ -439,7 +440,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         assert self.pl_module is not None and self.pl_module.trainer is not None
         trainer = self.pl_module.trainer
         checkpoint_callback = trainer.checkpoint_callback
-        if checkpoint_callback.current_score == checkpoint_callback.best_model_score:
+        if checkpoint_callback.current_score == checkpoint_callback.best_model_score:  # type: ignore[union-attr]
             self._fts_state._best_ckpt_depth = self._fts_state._curr_depth
             for opt_idx, _ in enumerate(trainer.optimizers):
                 self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"][opt_idx] = deepcopy(
@@ -490,12 +491,15 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
             else trainer.fit_loop.max_epochs
         )
         if not self.epoch_transitions_only:  # if we're considering FTSEarlyStopping criteria
+            assert early_stopping_callback is not None
+            is_final_phase = early_stopping_callback.final_phase  # type: ignore[attr-defined]
             epoch_driven_transition = (
-                True
-                if not early_stopping_callback.final_phase and (0 <= curr_max_epoch <= trainer.current_epoch)
-                else False
+                True if not is_final_phase and (0 <= curr_max_epoch <= trainer.current_epoch) else False
             )
-            phase_transition = True if early_stopping_callback.es_phase_complete or epoch_driven_transition else False
+            if early_stopping_callback.es_phase_complete or epoch_driven_transition:  # type: ignore[attr-defined]
+                phase_transition = True
+            else:
+                phase_transition = False
         else:  # we're only considering epoch-driven transition constraints
             phase_transition = True if 0 <= curr_max_epoch <= trainer.current_epoch else False
         return phase_transition
