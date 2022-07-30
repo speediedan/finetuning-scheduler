@@ -1292,7 +1292,7 @@ class CallbackDepMixin(ABC):
             trainer.callbacks.append(FTSCheckpoint(monitor="val_loss", verbose=True))
             added_ckpt_fts = True
         for uc in [c for c in trainer.callbacks if any([isinstance(c, d) for d in CALLBACK_DEP_PARENTS.values()])]:
-            uc.connect_callback(trainer)
+            uc.connect_callback(trainer)  # type: ignore[attr-defined]
         if has_lr_monitor:
             trainer.callbacks = CallbackDepMixin._reorder_callback_by_type(trainer.callbacks, LearningRateMonitor)
         # ensure existing callback_connector logic is adhered to. Adding an FTS configuration method to
