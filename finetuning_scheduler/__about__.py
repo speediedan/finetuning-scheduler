@@ -30,8 +30,8 @@ final phase of the schedule has its stopping criteria met.
 
 Documentation
 -------------
-- https://finetuning-scheduler.readthedocs.io/en/latest/
 - https://finetuning-scheduler.readthedocs.io/en/stable/
+- https://finetuning-scheduler.readthedocs.io/en/0.2.0/
 """
 
 __all__ = ["__author__", "__author_email__", "__copyright__", "__docs__", "__homepage__", "__license__", "__version__"]
