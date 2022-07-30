@@ -11,13 +11,13 @@
 # limitations under the License.
 # initially based on https://bit.ly/3pdAf1G
 
-ARG CUDA_VERSION=11.3.1
+ARG CUDA_VERSION=11.6.0
 ARG OS_VER=ubuntu20.04
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
 ARG PYTHON_VERSION=3.9
-ARG PYTORCH_VERSION=1.11
+ARG PYTORCH_VERSION=1.12
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
 
@@ -29,11 +29,11 @@ ENV \
     TZ=US/Pacific \
     PATH="$PATH:/root/.local/bin" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
-    TORCH_CUDA_ARCH_LIST="3.7;5.0;6.0;7.0;7.5;8.0" \
+    TORCH_CUDA_ARCH_LIST="6.0;7.0;7.5;8.0;8.6" \
     MKL_THREADING_LAYER=${MKL_THREADING_LAYER} \
     MAKEFLAGS="-j2"
 # temporary fix for https://github.com/NVIDIA/nvidia-docker/issues/1631
-RUN apt-key adv --fetch-keys https://developer.download.nvidia.cn/compute/cuda/repos/ubuntu2004/x86_64/3bf863cc.pub
+# RUN apt-key adv --fetch-keys https://developer.download.nvidia.cn/compute/cuda/repos/ubuntu2004/x86_64/3bf863cc.pub
 RUN apt-get update -qq --fix-missing  && \
     apt-get install -y --no-install-recommends \
         build-essential \
@@ -75,13 +75,13 @@ RUN \
     pip config set global.cache-dir false && \
     # set particular PyTorch version by default
     if [[ "${CUST_BUILD}" -eq 0 ]]; then \
-        python ./requirements/pl_adjust_versions.py requirements.txt ${PYTORCH_VERSION}; \
+        python ./requirements/pl_adjust_versions.py requirements/base.txt ${PYTORCH_VERSION}; \
         python ./requirements/pl_adjust_versions.py requirements/extra.txt ${PYTORCH_VERSION}; \
         python ./requirements/pl_adjust_versions.py requirements/examples.txt ${PYTORCH_VERSION}; \
     else \
         # or target a specific cuda build of latest stable packages
         # pip install torch==1.10.2+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
-        pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu113; \
+        pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu116; \
     fi && \
     # Install all requirements
     pip install -r requirements/devel.txt --no-cache-dir && \
@@ -91,10 +91,10 @@ RUN \
     CUDA_VERSION_MAJOR=$(python -c "import torch; print(torch.version.cuda.split('.')[0])") && \
     py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.9'.split('.')))")
 
-RUN \
-    # install FairScale
-    pip install "fairscale>=0.4.5" && \
-    python -c "import fairscale; print(fairscale.__version__)"
+# RUN \
+#     # install FairScale
+#     pip install "fairscale>=0.4.5" && \
+#     python -c "import fairscale; print(fairscale.__version__)"
 
 # RUN \ # removing deepspeed from extras unless/until add optimizer pg interface added to DS API
 #     # install DeepSpeed

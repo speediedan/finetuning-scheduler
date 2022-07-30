@@ -11,10 +11,11 @@
 # limitations under the License.
 
 ARG PYTHON_VERSION=3.9
-ARG PYTORCH_VERSION=1.8
+ARG PYTORCH_VERSION=1.12
+ARG LIGHTNING_VERSION=1.7
 ARG CUST_BASE
 
-FROM speediedan/finetuning-scheduler:base-${CUST_BASE}py${PYTHON_VERSION}-pt${PYTORCH_VERSION}-pl1.6
+FROM speediedan/finetuning-scheduler:base-${CUST_BASE}py${PYTHON_VERSION}-pt${PYTORCH_VERSION}-pl${LIGHTNING_VERSION}
 
 LABEL maintainer="Dan Dale <https://github.com/speediedan>"
 

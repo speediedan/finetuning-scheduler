@@ -22,10 +22,8 @@ jobs:
   - job: pytest
     strategy:
       matrix:
-        # 'PyTorch - LTS':
-        #   image: "speediedan/finetuning-scheduler:py3.9-pt1.8-azpl-init"
         'PyTorch - stable':
-          image: "speediedan/finetuning-scheduler:py3.9-pt1.11-azpl-init"
+          image: "speediedan/finetuning-scheduler:py3.9-pt1.12-azpl-init"
     # how long to run the job before automatically cancelling
     timeoutInMinutes: "100"
     # how much time to give 'run always even if cancelled tasks' before stopping them

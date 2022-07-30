@@ -383,9 +383,10 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         if strategy.strategy_name and strategy.strategy_name not in supported:
             if not self.allow_untested:
                 raise MisconfigurationException(
-                    "FTS is currently experimental and has not yet been adapted for the"
-                    " specified distributed strategy please select from currently"
-                    f" compatible distributed strategies ({supported})"
+                    "FTS is has not yet been adapted for or rigorously tested using the specified distributed strategy."
+                    f" Please select from currently compatible distributed strategies ({supported}) or if you would"
+                    " like to attempt to use the currently specified strategy, pass ``allow_untested=True`` to the"
+                    " FinetuningScheduler callback when adding it."
                 )
             else:
                 warn_msg = (
