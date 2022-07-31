@@ -29,7 +29,7 @@ ignore_missing_imports = "True"
 show_error_codes = "True"
 warn_redundant_casts = "True"
 warn_unused_configs = "True"
-warn_unused_ignores = "True"
+warn_unused_ignores = "False"
 allow_redefinition = "True"
 # style choices
 warn_no_return = "False"
