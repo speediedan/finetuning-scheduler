@@ -1,5 +1,4 @@
-#pytorch-lightning>=1.6.0, <=1.6.3
+#pytorch-lightning>=1.7.0, <=1.7.1
 # currently working off of pl dev master
-git+https://github.com/Lightning-AI/lightning.git@0f6caffa577e2c8d9602dc8fba37c13e128b2120#egg=lightning
-# disallow torch 1.12.0 due to this bug: https://github.com/pytorch/pytorch/issues/80809
-torch>=1.9.*, !=1.12.0
+git+https://github.com/Lightning-AI/lightning.git@0d2c086b04ad14ec5d6cf63e9487381a96eee1733#egg=lightning
+torch>=1.9.*
