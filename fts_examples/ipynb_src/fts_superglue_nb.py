@@ -187,11 +187,12 @@ from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTok
 from transformers import logging as transformers_logging
 from transformers.tokenization_utils_base import BatchEncoding
 
-if Version(torch.__version__) == Version("1.12.0"):
+if Version(torch.__version__) == Version("1.12.0") or torch.__version__.startswith("1.12.0"):
     # we need to use a patched version of AdamW to fix https://github.com/pytorch/pytorch/issues/80809
     # and allow examples to succeed with torch 1.12.0 (this torch bug is fixed in 1.12.1)
     from fts_examples.patched_adamw import AdamW
-
+else:
+    from torch.optim.adamw import AdamW
 # %%
 # Import the `FinetuningScheduler` PyTorch Lightning extension module we want to use. This will import all necessary callbacks.
 import finetuning_scheduler as fts
