@@ -139,7 +139,7 @@ class FinetuningSchedulerBoringModel(BoringModel):
     def validation_step(self, batch, batch_idx):
         output = self(batch)
         loss = self.val_loss(batch, output)
-        self.log("val_loss", loss, prog_bar=False)
+        self.log("val_loss", loss, prog_bar=False, sync_dist=True)
         return {"x": loss}
 
     def val_loss(self, batch, prediction):
@@ -1227,7 +1227,7 @@ def test_early_stopping_on_non_finite_monitor(tmpdir, stop_value):
     class CurrentModel(FinetuningSchedulerBoringModel):
         def validation_epoch_end(self, outputs):
             val_loss = losses[self.current_epoch]
-            self.log("val_loss", val_loss)
+            self.log("val_loss", val_loss, sync_dist=True)
 
     model = CurrentModel()
     trainer = Trainer(
@@ -1254,7 +1254,7 @@ def test_early_stopping_thresholds(tmpdir, stopping_threshold, divergence_thesho
     class CurrentModel(FinetuningSchedulerBoringModel):
         def validation_epoch_end(self, outputs):
             val_loss = losses[self.current_epoch]
-            self.log("abc", val_loss)
+            self.log("abc", val_loss, sync_dist=True)
 
     model = CurrentModel()
     callbacks = [

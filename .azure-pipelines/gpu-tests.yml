@@ -42,9 +42,10 @@ jobs:
       clean: outputs
 
     steps:
+
     - bash: |
         pip install --upgrade pip requests
-        pip install . --requirement requirements/devel.txt
+        pip install . --no-warn-script-location --requirement requirements/devel.txt
       displayName: 'Install dependencies'
 
     - bash: |
