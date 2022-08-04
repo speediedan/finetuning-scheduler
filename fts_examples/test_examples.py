@@ -52,7 +52,7 @@ ADV_EXPECTED_WARNS = EXPECTED_WARNS + ["Found an `init_pg_lrs` key"]
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
-@RunIf(min_gpus=1, skip_windows=True)
+@RunIf(min_cuda_gpus=1, skip_windows=True)
 @pytest.mark.parametrize(
     "config_file",
     ["nofts_baseline.yaml", "fts_explicit.yaml", "fts_implicit.yaml"],
@@ -77,7 +77,7 @@ def test_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
-@RunIf(min_gpus=1, skip_windows=True)
+@RunIf(min_cuda_gpus=1, skip_windows=True)
 @pytest.mark.parametrize(
     "config_file",
     [pytest.param("fts_explicit_reinit_lr.yaml", marks=RunIf(min_torch="1.10")), "fts_implicit_reinit_lr.yaml"],
@@ -102,7 +102,7 @@ def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_fi
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
-@RunIf(min_gpus=1, skip_windows=True)
+@RunIf(min_cuda_gpus=1, skip_windows=True)
 @pytest.mark.parametrize("nb_name", ["fts_superglue_nb"], ids=["fts_superglue_nb"])
 def test_fts_superglue_nb(recwarn, nb_name):
     # simple sanity check that the notebook-based version of the example builds and executes successfully
