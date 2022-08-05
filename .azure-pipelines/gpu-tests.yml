@@ -10,6 +10,7 @@ trigger:
   branches:
     include:
       - "main"
+      - "src_layout"
       - "release/*"
       - "refs/tags/*"
 pr:
@@ -54,7 +55,7 @@ jobs:
       displayName: 'Env details'
 
     # - bash: |
-    #     python -m coverage run --source finetuning_scheduler -m pytest finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
+    #     python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
     #   displayName: 'Testing: standard'
 
     - bash: |
@@ -77,7 +78,7 @@ jobs:
 
     - script: |
         set -e
-        python -m pytest fts_examples -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
+        python -m pytest src/fts_examples -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
       displayName: 'Testing: examples'
 
     # - script: |

@@ -15,7 +15,7 @@ trainer:
   - class_path: pytorch_lightning.callbacks.LearningRateMonitor
   - class_path: finetuning_scheduler.FinetuningScheduler
     init_args:
-      ft_schedule: ./fts_examples/config/advanced/explicit_reinit_lr.yaml
+      ft_schedule: ./src/fts_examples/config/advanced/explicit_reinit_lr.yaml
       max_depth: 2
       restore_best: false  # disable restore_best for lr pattern clarity
   - class_path: finetuning_scheduler.FTSCheckpoint

@@ -12,10 +12,11 @@
 # limitations under the License.
 import os
 import re
+from pathlib import Path
 from typing import List, Optional
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
-_TH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tests/helpers")
+_PROJECT_ROOT = Path(os.path.dirname(os.path.dirname(__file__))).parent
+_TH = os.path.join(_PROJECT_ROOT, "tests/helpers")
 
 
 def _load_requirements(

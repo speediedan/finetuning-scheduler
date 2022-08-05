@@ -39,8 +39,8 @@ EXPECTED_WARNS = [
     "sentencepiece tokenizer that you are converting",
     "Torchmetrics v0.9",  # temporarily allow until _ResultMetric updated
 ]
-MIN_VERSION_WARNS = "1.8"
-MAX_VERSION_WARNS = "1.11"
+MIN_VERSION_WARNS = "1.9"
+MAX_VERSION_WARNS = "1.12"
 # torch version-specific warns will go here
 EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [], MAX_VERSION_WARNS: []}
 torch_version = get_distribution("torch").version

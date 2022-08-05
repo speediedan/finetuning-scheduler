@@ -21,7 +21,7 @@ test: clean
 	pip install -r requirements/devel.txt
 
 	# run tests with coverage
-	python -m coverage run --source finetuning_scheduler -m pytest tests fts_examples -v
+	python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v
 	python -m coverage report
 
 docs: clean
