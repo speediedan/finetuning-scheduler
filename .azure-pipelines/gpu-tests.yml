@@ -10,7 +10,6 @@ trigger:
   branches:
     include:
       - "main"
-      - "src_layout"
       - "release/*"
       - "refs/tags/*"
 pr:
