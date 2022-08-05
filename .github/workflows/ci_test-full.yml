@@ -3,7 +3,7 @@ name: Test full
 # see: https://help.github.com/en/actions/reference/events-that-trigger-workflows
 on:  # Trigger the workflow on push or pull request, but only for the main branch
   push:
-    branches: [main, src_layout, "release/*"]
+    branches: [main, "release/*"]
   pull_request:
     branches: [main, "release/*"]
     types: [opened, reopened, ready_for_review, synchronize]
