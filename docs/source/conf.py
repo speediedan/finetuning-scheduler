@@ -27,7 +27,7 @@ FOLDER_GENERATED = "generated"
 SPHINX_MOCK_REQUIREMENTS = int(os.environ.get("SPHINX_MOCK_REQUIREMENTS", True))
 
 spec = spec_from_file_location(
-    "finetuning_scheduler/__about__.py", os.path.join(PATH_ROOT, "finetuning_scheduler", "__about__.py")
+    "src/finetuning_scheduler/__about__.py", os.path.join(PATH_ROOT, "src", "finetuning_scheduler", "__about__.py")
 )
 about = module_from_spec(spec)
 spec.loader.exec_module(about)
