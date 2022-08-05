@@ -13,8 +13,9 @@
 # Initially based on https://bit.ly/3L7HOQK
 import os
 from importlib.util import module_from_spec, spec_from_file_location
+from types import ModuleType
 
-from setuptools import find_packages, setup
+from setuptools import find_namespace_packages, setup
 
 # https://packaging.python.org/guides/single-sourcing-package-version/
 # http://blog.ionelmc.ro/2014/05/25/python-packaging/
@@ -22,14 +23,23 @@ _PATH_ROOT = os.path.dirname(__file__)
 _PATH_REQUIRE = os.path.join(_PATH_ROOT, "requirements")
 
 
-def _load_py_module(fname, pkg="finetuning_scheduler"):
-    spec = spec_from_file_location(os.path.join(pkg, fname), os.path.join(_PATH_ROOT, pkg, fname))
+def _load_py_module(name: str) -> ModuleType:
+    spec = spec_from_file_location(name, os.path.join(_PATH_ROOT, "src", "finetuning_scheduler", name))
+    assert spec, f"Failed to load module {name}"
     py = module_from_spec(spec)
+    assert spec.loader, f"ModuleSpec.loader is None for {name}"
     spec.loader.exec_module(py)
     return py
 
 
-about = _load_py_module("__about__.py")
+# def _load_py_module(fname, pkg="finetuning_scheduler"):
+#     spec = spec_from_file_location(os.path.join(pkg, fname), os.path.join(_PATH_ROOT, pkg, fname))
+#     py = module_from_spec(spec)
+#     spec.loader.exec_module(py)
+#     return py
+
+
+about = _load_py_module(name="__about__.py")
 setup_tools = _load_py_module("setup_tools.py")
 
 # https://setuptools.readthedocs.io/en/latest/setuptools.html#declaring-extras
@@ -74,7 +84,13 @@ setup(
     url=about.__homepage__,
     download_url="https://github.com/speediedan/finetuning-scheduler",
     license=about.__license__,
-    packages=find_packages(exclude=["tests*"]),
+    # packages=find_packages(exclude=["tests*"]),
+    packages=find_namespace_packages(where="src"),
+    package_dir={"": "src"},
+    package_data={
+        "fts_examples.config": ["*.yaml"],
+        "fts_examples.config.advanced": ["*.yaml"],
+    },
     include_package_data=True,
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -82,10 +98,10 @@ setup(
     keywords=["deep learning", "pytorch", "AI", "machine learning", "pytorch lightning", "fine-tuning", "finetuning"],
     python_requires=">=3.7",
     setup_requires=[],
-    # install_requires=setup_tools._load_requirements(_PATH_REQUIRE),
-    install_requires=setup_tools._load_requirements(
-        _PATH_REQUIRE, pl_commit="d2c086b04ad14ec5d6cf63e9487381a96eee1733"
-    ),
+    install_requires=setup_tools._load_requirements(_PATH_REQUIRE),
+    # install_requires=setup_tools._load_requirements(
+    #     _PATH_REQUIRE, pl_commit="d2c086b04ad14ec5d6cf63e9487381a96eee1733"
+    # ),
     extras_require=extras,
     project_urls={
         "Bug Tracker": "https://github.com/speediedan/finetuning-scheduler/issues",

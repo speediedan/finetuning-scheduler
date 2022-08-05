@@ -23,7 +23,7 @@ line-length = 120
 
 
 [tool.mypy]
-files = ["finetuning_scheduler"]
+files = ["src/finetuning_scheduler"]
 disallow_untyped_defs = "True"
 ignore_missing_imports = "True"
 show_error_codes = "True"
