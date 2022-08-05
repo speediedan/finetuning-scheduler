@@ -32,13 +32,6 @@ def _load_py_module(name: str) -> ModuleType:
     return py
 
 
-# def _load_py_module(fname, pkg="finetuning_scheduler"):
-#     spec = spec_from_file_location(os.path.join(pkg, fname), os.path.join(_PATH_ROOT, pkg, fname))
-#     py = module_from_spec(spec)
-#     spec.loader.exec_module(py)
-#     return py
-
-
 about = _load_py_module(name="__about__.py")
 setup_tools = _load_py_module("setup_tools.py")
 
@@ -84,7 +77,6 @@ setup(
     url=about.__homepage__,
     download_url="https://github.com/speediedan/finetuning-scheduler",
     license=about.__license__,
-    # packages=find_packages(exclude=["tests*"]),
     packages=find_namespace_packages(where="src"),
     package_dir={"": "src"},
     package_data={
