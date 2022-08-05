@@ -58,8 +58,7 @@ LABEL maintainer="Dan Dale <https://github.com/speediedan>"
 WORKDIR /home/finetuning-scheduler
 COPY ./tests ./tests
 COPY ./requirements ./requirements
-COPY ./fts_examples ./fts_examples
-COPY ./finetuning_scheduler ./finetuning_scheduler
+COPY ./src ./src
 COPY ./requirements.txt ./setup.py ./setup.cfg ./pyproject.toml ./README.md ./
 
 ENV PATH=/root/miniconda3/envs/${CONDA_ENV}/bin:$PATH \

@@ -22,12 +22,13 @@ LABEL maintainer="Dan Dale <https://github.com/speediedan>"
 WORKDIR /home/finetuning-scheduler
 COPY ./tests ./tests
 COPY ./requirements ./requirements
-COPY ./fts_examples ./fts_examples
-COPY ./finetuning_scheduler ./finetuning_scheduler
+COPY ./src ./src
 COPY ./requirements.txt ./setup.py ./setup.cfg ./pyproject.toml ./README.md ./
 
 # install dependencies
 RUN \
+    pip install -U pip && \
+    ln -s /usr/local/bin/pip /usr/bin/pip && \
     pip install ".[all]" --no-cache-dir && \
     rm -rf requirements.* requirements/
 

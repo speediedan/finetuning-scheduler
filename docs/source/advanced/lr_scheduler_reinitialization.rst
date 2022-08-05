@@ -267,7 +267,7 @@ The two different demo schedule configurations are composed with shared defaults
 
 .. code-block:: bash
 
-    cd ./finetuning_scheduler/fts_examples/
+    cd ./fts_examples/
     # Demo LR scheduler reinitialization with an explicitly defined fine-tuning schedule:
     python fts_superglue.py fit --config config/advanced/fts_explicit_reinit_lr.yaml
 
