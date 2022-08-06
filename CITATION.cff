@@ -6,7 +6,7 @@ date-released: 2022-02-04
 authors:
   - family-names: "Dale"
     given-names: "Dan"
-version: 0.2.0
+version: 0.3.0
 identifiers:
   - description: "Fine-Tuning Scheduler (all versions)"
     type: doi
@@ -35,6 +35,9 @@ identifiers:
   - description: "Fine-Tuning Scheduler (v0.1.8)"
     type: doi
     value: 10.5281/zenodo.6829704
+  - description: "Fine-Tuning Scheduler (v0.2.0)"
+    type: doi
+    value: 10.5281/zenodo.6969908
 license: "Apache-2.0"
 url: "https://finetuning-scheduler.readthedocs.io/"
 repository-code: "https://github.com/speediedan/finetuning-scheduler"
