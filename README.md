@@ -70,7 +70,7 @@ pip install finetuning-scheduler['all']
 **Note:** prefer latest tested pytorch and cuda toolkit by including official pytorch and nvidia channels:
 
 ```bash
-conda install -c pytorch -c nvidia -c conda-forge pytorch cudatoolkit=11.3 finetuning-scheduler
+conda install -c pytorch -c nvidia -c conda-forge pytorch cudatoolkit=11.6 finetuning-scheduler
 ```
 
 #### *Source Installation*
