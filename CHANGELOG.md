@@ -4,6 +4,49 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [0.2.0] - 2022-08-06
+
+### Added
+
+- support for pytorch-lightning 1.7.0
+- switched to [src-layout project structure](https://setuptools.pypa.io/en/latest/userguide/package_discovery.html)
+- increased flexibility of internal package management
+- added a patch to examples to allow them to work with torch 1.12.0 despite issue #80809
+- added sync for test log calls for multi-gpu testing
+
+### Fixed
+
+- adjusted runif condition for examples tests
+- minor type annotation stylistic correction to avoid jsonargparse issue fixed in
+  [#148](https://github.com/omni-us/jsonargparse/pull/148)
+
+### Changed
+
+- streamlined MANIFEST.in directives
+- updated docker image dependencies
+- disable mypy unused ignore warnings due to variable behavior depending on ptl installation method
+  (e.g. pytorch-lightning vs full lightning package)
+- changed full ci testing on mac to use macOS-11 instead of macOS-10.15
+- several type-hint mypy directive updates
+- unpinned protobuf in requirements as no longer necessary
+- updated cuda docker images to use pytorch-lightning 1.7.0, torch 1.12.0 and cuda-11.6
+- refactored mock strategy test to use a different mock strategy
+- updated pyproject.toml with jupytext metadata bypass configuration for nb test cleanup
+- updated ptl external class references for ptl 1.7.0
+- narrowed scope of runif test helper module to only used conditions
+- updated nb tutorial links to point to stable branch of docs
+- unpinned jsonargparse and bumped min version to 4.9.0
+- moved core requirements.txt to requirements/base.txt and update load_requirements and setup to reference lightning
+  meta package
+- update azure pipelines ci to use torch 1.12.0
+- renamed instantiate_registered_class meth to instantiate_class due to ptl 1.7 deprecation of cli registry
+  functionality
+
+### Deprecated
+
+- removed ddp2 support
+- removed use of ptl cli registries in examples due to its deprecation
+
 ## [0.1.8] - 2022-07-13
 
 ### Added
