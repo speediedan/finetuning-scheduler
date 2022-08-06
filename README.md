@@ -103,7 +103,7 @@ from finetuning_scheduler import FinetuningScheduler
 trainer = Trainer(callbacks=[FinetuningScheduler()])
 ```
 
-Get started by following [the Fine-Tuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/stable/index.html#scheduled-finetuning-superglue) or by following the [notebook-based](https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html) Fine-Tuning Scheduler tutorial.
+Get started by following [the Fine-Tuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/stable/index.html#example-scheduled-fine-tuning-for-superglue) or by following the [notebook-based](https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html) Fine-Tuning Scheduler tutorial.
 
 ______________________________________________________________________
 
@@ -112,7 +112,7 @@ ______________________________________________________________________
 ### Scheduled Fine-Tuning For SuperGLUE
 
 - [Notebook-based Tutorial](https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html)
-- [CLI-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/stable/#scheduled-finetuning-superglue)
+- [CLI-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/stable/#example-scheduled-fine-tuning-for-superglue)
 
 ______________________________________________________________________
 
