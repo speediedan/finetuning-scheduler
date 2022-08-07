@@ -376,12 +376,12 @@ class RteBoolqModule(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         outputs = self(**batch)
         loss = outputs[0]
-        self.log("train_loss", loss, sync_dist=True)
+        self.log("train_loss", loss)
         return loss
 
     def training_epoch_end(self, outputs: List[Any]) -> None:
         if self.finetuningscheduler_callback:
-            self.log("finetuning_schedule_depth", float(self.finetuningscheduler_callback.curr_depth), sync_dist=True)
+            self.log("finetuning_schedule_depth", float(self.finetuningscheduler_callback.curr_depth))
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         outputs = self(**batch)
@@ -391,9 +391,9 @@ class RteBoolqModule(pl.LightningModule):
         elif self.num_labels == 1:
             preds = logits.squeeze()
         labels = batch["labels"]
-        self.log("val_loss", val_loss, prog_bar=True, sync_dist=True)
+        self.log("val_loss", val_loss, prog_bar=True)
         metric_dict = self.metric.compute(predictions=preds, references=labels)
-        self.log_dict(metric_dict, prog_bar=True, sync_dist=True)
+        self.log_dict(metric_dict, prog_bar=True)
 
     def _init_param_groups(self) -> List[Dict]:
         """Initialize the parameter groups. Used to ensure weight_decay is not applied to our specified bias
@@ -443,9 +443,9 @@ class RteBoolqModule(pl.LightningModule):
 #
 # | Experiment Tag    | Training Scenario Description                                          |
 # |:-----------------:| ---------------------------------------------------------------------- |
-# | ``fts_explicit``  | Training with a fine-tuning schedule explicitly provided by the user    |
+# | ``fts_explicit``  | Training with a fine-tuning schedule explicitly provided by the user     |
 # | ``nofts_baseline``| A baseline fine-tuning training session (without scheduled fine-tuning)  |
-# | ``fts_implicit``  | Training with an implicitly generated fine-tuning schedule (the default)|
+# | ``fts_implicit``  | Training with an implicitly generated fine-tuning schedule (the default) |
 #
 # Let's begin by configuring the ``fts_explicit`` scenario. We'll subsequently run the other two scenarios for
 # comparison.
