@@ -139,7 +139,8 @@ class FinetuningSchedulerBoringModel(BoringModel):
     def validation_step(self, batch, batch_idx):
         output = self(batch)
         loss = self.val_loss(batch, output)
-        self.log("val_loss", loss, prog_bar=False, sync_dist=True)
+        use_sync_dist = True if self.trainer.strategy.strategy_name in ("ddp_spawn", "ddp_sharded_spawn") else False
+        self.log("val_loss", loss, prog_bar=False, sync_dist=use_sync_dist)
         return {"x": loss}
 
     def val_loss(self, batch, prediction):
