@@ -31,8 +31,9 @@ annotated yaml schedule below and can be explored using the
 
 When specifying an LR scheduler configuration for a given phase, the ``new_lr_scheduler`` dictionary requires at minimum
 an ``lr_scheduler_init`` dictionary containing a ``class_path`` key indicating the class of the lr scheduler to be
-instantiated and wrapped around your optimizer. Currently, all :class:`~torch.optim.lr_scheduler._LRScheduler` s
-are supported with the exception of :external+torch:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
+instantiated and wrapped around your optimizer. Currently,
+all :class:`~pytorch_lightning.utilities.types.LRSchedulerType` s are supported with the exception of
+:external+torch:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
 :external+torch:class:`~torch.optim.lr_scheduler.SequentialLR` (due to the configuration complexity and semantic
 conflicts supporting them would introduce).
 
@@ -107,7 +108,9 @@ sanity-checked prior to training initiation.
 .. note::
 
     It is currently is up to the user to ensure the number of parameter groups listed in ``init_pg_lrs`` matches the
-    number of optimizer parameter groups created in previous phases. This number of groups is dependent on a number of
+    number of optimizer parameter groups created in previous phases (and if using
+    :external+torch:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau` with a list of ``min_lr`` s, the
+    current number parameter groups). This number of groups is dependent on a number of
     factors including the ``nodecay`` mapping of parameters specified in previous phases and isn't yet
     introspected/simulated in the current :class:`~finetuning_scheduler.fts.FinetuningScheduler` version.
 

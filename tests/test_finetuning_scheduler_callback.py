@@ -129,12 +129,19 @@ class FinetuningSchedulerBoringModel(BoringModel):
     :class:`~finetuning_scheduler.FinetuningScheduler` by ensuring deterministic divergence
     and accommodating no_decay list configuration"""
 
-    def __init__(self, diverge_on_epoch: int = 3, no_decay: Optional[List] = None, weight_decay: float = 1.0e-06):
+    def __init__(
+        self,
+        diverge_on_epoch: int = 3,
+        no_decay: Optional[List] = None,
+        weight_decay: float = 1.0e-06,
+        init_rlrop: bool = False,
+    ):
         super().__init__()
         self.layer = nn.Sequential(nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 2))
         self.diverge_on_epoch = diverge_on_epoch
         self.no_decay = no_decay
         self.weight_decay = weight_decay
+        self.init_rlrop = init_rlrop
 
     def validation_step(self, batch, batch_idx):
         output = self(batch)
@@ -153,7 +160,15 @@ class FinetuningSchedulerBoringModel(BoringModel):
     def configure_optimizers(self):
         parameters = filter(lambda x: x.requires_grad, self.parameters())
         optimizer = torch.optim.SGD(parameters, lr=1e-3, weight_decay=self.weight_decay)
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
+        if self.init_rlrop:
+            lr_scheduler = {
+                "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2),
+                "monitor": "val_loss",
+                "frequency": 1,
+            }
+        else:
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
+
         return [optimizer], [lr_scheduler]
 
 
@@ -254,6 +269,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     mod_sched_dict = get_fts(trainer).load_yaml_schedule(unmod_schedule_file)
     reinitlr_sched_dict = deepcopy(mod_sched_dict)
     lambdalr_sched_dict = deepcopy(mod_sched_dict)
+    rlrop_sched_dict = deepcopy(mod_sched_dict)
     mod_sched_dict[0]["params"].extend(mod_sched_dict.pop(1)["params"])
     mod_sched_dict[0]["max_transition_epoch"] = 3
     mod_sched_dict[1] = mod_sched_dict.pop(2)
@@ -295,7 +311,34 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         "pl_lrs_cfg": {"interval": "step", "frequency": 1, "name": "Custom_Reinit_LR"},
         "init_pg_lrs": [1.0e-06, 2.0e-06],
     }
-    return unmod_schedule_file, mod_sched_dict, epoch_only_sched, reinitlr_sched_dict, lambdalr_sched_dict
+    rlrop_sched_dict[0]["max_transition_epoch"] = 4
+    rlrop_sched_dict[1]["max_transition_epoch"] = 8
+    rlrop_sched_dict[1]["new_lr_scheduler"] = {
+        "lr_scheduler_init": {
+            "class_path": "torch.optim.lr_scheduler.ReduceLROnPlateau",
+            "init_args": {"patience": 1, "min_lr": [2.0e-07, 1.0e-07]},
+        },
+        "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "monitor": "val_loss", "name": "Custom_Reinit_LR"},
+        "init_pg_lrs": [1.5e-06],
+    }
+    rlrop_sched_dict[2]["lr"] = 3.0e-06
+    rlrop_sched_dict[2]["max_transition_epoch"] = 10
+    rlrop_sched_dict[2]["new_lr_scheduler"] = {
+        "lr_scheduler_init": {
+            "class_path": "torch.optim.lr_scheduler.StepLR",
+            "init_args": {"step_size": 1, "gamma": 0.7, "verbose": True},
+        },
+        "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
+        "init_pg_lrs": [2.0e-06, 3.0e-06],
+    }
+    return (
+        unmod_schedule_file,
+        mod_sched_dict,
+        epoch_only_sched,
+        reinitlr_sched_dict,
+        lambdalr_sched_dict,
+        rlrop_sched_dict,
+    )
 
 
 @pytest.fixture(scope="function")
@@ -443,6 +486,20 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     pl_lrs_cfg:
       whoops: warnme
 """
+    rlrop_missing_mon = """
+1:
+  params:
+  - layer.1.bias
+  - layer.1.weight
+  new_lr_scheduler:
+    lr_scheduler_init:
+      class_path: torch.optim.lr_scheduler.ReduceLROnPlateau
+      init_args:
+        patience: 2
+    pl_lrs_cfg:
+      name: Custom_Reinit_LR
+      interval: epoch
+"""
     num_pg_match = """
 1:
   params:
@@ -506,6 +563,7 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     invalid_sched["imp_lrs_fail"] = valid_sched_start + lrs_import_fail
     invalid_sched["lrs_init_fail"] = valid_sched_start + lrs_init_fail
     invalid_sched["extra_plrs_key"] = valid_sched_start + extra_plrs_key
+    invalid_sched["rlrop_missing_mon"] = valid_sched_start + rlrop_missing_mon
     invalid_sched["num_pg_w"] = valid_sched_start + num_pg_match
     invalid_sched["ext_opt_key"] = valid_sched_start + extra_optimizer_key
     invalid_sched["non_conv_int"] = valid_sched_start + non_integer_conv_phase + valid_sched_end
@@ -978,6 +1036,97 @@ def test_finetuningscheduling_reinitlr_lambda(
         assert all([any([re.compile(w_msg).search(w.message.args[0]) for w in recwarn.list]) for w_msg in w_expected])
 
 
+IMP_REINIT_RLROP_CFG = {
+    "lr_scheduler_init": {
+        "class_path": "torch.optim.lr_scheduler.ReduceLROnPlateau",
+        "init_args": {"patience": 1},
+    },
+    "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "monitor": "val_loss", "name": "Custom_Reinit_LR"},
+}
+
+
+EXPECTED_RLROP_STATE = {
+    (True,): {
+        0: (0.001,),
+        1: (0.0007,),
+        2: (0.00049,),
+        3: (0.000343,),
+        4: (1.5e-06, 1e-05),
+        5: (1.5e-06, 1e-05),
+        6: (1.5e-06, 1e-05),
+        7: (2e-07, 1e-06),
+        8: (2e-06, 3e-06, 3e-06),
+        9: (1.4e-06, 2.1e-06, 2.1e-06),
+    },
+    (False,): {
+        0: (0.001,),
+        1: (0.001,),
+        2: (0.001,),
+        3: (0.001,),
+        4: (0.001,),
+        5: (0.001,),
+        6: (0.0001,),
+        7: (0.001, 1e-05),
+        8: (0.001, 1e-05),
+        9: (0.001, 1e-05),
+        10: (0.0001, 1e-06),
+        11: (0.001, 1e-05, 1e-05),
+        12: (0.001, 1e-05, 1e-05),
+        13: (0.001, 1e-05, 1e-05),
+        14: (0.0001, 1e-06, 1e-06),
+    },
+}
+
+
+@pytest.mark.parametrize(
+    "explicit_mode, es_patience, init_rlrop, max_epochs, w_expected",
+    [
+        (True, 5, False, 10, None),
+        (False, 4, True, 99, None),
+    ],
+    ids=["exp_rlrop", "imp_rlrop"],
+)
+def test_finetuningscheduling_reinitlr_rlrop(
+    tmpdir,
+    recwarn,
+    boring_ft_schedule,
+    explicit_mode: bool,
+    es_patience: int,
+    init_rlrop: bool,
+    max_epochs: int,
+    w_expected,
+):
+    """Inspect learning rate scheduler state within the training process to ensure it is taking the expected path
+    in both explicit and implict fine-tuning modes when using ReduceLROnPlateau schedulers (including when
+    reinitializing with them)."""
+    seed_everything(42)
+    reinit_lr_cfg = None
+    if explicit_mode:
+        ft_schedule = boring_ft_schedule[5]
+    else:
+        reinit_lr_cfg = IMP_REINIT_RLROP_CFG
+        ft_schedule = None
+
+    model = FinetuningSchedulerBoringModel(diverge_on_epoch=2, init_rlrop=init_rlrop)
+    callbacks = [
+        TestFinetuningScheduler(
+            lrs_state=EXPECTED_RLROP_STATE[(explicit_mode,)],
+            reinit_lr_cfg=reinit_lr_cfg,
+            ft_schedule=ft_schedule,
+            max_depth=2,
+        ),
+        FTSEarlyStopping(monitor="val_loss", patience=es_patience),
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, max_epochs=max_epochs)
+    trainer.fit(model)
+    finetuningscheduler_callback = get_fts(trainer)
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == 2
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+    if w_expected:
+        assert all([any([re.compile(w_msg).search(w.message.args[0]) for w in recwarn.list]) for w_msg in w_expected])
+
+
 @pytest.mark.parametrize(
     "callbacks, expected",
     [
@@ -1034,8 +1183,22 @@ def test_finetuningscheduling_opt_warns():
             ],
             "Specifying a `init_pg_lrs` key in the lr",
         ),
+        (
+            [
+                FinetuningScheduler(
+                    reinit_lr_cfg={
+                        "lr_scheduler_init": {
+                            "class_path": "torch.optim.lr_scheduler.ReduceLROnPlateau",
+                            "init_args": {"patience": 1, "min_lr": [0, 0]},
+                        },
+                        "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "monitor": "val_loss", "name": "test"},
+                    }
+                )
+            ],
+            "cannot be a list or tuple",
+        ),
     ],
-    ids=["nofts_ckpt", "nofts_es", "topk0", "multifts", "nomon", "schedfnf", "imp_reinit_pg"],
+    ids=["nofts_ckpt", "nofts_es", "topk0", "multifts", "nomon", "schedfnf", "imp_reinit_pg", "imp_reinit_rlrop_mlr"],
 )
 def test_finetuningscheduling_misconfiguration(tmpdir, callbacks: List[Callback], expected: str):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly
@@ -1068,6 +1231,7 @@ def test_finetuningscheduling_misconfiguration(tmpdir, callbacks: List[Callback]
         ("cflict_reinit", ("Specifying both `ft_schedule` and `reinit_lr_cfg` is an invalid", None)),
         ("valid_nonint", (None, None)),
         ("extra_plrs_key", ("Found unsupported keys in the lr scheduler dict", None)),
+        ("rlrop_missing_mon", ("must include a monitor", None)),
         ("num_pg_w", ("ensure the number of specified parameter groups matches", None)),
         ("ext_opt_key", ("the existing optimizer and all associated parameter", None)),
         ("non_integer", ("had non-integer keys", None)),
@@ -1091,6 +1255,7 @@ def test_finetuningscheduling_misconfiguration(tmpdir, callbacks: List[Callback]
         "cflict_reinit",
         "valid_nonint",
         "extra_plrs_key",
+        "rlrop_missing_mon",
         "num_pg_w",
         "ext_opt_key",
         "non_int",
