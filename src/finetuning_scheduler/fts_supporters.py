@@ -25,6 +25,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import KeysView
+from copy import copy
 from dataclasses import dataclass, field, fields
 from functools import reduce
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
@@ -41,10 +42,12 @@ from pytorch_lightning.utilities import _TORCH_GREATER_EQUAL_1_10, rank_zero_inf
 from pytorch_lightning.utilities.cloud_io import get_filesystem
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
-from pytorch_lightning.utilities.types import _LRScheduler, LRSchedulerConfig
+from pytorch_lightning.utilities.types import LRSchedulerConfig, LRSchedulerTypeTuple
 from torch import Tensor
 from torch.nn import Module
 from torch.optim.optimizer import Optimizer
+
+LRSchedulerType = Union[Type[pl.utilities.types._LRScheduler], Type[pl.utilities.types.ReduceLROnPlateau]]
 
 log = logging.getLogger(__name__)
 
@@ -451,9 +454,10 @@ class ScheduleParsingMixin(ABC):
             self._validate_epoch_transitions()
         return max_phase, max_epoch_wm
 
-    def _prune_pl_lrs(self, pl_lrs_cfg: Dict) -> Dict:
+    def _update_pl_lrs(self, pl_lrs_cfg: Dict, lrs_class: LRSchedulerType) -> Dict:
         """Prune keys not part of a valid PyTorch Lightning lr scheduler configuration (if automatic optimization
-        used)
+        used) and update configuration if :external+torch:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau` is
+        used.
 
         Args:
             pl_lrs_cfg (Dict): User-provided PyTorch Lightning lr scheduler configuration
@@ -469,6 +473,16 @@ class ScheduleParsingMixin(ABC):
                     f"Found unsupported keys in the lr scheduler dict: {extra_keys}.",
                     category=RuntimeWarning,
                 )
+            pl_lrs_cfg["reduce_on_plateau"] = pl_lrs_cfg.get(
+                "reduce_on_plateau", issubclass(lrs_class, torch.optim.lr_scheduler.ReduceLROnPlateau)
+            )
+            if pl_lrs_cfg["reduce_on_plateau"] and pl_lrs_cfg.get("monitor", None) is None:
+                raise MisconfigurationException(
+                    "The lr scheduler dict must include a monitor when a `ReduceLROnPlateau` scheduler is used."
+                    ' For example: {"optimizer": optimizer, "lr_scheduler":'
+                    ' {"scheduler": scheduler, "monitor": "your_loss"}}'
+                )
+
         return {k: v for k, v in pl_lrs_cfg.items() if k in supported_keys}
 
     def _pl_lrs_validation(self, pl_lrs_cfg: Dict) -> None:
@@ -506,7 +520,8 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: If the configuration provided in `lr_scheduler_init` does not specify a
                 `class_path` for the lr scheduler to be instantiated.
         """
-        if "init_pg_lrs" in target_sched.keys() and (self.reinit_lr_cfg or not depth):
+        implicit_chk = bool(self.reinit_lr_cfg or not depth)
+        if "init_pg_lrs" in target_sched.keys() and implicit_chk:
             raise MisconfigurationException(
                 "Specifying a `init_pg_lrs` key in the lr scheduler configuration passed via `reinit_lr_cfg` (i.e. "
                 "implicit mode training) is not a valid configuration since the same lr scheduler configuration "
@@ -542,7 +557,7 @@ class ScheduleParsingMixin(ABC):
             rank_zero_warn(warn_msg)
         lr_scheduler_init = target_sched.get("lr_scheduler_init")
         assert lr_scheduler_init
-        ScheduleParsingMixin._lr_scheduler_sanity_chk(lr_scheduler_init)
+        ScheduleParsingMixin._lr_scheduler_sanity_chk(lr_scheduler_init, implicit_chk)
 
     def _lr_scheduler_init_validation(self, lr_reinit_phases: Dict) -> None:
         """Trigger lr scheduler reinitialization configuration validation for all provided configurations. This
@@ -647,9 +662,9 @@ class ScheduleParsingMixin(ABC):
             self._rewrite_schedule(err_msg=err_msg)
 
     def _validate_epoch_transitions(self) -> None:
-        """If not composing :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` and epoch-driven
-        stopping criteria (the default behavior) but instead specifying exclusively epoch-driven transitions (
-        :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is
+        """If not composing :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` and
+        epoch-driven stopping criteria (the default behavior) but instead specifying exclusively epoch-driven
+        transitions ( :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is
         ``True``), ensure the specified schedule specifies transitions for every phase.
 
         Raises:
@@ -757,7 +772,7 @@ class ScheduleParsingMixin(ABC):
         lr_scheduler_init = new_lr_scheduler["lr_scheduler_init"]
         lrs_class = ScheduleParsingMixin._import_lr_scheduler(lr_scheduler_init)
         # unless overridden by user directive, reset optimizer pg lrs to initial before wrapping in new scheduler
-        curr_optimizer_lrs = [group["initial_lr"] for group in optimizer.param_groups]
+        curr_optimizer_lrs = [group.get("initial_lr", group["lr"]) for group in optimizer.param_groups]
         reset_init_pg_lrs = True if new_lr_scheduler.get("init_pg_lrs", None) else False
         initial_optimizer_lrs = new_lr_scheduler.get("init_pg_lrs", curr_optimizer_lrs)
         for _, data in enumerate(zip(optimizer.param_groups, initial_optimizer_lrs)):
@@ -766,7 +781,7 @@ class ScheduleParsingMixin(ABC):
             if reset_init_pg_lrs:
                 param_group["initial_lr"] = lr
         if "pl_lrs_cfg" in new_lr_scheduler.keys():
-            new_lr_scheduler["pl_lrs_cfg"] = self._prune_pl_lrs(new_lr_scheduler["pl_lrs_cfg"])
+            new_lr_scheduler["pl_lrs_cfg"] = self._update_pl_lrs(new_lr_scheduler["pl_lrs_cfg"], lrs_class=lrs_class)
         new_lrs_config = LRSchedulerConfig(
             opt_idx=0,
             scheduler=lrs_class(optimizer=optimizer, **lr_scheduler_init.get("init_args", {})),
@@ -795,7 +810,7 @@ class ScheduleParsingMixin(ABC):
                 )
 
     @staticmethod
-    def _is_supported_reinit_lr(lr_class: Type[_LRScheduler]) -> None:
+    def _is_supported_reinit_lr(lr_class: Type[LRSchedulerType]) -> None:
         """Evaulate whether the provided lr scheduler is currently supported in a lr scheduler reinitialization
         context."""
         if _TORCH_GREATER_EQUAL_1_10:
@@ -812,7 +827,7 @@ class ScheduleParsingMixin(ABC):
                 raise MisconfigurationException(error_msg)
 
     @staticmethod
-    def _import_lr_scheduler(lr_scheduler_init: Dict) -> Type[_LRScheduler]:
+    def _import_lr_scheduler(lr_scheduler_init: Dict) -> LRSchedulerType:
         """Import the lr scheduler specified in the provided `lr_scheduler_init` configuration.
 
         Args:
@@ -822,7 +837,7 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: If the specified LR scheduler cannot be imported successfully.
 
         Returns:
-            Type[_LRScheduler]: The lr scheduler class to be instantiated.
+            LRSchedulerType: The lr scheduler class to be instantiated.
         """
         try:
             class_module, class_name = lr_scheduler_init["class_path"].rsplit(".", 1)
@@ -841,7 +856,7 @@ class ScheduleParsingMixin(ABC):
         return lrs_class
 
     @staticmethod
-    def _lr_scheduler_sanity_chk(lr_scheduler_init: Dict) -> None:
+    def _lr_scheduler_sanity_chk(lr_scheduler_init: Dict, is_implicit_mode: bool = False) -> None:
         """Before beginning execution of defined fine-tuning schedule, perform a sanity check of the specified lr
         scheduler reinitialization configuration. To the extent reasonable (i.e. without simulating the entire
         training path), if the provided lr scheduler reinitialization configuration is expected to fail, it is
@@ -864,8 +879,22 @@ class ScheduleParsingMixin(ABC):
             )
             rank_zero_warn(warn_msg)
             del lr_scheduler_init["init_args"]["optimizer"]
+        min_lr_param = lr_scheduler_init["init_args"].get("min_lr")
+        invalid_min_lr = (
+            True if min_lr_param and (isinstance(min_lr_param, list) or isinstance(min_lr_param, tuple)) else False
+        )
+        reinit_rlrop = is_implicit_mode and issubclass(lrs_class, torch.optim.lr_scheduler.ReduceLROnPlateau)
+        if reinit_rlrop and invalid_min_lr:
+            raise MisconfigurationException(
+                "In the lr scheduler configuration passed via `reinit_lr_cfg` (i.e. implicit mode training)"
+                " `min_lr` cannot be a list or tuple since the same lr scheduler configuration is intended to be"
+                " reinitialized at every fine-tuning phase with implicit mode fine-tuning."
+            )
+        test_lr_init = copy(lr_scheduler_init.get("init_args", {}))
+        if min_lr_param:
+            del test_lr_init["min_lr"]  # our mock optimizer will not have any param groups
         try:
-            testlr = lrs_class(optimizer=_MockOptimizer(), **lr_scheduler_init.get("init_args", {}))
+            testlr = lrs_class(optimizer=_MockOptimizer(), **test_lr_init)
         except Exception as err:
             error_msg = (
                 "Could not configure the specified LR scheduler class using the `init_args` "
@@ -874,7 +903,7 @@ class ScheduleParsingMixin(ABC):
             )
             rank_zero_warn(error_msg)
             raise MisconfigurationException(error_msg)
-        assert isinstance(testlr, torch.optim.lr_scheduler._LRScheduler)
+        assert issubclass(type(testlr), LRSchedulerTypeTuple)
 
 
 class ScheduleImplMixin(ABC):
@@ -1118,8 +1147,9 @@ class ScheduleImplMixin(ABC):
             lr_factor = params_lr / denom_lr
             orig_lr_factor = lr_factor
             for config in module.trainer.lr_scheduler_configs:  # type: ignore[union-attr]
-                if hasattr(config.scheduler, "lr_lambdas") and config.scheduler.lr_lambdas and apply_lambdas:
-                    lr_factor = lr_factor * config.scheduler.lr_lambdas[-1](config.scheduler.last_epoch)
+                scheduler = config.scheduler
+                if hasattr(scheduler, "lr_lambdas") and scheduler.lr_lambdas and apply_lambdas:
+                    lr_factor = lr_factor * scheduler.lr_lambdas[-1](scheduler.last_epoch)
                 added_pgs = 0
                 if no_decay:
                     optimizer.add_param_group(
@@ -1155,9 +1185,12 @@ class ScheduleImplMixin(ABC):
                         }
                     )
                     added_pgs = 1
-                config.scheduler.base_lrs.extend([orig_lr_factor] * added_pgs)
-                if hasattr(config.scheduler, "lr_lambdas"):
-                    config.scheduler.lr_lambdas.extend([config.scheduler.lr_lambdas[-1]] * added_pgs)
+                if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    scheduler.min_lrs.extend([scheduler.min_lrs[0]] * added_pgs)  # type: ignore[attr-defined]
+                else:
+                    scheduler.base_lrs.extend([orig_lr_factor] * added_pgs)
+                    if hasattr(scheduler, "lr_lambdas"):
+                        scheduler.lr_lambdas.extend([scheduler.lr_lambdas[-1]] * added_pgs)
 
     @staticmethod
     def sync(objs: Tuple, asets: Tuple, agg_func: Callable = max) -> None:

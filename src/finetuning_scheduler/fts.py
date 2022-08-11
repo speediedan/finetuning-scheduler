@@ -119,9 +119,9 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                 epoch_transitions_only defaults to ``False``.
             reinit_lr_cfg: A lr scheduler reinitialization configuration dictionary consisting of at minimum a nested
                 ``lr_scheduler_init`` dictionary with a ``class_path`` key specifying the class of the
-                :class:`~torch.optim.lr_scheduler._LRScheduler` to be instantiated. Optionally, an ``init_args``
-                dictionary of arguments to initialize the lr scheduler with may be included. Additionally, one may
-                optionally include arguments to pass to PyTorch Lightning's lr scheduler configuration
+                :class:`~pytorch_lightning.utilities.types.LRSchedulerType` to be instantiated. Optionally, an
+                ``init_args`` dictionary of arguments to initialize the lr scheduler with may be included. Additionally,
+                one may optionally include arguments to pass to PyTorch Lightning's lr scheduler configuration
                 :class:`~pytorch_lightning.utilities.types.LRSchedulerConfig` in the ``pl_lrs_cfg`` dictionary. By way
                 of example, one could configure this dictionary via the
                 :external+pl:class:`~pytorch_lightning.utilities.cli.LightningCLI` with the following:
