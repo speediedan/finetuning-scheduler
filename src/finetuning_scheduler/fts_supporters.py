@@ -520,7 +520,7 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: If the configuration provided in `lr_scheduler_init` does not specify a
                 `class_path` for the lr scheduler to be instantiated.
         """
-        implicit_chk = bool(self.reinit_lr_cfg or not depth)
+        implicit_chk = bool(self.reinit_lr_cfg)
         if "init_pg_lrs" in target_sched.keys() and implicit_chk:
             raise MisconfigurationException(
                 "Specifying a `init_pg_lrs` key in the lr scheduler configuration passed via `reinit_lr_cfg` (i.e. "
@@ -1119,7 +1119,6 @@ class ScheduleImplMixin(ABC):
         thawed_pl: List,
         no_decay: Optional[list] = None,
         lr: Optional[float] = None,
-        initial_denom_lr: float = 10.0,
         apply_lambdas: bool = False,
     ) -> None:
         """Add optimizer parameter groups associated with the next scheduled fine-tuning depth/level and extend the
@@ -1135,21 +1134,17 @@ class ScheduleImplMixin(ABC):
                 ["bias", "LayerNorm.weight"]. Defaults to ``None``.
             lr: The initial learning rate for the new parameter group(s). If not specified,
                 the ``lr`` of the first scheduled fine-tuning depth will be used. Defaults to ``None``.
-            initial_denom_lr: The scaling factor by which to scale the initial learning rate for new
-                parameter groups when no initial learning rate is specified. Defaults to 10.0.
             apply_lambdas: Whether to apply lr lambdas to newly added groups. Defaults to False.
         """
         if len(thawed_pl) == 0:
             rank_zero_warn("No thawed parameters passed so no new optimizer groups will be added.")
         else:
-            params_lr = optimizer.param_groups[0]["lr"] if lr is None else float(lr)
-            denom_lr = initial_denom_lr if lr is None else 1.0
-            lr_factor = params_lr / denom_lr
-            orig_lr_factor = lr_factor
+            phase_lr = optimizer.param_groups[0]["lr"] if lr is None else float(lr)
+            orig_lr_factor = phase_lr
             for config in module.trainer.lr_scheduler_configs:  # type: ignore[union-attr]
                 scheduler = config.scheduler
                 if hasattr(scheduler, "lr_lambdas") and scheduler.lr_lambdas and apply_lambdas:
-                    lr_factor = lr_factor * scheduler.lr_lambdas[-1](scheduler.last_epoch)
+                    phase_lr = phase_lr * scheduler.lr_lambdas[-1](scheduler.last_epoch)
                 added_pgs = 0
                 if no_decay:
                     optimizer.add_param_group(
@@ -1159,8 +1154,8 @@ class ScheduleImplMixin(ABC):
                                 for n, p in module.named_parameters()
                                 if not any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
                             ],
-                            "lr": lr_factor,
-                            "initial_lr": lr_factor,
+                            "lr": phase_lr,
+                            "initial_lr": phase_lr,
                         }
                     )
                     optimizer.add_param_group(
@@ -1171,8 +1166,8 @@ class ScheduleImplMixin(ABC):
                                 if any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
                             ],
                             "weight_decay": 0.0,
-                            "lr": lr_factor,
-                            "initial_lr": lr_factor,
+                            "lr": phase_lr,
+                            "initial_lr": phase_lr,
                         }
                     )
                     added_pgs = 2
@@ -1180,8 +1175,8 @@ class ScheduleImplMixin(ABC):
                     optimizer.add_param_group(
                         {
                             "params": [p for n, p in module.named_parameters() if n in thawed_pl and p.requires_grad],
-                            "lr": lr_factor,
-                            "initial_lr": lr_factor,
+                            "lr": phase_lr,
+                            "initial_lr": phase_lr,
                         }
                     )
                     added_pgs = 1
