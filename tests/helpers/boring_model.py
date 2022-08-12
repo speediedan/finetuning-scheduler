@@ -30,6 +30,20 @@ class LinearWarmupLR(LambdaLR):
         super().__init__(optimizer, lr_lambda, last_epoch)
 
 
+class CustomLRScheduler:
+    def __init__(self, optimizer):
+        self.optimizer = optimizer
+
+    def step(self, epoch):
+        ...
+
+    def state_dict(self):
+        ...
+
+    def load_state_dict(self, state_dict):
+        ...
+
+
 class RandomDictDataset(Dataset):
     def __init__(self, size: int, length: int):
         self.len = length

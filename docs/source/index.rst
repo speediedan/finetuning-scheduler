@@ -266,6 +266,7 @@ There are plenty of options for customizing
 :ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` below for examples of composing different
 configurations.
 
+.. _supported_strategies:
 
 .. note::
    Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the following
@@ -280,17 +281,44 @@ configurations.
       * :external+pl:class:`~pytorch_lightning.strategies.sharded_spawn.DDPSpawnShardedStrategy`
       * :external+pl:class:`~pytorch_lightning.strategies.dp.DataParallelStrategy`
 
+.. _supported_lr_schedulers:
+
+.. note::
+   Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` officially supports the following torch lr
+   schedulers:
+
+   .. hlist::
+      :columns: 2
+
+      * :external+torch:class:`~torch.optim.lr_scheduler.StepLR`
+      * :external+torch:class:`~torch.optim.lr_scheduler.MultiStepLR`
+      * :external+torch:class:`~torch.optim.lr_scheduler.CosineAnnealingWarmRestarts`
+      * :external+torch:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau`
+      * :external+torch:class:`~torch.optim.lr_scheduler.LambdaLR`
+      * :external+torch:class:`~torch.optim.lr_scheduler.ConstantLR`
+      * :external+torch:class:`~torch.optim.lr_scheduler.LinearLR`
+      * :external+torch:class:`~torch.optim.lr_scheduler.ExponentialLR`
+      * :external+torch:class:`~torch.optim.lr_scheduler.CosineAnnealingLR`
+      * :external+torch:class:`~torch.optim.lr_scheduler.MultiplicativeLR`
+
 .. tip::
-    Custom or officially unsupported strategies can be used by setting
+    Custom or officially unsupported strategies and lr schedulers can be used by setting
     :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.allow_untested` to ``True``.
 
     Some officially unsupported strategies may work unaltered and are only unsupported due to
-    the ``Fine-Tuning Scheduler`` project's lack of CI/testing resources for that strategy (e.g.
-    ``single_tpu``).
+    the Fine-Tuning Scheduler project's lack of CI/testing resources for that strategy (e.g. ``single_tpu``). Most
+    unsupported strategies and schedulers, however, are currently unsupported because they require varying degrees of
+    modification to be compatible.
 
-    Most unsupported strategies, however, are currently unsupported because they require varying degrees of modification
-    to be compatible (e.g. ``deepspeed`` requires an ``add_param_group`` method, ``tpu_spawn`` an override of the
-    current broadcast method to include python objects).
+    For instance, with respect to strategies, ``deepspeed`` requires an
+    ``add_param_group`` method, ``tpu_spawn`` an override of the current broadcast method to include python objects.
+
+    Regarding lr schedulers, :external+torch:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
+    :external+torch:class:`~torch.optim.lr_scheduler.SequentialLR` are examples of schedulers not currently supported
+    due to the configuration complexity and semantic conflicts supporting them would introduce. If a supported torch lr
+    scheduler does not meet your requirements, one can always subclass a supported lr scheduler and modify it as
+    required (e.g. :external+torch:class:`~torch.optim.lr_scheduler.LambdaLR` is especially useful for this). PRs are
+    also always welcome!
 
 ----------
 

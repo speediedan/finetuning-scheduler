@@ -38,16 +38,14 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks.lr_monitor import LearningRateMonitor
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.core.optimizer import _MockOptimizer
-from pytorch_lightning.utilities import _TORCH_GREATER_EQUAL_1_10, rank_zero_info, rank_zero_only, rank_zero_warn
+from pytorch_lightning.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
 from pytorch_lightning.utilities.cloud_io import get_filesystem
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
-from pytorch_lightning.utilities.types import LRSchedulerConfig, LRSchedulerTypeTuple
+from pytorch_lightning.utilities.types import LRSchedulerConfig
 from torch import Tensor
 from torch.nn import Module
 from torch.optim.optimizer import Optimizer
-
-LRSchedulerType = Union[Type[pl.utilities.types._LRScheduler], Type[pl.utilities.types.ReduceLROnPlateau]]
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +78,34 @@ class FTSState:
             "best_ckpt_depth": self._best_ckpt_depth,
             "best_ckpt_pgs": {},
         }
+
+
+# todo: improve FTSLRSchedulerType naming/typing once corresponding changes made upstream in pytorch-lightning
+FTSLRSchedulerTypeTuple = (
+    torch.optim.lr_scheduler.LambdaLR,
+    torch.optim.lr_scheduler.MultiplicativeLR,  # type: ignore[attr-defined]
+    torch.optim.lr_scheduler.StepLR,
+    torch.optim.lr_scheduler.MultiStepLR,
+    torch.optim.lr_scheduler.ConstantLR,
+    torch.optim.lr_scheduler.LinearLR,
+    torch.optim.lr_scheduler.ExponentialLR,
+    torch.optim.lr_scheduler.CosineAnnealingLR,
+    torch.optim.lr_scheduler.ReduceLROnPlateau,
+    torch.optim.lr_scheduler.CosineAnnealingWarmRestarts,
+)
+
+FTSLRSchedulerType = Union[
+    Type[torch.optim.lr_scheduler.LambdaLR],
+    Type[torch.optim.lr_scheduler.MultiplicativeLR],  # type: ignore[name-defined]
+    Type[torch.optim.lr_scheduler.StepLR],
+    Type[torch.optim.lr_scheduler.MultiStepLR],
+    Type[torch.optim.lr_scheduler.ConstantLR],
+    Type[torch.optim.lr_scheduler.LinearLR],
+    Type[torch.optim.lr_scheduler.ExponentialLR],
+    Type[torch.optim.lr_scheduler.CosineAnnealingLR],
+    Type[torch.optim.lr_scheduler.ReduceLROnPlateau],
+    Type[torch.optim.lr_scheduler.CosineAnnealingWarmRestarts],
+]
 
 
 class CallbackResolverMixin(ABC):
@@ -454,7 +480,7 @@ class ScheduleParsingMixin(ABC):
             self._validate_epoch_transitions()
         return max_phase, max_epoch_wm
 
-    def _update_pl_lrs(self, pl_lrs_cfg: Dict, lrs_class: LRSchedulerType) -> Dict:
+    def _update_pl_lrs(self, pl_lrs_cfg: Dict, lrs_class: FTSLRSchedulerType) -> Dict:
         """Prune keys not part of a valid PyTorch Lightning lr scheduler configuration (if automatic optimization
         used) and update configuration if :external+torch:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau` is
         used.
@@ -557,7 +583,7 @@ class ScheduleParsingMixin(ABC):
             rank_zero_warn(warn_msg)
         lr_scheduler_init = target_sched.get("lr_scheduler_init")
         assert lr_scheduler_init
-        ScheduleParsingMixin._lr_scheduler_sanity_chk(lr_scheduler_init, implicit_chk)
+        self._lr_scheduler_sanity_chk(lr_scheduler_init, implicit_chk)
 
     def _lr_scheduler_init_validation(self, lr_reinit_phases: Dict) -> None:
         """Trigger lr scheduler reinitialization configuration validation for all provided configurations. This
@@ -770,7 +796,7 @@ class ScheduleParsingMixin(ABC):
                 scheduler will be wrapped.
         """
         lr_scheduler_init = new_lr_scheduler["lr_scheduler_init"]
-        lrs_class = ScheduleParsingMixin._import_lr_scheduler(lr_scheduler_init)
+        lrs_class = self._import_lr_scheduler(lr_scheduler_init)
         # unless overridden by user directive, reset optimizer pg lrs to initial before wrapping in new scheduler
         curr_optimizer_lrs = [group.get("initial_lr", group["lr"]) for group in optimizer.param_groups]
         reset_init_pg_lrs = True if new_lr_scheduler.get("init_pg_lrs", None) else False
@@ -784,7 +810,9 @@ class ScheduleParsingMixin(ABC):
             new_lr_scheduler["pl_lrs_cfg"] = self._update_pl_lrs(new_lr_scheduler["pl_lrs_cfg"], lrs_class=lrs_class)
         new_lrs_config = LRSchedulerConfig(
             opt_idx=0,
-            scheduler=lrs_class(optimizer=optimizer, **lr_scheduler_init.get("init_args", {})),
+            scheduler=lrs_class(
+                optimizer=optimizer, **lr_scheduler_init.get("init_args", {})
+            ),  # type: ignore[arg-type]
             **new_lr_scheduler.get("pl_lrs_cfg", {}),
         )
         trainer.strategy.lr_scheduler_configs = [new_lrs_config]
@@ -809,25 +837,35 @@ class ScheduleParsingMixin(ABC):
                     "convertable to a float."
                 )
 
-    @staticmethod
-    def _is_supported_reinit_lr(lr_class: Type[LRSchedulerType]) -> None:
-        """Evaulate whether the provided lr scheduler is currently supported in a lr scheduler reinitialization
-        context."""
-        if _TORCH_GREATER_EQUAL_1_10:
-            from torch.optim.lr_scheduler import ChainedScheduler, SequentialLR
+    def _is_supported_lr(self, lr_class: FTSLRSchedulerType) -> None:
+        """Evaulate whether the provided lr scheduler is currently supported.
 
-            unsupported_schedulers = (ChainedScheduler, SequentialLR)
-            if issubclass(lr_class, unsupported_schedulers):
+        Args:
+            lr_class (FTSLRSchedulerType): The lr scheduler class to be inspected for support.
+
+        Raises:
+            MisconfigurationException: If :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.allow_untested` is
+                ``False`` and the provided lr scheduler class is not a subclass allowed by ``FTSLRSchedulerTypeTuple``.
+        """
+        if not issubclass(lr_class, FTSLRSchedulerTypeTuple):
+            if not self.allow_untested:  # type: ignore[attr-defined]
                 error_msg = (
-                    f"The provided lr scheduler type ({lr_class}) is not currently supported in the context of lr "
-                    "scheduler reinitialization. The following lr scheduler types are currently unsupported in lr "
-                    f"reinitialization configurations: { unsupported_schedulers } "
+                    f"The provided lr scheduler ({lr_class}) is not currently supported by"
+                    " FinetuningScheduler. Please use a currently supported torch scheduler (or subclass thereof)"
+                    f" ({([i.__name__ for i in FTSLRSchedulerTypeTuple])}) or if you would like to attempt to use the"
+                    " currently specified scheduler, pass ``allow_untested=True`` to the FinetuningScheduler callback"
+                    " when adding it."
                 )
                 rank_zero_warn(error_msg)
                 raise MisconfigurationException(error_msg)
+            else:
+                warn_msg = (
+                    "Allowing untested scheduler"
+                    f" '{type(lr_class)}' because ``allow_untested`` is ``True``."  # type: ignore[attr-defined]
+                )
+                rank_zero_warn(warn_msg)
 
-    @staticmethod
-    def _import_lr_scheduler(lr_scheduler_init: Dict) -> LRSchedulerType:
+    def _import_lr_scheduler(self, lr_scheduler_init: Dict) -> FTSLRSchedulerType:
         """Import the lr scheduler specified in the provided `lr_scheduler_init` configuration.
 
         Args:
@@ -837,14 +875,13 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: If the specified LR scheduler cannot be imported successfully.
 
         Returns:
-            LRSchedulerType: The lr scheduler class to be instantiated.
+            FTSLRSchedulerType: The lr scheduler class to be instantiated.
         """
         try:
             class_module, class_name = lr_scheduler_init["class_path"].rsplit(".", 1)
             module = __import__(class_module, fromlist=[class_name])
             lrs_class = getattr(module, class_name)
-            if _TORCH_GREATER_EQUAL_1_10:
-                ScheduleParsingMixin._is_supported_reinit_lr(lrs_class)
+            self._is_supported_lr(lrs_class)
         except (ImportError, AttributeError) as err:
             error_msg = (
                 f"Could not import specified LR scheduler class using class_path ({lr_scheduler_init['class_path']}) "
@@ -855,8 +892,7 @@ class ScheduleParsingMixin(ABC):
             raise MisconfigurationException(error_msg)
         return lrs_class
 
-    @staticmethod
-    def _lr_scheduler_sanity_chk(lr_scheduler_init: Dict, is_implicit_mode: bool = False) -> None:
+    def _lr_scheduler_sanity_chk(self, lr_scheduler_init: Dict, is_implicit_mode: bool = False) -> None:
         """Before beginning execution of defined fine-tuning schedule, perform a sanity check of the specified lr
         scheduler reinitialization configuration. To the extent reasonable (i.e. without simulating the entire
         training path), if the provided lr scheduler reinitialization configuration is expected to fail, it is
@@ -869,7 +905,7 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: If a valid and supported scheduler cannot be instantiated with the specified
                 init args.
         """
-        lrs_class = ScheduleParsingMixin._import_lr_scheduler(lr_scheduler_init)
+        lrs_class = self._import_lr_scheduler(lr_scheduler_init)
         if lr_scheduler_init.get("init_args") and "optimizer" in lr_scheduler_init.get("init_args", {}).keys():
             warn_msg = (
                 f"Found an `optimizer` key in the provided `lr_scheduler_init`: {lr_scheduler_init['init_args']} "
@@ -903,7 +939,7 @@ class ScheduleParsingMixin(ABC):
             )
             rank_zero_warn(error_msg)
             raise MisconfigurationException(error_msg)
-        assert issubclass(type(testlr), LRSchedulerTypeTuple)
+        assert issubclass(type(testlr), FTSLRSchedulerTypeTuple)
 
 
 class ScheduleImplMixin(ABC):

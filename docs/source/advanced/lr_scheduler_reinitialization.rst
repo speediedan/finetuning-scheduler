@@ -30,12 +30,8 @@ annotated yaml schedule below and can be explored using the
 :ref:`advanced usage example<advanced-fine-tuning-lr-example>`.
 
 When specifying an LR scheduler configuration for a given phase, the ``new_lr_scheduler`` dictionary requires at minimum
-an ``lr_scheduler_init`` dictionary containing a ``class_path`` key indicating the class of the lr scheduler to be
-instantiated and wrapped around your optimizer. Currently,
-all :class:`~pytorch_lightning.utilities.types.LRSchedulerType` s are supported with the exception of
-:external+torch:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
-:external+torch:class:`~torch.optim.lr_scheduler.SequentialLR` (due to the configuration complexity and semantic
-conflicts supporting them would introduce).
+an ``lr_scheduler_init`` dictionary containing a ``class_path`` key indicating the class of the lr scheduler
+(:ref:`list of supported schedulers<supported_lr_schedulers>`) to be instantiated and wrapped around your optimizer.
 
 Any arguments you would like to pass to initialize the specified lr scheduler with should be specified in the
 ``init_args`` key of the ``lr_scheduler_init`` dictionary.
@@ -115,8 +111,9 @@ sanity-checked prior to training initiation.
     introspected/simulated in the current :class:`~finetuning_scheduler.fts.FinetuningScheduler` version.
 
 Note that specifying LR scheduler reinitialization configurations is only supported for phases >= ``1``. This is because
-for fine-tuning phase ``0``, the LR scheduler configuration will be the scheduler that you initiate your training session
-with, usually via the ``configure_optimizer`` method of :external+pl:class:`~pytorch_lightning.core.module.LightningModule`.
+for fine-tuning phase ``0``, the LR scheduler configuration will be the scheduler that you initiate your training
+session with, usually via the ``configure_optimizer`` method of
+:external+pl:class:`~pytorch_lightning.core.module.LightningModule`.
 
 .. tip::
 
