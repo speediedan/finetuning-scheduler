@@ -1400,6 +1400,54 @@ def test_finetuningscheduling_optimizer_compat(tmpdir):
 
 
 @pytest.mark.parametrize(
+    "param_cfg_key, expected",
+    [
+        ("extra_nograd", "additional parameters that do not require a gradient"),
+        ("missing_grad", "removed trainable parameters, you may want"),
+        ("extra_grad", "added additional trainable parameters you may want"),
+        ("no_warning", None),
+    ],
+    ids=["extra_nograd", "missing_grad", "extra_grad", "no_warning"],
+)
+def test_fts_optimizer_init_params(tmpdir, param_cfg_key: str, expected: str):
+    """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly raised
+    for multi-optimizer configurations."""
+
+    class DupParamFTS(TestFinetuningScheduler):
+        def on_fit_start(self, trainer, pl_module) -> None:
+            super().on_fit_start(trainer, pl_module)
+            raise SystemExit()
+
+    class DupParamInitBoringModel(FinetuningSchedulerBoringModel):
+        def configure_optimizers(self):
+            if param_cfg_key == "extra_nograd":
+                parameters = self.parameters()
+            elif param_cfg_key == "missing_grad":
+                parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
+                parameters.pop()
+            elif param_cfg_key == "extra_grad":
+                for p in self.parameters():
+                    p.requires_grad = True
+                parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
+            elif param_cfg_key == "no_warning":
+                parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
+            optimizer = torch.optim.SGD(parameters, lr=1e-3, weight_decay=self.weight_decay)
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
+            return [optimizer], [lr_scheduler]
+
+    seed_everything(42)
+    model = DupParamInitBoringModel()
+    callbacks = [DupParamFTS()]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    with pytest.raises(SystemExit):
+        if param_cfg_key == "no_warning":
+            trainer.fit(model)
+        else:
+            with pytest.warns(Warning, match=expected):
+                trainer.fit(model)
+
+
+@pytest.mark.parametrize(
     "epoch_only_cfg, expected_state",
     [(True, ((0, 2, 6, 8, 3, 3), "extraneous EarlyS", "maximum phase-specified")), (False, (None, "missing a max_"))],
     ids=["eponly", "noeponly"],

@@ -436,6 +436,9 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         if len(trainer.optimizers) > 1:
             raise MisconfigurationException("fts currently only supports a single-optimizer configuration")
         self._is_supported_lr(type(trainer.lr_scheduler_configs[0].scheduler))
+        if self.curr_depth == 0:
+            assert isinstance(self.ft_schedule, Dict)
+            self._validate_opt_init(trainer.optimizers[0], self.ft_schedule)
         super().on_fit_start(trainer, pl_module)
 
     def state_dict(self) -> Dict[str, Any]:
