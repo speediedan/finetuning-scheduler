@@ -166,6 +166,27 @@ either integers or convertible to integers via ``int()``.
 
     trainer = Trainer(callbacks=[FinetuningScheduler(ft_schedule="/path/to/my/schedule/my_schedule.yaml")])
 
+.. note::
+
+    For each fine-tuning phase, :class:`~finetuning_scheduler.fts.FinetuningScheduler` will unfreeze/freeze parameters
+    as directed in the explicitly specified or implicitly generated schedule. Prior to beginning the first phase of
+    training (phase ``0``), FinetuningScheduler will inspect the optimizer to determine if the user has manually
+    initialized the optimizer with parameters that are non-trainable or otherwise altered the parameter trainability
+    states from that expected of the configured phase ``0``.
+
+    When manually configuring the optimizer initially, one should normally ensure non-trainable parameters are filtered
+    out to (among other reasons) avoid triggering a parameter collision error in pytorch during a future training phase,
+    e.g.:
+
+    .. code-block:: python
+      :linenos:
+      :emphasize-lines: 2, 3
+
+        def configure_optimizers(self):
+            parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
+            optimizer = torch.optim.SGD(parameters, lr=1e-3, weight_decay=self.weight_decay)
+            ...
+
 EarlyStopping and Epoch-Driven Phase Transition Criteria
 ********************************************************
 

@@ -1269,6 +1269,51 @@ class ScheduleImplMixin(ABC):
         rank_zero_debug(f"The following module parameters are currently thawed: {[n for n in curr_thawed]}")
         return thawed_p_names, curr_thawed
 
+    @staticmethod
+    def _validate_opt_init(optimizer: Optimizer, ft_schedule: Dict) -> None:
+        """Validate the user-initialized optimizer state (necessary for fine-tuning phase 0) and warn user if
+        appropriate.
+
+        Args:
+            optimizer (Optimizer): The optimizer initialized.
+            ft_schedule (Dict): The fine-tuning schedule to be inspected vis-a-vis the optimizer state.
+        """
+        no_grad_cnt = len([p for pg in optimizer.param_groups for p in pg["params"] if not p.requires_grad])
+        init_ft_cnt = len(ft_schedule[0]["params"])
+        total_ft_cnt = len([p for phase in ft_schedule for p in ft_schedule[phase]["params"]])
+        req_grad_opt = len([p for pg in optimizer.param_groups for p in pg["params"] if p.requires_grad])
+        expected_grad_params = req_grad_opt == init_ft_cnt
+        if no_grad_cnt > 0 or not expected_grad_params:
+            warn_msg = (
+                f"FinetuningScheduler configured the provided model to have {init_ft_cnt} trainable parameters"
+                f" in phase 0 (the initial training phase) but the optimizer has subsequently been initialized with"
+            )
+            if not expected_grad_params:
+                warn_msg += f" {req_grad_opt} trainable parameters. If you have manually"
+                if req_grad_opt > init_ft_cnt:
+                    warn_msg += (
+                        " added additional trainable parameters you may want to ensure the manually added new trainable"
+                        f" parameters do not collide with the {total_ft_cnt} parameters FinetuningScheduler has been"
+                        " scheduled to thaw in the provided schedule."
+                    )
+                else:
+                    warn_msg += (
+                        " removed trainable parameters, you may want to update phase 0 of the provided fine-tuning"
+                        " schedule accordingly"
+                    )
+            else:
+                warn_msg += (
+                    f" {no_grad_cnt} additional parameters that do not require a gradient. If non-intentional, this"
+                    " state is commonly caused by failing to filter out parameters that do not require a gradient when"
+                    " initializing the optimizer (e.g.,"
+                    " `parameters = list(filter(lambda x: x.requires_grad, self.parameters()))`"
+                    f" If you intended to initialize the optimizer with parameters that do not require a"
+                    f" gradient you may want to ensure they are not included in the {total_ft_cnt} parameters that the"
+                    " FinetuningScheduler is currently configured to thaw (sum of all phases) to avoid triggering a "
+                    " parameter collision and training failure in pytorch during a future fine-tuning phase."
+                )
+            rank_zero_warn(warn_msg)
+
 
 class CallbackDepMixin(ABC):
     """Functionality for validating/managing callback dependencies."""
