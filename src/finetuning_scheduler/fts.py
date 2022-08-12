@@ -118,12 +118,11 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                 :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria only.
                 epoch_transitions_only defaults to ``False``.
             reinit_lr_cfg: A lr scheduler reinitialization configuration dictionary consisting of at minimum a nested
-                ``lr_scheduler_init`` dictionary with a ``class_path`` key specifying the class of the
-                :class:`~pytorch_lightning.utilities.types.LRSchedulerType` to be instantiated. Optionally, an
-                ``init_args`` dictionary of arguments to initialize the lr scheduler with may be included. Additionally,
-                one may optionally include arguments to pass to PyTorch Lightning's lr scheduler configuration
-                :class:`~pytorch_lightning.utilities.types.LRSchedulerConfig` in the ``pl_lrs_cfg`` dictionary. By way
-                of example, one could configure this dictionary via the
+                ``lr_scheduler_init`` dictionary with a ``class_path`` key specifying the class of the lr scheduler
+                to be instantiated. Optionally, an ``init_args`` dictionary of arguments to initialize the lr scheduler
+                with may be included. Additionally, one may optionally include arguments to pass to PyTorch Lightning's
+                lr scheduler configuration :class:`~pytorch_lightning.utilities.types.LRSchedulerConfig` in the
+                ``pl_lrs_cfg`` dictionary. By way of example, one could configure this dictionary via the
                 :external+pl:class:`~pytorch_lightning.utilities.cli.LightningCLI` with the following:
 
                 .. code-block:: yaml
@@ -139,19 +138,28 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                                 frequency: 1
                                 name: Implicit_Reinit_LR_Scheduler
 
-            allow_untested: If ``True``, allows the use of custom or unsupported training strategies (e.g.
-                ``single_tpu``, ``MyCustomStrategy``). Defaults to ``False``.
+            allow_untested: If ``True``, allows the use of custom or unsupported training strategies and lr schedulers
+                (e.g. ``single_tpu``, ``MyCustomStrategy``, ``MyCustomLRScheduler``) . Defaults to ``False``.
 
-                .. note:: Custom or officially unsupported strategies can be used by setting
+                .. note:: Custom or officially unsupported strategies and lr schedulers can be used by setting
                     :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.allow_untested` to ``True``.
 
                     Some officially unsupported strategies may work unaltered and are only unsupported due to
                     the ``Fine-Tuning Scheduler`` project's lack of CI/testing resources for that strategy (e.g.
                     ``single_tpu``).
 
-                    Most unsupported strategies, however, are currently unsupported because they require varying degrees
-                    of modification to be compatible (e.g. ``deepspeed`` requires an ``add_param_group`` method,
-                    ``tpu_spawn`` an override of the current broadcast method to include python objects).
+                    Most unsupported strategies and schedulers, however, are currently unsupported because they require
+                    varying degrees of modification to be compatible.
+
+                    For instance, with respect to strategies, ``deepspeed`` requires an ``add_param_group`` method,
+                    ``tpu_spawn`` an override of the current broadcast method to include python objects.
+
+                    Regarding lr schedulers, :external+torch:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
+                    :external+torch:class:`~torch.optim.lr_scheduler.SequentialLR` are examples of schedulers not
+                    currently supported due to the configuration complexity and semantic conflicts supporting them would
+                    introduce. If a supported torch lr scheduler does not meet your requirements, one can always
+                    subclass a supported lr scheduler and modify it as required
+                    (e.g. :external+torch:class:`~torch.optim.lr_scheduler.LambdaLR` is especially useful for this).
             apply_lambdas_new_pgs: If ``True``, applies most recent lambda in ``lr_lambdas`` list to newly added
                 optimizer groups for lr schedulers that have a ``lr_lambdas`` attribute. Note this option only applies
                 to phases without reinitialized lr schedulers. Phases with defined lr scheduler reinitialization configs
@@ -427,6 +435,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         """
         if len(trainer.optimizers) > 1:
             raise MisconfigurationException("fts currently only supports a single-optimizer configuration")
+        self._is_supported_lr(type(trainer.lr_scheduler_configs[0].scheduler))
         super().on_fit_start(trainer, pl_module)
 
     def state_dict(self) -> Dict[str, Any]:

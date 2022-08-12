@@ -32,6 +32,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from finetuning_scheduler import CallbackResolverMixin, FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from tests.helpers import BoringModel
+from tests.helpers.boring_model import CustomLRScheduler
 from tests.helpers.runif import RunIf
 
 fts_resolver = CallbackResolverMixin()
@@ -134,14 +135,14 @@ class FinetuningSchedulerBoringModel(BoringModel):
         diverge_on_epoch: int = 3,
         no_decay: Optional[List] = None,
         weight_decay: float = 1.0e-06,
-        init_rlrop: bool = False,
+        init_lr_key: str = None,
     ):
         super().__init__()
         self.layer = nn.Sequential(nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 2))
         self.diverge_on_epoch = diverge_on_epoch
         self.no_decay = no_decay
         self.weight_decay = weight_decay
-        self.init_rlrop = init_rlrop
+        self.init_lr_key = init_lr_key
 
     def validation_step(self, batch, batch_idx):
         output = self(batch)
@@ -157,19 +158,43 @@ class FinetuningSchedulerBoringModel(BoringModel):
         )
         return torch.nn.functional.mse_loss(prediction, val_func)
 
-    def configure_optimizers(self):
-        parameters = filter(lambda x: x.requires_grad, self.parameters())
-        optimizer = torch.optim.SGD(parameters, lr=1e-3, weight_decay=self.weight_decay)
-        if self.init_rlrop:
+    def cust_init_lr(self, optimizer):
+        if self.init_lr_key == "rlrop":
             lr_scheduler = {
                 "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2),
                 "monitor": "val_loss",
                 "frequency": 1,
             }
+        elif self.init_lr_key == "sequential_lr":
+            sched1 = torch.optim.lr_scheduler.ConstantLR(optimizer, factor=0.1, total_iters=2)
+            sched2 = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+            scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[sched1, sched2], milestones=[2])
+            lr_scheduler = {"scheduler": scheduler, "frequency": 1, "interval": "epoch"}
+        elif self.init_lr_key == "unsupp":
+            lr_scheduler = {"scheduler": CustomLRScheduler(optimizer)}
+        return lr_scheduler
+
+    def configure_optimizers(self):
+        parameters = filter(lambda x: x.requires_grad, self.parameters())
+        optimizer = torch.optim.SGD(parameters, lr=1e-3, weight_decay=self.weight_decay)
+        if self.init_lr_key:
+            lr_scheduler = self.cust_init_lr(optimizer)
         else:
             lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
-
         return [optimizer], [lr_scheduler]
+
+
+class FTSCustLRModel(FinetuningSchedulerBoringModel):
+    """overrides lr_scheduler_step to allow lr scheduler testing."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def lr_scheduler_step(*_):
+        ...
+
+    # def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
+    #     super().lr_scheduler_step(scheduler, optimizer_idx, metric)
 
 
 MOCK_STRATEGY_MAPPING = {"mock_stgy": ("single_tpu", False), "allow_untest": ("single_tpu", True)}
@@ -200,6 +225,11 @@ class TestFinetuningScheduler(FinetuningScheduler):
             trainer.strategy.strategy_name = MOCK_STRATEGY_MAPPING[self.mock_strategy][0]
             self.allow_untested = MOCK_STRATEGY_MAPPING[self.mock_strategy][1]
         super().setup(trainer, pl_module, stage)
+        if self.mock_strategy and self.allow_untested:
+            raise SystemExit()
+
+    def on_fit_start(self, trainer, pl_module) -> None:
+        super().on_fit_start(trainer, pl_module)
         if self.allow_untested:
             raise SystemExit()
 
@@ -393,7 +423,7 @@ def invalid_schedules(tmpdir_factory) -> Dict:
   - layer.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
-      class_path: torch.optim.lr_scheduler.SequentialLR
+      class_path: torch.optim.lr_scheduler.CyclicLR
 """
     invalid_plrs_cfg = """
 1:
@@ -1079,10 +1109,10 @@ EXPECTED_RLROP_STATE = {
 
 
 @pytest.mark.parametrize(
-    "explicit_mode, es_patience, init_rlrop, max_epochs, w_expected",
+    "explicit_mode, es_patience, init_lr_key, max_epochs, w_expected",
     [
-        (True, 5, False, 10, None),
-        (False, 4, True, 99, None),
+        (True, 5, None, 10, None),
+        (False, 4, "rlrop", 99, None),
     ],
     ids=["exp_rlrop", "imp_rlrop"],
 )
@@ -1092,7 +1122,7 @@ def test_finetuningscheduling_reinitlr_rlrop(
     boring_ft_schedule,
     explicit_mode: bool,
     es_patience: int,
-    init_rlrop: bool,
+    init_lr_key: str,
     max_epochs: int,
     w_expected,
 ):
@@ -1107,7 +1137,7 @@ def test_finetuningscheduling_reinitlr_rlrop(
         reinit_lr_cfg = IMP_REINIT_RLROP_CFG
         ft_schedule = None
 
-    model = FinetuningSchedulerBoringModel(diverge_on_epoch=2, init_rlrop=init_rlrop)
+    model = FinetuningSchedulerBoringModel(diverge_on_epoch=2, init_lr_key=init_lr_key)
     callbacks = [
         TestFinetuningScheduler(
             lrs_state=EXPECTED_RLROP_STATE[(explicit_mode,)],
@@ -1213,6 +1243,36 @@ def test_finetuningscheduling_misconfiguration(tmpdir, callbacks: List[Callback]
 
 
 @pytest.mark.parametrize(
+    "callbacks, cust_mod_args, expected",
+    [
+        (
+            [TestFinetuningScheduler(allow_untested=True)],
+            {"init_lr_key": "unsupp"},
+            "Allowing untested scheduler",
+        ),
+        (
+            [FinetuningScheduler()],
+            {"init_lr_key": "unsupp"},
+            "The provided lr scheduler",
+        ),
+    ],
+    ids=["allow_untested_lrs", "unsupported_lrs"],
+)
+def test_fts_init_lrs_misconfiguration(tmpdir, callbacks: List[Callback], cust_mod_args: Optional[Dict], expected: str):
+    """Validate :class:`~finetuning_scheduler.FinetuningScheduler` initial lr scheduler misconfiguration exceptions
+    and warnings are properly raised."""
+    model = FTSCustLRModel(**cust_mod_args)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    if callbacks[0].allow_untested:
+        with pytest.raises(SystemExit):
+            with pytest.warns(Warning, match=expected):
+                trainer.fit(model)
+    else:
+        with pytest.raises(MisconfigurationException, match=expected):
+            trainer.fit(model)
+
+
+@pytest.mark.parametrize(
     "schedule_key, expected",
     [
         ("missing_param", ("did not match any named", None)),
@@ -1220,7 +1280,7 @@ def test_finetuningscheduling_misconfiguration(tmpdir, callbacks: List[Callback]
         ("dup_key", ("Duplicate key", None)),
         ("lr_phase0", ("A lr for fine-tuning phase 0", None)),
         ("invalid_lr", ("convertable to a float", None)),
-        pytest.param("unsupp_rlrs", ("provided lr scheduler type ", None), marks=RunIf(min_torch="1.10")),
+        ("unsupp_rlrs", ("provided lr scheduler", None)),
         ("invalid_plrs", ("key in lr scheduler dict must be", None)),
         ("missing_lrs_init", ("configuration to reinitialize with requires", None)),
         ("no_cpath", ("`lr_scheduler_init` requires at least a  `class_", None)),
