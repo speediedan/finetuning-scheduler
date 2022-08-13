@@ -41,6 +41,7 @@ from pytorch_lightning.core.optimizer import _MockOptimizer
 from pytorch_lightning.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
 from pytorch_lightning.utilities.cloud_io import get_filesystem
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
+from pytorch_lightning.utilities.imports import _TORCH_GREATER_EQUAL_1_10
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
 from pytorch_lightning.utilities.types import LRSchedulerConfig
 from torch import Tensor
@@ -81,31 +82,20 @@ class FTSState:
 
 
 # todo: improve FTSLRSchedulerType naming/typing once corresponding changes made upstream in pytorch-lightning
-FTSLRSchedulerTypeTuple = (
-    torch.optim.lr_scheduler.LambdaLR,
-    torch.optim.lr_scheduler.MultiplicativeLR,  # type: ignore[attr-defined]
-    torch.optim.lr_scheduler.StepLR,
-    torch.optim.lr_scheduler.MultiStepLR,
-    torch.optim.lr_scheduler.ConstantLR,
-    torch.optim.lr_scheduler.LinearLR,
-    torch.optim.lr_scheduler.ExponentialLR,
-    torch.optim.lr_scheduler.CosineAnnealingLR,
-    torch.optim.lr_scheduler.ReduceLROnPlateau,
-    torch.optim.lr_scheduler.CosineAnnealingWarmRestarts,
-)
-
-FTSLRSchedulerType = Union[
-    Type[torch.optim.lr_scheduler.LambdaLR],
-    Type[torch.optim.lr_scheduler.MultiplicativeLR],  # type: ignore[name-defined]
-    Type[torch.optim.lr_scheduler.StepLR],
-    Type[torch.optim.lr_scheduler.MultiStepLR],
-    Type[torch.optim.lr_scheduler.ConstantLR],
-    Type[torch.optim.lr_scheduler.LinearLR],
-    Type[torch.optim.lr_scheduler.ExponentialLR],
-    Type[torch.optim.lr_scheduler.CosineAnnealingLR],
-    Type[torch.optim.lr_scheduler.ReduceLROnPlateau],
-    Type[torch.optim.lr_scheduler.CosineAnnealingWarmRestarts],
+supported_lrs = [
+    "LambdaLR",
+    "MultiplicativeLR",
+    "StepLR",
+    "MultiStepLR",
+    "ExponentialLR",
+    "CosineAnnealingLR",
+    "ReduceLROnPlateau",
+    "CosineAnnealingWarmRestarts",
 ]
+if _TORCH_GREATER_EQUAL_1_10:
+    supported_lrs.extend(["ConstantLR", "LinearLR"])
+FTSLRSchedulerTypeTuple = tuple(getattr(torch.optim.lr_scheduler, lr_class) for lr_class in supported_lrs)
+FTSLRSchedulerType = Union[Type[pl.utilities.types._LRScheduler], Type[pl.utilities.types.ReduceLROnPlateau]]
 
 
 class CallbackResolverMixin(ABC):

@@ -165,11 +165,6 @@ class FinetuningSchedulerBoringModel(BoringModel):
                 "monitor": "val_loss",
                 "frequency": 1,
             }
-        elif self.init_lr_key == "sequential_lr":
-            sched1 = torch.optim.lr_scheduler.ConstantLR(optimizer, factor=0.1, total_iters=2)
-            sched2 = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
-            scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[sched1, sched2], milestones=[2])
-            lr_scheduler = {"scheduler": scheduler, "frequency": 1, "interval": "epoch"}
         elif self.init_lr_key == "unsupp":
             lr_scheduler = {"scheduler": CustomLRScheduler(optimizer)}
         return lr_scheduler
