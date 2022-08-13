@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [0.2.1] - 2022-08-13
+
+### Added
+
+- support for pytorch-lightning 1.7.1
+- added support for ReduceLROnPlateau lr schedulers
+- improved user experience with additional lr scheduler configuration inspection (using an allowlist approach) and
+  enhanced documentation. Expanded use of ``allow_untested`` to allow use of unsupported/untested lr schedulers
+- added initial user-configured optimizer state inspection prior to phase ``0`` execution, issuing warnings to the user
+  if appropriate. Added associated documentation [#4](https://github.com/speediedan/finetuning-scheduler/issues/4)
+
+### Fixed
+
+- pruned test_examples.py from wheel
+
+### Changed
+
+- removed a few unused internal conditions relating to lr reinitialization and parameter group addition
+
 ## [0.2.0] - 2022-08-06
 
 ### Added
