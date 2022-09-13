@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 import torch.distributed
-from pytorch_lightning.plugins.environments.lightning_environment import find_free_network_port
+from lightning_lite.plugins.environments.lightning_environment import find_free_network_port
 from pytorch_lightning.trainer.connectors.signal_connector import SignalConnector
 from pytorch_lightning.utilities.imports import _IS_WINDOWS
 
@@ -34,7 +34,7 @@ def datadir():
 @pytest.fixture(scope="function", autouse=True)
 def preserve_global_rank_variable():
     """Ensures that the rank_zero_only.rank global variable gets reset in each test."""
-    from pytorch_lightning.utilities.distributed import rank_zero_only
+    from lightning_lite.utilities import rank_zero_only
 
     rank = getattr(rank_zero_only, "rank", None)
     yield

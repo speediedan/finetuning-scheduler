@@ -1,4 +1,4 @@
-from pytorch_lightning.utilities import _module_available
+from lightning_utilities.core.imports import module_available
 
-_HF_AVAILABLE = _module_available("transformers") and _module_available("datasets")
-_SP_AVAILABLE = _module_available("sentencepiece")
+_HF_AVAILABLE = module_available("transformers") and module_available("datasets")
+_SP_AVAILABLE = module_available("sentencepiece")
