@@ -21,9 +21,10 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Sequence, Union
 
 import pytorch_lightning as pl
+from lightning_lite.utilities import rank_zero_info
+from lightning_lite.utilities.enums import _StrategyType
 from pytorch_lightning.callbacks import BaseFinetuning
 from pytorch_lightning.trainer.states import TrainerFn
-from pytorch_lightning.utilities import _StrategyType, rank_zero_info
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug, rank_zero_warn
 from torch.optim.optimizer import Optimizer

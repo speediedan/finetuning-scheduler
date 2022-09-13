@@ -33,13 +33,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 import pytorch_lightning as pl
 import torch
 import yaml
+from lightning_lite.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
+from lightning_lite.utilities.cloud_io import get_filesystem
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks.lr_monitor import LearningRateMonitor
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.core.optimizer import _MockOptimizer
-from pytorch_lightning.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
-from pytorch_lightning.utilities.cloud_io import get_filesystem
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.imports import _TORCH_GREATER_EQUAL_1_10
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug

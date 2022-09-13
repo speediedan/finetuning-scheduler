@@ -21,11 +21,11 @@ import pytest
 import torch
 import torch.nn.functional as F
 import yaml
+from lightning_lite.utilities.cloud_io import get_filesystem
 from pytorch_lightning import LightningModule, seed_everything, Trainer
 from pytorch_lightning.callbacks import Callback, EarlyStopping, LearningRateMonitor
 from pytorch_lightning.strategies.single_device import SingleDeviceStrategy
 from pytorch_lightning.strategies.strategy_registry import StrategyRegistry
-from pytorch_lightning.utilities.cloud_io import get_filesystem
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
