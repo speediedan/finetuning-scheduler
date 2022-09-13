@@ -1349,7 +1349,7 @@ def test_finetuningscheduling_invalid_schedules(tmpdir, invalid_schedules, sched
     [
         pytest.param("cust_stgy", None, None, "allow_untest"),
         pytest.param("ddp", None, None, "mock_stgy"),
-        pytest.param("ddp_fully_sharded", 1, None, None, marks=RunIf(fairscale_fully_sharded=True, min_cuda_gpus=1)),
+        pytest.param("ddp_fully_sharded", 1, None, None, marks=RunIf(min_cuda_gpus=1)),
         pytest.param("horovod", None, None, None, marks=RunIf(horovod=True, min_cuda_gpus=1)),
         pytest.param("deepspeed_stage_2", 1, None, None, marks=RunIf(deepspeed=True, min_cuda_gpus=1)),
     ],

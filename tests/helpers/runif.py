@@ -20,11 +20,7 @@ from packaging.version import Version
 from pkg_resources import get_distribution
 from pytorch_lightning.overrides.fairscale import _FAIRSCALE_AVAILABLE
 from pytorch_lightning.strategies.deepspeed import _DEEPSPEED_AVAILABLE
-from pytorch_lightning.utilities.imports import (
-    _FAIRSCALE_FULLY_SHARDED_AVAILABLE,
-    _HOROVOD_AVAILABLE,
-    _TORCH_GREATER_EQUAL_1_10,
-)
+from pytorch_lightning.utilities.imports import _HOROVOD_AVAILABLE, _TORCH_GREATER_EQUAL_1_10
 
 _HOROVOD_NCCL_AVAILABLE = False
 if _HOROVOD_AVAILABLE:
@@ -62,7 +58,6 @@ class RunIf:
         skip_windows: bool = False,
         standalone: bool = False,
         fairscale: bool = False,
-        fairscale_fully_sharded: bool = False,
         deepspeed: bool = False,
         slow: bool = False,
         **kwargs,
@@ -81,7 +76,6 @@ class RunIf:
             standalone: Mark the test as standalone, our CI will run it in a separate process.
                 This requires that the ``PL_RUN_STANDALONE_TESTS=1`` environment variable is set.
             fairscale: Require that facebookresearch/fairscale is installed.
-            fairscale_fully_sharded: Require that `fairscale` fully sharded support is available.
             deepspeed: Require that microsoft/DeepSpeed is installed.
             slow: Mark the test as slow, our CI will run it in a separate job.
                 This requires that the ``PL_RUN_SLOW_TESTS=1`` environment variable is set.
@@ -147,10 +141,6 @@ class RunIf:
         if fairscale:
             conditions.append(not _FAIRSCALE_AVAILABLE)
             reasons.append("Fairscale")
-
-        if fairscale_fully_sharded:
-            conditions.append(not _FAIRSCALE_FULLY_SHARDED_AVAILABLE)
-            reasons.append("Fairscale Fully Sharded")
 
         if deepspeed:
             conditions.append(not _DEEPSPEED_AVAILABLE)
