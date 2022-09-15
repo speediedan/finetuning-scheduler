@@ -19,6 +19,8 @@ from importlib.util import module_from_spec, spec_from_file_location
 
 import pt_lightning_sphinx_theme
 
+import finetuning_scheduler  # noqa: F401
+
 PATH_HERE = os.path.abspath(os.path.dirname(__file__))
 PATH_ROOT = os.path.join(PATH_HERE, "..", "..")
 sys.path.insert(0, os.path.abspath(os.path.join(PATH_ROOT, "src")))
@@ -252,7 +254,7 @@ epub_exclude_files = ["search.html"]
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
-    "torch": ("https://pytorch.org/docs/stable/", None),
+    "torch": ("http://pytorch.org/docs/stable/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
     "pl": ("https://pytorch-lightning.readthedocs.io/en/stable/", None),
 }
