@@ -147,8 +147,9 @@ class FinetuningSchedulerBoringModel(BoringModel):
     def validation_step(self, batch, batch_idx):
         output = self(batch)
         loss = self.val_loss(batch, output)
-        use_sync_dist = True if self.trainer.strategy.strategy_name in ("ddp_spawn", "ddp_sharded_spawn") else False
-        self.log("val_loss", loss, prog_bar=False, sync_dist=use_sync_dist)
+        # we would normally use sync_dist for epoch-only logging in a distributed context but leaving it `False` here
+        # to test FTS transition behavior when the test model is used in a distributed context
+        self.log("val_loss", loss, prog_bar=False)
         return {"x": loss}
 
     def val_loss(self, batch, prediction):
@@ -187,9 +188,6 @@ class FTSCustLRModel(FinetuningSchedulerBoringModel):
 
     def lr_scheduler_step(*_):
         ...
-
-    # def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
-    #     super().lr_scheduler_step(scheduler, optimizer_idx, metric)
 
 
 MOCK_STRATEGY_MAPPING = {"mock_stgy": ("single_tpu", False), "allow_untest": ("single_tpu", True)}
@@ -1152,21 +1150,57 @@ def test_finetuningscheduling_reinitlr_rlrop(
         assert all([any([re.compile(w_msg).search(w.message.args[0]) for w in recwarn.list]) for w_msg in w_expected])
 
 
+class MockDistFTS(TestFinetuningScheduler):
+    def _diverge_transition(self, strategy, decision: bool) -> bool:
+        """Mock disagreement among processes on transition bool."""
+        return not decision
+
+    def on_train_start(self, trainer: "Trainer", pl_module: "LightningModule") -> None:
+        # force reduction of transition decisions
+        trainer.early_stopping_callback._reduce_transition_decisions = True
+        return super().on_train_start(trainer, pl_module)
+
+    def on_train_epoch_start(self, trainer, pl_module) -> None:
+        if self.curr_depth == 2:
+            self._reduce_transition = self._diverge_transition
+        super().on_train_epoch_start(trainer, pl_module)
+
+
 @pytest.mark.parametrize(
-    "callbacks, expected",
+    "callbacks, dist_mode, expected",
     [
-        ([FinetuningScheduler()], ("an FTSEarlyStopping", "as FTSCheck")),
-        ([FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)], ("FTSCheckpoint. Subs")),
-        ([FinetuningScheduler(), EarlyStopping(monitor="val_loss", patience=1)], ("Stopping. Sub", "Checkpoint. Sub")),
-        ([FinetuningScheduler(), FTSCheckpoint(monitor="val_loss", verbose=True)], ("Adding an FTSEarlyStopping")),
+        ([FinetuningScheduler()], None, ("an FTSEarlyStopping", "as FTSCheck")),
+        ([FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)], None, ("FTSCheckpoint. Subs")),
+        (
+            [FinetuningScheduler(), EarlyStopping(monitor="val_loss", patience=1)],
+            None,
+            ("Stopping. Sub", "Checkpoint. Sub"),
+        ),
+        (
+            [FinetuningScheduler(), FTSCheckpoint(monitor="val_loss", verbose=True)],
+            None,
+            ("Adding an FTSEarlyStopping",),
+        ),
+        (
+            [
+                MockDistFTS(),
+                FTSCheckpoint(monitor="val_loss", verbose=True),
+                FTSEarlyStopping(monitor="val_loss", patience=1),
+            ],
+            "ddp",
+            ("not being synchronized",),
+        ),
     ],
-    ids=["default", "nondef_es", "def_es", "nondef_ftsckpt"],
+    ids=["default", "nondef_es", "def_es", "nondef_ftsckpt", "no_sync"],
 )
-def test_finetuningscheduler_callback_warns(tmpdir, recwarn, callbacks: List[Callback], expected: Tuple[str]):
+def test_finetuningscheduler_callback_warns(
+    tmpdir, recwarn, callbacks: List[Callback], dist_mode: str, expected: Tuple[str]
+):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` warnings that require a
     :class:`~pytorch_lighting.trainer.Trainer` to be defined are properly issued"""
     model = FinetuningSchedulerBoringModel()
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    dist_args = {"strategy": dist_mode, "accelerator": "cpu", "devices": "auto"} if dist_mode else {}
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, **dist_args)
     trainer.fit(model)
     assert all([any([re.compile(w_msg).search(w.message.args[0]) for w in recwarn.list]) for w_msg in expected])
 

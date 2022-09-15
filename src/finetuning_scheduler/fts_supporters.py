@@ -35,11 +35,13 @@ import torch
 import yaml
 from lightning_lite.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
 from lightning_lite.utilities.cloud_io import get_filesystem
+from lightning_lite.utilities.distributed import distributed_available
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks.lr_monitor import LearningRateMonitor
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.core.optimizer import _MockOptimizer
+from pytorch_lightning.trainer.states import TrainerFn
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.imports import _TORCH_GREATER_EQUAL_1_10
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
@@ -188,6 +190,7 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
     """
     _check_on_train_epoch_end: Optional[bool]
     best_score: Tensor
+    wait_count: int
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """
@@ -199,6 +202,9 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
             finetuningscheduler_callback (pytorch_lightning.callbacks.Callback):
                 Reference to the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
                 callback being used.
+            reduce_transition_decisions (bool):
+                Used to indicate whether the callback is operating in a distributed context without the monitored metric
+                being synchronized (via ``sync_dist`` being set to ``True`` when logging).
             check_on_train_epoch_end (bool): Whether to run early stopping check at the end of the training epoch. If
                 this is ``False``, then the check runs at the end of the validation. Defaults to ``None`` similar to
                 :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` but is set to
@@ -208,6 +214,7 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         self.es_phase_complete = True
         self.final_phase = True
         self.finetuningscheduler_callback = None
+        self.reduce_transition_decisions = False
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
         """Ensure a :class:`~finetuning_scheduler.fts.FinetuningScheduler` is provided before beginning
@@ -217,6 +224,61 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
             # post-validation saving/evaluation is the most common fts usage pattern
             self._check_on_train_epoch_end = False
         super().setup(trainer, pl_module, stage)
+
+    def on_validation_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        """Ascertain whether the execution context of this callback requires that we reduce transition decisions
+        over all distributed training processes.
+
+        Args:
+            trainer: The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
+            pl_module  (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The
+                :external+pl:class:`~pytorch_lightning.core.module.LightningModule` object
+        """
+        if trainer.state.fn == TrainerFn.FITTING:
+            self.reduce_transition_decisions = self._check_sync_dist(trainer)
+        super().on_validation_end(trainer, pl_module)
+
+    def _check_sync_dist(self, trainer: "pl.Trainer") -> bool:
+        """Inspect the monitored metric and execution context to determine whether transition decisions for this
+        callback need to be reduced over all distributed training processes.
+
+        Args:
+            trainer: The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
+
+        Returns:
+            bool: Whether to reduce transition decisions for this callback over all training processes
+        """
+        assert self.finetuningscheduler_callback is not None
+        monitor_metric = [
+            m
+            for m in self.finetuningscheduler_callback.pl_module.trainer._results.result_metrics
+            if m.meta.name == self.monitor
+        ]
+        assert monitor_metric[0] is not None
+        no_sync = (distributed_available() and monitor_metric[0].is_tensor) and not monitor_metric[0].meta.sync.should
+        return no_sync
+
+    def _transition_es_phase(self) -> None:
+        """Encapsulates updating the :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` internal state
+        while transitioning to the next scheduled fine-tuning phase."""
+        assert self.finetuningscheduler_callback is not None
+        self.es_phase_complete = True
+        self.wait_count = 0
+        rank_zero_debug(
+            "Preparing the FTSEarlyStopping callback for transition to the next scheduled fine-tuning phase (phase"
+            f" {self.finetuningscheduler_callback.curr_depth + 1})"
+        )
+
+    def _reset_es_phase(self) -> None:
+        """Encapsulates resetting of :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` internal state
+        for the next scheduled fine-tuning phase."""
+        assert self.finetuningscheduler_callback is not None
+        self.es_phase_complete = False
+        self.wait_count = 0
+        rank_zero_debug(
+            "Reset the FTSEarlyStopping callback for the next scheduled fine-tuning phase (phase"
+            f" {self.finetuningscheduler_callback.curr_depth})"
+        )
 
     def _evaluate_stopping_criteria(self, current: Tensor) -> Tuple[bool, Optional[str]]:
         """Evaluate whether and why to stop the current training session.
@@ -264,8 +326,7 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
                         f" Best score: {self.best_score:.3f}. Signaling Trainer to stop."
                     )
                 else:
-                    self.es_phase_complete = True
-                    self.wait_count = 0
+                    self._transition_es_phase()
         return should_stop, reason
 
 

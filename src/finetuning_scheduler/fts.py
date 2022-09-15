@@ -21,9 +21,12 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Sequence, Union
 
 import pytorch_lightning as pl
+import torch
 from lightning_lite.utilities import rank_zero_info
+from lightning_lite.utilities.distributed import ReduceOp
 from lightning_lite.utilities.enums import _StrategyType
 from pytorch_lightning.callbacks import BaseFinetuning
+from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.trainer.states import TrainerFn
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug, rank_zero_warn
@@ -355,6 +358,47 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
                         "we're reinitializing the lr scheduler."
                     )
 
+    def _reduce_transition(self, strategy: Strategy, decision: bool) -> bool:
+        """Reduce a transition decision across all world processes (effectively a global `any` collective)
+
+        Args:
+            strategy (Strategy): The PL :external+pl:class:`~pytorch_lightning.strategies.Strategy` context to use.
+            decision (bool): The local process decision.
+
+        Returns:
+            bool: The reduced decision across all world processes.
+        """
+        decision = torch.tensor(int(decision), device=strategy.root_device)
+        decision = bool(strategy.reduce(decision, reduce_op=ReduceOp.SUM))
+        return decision
+
+    def _sync_es_state(self, trainer: "pl.Trainer") -> None:
+        """Synchronize the :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` callback transition state
+        across distributed processes to avoid rare transition divergences when the user does not set ``sync_dist``
+        to ``True`` in logging the monitored metric.
+
+        Args:
+            trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The
+                :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
+        """
+        early_stopping_callback = trainer.early_stopping_callback
+        assert early_stopping_callback is not None
+        # reset the FTSEarlyStopping state in every distributed process if any world process is ready to transition to
+        # the next fine-tuning phase
+        should_reset_es = early_stopping_callback.es_phase_complete
+        should_reset_es = self._reduce_transition(trainer.strategy, should_reset_es)
+        if should_reset_es != early_stopping_callback.es_phase_complete:
+            warn_msg = (
+                "The FTSEarlyStopping quantity you are monitoring is not being synchronized across processes and FTS"
+                " has detected that two or more world processes are disagreeing on whether to continue the current"
+                " training phase. Training is continuing by transitioning all training processes to the next"
+                " fine-tuning phase when the early stopping conditions of any training process are met. To avoid this"
+                " behavior in the future, you may want to either log the monitored metric with ``sync_dist`` set to"
+                " ``True`` or increase the configured FTSEarlyStopping ``min_delta``."
+            )
+            rank_zero_warn(warn_msg)
+            early_stopping_callback._transition_es_phase()
+
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
         """Validate a compatible :external+pl:class:`~pytorch_lightning.strategies.Strategy` strategy is being used and
         ensure all :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback dependencies are met. If a valid
@@ -505,6 +549,11 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         )
         if not self.epoch_transitions_only:  # if we're considering FTSEarlyStopping criteria
             assert early_stopping_callback is not None
+            # in the edge case where transition decisions diverge among distributed processes because the user is
+            # running in a distributed context without ``sync_dist`` set to ``True`` and ``min_delta`` is
+            # sufficiently low, we should reduce the transition decision over all training processes to avoid deadlocks
+            if early_stopping_callback.reduce_transition_decisions:
+                self._sync_es_state(trainer)
             is_final_phase = early_stopping_callback.final_phase  # type: ignore[attr-defined]
             epoch_driven_transition = (
                 True if not is_final_phase and (0 <= curr_max_epoch <= trainer.current_epoch) else False
@@ -545,8 +594,7 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
             )
             if not self.epoch_transitions_only:
                 assert isinstance(trainer.early_stopping_callback, FTSEarlyStopping)
-                trainer.early_stopping_callback.es_phase_complete = False
-                trainer.early_stopping_callback.wait_count = 0
+                trainer.early_stopping_callback._reset_es_phase()
         if self.depth_remaining == 0:
             if not self.epoch_transitions_only:
                 assert isinstance(trainer.early_stopping_callback, FTSEarlyStopping)
@@ -579,8 +627,9 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         to ensure final training state is consistent with epoch semantics.
 
         Args:
-            trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): _description_
-            pl_module (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): _description_
+            trainer: The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
+            pl_module  (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The
+                :external+pl:class:`~pytorch_lightning.core.module.LightningModule` object
         """
         assert self._fts_state._ft_sync_objects is not None
         self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
