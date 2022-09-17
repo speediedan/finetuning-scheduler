@@ -18,8 +18,7 @@ import sys
 from importlib.util import module_from_spec, spec_from_file_location
 
 import pt_lightning_sphinx_theme
-
-import finetuning_scheduler  # noqa: F401
+import pytorch_lightning  # noqa: F401 workaround for TypeError on sphinx import
 
 PATH_HERE = os.path.abspath(os.path.dirname(__file__))
 PATH_ROOT = os.path.join(PATH_HERE, "..", "..")
