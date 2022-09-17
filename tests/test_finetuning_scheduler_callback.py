@@ -1226,6 +1226,16 @@ def test_finetuningscheduling_opt_warns():
             "Please set save_top_k to a non-zero value",
         ),
         ([FinetuningScheduler(), FinetuningScheduler(), FTSCheckpoint(monitor="val_loss")], "multiple Finetuning"),
+        (
+            [
+                FinetuningScheduler(),
+                EarlyStopping(monitor="val_loss"),
+                FTSEarlyStopping(monitor="val_loss"),
+                FTSCheckpoint(monitor="val_loss"),
+                FTSCheckpoint(monitor="val_loss"),
+            ],
+            "maximum of one",
+        ),
         ([FinetuningScheduler(), FTSCheckpoint(monitor=None)], "but has no quantity to monitor"),
         ([FinetuningScheduler(ft_schedule="/tmp/fnf")], "Could not find specified fine-tuning scheduling file"),
         (
@@ -1257,7 +1267,17 @@ def test_finetuningscheduling_opt_warns():
             "cannot be a list or tuple",
         ),
     ],
-    ids=["nofts_ckpt", "nofts_es", "topk0", "multifts", "nomon", "schedfnf", "imp_reinit_pg", "imp_reinit_rlrop_mlr"],
+    ids=[
+        "nofts_ckpt",
+        "nofts_es",
+        "topk0",
+        "multifts",
+        "multidep",
+        "nomon",
+        "schedfnf",
+        "imp_reinit_pg",
+        "imp_reinit_rlrop_mlr",
+    ],
 )
 def test_finetuningscheduling_misconfiguration(tmpdir, callbacks: List[Callback], expected: str):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly

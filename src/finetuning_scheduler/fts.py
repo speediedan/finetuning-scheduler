@@ -43,7 +43,7 @@ from finetuning_scheduler.fts_supporters import (
 log = logging.getLogger(__name__)
 
 
-class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMixin):
+class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMixin, BaseFinetuning):
     r"""
     This callback enables flexible, multi-phase, scheduled fine-tuning of foundational models. Gradual
     unfreezing/thawing can help maximize foundational model knowledge retention while allowing (typically upper layers
@@ -73,6 +73,12 @@ class FinetuningScheduler(BaseFinetuning, ScheduleImplMixin, ScheduleParsingMixi
         from pytorch_lightning import Trainer
         from pytorch_lightning.callbacks import FinetuningScheduler
         trainer = Trainer(callbacks=[FinetuningScheduler()])
+
+    .. note::
+
+        Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` does not support the use of multiple
+        :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` or
+        :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` callback instances.
     """
 
     def __init__(
