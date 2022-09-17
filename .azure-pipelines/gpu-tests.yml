@@ -23,7 +23,7 @@ jobs:
     strategy:
       matrix:
         'PyTorch - stable':
-          image: "speediedan/finetuning-scheduler:py3.9-pt1.12-azpl-init"
+          image: "speediedan/finetuning-scheduler:py3.9-pt1.12.1-azpl-init"
     # how long to run the job before automatically cancelling
     timeoutInMinutes: "100"
     # how much time to give 'run always even if cancelled tasks' before stopping them

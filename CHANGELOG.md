@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [0.2.2] - 2022-09-17
+
+### Added
+
+- support for pytorch-lightning 1.7.6
+- added detection of multiple instances of a given callback dependency parent
+- add new expected warning to examples
+
+### Fixed
+
+- import fts to workaround pl TypeError via sphinx import, switch to non-TLS pytorch inv object connection due to current certificate issues
+
+### Changed
+
+- bumped pytorch dependency in docker image to 1.12.1
+
 ## [0.2.1] - 2022-08-13
 
 ### Added
