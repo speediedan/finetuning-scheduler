@@ -110,7 +110,7 @@ class CallbackResolverMixin(ABC):
         callback_attrs: Tuple = CALLBACK_ATTRS,
         callback_parents: Dict = CALLBACK_DEP_PARENTS,
         target_callback_ref: str = TARGET_CALLBACK_REF,
-        support_multiple: bool = False,
+        support_multiple_targets: bool = False,
     ) -> None:
         """Initialize the user-provided callback depedency resolver in accordance with the user-provided module
         configuration.
@@ -124,15 +124,15 @@ class CallbackResolverMixin(ABC):
             target_callback_ref (str, optional): The name of the target user-provided callback to connect to. For each
                 subclass of CALLBACK_DEP_PARENTS, an attribute named ``(target_callback_ref.lower())_callback`` will be
                 added. Defaults to TARGET_CALLBACK_REF in the user-provided module.
-            support_multiple (bool, optional): Whether multiple instances of the target user-provided callback (only the
-                first of which will be connected to) are allowed. Defaults to False.
+            support_multiple_targets (bool, optional): Whether multiple instances of the target user-provided callback
+                (only the first of which will be connected to) are allowed. Defaults to False.
         """
         super().__init__()
         self.callback_attrs = callback_attrs
         self.callback_parents = callback_parents
         self.target_callback_ref = target_callback_ref
         self.callback_handle = f"{self.target_callback_ref.lower()}_callback"
-        self.support_multiple = support_multiple
+        self.support_multiple_targets = support_multiple_targets
         setattr(self, self.callback_handle, None)
 
     def connect_callback(self, trainer: "pl.Trainer", reconnect: bool = False) -> None:
@@ -146,25 +146,25 @@ class CallbackResolverMixin(ABC):
 
         Raises:
             MisconfigurationException: If no target callback is detected
-            MisconfigurationException: if :attr:`support_multiple` is ``False`` and multiple target callbacks are
-                detected.
+            MisconfigurationException: if :attr:`support_multiple_targets` is ``False`` and multiple target callbacks
+                are detected.
         """
         if self.__dict__[self.callback_handle] and not reconnect:
             return
-        resolved_callbacks = [c for c in trainer.callbacks if all([hasattr(c, a) for a in self.callback_attrs])]
-        if not resolved_callbacks:
+        resolved_target_callbacks = [c for c in trainer.callbacks if all([hasattr(c, a) for a in self.callback_attrs])]
+        if not resolved_target_callbacks:
             raise MisconfigurationException(
                 f"{self.__class__.__name__} is intended for use with a {self.target_callback_ref}. If not using a"
                 f"{self.target_callback_ref} callback, please use the standard "
                 f"{[k for k,v in self.callback_parents.items() if isinstance(self,v)][0]} callback."
             )
-        elif not self.support_multiple and len(resolved_callbacks) > 1:
+        elif not self.support_multiple_targets and len(resolved_target_callbacks) > 1:
             raise MisconfigurationException(
-                f"Use of multiple {resolved_callbacks[0].__class__.__name__} callbacks is"
+                f"Use of multiple {resolved_target_callbacks[0].__class__.__name__} callbacks is"
                 "not currently supported. Please provide a maximum of one."
             )
         else:
-            setattr(self, self.callback_handle, resolved_callbacks[0])
+            setattr(self, self.callback_handle, resolved_target_callbacks[0])
 
 
 class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
@@ -185,6 +185,12 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
 
        :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` is in beta and subject to change. For detailed
        usage information, see :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`.
+
+    .. note::
+
+       Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the use of one
+       :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` callback instance at a time.
+
     """
     _check_on_train_epoch_end: Optional[bool]
     best_score: Tensor
@@ -283,6 +289,11 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
     .. warning::
         :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is in beta and subject to change. For detailed usage
         information, see :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`.
+
+    .. note::
+
+       Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the use of one
+       :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callback instance at a time.
     """
     _save_on_train_epoch_end: Optional[bool]
     best_model_path: str
@@ -1308,6 +1319,18 @@ class ScheduleImplMixin(ABC):
 class CallbackDepMixin(ABC):
     """Functionality for validating/managing callback dependencies."""
 
+    def __init__(self, callback_dep_parents: Dict = CALLBACK_DEP_PARENTS) -> None:
+        """Initialize the user-provided callback dependency validation in accordance with the user-provided module
+        configuration.
+
+        Args:
+            callback_dep_parents (Dict, optional): The parent classes of all user-provided callbacks in the module that
+                should be connected to the target user-provided callback. Defaults to CALLBACK_DEP_PARENTS in the
+                user-provided module.
+        """
+        super().__init__()
+        self.callback_dep_parents = callback_dep_parents
+
     def _inspect_callback_deps(self, trainer: "pl.Trainer") -> List[bool]:
         """Inspect the trainer :paramref:`~pytorch_lighting.trainer.trainer.Trainer.callbacks` for earlystopping
         and scheduled fine-tuning capabilities.
@@ -1321,9 +1344,36 @@ class CallbackDepMixin(ABC):
         """
         callbacks_inspected = [FTSCheckpoint, ModelCheckpoint, FTSEarlyStopping, EarlyStopping, LearningRateMonitor]
         callback_inspection = []
+        self._validate_dep_callbacks(trainer)
         for ci in callbacks_inspected:
             callback_inspection.append(any([isinstance(c, ci) for c in trainer.callbacks]))
         return callback_inspection
+
+    def _validate_dep_callbacks(self, trainer: "pl.Trainer") -> None:
+        """Validate multiple instances of a given user-provided callback dependency parent are not present.
+
+        Args:
+            trainer (pl.Trainer): The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object to
+                inspect the callbacks of
+
+        Raises:
+            MisconfigurationException: If multiple instances of a callback dependency parent are found
+        """
+        dep_callback_cnts: Dict = {}
+        dep_callback_errs = []
+        err_suffix = "callbacks is not currently supported. Please provide a maximum of one."
+        for k, v in self.callback_dep_parents.items():
+            dep_callback_cnts.setdefault(k, 0)
+            for c in trainer.callbacks:
+                if isinstance(c, v):
+                    dep_callback_cnts[k] += 1
+                if dep_callback_cnts[k] > 1:
+                    break
+        for k, v in dep_callback_cnts.items():
+            if v > 1:
+                dep_callback_errs.append(f"Use of multiple {k} {err_suffix}")
+        if dep_callback_errs:
+            raise MisconfigurationException(dep_callback_errs)
 
     @staticmethod
     def _reorder_callback_by_type(callbacks: List[Callback], target_callback: type) -> List[Callback]:
@@ -1364,7 +1414,7 @@ class CallbackDepMixin(ABC):
                 rank_zero_warn(
                     f"{self.__class__.__name__} currently depends upon a fine-tuning schedule "
                     "capable EarlyStopping callback such as FTSEarlyStopping. Substituting current "
-                    "EarlyStopping for FTSCheckpoint"
+                    "EarlyStopping for FTSEarlyStopping"
                 )
                 trainer.callbacks = [c for c in trainer.callbacks if not isinstance(c, EarlyStopping)]
             else:
