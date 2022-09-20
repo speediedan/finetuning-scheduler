@@ -179,6 +179,7 @@ import datasets
 import pytorch_lightning as pl
 import torch
 from datasets import logging as datasets_logging
+from lightning_lite.accelerators.cuda import is_cuda_available
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers.tensorboard import TensorBoardLogger
 from pytorch_lightning.utilities import rank_zero_warn
@@ -574,7 +575,7 @@ def train() -> None:
         limit_train_batches=2,
         precision=16,
         accelerator="auto",
-        devices=1 if torch.cuda.is_available() else None,
+        devices=1 if is_cuda_available() else None,
         callbacks=callbacks,
         logger=logger,
     )
