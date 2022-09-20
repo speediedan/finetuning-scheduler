@@ -16,11 +16,12 @@ from typing import Optional
 
 import pytest
 import torch
+from lightning_lite.utilities.device_parser import num_cuda_devices
+from lightning_lite.utilities.imports import _HOROVOD_AVAILABLE, _TORCH_GREATER_EQUAL_1_10
 from packaging.version import Version
 from pkg_resources import get_distribution
 from pytorch_lightning.overrides.fairscale import _FAIRSCALE_AVAILABLE
 from pytorch_lightning.strategies.deepspeed import _DEEPSPEED_AVAILABLE
-from pytorch_lightning.utilities.imports import _HOROVOD_AVAILABLE, _TORCH_GREATER_EQUAL_1_10
 
 _HOROVOD_NCCL_AVAILABLE = False
 if _HOROVOD_AVAILABLE:
@@ -44,6 +45,8 @@ class RunIf:
     def test_wrapper(arg1):
         assert arg1 > 0.0
     """
+
+    standalone_ctx = os.getenv("PL_RUN_STANDALONE_TESTS", "0")
 
     def __new__(
         self,
@@ -85,7 +88,8 @@ class RunIf:
         reasons = []
 
         if min_cuda_gpus:
-            conditions.append(torch.cuda.device_count() < min_cuda_gpus)
+            cuda_device_fx = num_cuda_devices if RunIf.standalone_ctx == "1" else torch.cuda.device_count
+            conditions.append(cuda_device_fx() < min_cuda_gpus)
             reasons.append(f"GPUs>={min_cuda_gpus}")
             # used in conftest.py::pytest_collection_modifyitems
             kwargs["min_cuda_gpus"] = True

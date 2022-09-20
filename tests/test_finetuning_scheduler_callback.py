@@ -1664,3 +1664,15 @@ def test_fts_multi_ddp_sharded_spawn(tmpdir):
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_sharded_spawn", gpus=2)
     trainer.fit(model)
     assert trainer.callback_metrics["val_loss"] < 0.1
+
+
+@RunIf(standalone=True, min_cuda_gpus=2, min_torch="1.12.1", skip_windows=True)
+def test_fts_multi_ddp_fork(tmpdir):
+    """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_fork'
+    distributed context."""
+    seed_everything(42)
+    model = FinetuningSchedulerBoringModel()
+    callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_fork", gpus=2)
+    trainer.fit(model)
+    assert trainer.callback_metrics["val_loss"] < 0.1
