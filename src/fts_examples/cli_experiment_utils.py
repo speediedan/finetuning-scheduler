@@ -3,6 +3,8 @@ import sys
 from collections import namedtuple
 from typing import Any, Dict, Optional, Tuple, Union
 
+import torch
+from lightning_lite.accelerators.cuda import is_cuda_available
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from torch.utils import collect_env
 
@@ -62,6 +64,56 @@ def get_pip_packages(run_lambda):
     return pip_version, out
 
 
+def get_env_info():
+    run_lambda = collect_env.run
+    pip_version, pip_list_output = get_pip_packages(run_lambda)
+
+    if collect_env.TORCH_AVAILABLE:
+        version_str = torch.__version__
+        debug_mode_str = str(torch.version.debug)
+        cuda_available_str = str(is_cuda_available())
+        cuda_version_str = torch.version.cuda
+        if not hasattr(torch.version, "hip") or torch.version.hip is None:  # cuda version
+            hip_compiled_version = hip_runtime_version = miopen_runtime_version = "N/A"
+        else:  # HIP version
+            cfg = torch._C._show_config().split("\n")
+            hip_runtime_version = [s.rsplit(None, 1)[-1] for s in cfg if "HIP Runtime" in s][0]
+            miopen_runtime_version = [s.rsplit(None, 1)[-1] for s in cfg if "MIOpen" in s][0]
+            cuda_version_str = "N/A"
+            hip_compiled_version = torch.version.hip
+    else:
+        version_str = debug_mode_str = cuda_available_str = cuda_version_str = "N/A"
+        hip_compiled_version = hip_runtime_version = miopen_runtime_version = "N/A"
+
+    sys_version = sys.version.replace("\n", " ")
+
+    return collect_env.SystemEnv(
+        torch_version=version_str,
+        is_debug_build=debug_mode_str,
+        python_version=f"{sys_version} ({sys.maxsize.bit_length() + 1}-bit runtime)",
+        python_platform=collect_env.get_python_platform(),
+        is_cuda_available=cuda_available_str,
+        cuda_compiled_version=cuda_version_str,
+        cuda_runtime_version=collect_env.get_running_cuda_version(run_lambda),
+        nvidia_gpu_models=collect_env.get_gpu_info(run_lambda),
+        nvidia_driver_version=collect_env.get_nvidia_driver_version(run_lambda),
+        cudnn_version=collect_env.get_cudnn_version(run_lambda),
+        hip_compiled_version=hip_compiled_version,
+        hip_runtime_version=hip_runtime_version,
+        miopen_runtime_version=miopen_runtime_version,
+        pip_version=pip_version,
+        pip_packages=pip_list_output,
+        conda_packages=collect_env.get_conda_packages(run_lambda),
+        os=collect_env.get_os(run_lambda),
+        libc_version=collect_env.get_libc_version(),
+        gcc_version=collect_env.get_gcc_version(run_lambda),
+        clang_version=collect_env.get_clang_version(run_lambda),
+        cmake_version=collect_env.get_cmake_version(run_lambda),
+        caching_allocator_config=collect_env.get_cachingallocator_config(),
+        is_xnnpack_available=collect_env.is_xnnpack_available(),
+    )
+
+
 def collect_env_info() -> Dict:
     """Collect environmental details, logging versions of salient packages for improved reproducibility.
 
@@ -96,7 +148,7 @@ def collect_env_info() -> Dict:
         ],
     )
     collect_env.get_pip_packages = get_pip_packages
-    sys_info = collect_env.get_env_info()
+    sys_info = get_env_info()
     sys_dict = sys_info._asdict()
     pip_dict = {name: ver for name, ver in [p.split("==") for p in sys_info._asdict()["pip_packages"].split("\n")]}
     sys_dict["pip_packages"] = pip_dict

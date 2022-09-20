@@ -24,8 +24,8 @@ import yaml
 from lightning_lite.utilities.cloud_io import get_filesystem
 from pytorch_lightning import LightningModule, seed_everything, Trainer
 from pytorch_lightning.callbacks import Callback, EarlyStopping, LearningRateMonitor
+from pytorch_lightning.strategies import StrategyRegistry
 from pytorch_lightning.strategies.single_device import SingleDeviceStrategy
-from pytorch_lightning.strategies.strategy_registry import StrategyRegistry
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
@@ -122,7 +122,9 @@ class TestStrategy(SingleDeviceStrategy):
 
 strategy_name = "test_strategy"
 strategy_description = "Test Strategy"
-StrategyRegistry.register(strategy_name, TestStrategy, description=strategy_description, param1="abc", param2=123)
+StrategyRegistry.register(
+    name=strategy_name, strategy=TestStrategy, description=strategy_description, param1="abc", param2=123
+)
 
 
 class FinetuningSchedulerBoringModel(BoringModel):
