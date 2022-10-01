@@ -39,6 +39,7 @@ EXPECTED_WARNS = [
     "sentencepiece tokenizer that you are converting",
     "Torchmetrics v0.9",  # temporarily allow until _ResultMetric updated,
     "copy construct from a tensor",
+    "'dataset_info': token",  # can remove w datasets ver 0.12 per https://github.com/huggingface/datasets/issues/4990
 ]
 MIN_VERSION_WARNS = "1.9"
 MAX_VERSION_WARNS = "1.12"
