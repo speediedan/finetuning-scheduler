@@ -1,4 +1,5 @@
 datasets
+evaluate
 transformers>=4.18.0
 scikit-learn
 sentencepiece

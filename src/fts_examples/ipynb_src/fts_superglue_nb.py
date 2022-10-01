@@ -176,6 +176,7 @@ from packaging.version import Version
 
 import sentencepiece as sp  # noqa: F401 # isort: split
 import datasets
+import evaluate
 import pytorch_lightning as pl
 import torch
 from datasets import logging as datasets_logging
@@ -362,9 +363,7 @@ class RteBoolqModule(pl.LightningModule):
             "experiment_id": f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{experiment_tag}",
         }
         self.save_hyperparameters(self.init_hparams)
-        self.metric = datasets.load_metric(
-            "super_glue", self.hparams.task_name, experiment_id=self.hparams.experiment_id
-        )
+        self.metric = evaluate.load("super_glue", self.hparams.task_name, experiment_id=self.hparams.experiment_id)
         self.no_decay = ["bias", "LayerNorm.weight"]
 
     @property

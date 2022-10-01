@@ -49,6 +49,7 @@ from fts_examples.cli_experiment_utils import collect_env_info, instantiate_clas
 
 if _HF_AVAILABLE:
     import datasets
+    import evaluate
     from datasets.arrow_dataset import Batch
     from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer
     from transformers import logging as transformers_logging
@@ -234,9 +235,7 @@ class RteBoolqModule(pl.LightningModule):
         }
         self.init_hparams["env_info"] = collect_env_info() if log_env_details else None
         self.save_hyperparameters(self.init_hparams)
-        self.metric = datasets.load_metric(
-            "super_glue", self.hparams.task_name, experiment_id=self.hparams.experiment_id
-        )
+        self.metric = evaluate.load("super_glue", self.hparams.task_name, experiment_id=self.hparams.experiment_id)
         self.no_decay = ["bias", "LayerNorm.weight"]
 
     @property
