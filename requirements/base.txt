@@ -1,2 +1,2 @@
-pytorch-lightning>=1.7.0, <=1.7.6
+pytorch-lightning>=1.7.0, <=1.7.7
 torch>=1.9.*
