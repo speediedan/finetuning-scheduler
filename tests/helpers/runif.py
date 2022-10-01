@@ -17,10 +17,10 @@ from typing import Optional
 import pytest
 import torch
 from lightning_lite.accelerators.cuda import num_cuda_devices
+from lightning_lite.strategies.fairscale import _FAIRSCALE_AVAILABLE
 from lightning_lite.utilities.imports import _HOROVOD_AVAILABLE, _TORCH_GREATER_EQUAL_1_10
 from packaging.version import Version
 from pkg_resources import get_distribution
-from pytorch_lightning.overrides.fairscale import _FAIRSCALE_AVAILABLE
 from pytorch_lightning.strategies.deepspeed import _DEEPSPEED_AVAILABLE
 
 _HOROVOD_NCCL_AVAILABLE = False
