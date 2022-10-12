@@ -10,7 +10,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os.path
-import re
 import subprocess
 
 import pytest
@@ -18,6 +17,7 @@ from packaging.version import Version
 from pkg_resources import get_distribution
 
 from fts_examples import _HF_AVAILABLE
+from tests.helpers.boring_model import multiwarn_check
 from tests.helpers.runif import RunIf
 
 ARGS_DEFAULT = (
@@ -74,7 +74,7 @@ def test_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
     monkeypatch.setattr("sys.argv", [example_script, "fit", "--config"] + config_loc + cli_args)
     cli_main()
     # ensure no unexpected warnings detected
-    matched = [any([re.compile(w).search(w_msg.message.args[0]) for w in EXPECTED_WARNS]) for w_msg in recwarn.list]
+    matched = multiwarn_check(rec_warns=recwarn.list, expected_warns=EXPECTED_WARNS)
     assert all(matched)
 
 
@@ -99,7 +99,7 @@ def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_fi
     monkeypatch.setattr("sys.argv", [example_script, "fit", "--config"] + config_loc + cli_args)
     cli_main()
     # ensure no unexpected warnings detected
-    matched = [any([re.compile(w).search(w_msg.message.args[0]) for w in ADV_EXPECTED_WARNS]) for w_msg in recwarn.list]
+    matched = multiwarn_check(rec_warns=recwarn.list, expected_warns=ADV_EXPECTED_WARNS)
     assert all(matched)
 
 

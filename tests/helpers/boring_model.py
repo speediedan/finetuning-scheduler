@@ -10,12 +10,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Initially based on https://bit.ly/3oQ8Vqf
-from typing import Optional
+import re
+from typing import List, Optional
 
 import torch
 from pytorch_lightning import LightningDataModule, LightningModule
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Dataset, IterableDataset, Subset
+
+
+def multiwarn_check(rec_warns: List, expected_warns: List, expected_mode: bool = False) -> List[bool]:
+    if expected_mode:  # we're directed to check that multiple expected warns are obtained
+        return [any([re.compile(w_msg).search(w.message.args[0]) for w in rec_warns]) for w_msg in expected_warns]
+    else:  # by default we're checking that no unexpected warns are obtained
+        return [any([re.compile(w).search(w_msg.message.args[0]) for w in expected_warns]) for w_msg in rec_warns]
 
 
 class LinearWarmupLR(LambdaLR):
