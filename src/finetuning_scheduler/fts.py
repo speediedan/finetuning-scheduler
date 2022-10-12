@@ -230,7 +230,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             pl_module (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The target
                 :external+pl:class:`~pytorch_lightning.core.module.LightningModule` to freeze parameters of
         """
-        self.freeze(modules=pl_module)
+        self.freeze(modules=pl_module, train_bn=False)
 
     def step(self) -> None:
         """Prepare and execute the next scheduled fine-tuning level

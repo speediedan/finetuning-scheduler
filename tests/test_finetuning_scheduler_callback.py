@@ -1451,18 +1451,18 @@ def test_finetuningscheduling_optimizer_compat(tmpdir):
 
 
 @pytest.mark.parametrize(
-    "param_cfg_key, expected",
+    "param_cfg_key, warn_expected",
     [
         ("extra_nograd", "additional parameters that do not require a gradient"),
         ("missing_grad", "removed trainable parameters, you may want"),
         ("extra_grad", "added additional trainable parameters you may want"),
-        ("no_warning", None),
+        ("bn_freeze", None),
     ],
-    ids=["extra_nograd", "missing_grad", "extra_grad", "no_warning"],
+    ids=["extra_nograd", "missing_grad", "extra_grad", "bn_freeze"],
 )
-def test_fts_optimizer_init_params(tmpdir, param_cfg_key: str, expected: str):
-    """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly raised
-    for multi-optimizer configurations."""
+def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, warn_expected: str):
+    """Ensure :class:`~finetuning_scheduler.FinetuningScheduler` warnings associated with parameter/schedule
+    consistency inspection are properly raised."""
 
     class DupParamFTS(TestFinetuningScheduler):
         def on_fit_start(self, trainer, pl_module) -> None:
@@ -1480,22 +1480,44 @@ def test_fts_optimizer_init_params(tmpdir, param_cfg_key: str, expected: str):
                 for p in self.parameters():
                     p.requires_grad = True
                 parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
-            elif param_cfg_key == "no_warning":
+            optimizer = torch.optim.SGD(parameters, lr=1e-3, weight_decay=self.weight_decay)
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
+            return [optimizer], [lr_scheduler]
+
+    class BNInitBoringModel(FinetuningSchedulerBoringModel):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.layer = nn.Sequential(
+                OrderedDict(
+                    [("lin_base", nn.Linear(32, 32)), ("bn", nn.BatchNorm1d(32)), ("lin_classif", nn.Linear(32, 2))]
+                )
+            )
+
+        def configure_optimizers(self):
+            if param_cfg_key == "bn_freeze":
                 parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
+            else:
+                raise MisconfigurationException("Currently invalid test config key")
             optimizer = torch.optim.SGD(parameters, lr=1e-3, weight_decay=self.weight_decay)
             lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
             return [optimizer], [lr_scheduler]
 
     seed_everything(42)
-    model = DupParamInitBoringModel()
+    model = DupParamInitBoringModel() if param_cfg_key != "bn_freeze" else BNInitBoringModel()
     callbacks = [DupParamFTS()]
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
     with pytest.raises(SystemExit):
-        if param_cfg_key == "no_warning":
+        if not warn_expected:
             trainer.fit(model)
         else:
-            with pytest.warns(Warning, match=expected):
+            with pytest.warns(Warning, match=warn_expected):
                 trainer.fit(model)
+    init_warns = EXPECTED_WARNS + ["currently depends upon"]
+    if warn_expected:
+        init_warns.extend(warn_expected)
+    # ensure no unexpected warnings detected
+    matched = [any([re.compile(w).search(w_msg.message.args[0]) for w in init_warns]) for w_msg in recwarn.list]
+    assert all(matched)
 
 
 @pytest.mark.parametrize(
