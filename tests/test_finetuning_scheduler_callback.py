@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from finetuning_scheduler import CallbackResolverMixin, FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from tests.helpers import BoringModel
-from tests.helpers.boring_model import CustomLRScheduler, multiwarn_check
+from tests.helpers.boring_model import CustomLRScheduler, unexpected_warns, unmatched_warns
 from tests.helpers.runif import RunIf
 
 fts_resolver = CallbackResolverMixin()
@@ -850,8 +850,8 @@ def test_fts_callback_resume(
     if not diff_dirpath:
         resume_warns.append(EXPECTED_DIRPATH)
     # ensure no unexpected warnings detected
-    matched = multiwarn_check(rec_warns=recwarn.list, expected_warns=resume_warns)
-    assert all(matched)
+    unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=resume_warns)
+    assert not unexpected
 
 
 EXPECTED_INTRAFIT_STATE = {
@@ -1059,8 +1059,8 @@ def test_finetuningscheduling_reinitlr_lambda(
     assert finetuningscheduler_callback.curr_depth == EXPECTED_LAMBDALR_STATE[(explicit_mode, lam_mode)]["max_depth"]
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
     if w_expected:
-        matched = multiwarn_check(rec_warns=recwarn.list, expected_warns=w_expected, expected_mode=True)
-        assert all(matched)
+        unmatched = unmatched_warns(rec_warns=recwarn.list, expected_warns=w_expected)
+        assert not unmatched
 
 
 IMP_REINIT_RLROP_CFG = {
@@ -1151,8 +1151,8 @@ def test_finetuningscheduling_reinitlr_rlrop(
     assert finetuningscheduler_callback.curr_depth == 2
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
     if w_expected:
-        matched = multiwarn_check(rec_warns=recwarn.list, expected_warns=w_expected, expected_mode=True)
-        assert all(matched)
+        unmatched = unmatched_warns(rec_warns=recwarn.list, expected_warns=w_expected)
+        assert not unmatched
 
 
 class MockDistFTS(TestFinetuningScheduler):
@@ -1207,8 +1207,8 @@ def test_finetuningscheduler_callback_warns(
     dist_args = {"strategy": dist_mode, "accelerator": "cpu", "devices": "auto"} if dist_mode else {}
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, **dist_args)
     trainer.fit(model)
-    matched = multiwarn_check(rec_warns=recwarn.list, expected_warns=expected, expected_mode=True)
-    assert all(matched)
+    unmatched = unmatched_warns(rec_warns=recwarn.list, expected_warns=expected)
+    assert not unmatched
 
 
 def test_finetuningscheduling_opt_warns():
@@ -1520,8 +1520,8 @@ def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, warn_exp
     if warn_expected:
         init_warns.extend(warn_expected)
     # ensure no unexpected warnings detected
-    matched = multiwarn_check(rec_warns=recwarn.list, expected_warns=init_warns)
-    assert all(matched)
+    unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=init_warns)
+    assert not unexpected
 
 
 @pytest.mark.parametrize(

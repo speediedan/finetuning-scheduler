@@ -17,7 +17,7 @@ from packaging.version import Version
 from pkg_resources import get_distribution
 
 from fts_examples import _HF_AVAILABLE
-from tests.helpers.boring_model import multiwarn_check
+from tests.helpers.boring_model import unexpected_warns
 from tests.helpers.runif import RunIf
 
 ARGS_DEFAULT = (
@@ -40,6 +40,8 @@ EXPECTED_WARNS = [
     "Torchmetrics v0.9",  # temporarily allow until _ResultMetric updated,
     "copy construct from a tensor",
     "'dataset_info': token",  # can remove w datasets ver 0.12 per https://github.com/huggingface/datasets/issues/4990
+    "BILINEAR is deprecated",
+    "NEAREST is deprecated",
 ]
 MIN_VERSION_WARNS = "1.9"
 MAX_VERSION_WARNS = "1.12"
@@ -74,8 +76,8 @@ def test_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
     monkeypatch.setattr("sys.argv", [example_script, "fit", "--config"] + config_loc + cli_args)
     cli_main()
     # ensure no unexpected warnings detected
-    matched = multiwarn_check(rec_warns=recwarn.list, expected_warns=EXPECTED_WARNS)
-    assert all(matched)
+    unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=EXPECTED_WARNS)
+    assert not unexpected
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
@@ -99,8 +101,8 @@ def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_fi
     monkeypatch.setattr("sys.argv", [example_script, "fit", "--config"] + config_loc + cli_args)
     cli_main()
     # ensure no unexpected warnings detected
-    matched = multiwarn_check(rec_warns=recwarn.list, expected_warns=ADV_EXPECTED_WARNS)
-    assert all(matched)
+    unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=ADV_EXPECTED_WARNS)
+    assert not unexpected
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")

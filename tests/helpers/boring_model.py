@@ -11,7 +11,9 @@
 # limitations under the License.
 # Initially based on https://bit.ly/3oQ8Vqf
 import re
+from functools import partial
 from typing import List, Optional
+from warnings import WarningMessage
 
 import torch
 from pytorch_lightning import LightningDataModule, LightningModule
@@ -19,11 +21,20 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Dataset, IterableDataset, Subset
 
 
-def multiwarn_check(rec_warns: List, expected_warns: List, expected_mode: bool = False) -> List[bool]:
+def multiwarn_check(
+    rec_warns: List, expected_warns: List, expected_mode: bool = False
+) -> List[Optional[WarningMessage]]:
+    msg_search = lambda w1, w2: re.compile(w1).search(w2.message.args[0])
     if expected_mode:  # we're directed to check that multiple expected warns are obtained
-        return [any([re.compile(w_msg).search(w.message.args[0]) for w in rec_warns]) for w_msg in expected_warns]
+        return [w_msg for w_msg in expected_warns if not any([msg_search(w_msg, w) for w in rec_warns])]
     else:  # by default we're checking that no unexpected warns are obtained
-        return [any([re.compile(w).search(w_msg.message.args[0]) for w in expected_warns]) for w_msg in rec_warns]
+        return [w_msg for w_msg in rec_warns if not any([msg_search(w, w_msg) for w in expected_warns])]
+
+
+unexpected_warns = partial(multiwarn_check, expected_mode=False)
+
+
+unmatched_warns = partial(multiwarn_check, expected_mode=True)
 
 
 class LinearWarmupLR(LambdaLR):
