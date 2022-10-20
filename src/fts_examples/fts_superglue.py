@@ -347,7 +347,7 @@ def cli_main() -> None:
         pl.LightningDataModule,
         subclass_mode_model=True,
         subclass_mode_data=True,
-        save_config_overwrite=True,
+        save_config_kwargs={"overwrite": True},
         parser_kwargs={"fit": {"default_config_files": [default_config_file]}},
     )
 
