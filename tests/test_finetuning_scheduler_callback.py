@@ -1671,9 +1671,11 @@ def test_fts_multi_ddp_sharded(tmpdir):
 
 
 @RunIf(standalone=True, min_cuda_gpus=2)
-def test_fts_multi_ddp_spawn(tmpdir):
+def test_fts_multi_ddp_spawn(monkeypatch, tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_spawn'
     distributed context."""
+    # TODO: remove once re-emergence of https://github.com/pytorch/pytorch/issues/37377 is patched
+    monkeypatch.setenv("MKL_THREADING_LAYER", "GNU")
     seed_everything(42)
     model = FinetuningSchedulerBoringModel()
     callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
@@ -1683,9 +1685,11 @@ def test_fts_multi_ddp_spawn(tmpdir):
 
 
 @RunIf(standalone=True, min_cuda_gpus=2)
-def test_fts_multi_ddp_sharded_spawn(tmpdir):
+def test_fts_multi_ddp_sharded_spawn(monkeypatch, tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported
     'ddp_sharded_spawn' distributed context."""
+    # TODO: remove once re-emergence of https://github.com/pytorch/pytorch/issues/37377 is patched
+    monkeypatch.setenv("MKL_THREADING_LAYER", "GNU")
     seed_everything(42)
     model = FinetuningSchedulerBoringModel()
     callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
@@ -1694,7 +1698,7 @@ def test_fts_multi_ddp_sharded_spawn(tmpdir):
     assert trainer.callback_metrics["val_loss"] < 0.1
 
 
-@RunIf(standalone=True, min_cuda_gpus=2, min_torch="1.12.1", skip_windows=True)
+@RunIf(standalone=True, min_cuda_gpus=2, skip_windows=True)
 def test_fts_multi_ddp_fork(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_fork'
     distributed context."""
