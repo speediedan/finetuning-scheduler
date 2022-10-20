@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 import torch.distributed
-from lightning_lite.plugins.environments.lightning_environment import find_free_network_port
+from lightning_lite.plugins.environments.lightning import find_free_network_port
 from pytorch_lightning.trainer.connectors.signal_connector import SignalConnector
 from pytorch_lightning.utilities.imports import _IS_WINDOWS
 
