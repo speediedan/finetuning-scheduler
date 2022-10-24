@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 from lightning_lite.accelerators.cuda import is_cuda_available
+from lightning_lite.utilities.imports import _TORCH_GREATER_EQUAL_1_13
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from torch.utils import collect_env
 
@@ -87,31 +88,35 @@ def get_env_info():
 
     sys_version = sys.version.replace("\n", " ")
 
-    return collect_env.SystemEnv(
-        torch_version=version_str,
-        is_debug_build=debug_mode_str,
-        python_version=f"{sys_version} ({sys.maxsize.bit_length() + 1}-bit runtime)",
-        python_platform=collect_env.get_python_platform(),
-        is_cuda_available=cuda_available_str,
-        cuda_compiled_version=cuda_version_str,
-        cuda_runtime_version=collect_env.get_running_cuda_version(run_lambda),
-        nvidia_gpu_models=collect_env.get_gpu_info(run_lambda),
-        nvidia_driver_version=collect_env.get_nvidia_driver_version(run_lambda),
-        cudnn_version=collect_env.get_cudnn_version(run_lambda),
-        hip_compiled_version=hip_compiled_version,
-        hip_runtime_version=hip_runtime_version,
-        miopen_runtime_version=miopen_runtime_version,
-        pip_version=pip_version,
-        pip_packages=pip_list_output,
-        conda_packages=collect_env.get_conda_packages(run_lambda),
-        os=collect_env.get_os(run_lambda),
-        libc_version=collect_env.get_libc_version(),
-        gcc_version=collect_env.get_gcc_version(run_lambda),
-        clang_version=collect_env.get_clang_version(run_lambda),
-        cmake_version=collect_env.get_cmake_version(run_lambda),
-        caching_allocator_config=collect_env.get_cachingallocator_config(),
-        is_xnnpack_available=collect_env.is_xnnpack_available(),
-    )
+    systemenv_kwargs = {
+        "torch_version": version_str,
+        "is_debug_build": debug_mode_str,
+        "python_version": f"{sys_version} ({sys.maxsize.bit_length() + 1}-bit runtime)",
+        "python_platform": collect_env.get_python_platform(),
+        "is_cuda_available": cuda_available_str,
+        "cuda_compiled_version": cuda_version_str,
+        "cuda_runtime_version": collect_env.get_running_cuda_version(run_lambda),
+        "nvidia_gpu_models": collect_env.get_gpu_info(run_lambda),
+        "nvidia_driver_version": collect_env.get_nvidia_driver_version(run_lambda),
+        "cudnn_version": collect_env.get_cudnn_version(run_lambda),
+        "hip_compiled_version": hip_compiled_version,
+        "hip_runtime_version": hip_runtime_version,
+        "miopen_runtime_version": miopen_runtime_version,
+        "pip_version": pip_version,
+        "pip_packages": pip_list_output,
+        "conda_packages": collect_env.get_conda_packages(run_lambda),
+        "os": collect_env.get_os(run_lambda),
+        "libc_version": collect_env.get_libc_version(),
+        "gcc_version": collect_env.get_gcc_version(run_lambda),
+        "clang_version": collect_env.get_clang_version(run_lambda),
+        "cmake_version": collect_env.get_cmake_version(run_lambda),
+        "caching_allocator_config": collect_env.get_cachingallocator_config(),
+        "is_xnnpack_available": collect_env.is_xnnpack_available(),
+    }
+    if _TORCH_GREATER_EQUAL_1_13:
+        # get_cuda_module_loading_config() initializes CUDA which we want to avoid so we bypass this inspection
+        systemenv_kwargs["cuda_module_loading"] = "not inspected"
+    return collect_env.SystemEnv(**systemenv_kwargs)
 
 
 def collect_env_info() -> Dict:
