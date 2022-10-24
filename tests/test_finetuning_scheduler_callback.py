@@ -666,7 +666,6 @@ def test_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expe
     ft_schedule = tmpdir / "lightning_logs" / "version_0" / f"{model.__class__.__name__}_ft_schedule.yaml"
     with pytest.raises(SystemExit):
         trainer.fit(model)
-    seed_everything(42)
     if trainer.is_global_zero:
         assert os.path.isfile(ft_schedule)
         with open(ft_schedule) as f:
@@ -675,6 +674,8 @@ def test_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expe
         assert len(test_schedule) == expected[0]
         assert test_schedule[1]["params"] == expected[1]
         assert test_schedule[next(reversed(list(test_schedule.keys())))]["params"] == expected[2]
+    if "CUDA_MODULE_LOADING" in os.environ:  # CUDA 11.7+ sets this and we want to avoid leaking it
+        del os.environ["CUDA_MODULE_LOADING"]
 
 
 EXPECTED_EXPIMP_RESULTS = {
