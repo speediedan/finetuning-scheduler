@@ -15,6 +15,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -27,13 +28,18 @@ from pytorch_lightning.callbacks import Callback, EarlyStopping, LearningRateMon
 from pytorch_lightning.strategies import StrategyRegistry
 from pytorch_lightning.strategies.single_device import SingleDeviceStrategy
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
+from pytorch_lightning.utilities.imports import _TORCH_GREATER_EQUAL_1_10
 from torch import nn
+from torch.multiprocessing import ProcessRaisedException
 from torch.utils.data import DataLoader, Dataset
 
 from finetuning_scheduler import CallbackResolverMixin, FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from tests.helpers import BoringModel
 from tests.helpers.boring_model import CustomLRScheduler, unexpected_warns, unmatched_warns
 from tests.helpers.runif import RunIf
+
+if _TORCH_GREATER_EQUAL_1_10:
+    from torch.distributed.optim import ZeroRedundancyOptimizer
 
 fts_resolver = CallbackResolverMixin()
 
@@ -261,6 +267,34 @@ class TestFinetuningScheduler(FinetuningScheduler):
             assert self.restored_best_cnt == self.curr_depth
         else:
             assert self.restored_best_cnt == 0
+
+
+class FitStartOnlyFTS(TestFinetuningScheduler):
+    def on_fit_start(self, trainer, pl_module) -> None:
+        super().on_fit_start(trainer, pl_module)
+        raise SystemExit()
+
+
+class MultiOptFTSBoringModel(FinetuningSchedulerBoringModel):
+    def configure_optimizers(self):
+        parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
+        optimizer0 = torch.optim.SGD(parameters, lr=1e-3)
+        optimizer1 = torch.optim.SGD(parameters, lr=1e-3)
+        return [optimizer0, optimizer1]
+
+
+class FTSZeroRedundancyOptimizerModel(FinetuningSchedulerBoringModel):
+    def __init__(self, test_overlap: Optional[bool] = False, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.test_overlap = test_overlap
+
+    def configure_optimizers(self):
+        parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
+        optimizer = ZeroRedundancyOptimizer(
+            parameters, optimizer_class=torch.optim.Adam, lr=0.1, overlap_with_ddp=self.test_overlap
+        )
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
+        return [optimizer], [lr_scheduler]
 
 
 @pytest.fixture(scope="function")
@@ -654,6 +688,7 @@ class ComplexNestedModel(LightningModule):
     ],
     ids=["dist_boring", "Boring", "ParityRNN", "ComplexNested"],
 )
+@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expected: Tuple):
     """Validate the default fine-tuning schedule generation."""
     seed_everything(42)
@@ -674,8 +709,6 @@ def test_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expe
         assert len(test_schedule) == expected[0]
         assert test_schedule[1]["params"] == expected[1]
         assert test_schedule[next(reversed(list(test_schedule.keys())))]["params"] == expected[2]
-    if "CUDA_MODULE_LOADING" in os.environ:  # CUDA 11.7+ sets this and we want to avoid leaking it
-        del os.environ["CUDA_MODULE_LOADING"]
 
 
 EXPECTED_EXPIMP_RESULTS = {
@@ -1436,22 +1469,33 @@ def test_finetuningscheduling_distributed_compat(tmpdir, strategy, gpus, plugins
             trainer.fit(model)
 
 
-def test_finetuningscheduling_optimizer_compat(tmpdir):
+@pytest.mark.parametrize(
+    "test_model, dist_mode, excepts, expected",
+    [
+        pytest.param(
+            FTSZeroRedundancyOptimizerModel(test_overlap=True),
+            "ddp",
+            (MisconfigurationException, ProcessRaisedException),
+            "overlap_with_ddp",
+            marks=RunIf(min_cuda_gpus=2, skip_windows=True, min_torch="1.10", standalone=True),
+        ),
+        (MultiOptFTSBoringModel(), None, (MisconfigurationException,), "single-optimizer configuration"),
+    ],
+    ids=["zeroopt_overlap", "multi_opt"],
+)
+@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
+def test_fts_optimizer_compat(
+    monkeypatch, tmpdir, test_model: LightningModule, dist_mode: str, excepts: Tuple[BaseException], expected: str
+):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly raised
     for multi-optimizer configurations."""
-
-    class MultiOptFTSBoringModel(FinetuningSchedulerBoringModel):
-        def configure_optimizers(self):
-            parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
-            optimizer0 = torch.optim.SGD(parameters, lr=1e-3)
-            optimizer1 = torch.optim.SGD(parameters, lr=1e-3)
-            return [optimizer0, optimizer1]
-
+    monkeypatch.setenv("MKL_THREADING_LAYER", "GNU")
     seed_everything(42)
-    model = MultiOptFTSBoringModel()
+    model = test_model
+    dist_args = {"strategy": dist_mode, "accelerator": "gpu", "devices": "2"} if dist_mode else {}
     callbacks = [FinetuningScheduler()]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
-    with pytest.raises(MisconfigurationException, match="single-optimizer configuration"):
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, **dist_args)
+    with pytest.raises(excepts, match=expected):
         trainer.fit(model)
 
 
@@ -1468,11 +1512,6 @@ def test_finetuningscheduling_optimizer_compat(tmpdir):
 def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, warn_expected: str):
     """Ensure :class:`~finetuning_scheduler.FinetuningScheduler` warnings associated with parameter/schedule
     consistency inspection are properly raised."""
-
-    class DupParamFTS(TestFinetuningScheduler):
-        def on_fit_start(self, trainer, pl_module) -> None:
-            super().on_fit_start(trainer, pl_module)
-            raise SystemExit()
 
     class DupParamInitBoringModel(FinetuningSchedulerBoringModel):
         def configure_optimizers(self):
@@ -1509,7 +1548,7 @@ def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, warn_exp
 
     seed_everything(42)
     model = DupParamInitBoringModel() if param_cfg_key != "bn_freeze" else BNInitBoringModel()
-    callbacks = [DupParamFTS()]
+    callbacks = [FitStartOnlyFTS()]
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
     with pytest.raises(SystemExit):
         if not warn_expected:
@@ -1523,6 +1562,70 @@ def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, warn_exp
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=init_warns)
     assert not unexpected
+
+
+EXPECTED_OPTIMIZER_STATE = {
+    0: (0, 3, 0, 0, 0, 0, 2, 1, 0, 0, 1, (2,), 2, ((1,), (1,)), (1,)),
+    1: (0, 3, 1, 0, 0, 1, 2, 1, 0, 0, 1, (2,), 2, ((1,), (1,)), (1,)),
+    2: (0, 3, 2, 0, 0, 1, 2, 1, 0, 0, 1, (2,), 2, ((1,), (1,)), (1,)),
+    3: (0, 3, 3, 0, 0, 1, 2, 1, 0, 0, 1, (2,), 2, ((1,), (1,)), (1,)),
+    4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), 2, ((1, 1), (1, 1)), (1, 1)),
+    5: (2, 1, 5, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), 2, ((1, 1, 1), (1, 1, 1)), (1, 1, 1)),
+    6: (3, 0, 6, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), 2, ((1, 1, 1, 1), (1, 1, 1, 1)), (1, 1, 1, 1)),
+}
+
+
+class OptInspectFTS(TestFinetuningScheduler):
+    def on_train_epoch_start(self, trainer, pl_module):
+        super(TestFinetuningScheduler, self).on_train_epoch_start(trainer, pl_module)
+        state_key = trainer.current_epoch
+        partition_cache = trainer.optimizers[0]._partition_parameters_cache
+        current_state = (
+            self.curr_depth,
+            self.depth_remaining,
+            self._fts_state._ft_epoch,
+            self._fts_state._fts_ckpt_metadata["current_ckpt_depth"],
+            self._fts_state._fts_ckpt_metadata["best_ckpt_depth"],
+            len(self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"]),
+            len(self._fts_state._curr_thawed_params),
+            len(self._internal_optimizer_metadata[0]),
+            trainer.checkpoint_callback.current_ckpt_depth,
+            trainer.checkpoint_callback.best_ckpt_depth,
+            len(trainer.optimizers[0].param_groups),
+            tuple(len(pg["params"]) for pg in trainer.optimizers[0].param_groups),
+            len(trainer.optimizers[0]._all_params),
+            tuple(tuple(len(pg["params"]) for pg in pgs) for _, pgs in enumerate(partition_cache)),
+            tuple(len(pg["params"]) for pg in trainer.optimizers[0].optim.param_groups),
+        )
+        if self.expected_state:
+            # given the number of trainable params mod our world size is 0, the state should be the same on all ranks
+            assert current_state == self.expected_state[state_key]
+
+    def on_train_end(self, trainer, pl_module) -> None:
+        super(TestFinetuningScheduler, self).on_train_end(trainer, pl_module)
+        assert self._fts_state._ft_sync_objects is not None
+        self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
+        assert self.depth_remaining == 0
+        assert self.curr_depth == 3
+        assert self.curr_depth == self.max_depth
+
+
+@RunIf(min_cuda_gpus=2, skip_windows=True, min_torch="1.10")
+@pytest.mark.parametrize("strategy", (pytest.param("ddp", marks=RunIf(standalone=True)), "ddp_spawn"))
+@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
+def test_fts_zero_opt_support(monkeypatch, tmpdir, strategy):
+    """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
+    both restore_best modes."""
+    monkeypatch.setenv("MKL_THREADING_LAYER", "GNU")
+    seed_everything(42)
+
+    model = FTSZeroRedundancyOptimizerModel()
+    callbacks = [
+        OptInspectFTS(expected_state=EXPECTED_OPTIMIZER_STATE),
+        FTSEarlyStopping(monitor="val_loss", patience=1),
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, accelerator="gpu", devices=2, strategy=strategy)
+    trainer.fit(model)
 
 
 @pytest.mark.parametrize(
@@ -1627,6 +1730,7 @@ def test_early_stopping_thresholds(tmpdir, stopping_threshold, divergence_thesho
 
 
 @RunIf(standalone=True, min_cuda_gpus=2)
+@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_multi_dp(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'dp'
     distributed context."""
@@ -1642,6 +1746,7 @@ def test_fts_multi_dp(tmpdir):
 
 
 @RunIf(standalone=True, min_cuda_gpus=2)
+@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_multi_ddp(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp'
     distributed context."""
@@ -1657,6 +1762,7 @@ def test_fts_multi_ddp(tmpdir):
 
 
 @RunIf(standalone=True, fairscale=True, min_cuda_gpus=2)
+@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_multi_ddp_sharded(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_sharded'
     distributed context."""
@@ -1672,6 +1778,7 @@ def test_fts_multi_ddp_sharded(tmpdir):
 
 
 @RunIf(standalone=True, min_cuda_gpus=2)
+@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_multi_ddp_spawn(monkeypatch, tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_spawn'
     distributed context."""
@@ -1685,7 +1792,8 @@ def test_fts_multi_ddp_spawn(monkeypatch, tmpdir):
     assert trainer.callback_metrics["val_loss"] < 0.1
 
 
-@RunIf(standalone=True, min_cuda_gpus=2)
+@RunIf(standalone=True, fairscale=True, min_cuda_gpus=2)
+@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_multi_ddp_sharded_spawn(monkeypatch, tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported
     'ddp_sharded_spawn' distributed context."""
@@ -1700,6 +1808,7 @@ def test_fts_multi_ddp_sharded_spawn(monkeypatch, tmpdir):
 
 
 @RunIf(standalone=True, min_cuda_gpus=2, skip_windows=True)
+@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_multi_ddp_fork(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_fork'
     distributed context."""

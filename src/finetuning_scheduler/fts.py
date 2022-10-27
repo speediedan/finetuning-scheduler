@@ -79,6 +79,12 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` does not support the use of multiple
         :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` or
         :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` callback instances.
+
+    .. note::
+
+       While :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the use of
+       :external+torch:class:`~torch.distributed.optim.ZeroRedundancyOptimizer`, setting ``overlap_with_ddp`` to
+       ``True`` is not supported because that optimizer mode only supports a single parameter group.
     """
 
     def __init__(
@@ -327,6 +333,17 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             optimizer.param_groups = BaseFinetuning._apply_mapping_to_param_groups(
                 self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"][opt_idx], dict(self.pl_module.named_parameters())
             )
+            if hasattr(optimizer, "consolidate_state_dict"):
+                # for optimizers that shard their states like (e.g. ZeroRedundancyOptimizer, OSS), we need to clear
+                # local optimizer partition caches and repartition to support restoring across multiple depths
+                partition_params = (
+                    optimizer._partition_parameters
+                    if callable(optimizer._partition_parameters)
+                    else optimizer.partition_parameters
+                )
+                optimizer._clear_cache()
+                optimizer.optim.param_groups = partition_params()[optimizer.rank]
+                optimizer._sync_param_groups(optimizer.optim.param_groups, optimizer.param_groups)
         # we're restoring everything but callbacks and loops, otherwise, checkpoint_connector.restore() could be used
         assert self.pl_module.trainer.checkpoint_callback is not None
         checkpoint_path = self.pl_module.trainer.checkpoint_callback.best_model_path  # type: ignore[attr-defined]
@@ -486,8 +503,15 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             MisconfigurationException: If more than 1 optimizers are configured indicates a configuration error
         """
         if len(trainer.optimizers) > 1:
-            raise MisconfigurationException("fts currently only supports a single-optimizer configuration")
-        self._is_supported_lr(type(trainer.lr_scheduler_configs[0].scheduler))
+            raise MisconfigurationException("FTS currently only supports a single-optimizer configuration")
+        if getattr(trainer.optimizers[0], "_overlap_with_ddp", False):
+            raise MisconfigurationException(
+                "Configuring an optimizer using `overlap_with_ddp=True` is not supported"
+                " with FTS since that optimizer mode only supports a single parameter"
+                " group."
+            )
+        if trainer.lr_scheduler_configs:
+            self._is_supported_lr(type(trainer.lr_scheduler_configs[0].scheduler))
         if self.curr_depth == 0:
             assert isinstance(self.ft_schedule, Dict)
             self._validate_opt_init(trainer.optimizers[0], self.ft_schedule)

@@ -58,7 +58,7 @@ jobs:
     #   displayName: 'Testing: standard'
 
     - bash: |
-        bash ./tests/standalone_tests.sh -k test_fts_multi_
+        bash ./tests/standalone_tests.sh -k test_fts_
       displayName: 'Testing: standalone multi-gpu'
 
     - bash: |
