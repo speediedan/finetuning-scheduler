@@ -16,7 +16,7 @@ set -e
 # this environment variable allows special tests to run
 export PL_RUN_STANDALONE_TESTS=1
 # python arguments
-defaults='-m coverage run --source finetuning_scheduler --append -m pytest --capture=no'
+defaults='-m coverage run --source src/finetuning_scheduler --append -m pytest --capture=no'
 
 # find tests marked as `@RunIf(standalone=True)`. done manually instead of with pytest because it is faster
 grep_output=$(grep --recursive --word-regexp 'tests' --regexp 'standalone=True' --include '*.py' --exclude 'tests/conftest.py')

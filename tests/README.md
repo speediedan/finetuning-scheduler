@@ -26,7 +26,7 @@ Make sure to run coverage on a GPU machine with at least 2 GPUs
 cd finetuning-scheduler
 
 # generate coverage (coverage is also installed as part of dev dependencies under requirements/devel.txt)
-coverage run --source finetuning_scheduler -m pytest finetuning_scheduler tests fts_examples -v
+python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v
 
 # print coverage stats
 coverage report -m

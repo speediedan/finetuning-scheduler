@@ -45,7 +45,7 @@ jobs:
 
     - bash: |
         pip install --upgrade pip requests
-        pip install . --no-warn-script-location --requirement requirements/devel.txt
+        pip install -e . --no-warn-script-location --requirement requirements/devel.txt
       displayName: 'Install dependencies'
 
     - bash: |
@@ -53,20 +53,28 @@ jobs:
         python -c "import torch ; mgpu = torch.cuda.device_count() ; assert mgpu >= 2, f'GPU: {mgpu}'"
       displayName: 'Env details'
 
-    # - bash: |
-    #     python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
-    #   displayName: 'Testing: standard'
+    - bash: |
+        python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
+      env:
+        PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      displayName: 'Testing: standard'
 
     - bash: |
         bash ./tests/standalone_tests.sh -k test_fts_
+      env:
+        PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       displayName: 'Testing: standalone multi-gpu'
 
     - bash: |
         python -m coverage report
         python -m coverage xml
         python -m coverage html
-        python -m codecov --commit=$(Build.SourceVersion) --flags=gpu,pytest --name="GPU-coverage" --env=linux,azure
+        python -m codecov --token=$CODECOV_TOK --commit=$(Build.SourceVersion) --flags=gpu,pytest --name="GPU-coverage" --env=linux,azure
+      env:
+        CODECOV_TOK: $(CODECOV_TOKEN)  # explicit mapping required for secret azure pipeline variables
       displayName: 'Statistics'
+
+
 
     # - task: PublishTestResults@2
     #   displayName: 'Publish test results'
@@ -78,6 +86,8 @@ jobs:
     - script: |
         set -e
         python -m pytest src/fts_examples -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
+      env:
+        PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       displayName: 'Testing: examples'
 
     # - script: |
