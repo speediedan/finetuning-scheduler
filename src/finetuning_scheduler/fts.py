@@ -423,7 +423,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             rank_zero_warn(warn_msg)
             early_stopping_callback._transition_es_phase()
 
-    def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
+    def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
         """Validate a compatible :external+pl:class:`~pytorch_lightning.strategies.Strategy` strategy is being used and
         ensure all :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback dependencies are met. If a valid
         configuration is present, then either dump the default fine-tuning schedule OR

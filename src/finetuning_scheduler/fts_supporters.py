@@ -222,7 +222,7 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         self.finetuningscheduler_callback = None
         self.reduce_transition_decisions = False
 
-    def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
+    def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
         """Ensure a :class:`~finetuning_scheduler.fts.FinetuningScheduler` is provided before beginning
         training."""
         self.connect_callback(trainer)
@@ -383,7 +383,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         self.best_ckpt_depth = 0
         self.finetuningscheduler_callback = None
 
-    def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: Optional[str] = None) -> None:
+    def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
         """Verify a valid callback configuration is present before beginning training.
 
         Args:
