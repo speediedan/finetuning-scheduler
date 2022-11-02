@@ -89,7 +89,7 @@ RUN \
 
 RUN \
     CUDA_VERSION_MAJOR=$(python -c "import torch; print(torch.version.cuda.split('.')[0])") && \
-    py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.9'.split('.')))")
+    py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.10'.split('.')))")
 
 # RUN \
 #     # install FairScale
