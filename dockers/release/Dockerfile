@@ -10,9 +10,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG PYTHON_VERSION=3.9
-ARG PYTORCH_VERSION=1.12.1
-ARG LIGHTNING_VERSION=1.7
+ARG PYTHON_VERSION=3.10
+ARG PYTORCH_VERSION=1.13.0
+ARG LIGHTNING_VERSION=1.8
 ARG CUST_BASE
 
 FROM speediedan/finetuning-scheduler:base-${CUST_BASE}py${PYTHON_VERSION}-pt${PYTORCH_VERSION}-pl${LIGHTNING_VERSION}

@@ -10,13 +10,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG CUDA_VERSION=11.6
+ARG CUDA_VERSION=11.7
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04
 
-ARG CUDATOOLKIT_VERSION=11.6
-ARG PYTHON_VERSION=3.9
-ARG PYTORCH_VERSION=1.12.1
+ARG CUDATOOLKIT_VERSION=11.7
+ARG PYTHON_VERSION=3.10
+ARG PYTORCH_VERSION=1.13.0
 ARG CONDA_VERSION=4.13.0
 
 SHELL ["/bin/bash", "-c"]
@@ -35,7 +35,7 @@ RUN apt-get update -qq --fix-missing && \
         unzip \
         ca-certificates \
     && \
-    curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py39_${CONDA_VERSION}-Linux-x86_64.sh && \
+    curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py310_${CONDA_VERSION}-Linux-x86_64.sh && \
     chmod +x ~/miniconda.sh && \
     ~/miniconda.sh -b && \
     rm ~/miniconda.sh && \

@@ -25,10 +25,10 @@ jobs:
   build-package:
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/setup-python@v2
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v4
       with:
-        python-version: 3.9
+        python-version: '3.10'
 
     - name: Install dependencies
       run: >-
@@ -50,8 +50,8 @@ jobs:
     # only upload package assets with new release
     if: github.event_name == 'release'
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/download-artifact@v2
+    - uses: actions/checkout@v3
+    - uses: actions/download-artifact@v3
       with:
         name: pypi-packages-${{ github.sha }}
         path: dist
@@ -69,8 +69,8 @@ jobs:
     # only publish packages with new tags or release
     if: startsWith(github.event.ref, 'refs/tags') || github.event_name == 'release'
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/download-artifact@v2
+    - uses: actions/checkout@v3
+    - uses: actions/download-artifact@v3
       with:
         name: pypi-packages-${{ github.sha }}
         path: dist
