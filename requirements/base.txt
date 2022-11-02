@@ -1,5 +1,4 @@
-#pytorch-lightning>=1.8.0, <1.8.1
-pytorch-lightning==1.8.0rc1
-# currently working off of pl dev master
-#git+https://github.com/Lightning-AI/lightning.git@adc82385978d3ec1706c3d15a8f1986f27033621#egg=lightning
+pytorch-lightning>=1.8.0, <1.8.1
+# the below is uncommented when master is targeting a specific pl dev master commit
+# git+https://github.com/Lightning-AI/lightning.git@adc82385978d3ec1706c3d15a8f1986f27033621#egg=lightning
 torch>=1.9.*
