@@ -85,6 +85,8 @@ RUN \
     fi && \
     # Install all requirements
     pip install -r requirements/devel.txt --no-cache-dir && \
+    # Update six to avoid unnecessary warnings associated with 3.10: https://github.com/benjaminp/six/pull/343
+    pip install -U six --no-cache-dir && \
     rm -rf requirements.* requirements/
 
 RUN \
