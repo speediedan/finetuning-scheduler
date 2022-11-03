@@ -3,6 +3,38 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
+## [0.3.0] - 2022-11-03
+
+### Added
+
+- support for pytorch-lightning 1.8.0
+- support for python 3.10
+- support for PyTorch 1.13
+- support for `ZeroRedundancyOptimizer`
+
+### Fixed
+
+- call to PL `BaseFinetuning.freeze` did not properly hand control of `BatchNorm` module thawing to FTS schedule. Resolves [#5](https://github.com/speediedan/finetuning-scheduler/issues/5).
+- fixed codecov config for azure pipeline gpu-based coverage
+
+### Changed
+
+- Refactored unexpected and expected multi-warning checks to use a single test helper function
+- Adjusted multiple FTS imports to adapt to reorganized PL/Lite imports
+- Refactored fts-torch collect_env interface to allow for (slow) collect_env evolution on a per-torch version basis
+- Bumped required jsonargparse version
+- adapted to PL protection of `_distributed_available`
+- made callback setup stage arg mandatory
+- updated mypy config to align with PL `Trainer` handling
+- updated dockerfile defs for PyTorch 1.13 and python 3.10
+- updated github actions versions to current versions
+- excluded python 3.10 from torch 1.9 testing due to incompatibility
+
+### Deprecated
+
+- removed use of deprecated `LightningCLI` `save_config_overwrite` in PL 1.8
+
+
 ## [0.2.3] - 2022-10-01
 
 ### Added
