@@ -4,9 +4,31 @@ name: Test full
 on:  # Trigger the workflow on push or pull request, but only for the main branch
   push:
     branches: [main, "release/*"]
+    paths:
+      - "setup.*"  # setup.py/cfg
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".codecov.yml"
+      - "tests/**"
+      - "src/**"
+      - "requirements/**"
+      - ".github/workflows/ci_test-full.yml"
+      - ".azure-pipelines/**"
+      - ".actions/**"
   pull_request:
     branches: [main, "release/*"]
     types: [opened, reopened, ready_for_review, synchronize]
+    paths:
+      - "setup.*"  # setup.py/cfg
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".codecov.yml"
+      - "tests/**"
+      - "src/**"
+      - "requirements/**"
+      - ".github/workflows/ci_test-full.yml"
+      - ".azure-pipelines/**"
+      - ".actions/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref }}
