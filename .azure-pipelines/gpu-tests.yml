@@ -12,11 +12,31 @@ trigger:
       - "main"
       - "release/*"
       - "refs/tags/*"
+  paths:
+    - "setup.*"  # setup.py/cfg
+    - "requirements.txt"
+    - "pyproject.toml"
+    - ".codecov.yml"
+    - "tests/**"
+    - "src/**"
+    - "requirements/**"
+    - ".azure-pipelines/**"
+    - ".actions/**"
 pr:
   branches:
     include:
     - main
     - release/*
+  paths:
+    - "setup.*"  # setup.py/cfg
+    - "requirements.txt"
+    - "pyproject.toml"
+    - ".codecov.yml"
+    - "tests/**"
+    - "src/**"
+    - "requirements/**"
+    - ".azure-pipelines/**"
+    - ".actions/**"
 
 jobs:
   - job: pytest
