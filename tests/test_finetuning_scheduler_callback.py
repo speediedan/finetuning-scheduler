@@ -885,7 +885,7 @@ def test_fts_callback_resume(
         resume_warns.append(EXPECTED_DIRPATH)
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=resume_warns)
-    assert not unexpected
+    assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
 EXPECTED_INTRAFIT_STATE = {
@@ -1561,7 +1561,7 @@ def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, warn_exp
         init_warns.extend(warn_expected)
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=init_warns)
-    assert not unexpected
+    assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
 EXPECTED_OPTIMIZER_STATE = {

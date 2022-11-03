@@ -44,7 +44,7 @@ EXPECTED_WARNS = [
     "NEAREST is deprecated",
 ]
 MIN_VERSION_WARNS = "1.9"
-MAX_VERSION_WARNS = "1.12"
+MAX_VERSION_WARNS = "1.13"
 # torch version-specific warns will go here
 EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [], MAX_VERSION_WARNS: []}
 torch_version = get_distribution("torch").version
@@ -77,7 +77,7 @@ def test_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
     cli_main()
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=EXPECTED_WARNS)
-    assert not unexpected
+    assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
@@ -102,7 +102,7 @@ def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_fi
     cli_main()
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=ADV_EXPECTED_WARNS)
-    assert not unexpected
+    assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
