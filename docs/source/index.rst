@@ -508,7 +508,7 @@ Footnotes
    :caption: Examples
 
    Notebook-based Fine-Tuning Scheduler tutorial <https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html>
-   CLI-based Fine-Tuning Scheduler tutorial <https://finetuning-scheduler.readthedocs.io/en/latest/#example-scheduled-finetuning-for-superglue>
+   CLI-based Fine-Tuning Scheduler tutorial <https://finetuning-scheduler.readthedocs.io/en/latest/#example-scheduled-fine-tuning-for-superglue>
 
 .. toctree::
    :maxdepth: 1
