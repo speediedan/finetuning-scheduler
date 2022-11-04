@@ -13,7 +13,6 @@ on:  # Trigger the workflow on push or pull request, but only for the main branc
       - "src/**"
       - "requirements/**"
       - ".github/workflows/ci_test-full.yml"
-      - ".azure-pipelines/**"
       - ".actions/**"
   pull_request:
     branches: [main, "release/*"]
@@ -27,7 +26,6 @@ on:  # Trigger the workflow on push or pull request, but only for the main branc
       - "src/**"
       - "requirements/**"
       - ".github/workflows/ci_test-full.yml"
-      - ".azure-pipelines/**"
       - ".actions/**"
 
 concurrency:
