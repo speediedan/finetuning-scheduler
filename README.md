@@ -83,6 +83,8 @@ conda install -c pytorch -c nvidia -c conda-forge pytorch pytorch-cuda=11.7 fine
 # update the url below with the desired release #, e.g. for finetuning-scheduler release 0.1.2:
 git clone https://github.com/speediedan/finetuning-scheduler.git@release/0.1.2
 cd finetuning-scheduler
+# PACKAGE_NAME variable currently required to specify pytorch-lightning dev package dep (as of lightning 1.8.0)
+export PACKAGE_NAME=pytorch
 python -m pip install -e ".[all]" -r requirements/docs.txt
 ```
 

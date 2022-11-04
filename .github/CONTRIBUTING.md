@@ -171,6 +171,8 @@ Notes:
 To setup a local development environment, install both local and test dependencies:
 
 ```bash
+# PACKAGE_NAME variable currently required to specify pytorch-lightning dev package dep (as of lightning 1.8.0)
+export PACKAGE_NAME=pytorch
 python -m pip install ".[all]"
 python -m pip install pre-commit
 pre-commit install

@@ -91,9 +91,8 @@ jobs:
           ${{ runner.os }}-pip-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-
 
     - name: Install extra dependencies
-      # env:
-      #   PACKAGE_NAME: pytorch
-      #   FREEZE_REQUIREMENTS: 1
+      env:
+        PACKAGE_NAME: "pytorch"
       run: |
         pip install --requirement requirements/base.txt --upgrade
         pip install --requirement requirements/examples.txt --upgrade

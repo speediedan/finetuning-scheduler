@@ -68,6 +68,8 @@ jobs:
     - bash: |
         pip install --upgrade pip requests
         pip install -e . --no-warn-script-location --requirement requirements/devel.txt
+      env:
+        PACKAGE_NAME: "pytorch"
       displayName: 'Install dependencies'
 
     - bash: |

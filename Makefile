@@ -3,6 +3,7 @@
 # initially based on https://bit.ly/3rFergQ
 # assume you have installed needed packages
 export SPHINX_MOCK_REQUIREMENTS=1
+export PACKAGE_NAME=pytorch
 
 clean:
 	# clean all temp runs

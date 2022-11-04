@@ -5,6 +5,8 @@ git clone https://github.com/speediedan/finetuning-scheduler
 cd finetuning-scheduler
 
 # install dev deps
+# PACKAGE_NAME variable currently required to specify pytorch-lightning dev package dep (as of lightning 1.8.0)
+export PACKAGE_NAME=pytorch
 python -m pip install ".[all]"
 
 # run tests

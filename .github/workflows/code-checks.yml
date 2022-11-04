@@ -6,6 +6,9 @@ on:  # Trigger the workflow on push or pull request, but only for the main branc
   pull_request:
     branches: [main, "release/*"]
 
+env:
+  PACKAGE_NAME: "pytorch"
+
 jobs:
   mypy:
     runs-on: ubuntu-20.04
