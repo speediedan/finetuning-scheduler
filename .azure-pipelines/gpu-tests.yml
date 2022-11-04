@@ -13,30 +13,32 @@ trigger:
       - "release/*"
       - "refs/tags/*"
   paths:
-    - "setup.*"  # setup.py/cfg
-    - "requirements.txt"
-    - "pyproject.toml"
-    - ".codecov.yml"
-    - "tests/**"
-    - "src/**"
-    - "requirements/**"
-    - ".azure-pipelines/**"
-    - ".actions/**"
+    include:
+      - "setup.*"  # setup.py/cfg
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".codecov.yml"
+      - "tests/**"
+      - "src/**"
+      - "requirements/**"
+      - ".azure-pipelines/**"
+      - ".actions/**"
 pr:
   branches:
     include:
     - main
     - release/*
   paths:
-    - "setup.*"  # setup.py/cfg
-    - "requirements.txt"
-    - "pyproject.toml"
-    - ".codecov.yml"
-    - "tests/**"
-    - "src/**"
-    - "requirements/**"
-    - ".azure-pipelines/**"
-    - ".actions/**"
+    include:
+      - "setup.*"  # setup.py/cfg
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".codecov.yml"
+      - "tests/**"
+      - "src/**"
+      - "requirements/**"
+      - ".azure-pipelines/**"
+      - ".actions/**"
 
 jobs:
   - job: pytest
@@ -94,13 +96,11 @@ jobs:
         CODECOV_TOK: $(CODECOV_TOKEN)  # explicit mapping required for secret azure pipeline variables
       displayName: 'Statistics'
 
-
-
     # - task: PublishTestResults@2
     #   displayName: 'Publish test results'
     #   inputs:
     #     testResultsFiles: '$(Build.Repository.LocalPath)/test-results.xml'
-    #     testRunTitle: '$(Agent.OS) - $(Build.DefinitionName) - Python $(python.version)'
+    #     testRunTitle: 'Python $(python.version)'
     #   condition: succeededOrFailed()
 
     - script: |
