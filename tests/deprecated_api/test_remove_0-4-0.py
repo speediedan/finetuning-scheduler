@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Initially based on https://bit.ly/35NIc6J
-"""Test deprecated functionality which will be removed in v0.3.0."""
+"""Test deprecated functionality which will be removed in v0.4.0."""
 # import pytest
 # from pytorch_lightning import Trainer
 
