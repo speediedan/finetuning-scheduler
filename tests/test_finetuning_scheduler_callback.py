@@ -15,7 +15,6 @@ from collections import OrderedDict
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from unittest import mock
 
 import numpy as np
 import pytest
@@ -688,7 +687,6 @@ class ComplexNestedModel(LightningModule):
     ],
     ids=["dist_boring", "Boring", "ParityRNN", "ComplexNested"],
 )
-@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expected: Tuple):
     """Validate the default fine-tuning schedule generation."""
     seed_everything(42)
@@ -837,6 +835,7 @@ EXPECTED_WARNS = [
     "that ended mid-epoch",
     "The dirpath has changed from",
     "Torchmetrics v0.9",  # temporarily allow until _ResultMetric updated
+    "distutils Version classes are deprecated",  # temporarily allow until PL utilities/migration/utils.py updated
 ]
 EXPECTED_TRAIN_CHK_WARNS = ["could not find the monitored key", "callbacks used to create"]
 EXPECTED_DIRPATH = "exists and is not empty"
@@ -1483,7 +1482,6 @@ def test_finetuningscheduling_distributed_compat(tmpdir, strategy, gpus, plugins
     ],
     ids=["zeroopt_overlap", "multi_opt"],
 )
-@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_optimizer_compat(
     monkeypatch, tmpdir, test_model: LightningModule, dist_mode: str, excepts: Tuple[BaseException], expected: str
 ):
@@ -1612,7 +1610,6 @@ class OptInspectFTS(TestFinetuningScheduler):
 
 @RunIf(min_cuda_gpus=2, skip_windows=True, min_torch="1.10")
 @pytest.mark.parametrize("strategy", (pytest.param("ddp", marks=RunIf(standalone=True)), "ddp_spawn"))
-@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_zero_opt_support(monkeypatch, tmpdir, strategy):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
     both restore_best modes."""
@@ -1730,7 +1727,6 @@ def test_early_stopping_thresholds(tmpdir, stopping_threshold, divergence_thesho
 
 
 @RunIf(standalone=True, min_cuda_gpus=2)
-@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_multi_dp(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'dp'
     distributed context."""
@@ -1746,7 +1742,6 @@ def test_fts_multi_dp(tmpdir):
 
 
 @RunIf(standalone=True, min_cuda_gpus=2)
-@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_multi_ddp(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp'
     distributed context."""
@@ -1762,7 +1757,6 @@ def test_fts_multi_ddp(tmpdir):
 
 
 @RunIf(standalone=True, fairscale=True, min_cuda_gpus=2)
-@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_multi_ddp_sharded(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_sharded'
     distributed context."""
@@ -1778,7 +1772,6 @@ def test_fts_multi_ddp_sharded(tmpdir):
 
 
 @RunIf(standalone=True, min_cuda_gpus=2)
-@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_multi_ddp_spawn(monkeypatch, tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_spawn'
     distributed context."""
@@ -1793,7 +1786,6 @@ def test_fts_multi_ddp_spawn(monkeypatch, tmpdir):
 
 
 @RunIf(standalone=True, fairscale=True, min_cuda_gpus=2)
-@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_multi_ddp_sharded_spawn(monkeypatch, tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported
     'ddp_sharded_spawn' distributed context."""
@@ -1808,7 +1800,6 @@ def test_fts_multi_ddp_sharded_spawn(monkeypatch, tmpdir):
 
 
 @RunIf(standalone=True, min_cuda_gpus=2, skip_windows=True)
-@mock.patch.dict(os.environ, os.environ.copy(), clear=True)
 def test_fts_multi_ddp_fork(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_fork'
     distributed context."""
