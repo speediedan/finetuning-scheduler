@@ -79,14 +79,14 @@ jobs:
 
     - bash: |
         python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
-      env:
-        PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      # env:
+      #   PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       displayName: 'Testing: standard'
 
     - bash: |
         bash ./tests/standalone_tests.sh -k test_fts_
-      env:
-        PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      # env:
+      #   PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       displayName: 'Testing: standalone multi-gpu'
 
     - bash: |
@@ -108,8 +108,8 @@ jobs:
     - script: |
         set -e
         python -m pytest src/fts_examples -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
-      env:
-        PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      # env:
+      #   PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       displayName: 'Testing: examples'
 
     # - script: |
