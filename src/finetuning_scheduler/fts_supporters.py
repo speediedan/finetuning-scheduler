@@ -1191,7 +1191,7 @@ class ScheduleImplMixin(ABC):
             raise MisconfigurationException(error_msg)
         return schedule_dict
 
-    def thaw_to_depth(self, depth: int = None) -> None:
+    def thaw_to_depth(self, depth: Optional[int] = None) -> None:
         """Thaw/unfreeze the current
         :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.pl_module` to the specified
         fine-tuning depth (aka level)
