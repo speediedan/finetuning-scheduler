@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
+
+## [0.3.1] - 2022-11-10
+
+### Added
+
+- support for `pytorch-lightning` 1.8.1
+- augmented `standalone_tests.sh` to be more robust to false negatives
+
+### Changed
+
+- added temporary expected `distutils` warning until fixed upstream in PL
+- updated `depth` type hint to accommodate updated mypy default config
+- bumped full test timeout to be more conservative given a dependent package that is currently slow to install in some contexts (i.e. `grpcio` on MacOS 11 with python `3.10`)
+
 ## [0.3.0] - 2022-11-04
 
 ### Added
