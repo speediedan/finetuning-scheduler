@@ -138,7 +138,7 @@ To ensure maximum stability, the latest PyTorch Lightning patch release fully te
 
 ## Community
 
-Fine-Tuning Scheduler is developed and maintained by the community in close communication with the [PyTorch Lightning team](https://pytorch-lightning.readthedocs.io/en/latest/governance.html). Thanks to everyone in the community for their tireless effort building and improving the immensely useful core PyTorch Lightning project.
+Fine-Tuning Scheduler is developed and maintained by the community in close communication with the [PyTorch Lightning team](https://pytorch-lightning.readthedocs.io/en/stable/governance.html). Thanks to everyone in the community for their tireless effort building and improving the immensely useful core PyTorch Lightning project.
 
 PR's welcome! Please see the [contributing guidelines](https://finetuning-scheduler.readthedocs.io/en/stable/generated/CONTRIBUTING.html) (which are essentially the same as PyTorch Lightning's).
 
