@@ -13,7 +13,6 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
-- removed azure pipeline PATH adjustments that are no longer necessary due to partial implementation of https://github.com/Lightning-AI/lightning/pull/15485
 - added temporary expected `distutils` warning until fixed upstream in PL
 - updated `depth` type hint to accommodate updated mypy default config
 - bumped full test timeout to be more conservative given a dependent package that is currently slow to install in some contexts (i.e. `grpcio` on MacOS 11 with python `3.10`)
