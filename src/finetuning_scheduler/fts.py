@@ -18,7 +18,7 @@ Used to implement flexible fine-tuning training schedules
 """
 import logging
 from copy import deepcopy
-from typing import Any, Dict, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Union
 
 import pytorch_lightning as pl
 import torch
@@ -26,9 +26,11 @@ from lightning_lite.utilities import rank_zero_info
 from lightning_lite.utilities.distributed import ReduceOp
 from lightning_lite.utilities.enums import _StrategyType
 from pytorch_lightning.callbacks import BaseFinetuning
+from pytorch_lightning.strategies import DDPFullyShardedNativeStrategy
 from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.trainer.states import TrainerFn
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
+from pytorch_lightning.utilities.model_helpers import is_overridden
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug, rank_zero_warn
 from torch.optim.optimizer import Optimizer
 
@@ -98,6 +100,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         reinit_lr_cfg: Optional[Dict] = None,
         allow_untested: bool = False,
         apply_lambdas_new_pgs: bool = False,
+        logging_level: int = logging.INFO,
     ):
         r"""
         Define and configure a scheduled fine-tuning training session.
@@ -180,6 +183,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 optimizer groups for lr schedulers that have a ``lr_lambdas`` attribute. Note this option only applies
                 to phases without reinitialized lr schedulers. Phases with defined lr scheduler reinitialization configs
                 will always apply the specified lambdas. Defaults to ``False``.
+            logging_level: Sets the logging level for :class:`~finetuning_scheduler.fts.FinetuningScheduler`. Defaults
+                to ``INFO``.
 
         Attributes:
             _fts_state: The internal :class:`~finetuning_scheduler.fts.FinetuningScheduler` state.
@@ -196,6 +201,13 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.allow_untested = allow_untested
         self.apply_lambdas_new_pgs = apply_lambdas_new_pgs
         self.pl_module: pl.LightningModule
+        self._fsdp_flat_to_unflat_mapping: Dict
+        self._fsdp_unflat_to_flat_mapping: Dict
+        # self._param_translation_enabled: bool = False
+        self._param_translator: Optional[Callable] = None
+        # self._get_logical_params: Optional[Callable] = None
+        rz_logger = logging.getLogger("pytorch_lightning.utilities.rank_zero")
+        rz_logger.setLevel(logging_level)
 
     @property
     def curr_depth(self) -> int:
@@ -226,6 +238,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             _StrategyType.DDP_SHARDED,
             _StrategyType.DDP_SHARDED_SPAWN,
             "single_device",
+            "fsdp_native_full_shard_offload",
+            "fsdp_native",
         )
 
     def freeze_before_training(self, pl_module: "pl.LightningModule") -> None:
@@ -288,10 +302,13 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             thaw_layers = {d: l for d, l in self.ft_schedule.items() if d > self._fts_state._best_ckpt_depth}.items()
         else:
             thaw_layers = {depth: self.ft_schedule[depth]}.items()
-        for i, next_tl in thaw_layers:
+        for i, orig_next_tl in thaw_layers:
+            next_tl = deepcopy(orig_next_tl)
+            if isinstance(self.pl_module.trainer.strategy, DDPFullyShardedNativeStrategy):
+                next_tl["params"] = self.fsdp_param_transform(next_tl["params"])
             if i <= depth:
                 _, self._fts_state._curr_thawed_params = FinetuningScheduler.exec_ft_phase(
-                    self.pl_module, thaw_pl=next_tl["params"]
+                    self.pl_module, thaw_pl=next_tl["params"], translation_func=self._param_translator
                 )
                 FinetuningScheduler.add_optimizer_groups(
                     module=self.pl_module,
@@ -487,6 +504,21 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 self._fts_state._resume_fit_from_ckpt = True
             self.freeze_before_training(pl_module)
             self.pl_module = pl_module  # save pl_module ref for downstream configuration convenience
+            # TODO: connect FTS strategy adapter to user-provided pl_module here
+            if isinstance(strategy, DDPFullyShardedNativeStrategy):
+                if is_overridden("configure_sharded_model", self.pl_module):
+                    rank_zero_info(
+                        "You have overridden the `LightningModule.configure_sharded_model` hook. Fine-Tuning Scheduler"
+                        " will validate that you have wrapped the provided model in a manner that aligns with the"
+                        " defined fine-tuning schedule phases. If you would like to have Fine-Tuning Scheduler"
+                        " automatically wrap your model in a fine-tuning phase-aligned according to a given auto wrap"
+                        " policy, avoid overriding `configure_sharded_model` in your module and provide the desired"
+                        " auto wrap policy."
+                    )
+                    csm_func = self._wrapped_configure_sharded_model(self.pl_module.configure_sharded_model)
+                    setattr(self.pl_module, "configure_sharded_model", csm_func)
+                else:
+                    setattr(self.pl_module, "configure_sharded_model", self._phase_aligned_configure_sharded_model)
         self.init_fts()
 
     def on_fit_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
@@ -514,7 +546,11 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             self._is_supported_lr(type(trainer.lr_scheduler_configs[0].scheduler))
         if self.curr_depth == 0:
             assert isinstance(self.ft_schedule, Dict)
-            self._validate_opt_init(trainer.optimizers[0], self.ft_schedule)
+            # self._validate_opt_init(trainer.optimizers[0], self.ft_schedule)
+            self._validate_opt_init()
+        # if isinstance(self.pl_module.trainer.strategy, DDPFullyShardedNativeStrategy):
+        #     self._init_fsdp_param_map()
+        #     self._get_logical_params = self._logical_param_translation
         super().on_fit_start(trainer, pl_module)
 
     def state_dict(self) -> Dict[str, Any]:
@@ -619,8 +655,14 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         if self.should_transition(trainer):
             self._fts_state._curr_depth += 1  # increment depth
             self.step()
+            # TODO: refactor this into a separate debug params method
+            if self._param_translator:
+                rank_zero_debug(
+                    f"Current logical parameters thawed by Fine-Tuning Scheduler: "
+                    f"{self._param_translator(self._fts_state._curr_thawed_params)}."
+                )
             rank_zero_debug(
-                f"Current parameters thawed by the Fine-Tuning Scheduler: {self._fts_state._curr_thawed_params}. "
+                f"Current actual parameters thawed by Fine-Tuning Scheduler: {self._fts_state._curr_thawed_params}. "
                 f"Current depth is {self.curr_depth}."
             )
             if not self.epoch_transitions_only:

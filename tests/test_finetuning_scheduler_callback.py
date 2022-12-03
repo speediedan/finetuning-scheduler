@@ -389,6 +389,11 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
         "init_pg_lrs": [2.0e-06, 3.0e-06],
     }
+    fsdp_sched_dict = deepcopy(mod_sched_dict)
+    fsdp_sched_dict[0]["params"] = ["layer.(4|2).*"]
+    # fsdp_sched_dict[0]["max_transition_epoch"] = 3
+    # fsdp_sched_dict[1] = fsdp_sched_dict.pop(2)
+    # fsdp_sched_dict[1]["lr"] = 1e-06
     return (
         unmod_schedule_file,
         mod_sched_dict,
@@ -396,6 +401,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         reinitlr_sched_dict,
         lambdalr_sched_dict,
         rlrop_sched_dict,
+        fsdp_sched_dict,
     )
 
 

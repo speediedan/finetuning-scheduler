@@ -22,13 +22,15 @@ import os
 import pathlib
 import re
 import warnings
+import weakref
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import KeysView
-from copy import copy
+from contextlib import contextmanager
+from copy import copy, deepcopy
 from dataclasses import dataclass, field, fields
-from functools import reduce
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from functools import reduce, wraps
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Type, Union
 
 import pytorch_lightning as pl
 import torch
@@ -41,20 +43,36 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks.lr_monitor import LearningRateMonitor
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.core.optimizer import _MockOptimizer
+from pytorch_lightning.strategies import DDPFullyShardedNativeStrategy
+from pytorch_lightning.strategies.fully_sharded_native import _fsdp_available
 from pytorch_lightning.trainer.states import TrainerFn
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.imports import _TORCH_GREATER_EQUAL_1_10
+from pytorch_lightning.utilities.model_helpers import is_overridden
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
 from pytorch_lightning.utilities.types import LRSchedulerConfig
 from torch import Tensor
 from torch.nn import Module
 from torch.optim.optimizer import Optimizer
 
+if _fsdp_available:
+    from torch.distributed.fsdp.fully_sharded_data_parallel import (
+        _get_param_to_unflat_param_names,
+        FullyShardedDataParallel,
+    )
+    from torch.distributed.fsdp.wrap import _ConfigAutoWrap, wrap
+else:
+    FullyShardedDataParallel = None  # type: ignore[misc,assignment]
+    MixedPrecision = None  # type: ignore[misc,assignment]
+    BackwardPrefetch = None  # type: ignore[misc,assignment]
+    CPUOffload = None  # type: ignore[misc,assignment]
+
 log = logging.getLogger(__name__)
 
 CALLBACK_DEP_PARENTS = {"ModelCheckpoint": ModelCheckpoint, "EarlyStopping": EarlyStopping}
 CALLBACK_ATTRS = ("ft_schedule", "max_depth")
 TARGET_CALLBACK_REF = "FinetuningScheduler"
+FTS_TMP_KEY = "__ftskey__"
 
 
 @dataclass
@@ -542,6 +560,20 @@ class ScheduleParsingMixin(ABC):
             self._validate_epoch_transitions()
         return max_phase, max_epoch_wm
 
+    def _gen_ft_sched_module_map(self) -> Dict:
+        assert isinstance(self.ft_schedule, Dict)
+        ft_schedule_module_map: Dict = {}
+        for depth in self.ft_schedule.keys():  # type: ignore[union-attr]
+            phase_params = self.ft_schedule[depth].get("params", [])  # type: ignore[union-attr]
+            ft_schedule_module_map[depth] = set()
+            for p in phase_params:
+                module_path, _, param_name = p.rpartition(".")
+                mod: torch.nn.Module = self.pl_module.get_submodule(module_path)
+                if not hasattr(mod, param_name):
+                    raise AttributeError(mod._get_name() + " has no attribute `" + param_name + "`")
+                ft_schedule_module_map[depth].add(module_path)
+        return ft_schedule_module_map
+
     def _update_pl_lrs(self, pl_lrs_cfg: Dict, lrs_class: FTSLRSchedulerType) -> Dict:
         """Prune keys not part of a valid PyTorch Lightning lr scheduler configuration (if automatic optimization
         used) and update configuration if :external+torch:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau` is
@@ -1026,9 +1058,12 @@ class ScheduleImplMixin(ABC):
         2. Prepare the first scheduled fine-tuning level, unfreezing the relevant parameters."""
         self.init_ft_sched()
         assert isinstance(self.ft_schedule, Dict)
-        _, self._fts_state._curr_thawed_params = self.exec_ft_phase(
-            self.pl_module, thaw_pl=self.ft_schedule[0]["params"], init_thaw=True
-        )
+        # is_fsdp = isinstance(self.pl_module.trainer.strategy, DDPFullyShardedNativeStrategy)
+        # csm_overridden = is_overridden("configure_sharded_model", self.pl_module)
+        if not isinstance(self.pl_module.trainer.strategy, DDPFullyShardedNativeStrategy):
+            _, self._fts_state._curr_thawed_params = self.exec_ft_phase(
+                self.pl_module, thaw_pl=self.ft_schedule[0]["params"], init_thaw=True
+            )
 
     def gen_or_load_sched(self) -> None:
         """Load an explicitly specified fine-tuning schedule if one provided, otherwise generate a default one."""
@@ -1208,7 +1243,9 @@ class ScheduleImplMixin(ABC):
         depth = depth or self.curr_depth
         for i, next_tl in self.ft_schedule.items():  # type: ignore[union-attr]
             if i <= depth:
-                _, self._fts_state._curr_thawed_params = self.exec_ft_phase(self.pl_module, thaw_pl=next_tl["params"])
+                _, self._fts_state._curr_thawed_params = self.exec_ft_phase(
+                    self.pl_module, thaw_pl=next_tl["params"], translation_func=self._param_translator
+                )
 
     @staticmethod
     def add_optimizer_groups(
@@ -1300,7 +1337,9 @@ class ScheduleImplMixin(ABC):
                 setattr(o, a, agg)
 
     @staticmethod
-    def exec_ft_phase(module: Module, thaw_pl: List, init_thaw: bool = False) -> Tuple[List, List]:
+    def exec_ft_phase(
+        module: Module, thaw_pl: List, translation_func: Optional[Callable] = None, init_thaw: bool = False
+    ) -> Tuple[List, List]:
         """Thaw/unfreeze the provided list of parameters in the provided :class:`~torch.nn.Module`
 
         Args:
@@ -1325,14 +1364,34 @@ class ScheduleImplMixin(ABC):
         if thawed_p_names:
             rank_zero_debug(
                 f"{'Initializing with' if init_thaw else 'Thawed'} the following module parameters: "
-                f"{[n for n in thawed_p_names]}"
+                f"{translation_func(thawed_p_names) if translation_func else [n for n in thawed_p_names]}"
+                # f"{[n for n in thawed_p_names]}"
             )
         curr_thawed.extend(thawed_p_names)
-        rank_zero_debug(f"The following module parameters are currently thawed: {[n for n in curr_thawed]}")
+        rank_zero_debug(
+            f"The following module parameters are currently thawed: "
+            f"{translation_func(curr_thawed) if translation_func else [n for n in curr_thawed]}"
+        )
         return thawed_p_names, curr_thawed
 
-    @staticmethod
-    def _validate_opt_init(optimizer: Optimizer, ft_schedule: Dict) -> None:
+    def _inspect_fts_opt_state(self) -> Tuple:
+        assert isinstance(self.ft_schedule, Dict)
+        opt = self.pl_module.trainer.optimizers[0]
+        sched = self.ft_schedule
+        no_grad_cnt = len([p for pg in opt.param_groups for p in pg["params"] if not p.requires_grad])
+        if self._param_translator is not None:
+            init_ft_cnt = len(self.fsdp_param_transform(sched[0]["params"]))
+            total_ft_cnt = len([p for phase in sched for p in self.fsdp_param_transform(sched[phase]["params"])])
+        else:
+            init_ft_cnt = len(sched[0]["params"])
+            total_ft_cnt = len([p for phase in sched for p in sched[phase]["params"]])
+        req_grad_opt = len([p for pg in opt.param_groups for p in pg["params"] if p.requires_grad])
+        expected_grad_params = req_grad_opt == init_ft_cnt
+        return no_grad_cnt, init_ft_cnt, total_ft_cnt, req_grad_opt, expected_grad_params
+
+    # @staticmethod
+    # def _validate_opt_init(optimizer: Optimizer, ft_schedule: Dict) -> None:
+    def _validate_opt_init(self) -> None:
         """Validate the user-initialized optimizer state (necessary for fine-tuning phase 0) and warn user if
         appropriate.
 
@@ -1340,11 +1399,13 @@ class ScheduleImplMixin(ABC):
             optimizer (Optimizer): The optimizer initialized.
             ft_schedule (Dict): The fine-tuning schedule to be inspected vis-a-vis the optimizer state.
         """
-        no_grad_cnt = len([p for pg in optimizer.param_groups for p in pg["params"] if not p.requires_grad])
-        init_ft_cnt = len(ft_schedule[0]["params"])
-        total_ft_cnt = len([p for phase in ft_schedule for p in ft_schedule[phase]["params"]])
-        req_grad_opt = len([p for pg in optimizer.param_groups for p in pg["params"] if p.requires_grad])
-        expected_grad_params = req_grad_opt == init_ft_cnt
+        # use_logical = True if self._get_logical_params else False
+        # no_grad_cnt = len([p for pg in self.trainer.optimizer.param_groups for p in pg["params"] if not p.requires_grad])
+        # init_ft_cnt = len(ft_schedule[0]["params"])
+        # total_ft_cnt = len([p for phase in ft_schedule for p in ft_schedule[phase]["params"]])
+        # req_grad_opt = len([p for pg in optimizer.param_groups for p in pg["params"] if p.requires_grad])
+        # expected_grad_params = req_grad_opt == init_ft_cnt
+        no_grad_cnt, init_ft_cnt, total_ft_cnt, req_grad_opt, expected_grad_params = self._inspect_fts_opt_state()
         if no_grad_cnt > 0 or not expected_grad_params:
             warn_msg = (
                 f"FinetuningScheduler configured the provided model to have {init_ft_cnt} trainable parameters"
@@ -1375,6 +1436,134 @@ class ScheduleImplMixin(ABC):
                     " parameter collision and training failure in pytorch during a future fine-tuning phase."
                 )
             rank_zero_warn(warn_msg)
+
+    def _phase_aligned_configure_sharded_model(self) -> None:
+        for m in self.pl_module.modules():
+            # if the model is already wrapped with FSDP, tracing with auto-policy would fail
+            if isinstance(m, FullyShardedDataParallel):
+                raise MisconfigurationException(
+                    "The provided model is already wrapped by FSDP. Cannot apply an FSDP auto-wrapping policy along"
+                    " fine-tuning schedule phase boundaries if the model is already wrapped."
+                )
+
+        # if isinstance(self.pl_module.trainer.strategy, DDPFullyShardedNativeStrategy):
+        #     assert isinstance(self.ft_schedule, Dict)  # TODO: move/consolidate ft_schedule assertions
+        self._phase_constrained_auto_wrap()  # TODO: should always be true, move this to the strategyadapter hook
+        self._after_configure_sharded_model()
+        # self._init_fsdp_param_map()
+        # self._param_translator = self._logical_param_translation
+        # _, self._fts_state._curr_thawed_params = self.exec_ft_phase(
+        #     self.pl_module,
+        #     thaw_pl=self.fsdp_param_transform(self.ft_schedule[0]["params"]),
+        #     translation_func=self._param_translator,
+        #     init_thaw=True)
+
+    def _after_configure_sharded_model(self) -> None:
+        assert isinstance(self.ft_schedule, Dict)  # TODO: move/consolidate ft_schedule assertions
+        self._init_fsdp_param_map()
+        self._param_translator = self._logical_param_translation
+        _, self._fts_state._curr_thawed_params = self.exec_ft_phase(
+            self.pl_module,
+            thaw_pl=self.fsdp_param_transform(self.ft_schedule[0]["params"]),
+            translation_func=self._param_translator,
+            init_thaw=True,
+        )
+
+    def _wrapped_configure_sharded_model(self, csm_func: Callable) -> Callable:
+        @wraps(csm_func)
+        def wrapped_func() -> None:
+            csm_func()
+            self._after_configure_sharded_model()
+
+        return wrapped_func
+
+    def _init_fsdp_param_map(self) -> None:
+        # TODO: make weakrefs?
+        self._fsdp_flat_to_unflat_mapping = _get_param_to_unflat_param_names(self.pl_module)
+        self._fsdp_unflat_to_flat_mapping = {
+            up: fpn for fpn, upl in self._fsdp_flat_to_unflat_mapping.items() for up in upl
+        }
+
+    def _inspect_policy_trace(self, phase_mods: List) -> Dict:
+        phase_fsdp = weakref.proxy(
+            wrap(
+                torch.nn.ModuleDict(
+                    {mp.replace(".", FTS_TMP_KEY): deepcopy(self.pl_module.get_submodule(mp)) for mp in phase_mods}
+                )
+            )
+        )
+        return dict(
+            map(
+                (
+                    lambda m: (m, True)
+                    if isinstance(phase_fsdp.get_submodule(m.replace(".", FTS_TMP_KEY)), FullyShardedDataParallel)
+                    else (m, False)
+                ),
+                phase_mods,
+            )
+        )
+
+    def _apply_phase_wrap(self, should_wrap: Dict, mod_paths: List) -> None:
+        with self._enable_explicit_wrap():
+            for modp in mod_paths:
+                parent_name, _, child_name = modp.rpartition(".")
+                if should_wrap[modp]:
+                    setattr(
+                        self.pl_module.get_submodule(parent_name), child_name, wrap(self.pl_module.get_submodule(modp))
+                    )
+
+    def _validate_min_wrap_condition(self, should_wrap: Dict, mod_paths: List) -> Dict:
+        if any([w for w in should_wrap.values()]):
+            return should_wrap
+        init_layer_sizes = {}
+        for modp in mod_paths:
+            init_layer_sizes[modp] = sum(p.numel() for p in self.pl_module.get_submodule(modp).parameters())
+        force_wrap_m = max(init_layer_sizes, key=lambda k: init_layer_sizes[k])
+        # TODO: update this warning message with override options
+        rank_zero_warn(
+            "Training an FSDP wrapped model requires one or more FSDP parameters to be included in the optimizer."
+            " The auto_wrap_policy you have specified would not wrap any of the layers specified in fine-tuning"
+            " phase 0. To enable training in this context, Fine-Tuning Scheduler by default wraps the largest layer"
+            f" in phase 0, (in this case {force_wrap_m}). If you would like to override this behavior..."
+        )
+        should_wrap[force_wrap_m] = True
+        return should_wrap
+
+    def _phase_constrained_auto_wrap(self) -> None:
+        # link phase params to modules, until PT adds fix for param-level specificaiton
+        module_map = self._gen_ft_sched_module_map()  # TODO: move to fts setup?
+        for phase, mod_paths in module_map.items():
+            should_wrap = self._inspect_policy_trace(mod_paths)
+            if phase == 0:
+                should_wrap = self._validate_min_wrap_condition(should_wrap, mod_paths)
+            self._apply_phase_wrap(should_wrap, mod_paths)
+        with self._enable_explicit_wrap():
+            for n, m in self.pl_module.named_children():
+                setattr(self.pl_module, n, wrap(m))
+
+    @contextmanager
+    def _enable_explicit_wrap(self) -> Generator:
+        auto_wrap_policy_handle = _ConfigAutoWrap.kwargs.get("auto_wrap_policy", None)
+        _ConfigAutoWrap.kwargs["auto_wrap_policy"] = None
+        try:
+            yield
+        finally:
+            _ConfigAutoWrap.kwargs["auto_wrap_policy"] = auto_wrap_policy_handle
+
+    def fsdp_param_transform(self, orig_thaw_pl: List) -> List:
+        flat_next_tl = {self._fsdp_unflat_to_flat_mapping[p] for p in orig_thaw_pl}
+        return [n for n, p in self.pl_module.named_parameters() if p in flat_next_tl]
+
+    def _logical_param_translation(self, param_names: List) -> List:
+        logical_param_names = []
+        for n, p in self.pl_module.named_parameters():
+            if n in param_names:
+                if self._fsdp_flat_to_unflat_mapping.get(p):
+                    logical_param_names.extend(self._fsdp_flat_to_unflat_mapping[p])
+                else:
+                    logical_param_names.append(n)
+        return logical_param_names
+        # [lpn for n, p in self.pl_module.named_parameters() if n in param_names for lpn in self._fsdp_flat_to_unflat_mapping[p]]
 
 
 class CallbackDepMixin(ABC):
