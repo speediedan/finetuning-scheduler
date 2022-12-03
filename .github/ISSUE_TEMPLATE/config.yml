@@ -2,4 +2,4 @@ blank_issues_enabled: false
 contact_links:
   - name: Ask a Question
     url: https://github.com/speediedan/finetuning-scheduler/discussions/new
-    about: Ask and answer Lightning related questions
+    about: Ask and answer Fine-Tuning Scheduler related questions
