@@ -98,6 +98,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         gen_ft_sched_only: bool = False,
         epoch_transitions_only: bool = False,
         reinit_lr_cfg: Optional[Dict] = None,
+        strategy_adapter_cfg: Optional[Dict] = None,
         allow_untested: bool = False,
         apply_lambdas_new_pgs: bool = False,
         logging_level: int = logging.INFO,
@@ -157,6 +158,11 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                                 frequency: 1
                                 name: Implicit_Reinit_LR_Scheduler
 
+            strategy_adapter_cfg: A configuration dictionary that will be applied to the
+                :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` associated with the current training
+                :external+pl:class:`~pytorch_lightning.strategies.Strategy`. See the relevant
+                :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` documentation for strategy-specific
+                configuration options.
             allow_untested: If ``True``, allows the use of custom or unsupported training strategies and lr schedulers
                 (e.g. ``single_tpu``, ``MyCustomStrategy``, ``MyCustomLRScheduler``) . Defaults to ``False``.
 
@@ -198,6 +204,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.gen_ft_sched_only = gen_ft_sched_only
         self.epoch_transitions_only = epoch_transitions_only
         self.reinit_lr_cfg = reinit_lr_cfg
+        self.strategy_adapter_cfg = strategy_adapter_cfg or {}
         self.allow_untested = allow_untested
         self.apply_lambdas_new_pgs = apply_lambdas_new_pgs
         self.pl_module: pl.LightningModule
@@ -483,7 +490,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                     f" '{strategy.strategy_name}' because ``allow_untested`` is ``True``."  # type: ignore[attr-defined]
                 )
                 rank_zero_warn(warn_msg)
-        self.strategy_adapter = STRATEGY_ADAPTERS.get(strategy.strategy_name, StrategyAdapter)()
+        strategy_cls = STRATEGY_ADAPTERS.get(strategy.strategy_name, StrategyAdapter)
+        self.strategy_adapter = strategy_cls(**self.strategy_adapter_cfg)
         self.strategy_adapter.connect(self)
         if self.gen_ft_sched_only:
             if trainer.is_global_zero:

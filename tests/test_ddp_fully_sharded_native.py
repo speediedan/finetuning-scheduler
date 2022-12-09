@@ -9,38 +9,22 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import os
-import re
-import warnings
-from collections import OrderedDict
 from copy import deepcopy
-from functools import reduce
 from logging import DEBUG
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, Tuple
 
-import numpy as np
 import pytest
 import torch
-import torch.nn.functional as F
-import yaml
-from lightning_lite.utilities.cloud_io import get_filesystem
-from pytorch_lightning import LightningModule, seed_everything, Trainer
-from pytorch_lightning.callbacks import Callback, EarlyStopping, LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.plugins.precision.fsdp_native_native_amp import FullyShardedNativeNativeMixedPrecisionPlugin
-from pytorch_lightning.strategies import DDPFullyShardedNativeStrategy, StrategyRegistry
-from pytorch_lightning.strategies.single_device import SingleDeviceStrategy
+from pytorch_lightning.strategies import DDPFullyShardedNativeStrategy
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.imports import _TORCH_GREATER_EQUAL_1_12
-from torch import nn
-from torch.distributed.utils import _replace_by_prefix
-from torch.multiprocessing import ProcessRaisedException
-from torch.profiler import profile, ProfilerActivity, record_function
-from torch.utils.data import DataLoader, Dataset
 
-from finetuning_scheduler import CallbackResolverMixin, FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
+from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from tests.helpers import BoringModel
-from tests.helpers.boring_model import CustomLRScheduler, unexpected_warns, unmatched_warns
+from tests.helpers.boring_model import unexpected_warns, unmatched_warns
 from tests.helpers.runif import RunIf
 from tests.test_finetuning_scheduler_callback import (
     EXPECTED_WARNS,
@@ -56,7 +40,7 @@ if _TORCH_GREATER_EQUAL_1_12:
 additional_fsdp_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
     "is still running",  # TODO: explicitly cleanup subprocess
-    'Deallocating Tensor that still',  # TODO: can be triggered by policy tracing, suppress or potentially open PR
+    "Deallocating Tensor that still",  # TODO: can be triggered by policy tracing, suppress or potentially open PR
     "Please use torch.distributed.all_gather_into_tensor",  # can be removed once PyTorch stops using internally,
     "Please use torch.distributed.reduce_scatter_tensor",  # can be removed once PyTorch stops using internally,
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
@@ -178,9 +162,10 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
 
 
 class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
-    def __init__(self, fsdp_mask: Dict, *args, **kwargs):
+    def __init__(self, fsdp_mask: Dict, outer_is_wrapped: bool = True, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fsdp_mask = fsdp_mask
+        self.outer_is_wrapped = outer_is_wrapped
 
         # self.layer: Optional[torch.nn.Module] = None
         self.layer = torch.nn.Sequential(
@@ -249,8 +234,10 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
         self._assert_layer_fsdp_instance()
 
     def _assert_layer_fsdp_instance(self) -> None:
-        # assert isinstance(self.layer, torch.nn.Sequential)
-        assert isinstance(self.layer, FullyShardedDataParallel)
+        if self.outer_is_wrapped:
+            assert isinstance(self.layer, FullyShardedDataParallel)
+        else:
+            assert isinstance(self.layer, torch.nn.Sequential)
         # assert isinstance(self.trainer.strategy.precision_plugin, FullyShardedNativeNativeMixedPrecisionPlugin)
         # precision = torch.float16 if self.precision == 16 else torch.bfloat16
         # ensure our ignored module is not wrapped
@@ -287,6 +274,15 @@ def custom_auto_wrap_policy(
     return unwrapped_params >= 67
 
 
+def aggressive_auto_wrap_policy(
+    module,
+    recurse,
+    unwrapped_params: int,
+    min_num_params: int = int(1e8),
+) -> bool:
+    return unwrapped_params >= 2
+
+
 def warn_custom_auto_wrap_policy(
     module,
     recurse,
@@ -317,6 +313,7 @@ def test_fsdp_custom_mixed_precision(tmpdir):
 EXPECTED_FSDP_FTS_RESULTS = {
     ("csm_overridden", False, 10): ({"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, None),
     ("custom_auto_wrap_policy", False, 10): ({"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, None),
+    ("aggressive_auto_wrap_policy", False, 10): ({"wrapped_mods": list(range(6)) + [7], "unwrapped_mods": []}, None),
     ("warn_custom_auto_wrap_policy", False, 10): (
         {"wrapped_mods": [5], "unwrapped_mods": [i for i in list(range(8)) if i != 5]},
         ("Training an FSDP wrapped model requires",),
@@ -324,16 +321,24 @@ EXPECTED_FSDP_FTS_RESULTS = {
 }
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.12")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False, min_torch="1.12")
 @pytest.mark.parametrize(
-    "model, auto_wrap_policy, use_precision, ft_sched_idx, fit_start_only",
+    "model, auto_wrap_policy, use_precision, ft_sched_idx, fit_start_only, strategy_adapter_cfg, test_model_cfg",
     [
-        (FTSBaseFSDPModel, custom_auto_wrap_policy, False, 10, False),
-        (FTSCsmFSDPModel, None, False, 10, False),
-        (FTSBaseFSDPModel, warn_custom_auto_wrap_policy, False, 10, True),
+        (FTSBaseFSDPModel, custom_auto_wrap_policy, False, 10, False, None, None),
+        (FTSCsmFSDPModel, None, False, 10, False, None, None),
+        (FTSBaseFSDPModel, warn_custom_auto_wrap_policy, False, 10, True, None, None),
+        (
+            FTSBaseFSDPModel,
+            aggressive_auto_wrap_policy,
+            False,
+            10,
+            False,
+            {"phase_constrain_awp": False},
+            {"outer_is_wrapped": False},
+        ),
         # TODO: test with provided size based policy
         # TODO: test modified schedule if phase 0 doesn't have at least 1 FSDP param (and warning gen)
-        # TODO: add fts option and test to bypass phase-aligned application of auto policy
         # TODO: enable precision tests
         # TODO: test misconfiguration error from validation func generated when auto policy bypass or user csm override
         #  doesn't yield a valid schedule (non disjoint phase mods, no fsdp in the first phase)
@@ -341,19 +346,30 @@ EXPECTED_FSDP_FTS_RESULTS = {
         # TODO: test precision with BatchNorm
     ],
     ids=[
-        "fts_cust_auto_noprec",
-        "fts_no_auto_noprec",
-        "fts_warn_auto_noprec",
+        "cust_auto_noprec",
+        "no_auto_noprec",
+        "warn_auto_noprec",
+        "no_phase_constrain_auto"
         # "fts_size_auto_no_prec"
         # "fts_user_auto_only_no_prec",
         # "fts_cust_auto_prec"
     ],
 )
 def test_fsdp_native_multi_gpus(
-    tmpdir, recwarn, fsdp_ft_schedules, model, auto_wrap_policy, use_precision, ft_sched_idx, fit_start_only
+    tmpdir,
+    recwarn,
+    fsdp_ft_schedules,
+    model,
+    auto_wrap_policy,
+    use_precision,
+    ft_sched_idx,
+    fit_start_only,
+    strategy_adapter_cfg,
+    test_model_cfg,
 ):
     """Test to ensure that checkpoint is saved correctly when using multiple GPUs, and all stages can be run."""
     fsdp_warns = FSDP_BASE_WARNS
+    model_cfg = test_model_cfg or {}
     auto_wrap_key = getattr(auto_wrap_policy, "__name__", None) or "csm_overridden"
     expected_state = EXPECTED_FSDP_FTS_RESULTS[
         (
@@ -364,17 +380,20 @@ def test_fsdp_native_multi_gpus(
     ]
     warns_expected = expected_state[1]
     seed_everything(42)
-    model = model(fsdp_mask=expected_state[0])
+    model = model(fsdp_mask=expected_state[0], **model_cfg)
     test_ignored = False
     ignored_modules = [model.layer[1]] if test_ignored else None
     fts_cls = FitStartOnlyFTS if fit_start_only else FinetuningScheduler
     callbacks = [
-        fts_cls(ft_schedule=fsdp_ft_schedules[ft_sched_idx], logging_level=DEBUG),  # max_depth=0
+        fts_cls(
+            ft_schedule=fsdp_ft_schedules[ft_sched_idx], logging_level=DEBUG, strategy_adapter_cfg=strategy_adapter_cfg
+        ),
         FTSEarlyStopping(monitor="val_loss", patience=1),
         FTSCheckpoint(monitor="val_loss", save_last=True, verbose=True),
     ]
 
-    # precision_config = MixedPrecision(reduce_dtype=torch.float32, param_dtype=torch.float32, buffer_dtype=torch.float32)
+    # precision_config = MixedPrecision(reduce_dtype=torch.float32, param_dtype=torch.float32,
+    # buffer_dtype=torch.float32)
     strategy = DDPFullyShardedNativeStrategy(
         auto_wrap_policy=auto_wrap_policy,
         cpu_offload=CPUOffload(offload_params=True),

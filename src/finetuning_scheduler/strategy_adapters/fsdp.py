@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, Generator, List
 
 import torch
 from lightning_lite.utilities import rank_zero_info, rank_zero_warn
+from pytorch_lightning import Trainer
 from pytorch_lightning.strategies.fully_sharded_native import _fsdp_available
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.model_helpers import is_overridden
@@ -46,8 +47,20 @@ FTS_TMP_KEY = "__ftskey__"
 
 
 class FSDPStrategyAdapter(StrategyAdapter):
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    """_summary_
+
+    Args:
+        StrategyAdapter (_type_): _description_
+    """
+
+    def __init__(self, phase_constrain_awp: bool = True, *args: Any, **kwargs: Any) -> None:
+        """_summary_
+
+        Args:
+            phase_constrain_awp (bool, optional): _description_. Defaults to True.
+        """
         super().__init__(*args, **kwargs)
+        self.phase_constrain_awp = phase_constrain_awp
         self._fsdp_flat_to_unflat_mapping: Dict
         self._fsdp_unflat_to_flat_mapping: Dict
         self.exec_ft_phase = partial(StrategyAdapter.base_ft_phase, translation_func=self.logical_param_translation)
@@ -65,13 +78,21 @@ class FSDPStrategyAdapter(StrategyAdapter):
             )
             csm_func = self._wrapped_configure_sharded_model(self.fts_handle.pl_module.configure_sharded_model)
             setattr(self.fts_handle.pl_module, "configure_sharded_model", csm_func)
-        else:
+        elif self.phase_constrain_awp:
             setattr(self.fts_handle.pl_module, "configure_sharded_model", self._phase_aligned_configure_sharded_model)
+        else:
+            rank_zero_info("Applying provided auto_wrap_policy without phase-aligned constraints.")
+            before_optim_setup_func = self._wrapped_before_optim_setup(
+                self.fts_handle.pl_module._trainer.strategy.setup_optimizers
+            )
+            setattr(self.fts_handle.pl_module._trainer.strategy, "setup_optimizers", before_optim_setup_func)
 
     def on_after_init_fts(self) -> None:
         """Override this hook for FSDP to defer first ft schedule phase initialization until after model
         wrapped."""
 
+    # NEXT: debug phase_constrain_awp false issue not adding params to optimizer and/or wrapping issue,
+    # gonna squash that mutha!...
     def fts_optim_view(self, orig_pl: List) -> List:
         """FSDP requires an FTS adapter transformation of schedule parameters for optimizer operations."""
         return self.fsdp_param_transform(orig_pl)
@@ -98,7 +119,9 @@ class FSDPStrategyAdapter(StrategyAdapter):
                     "The provided model is already wrapped by FSDP. Cannot apply an FSDP auto-wrapping policy along"
                     " fine-tuning schedule phase boundaries if the model is already wrapped."
                 )
-        self._phase_constrained_auto_wrap()
+        # link phase params to modules, until PT adds fix for param-level specificaiton
+        if self.phase_constrain_awp:
+            self._phase_constrained_auto_wrap(self._gen_ft_sched_module_map())
         self._after_configure_sharded_model()
 
     def _after_configure_sharded_model(self) -> None:
@@ -115,6 +138,14 @@ class FSDPStrategyAdapter(StrategyAdapter):
         def wrapped_func() -> None:
             csm_func()
             self._after_configure_sharded_model()
+
+        return wrapped_func
+
+    def _wrapped_before_optim_setup(self, before_optim_setup_func: Callable) -> Callable:
+        @wraps(before_optim_setup_func)
+        def wrapped_func(trainer: "Trainer") -> None:
+            self._after_configure_sharded_model()
+            before_optim_setup_func(trainer)
 
         return wrapped_func
 
@@ -189,9 +220,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 ft_schedule_module_map[depth].add(module_path)
         return ft_schedule_module_map
 
-    def _phase_constrained_auto_wrap(self) -> None:
-        # link phase params to modules, until PT adds fix for param-level specificaiton
-        module_map = self._gen_ft_sched_module_map()  # TODO: move to fts setup?
+    def _phase_constrained_auto_wrap(self, module_map: Dict) -> None:
         for phase, mod_paths in module_map.items():
             should_wrap = self._inspect_policy_trace(mod_paths)
             if phase == 0:
