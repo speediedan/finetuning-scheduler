@@ -4,13 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [0.3.3] - 2022-12-09
+
+### Added
+
+- support for `pytorch-lightning` 1.8.4
+
+### Changed
+
+- pinned `jsonargparse` dependency to <4.18.0 until [#205](https://github.com/omni-us/jsonargparse/issues/205) is fixed
 
 ## [0.3.2] - 2022-11-18
 
 ### Added
 
 - support for `pytorch-lightning` 1.8.2
-
 
 ## [0.3.1] - 2022-11-10
 
