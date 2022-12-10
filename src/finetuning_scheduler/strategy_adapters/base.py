@@ -46,6 +46,10 @@ class StrategyAdapter:
             init_thaw=True,
         )
 
+    def on_before_fts_fit_start(self) -> None:
+        """_summary_"""
+        pass
+
     def fts_optim_view(self, orig_pl: List) -> List:
         """By default, no transformation of schedule parameters is required for optimizer operations."""
         return orig_pl

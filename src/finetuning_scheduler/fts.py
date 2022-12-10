@@ -509,8 +509,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 self._fts_state._resume_fit_from_ckpt = True
             self.freeze_before_training(pl_module)
             self.pl_module = pl_module  # save pl_module ref for downstream configuration convenience
-            self.strategy_adapter.on_before_init_fts()
-        self.init_fts()
+            self.strategy_adapter.on_before_init_fts()  # TODO: pass ptl args to hook? maybe continue to use fts handle
+        self.init_fts()  # TODO: wrap fts hooks into init_fts method after unesting if
         self.strategy_adapter.on_after_init_fts()
 
     def on_fit_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
@@ -526,6 +526,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         Raises:
             MisconfigurationException: If more than 1 optimizers are configured indicates a configuration error
         """
+        self.strategy_adapter.on_before_fts_fit_start()
         if len(trainer.optimizers) > 1:
             raise MisconfigurationException("FTS currently only supports a single-optimizer configuration")
         if getattr(trainer.optimizers[0], "_overlap_with_ddp", False):

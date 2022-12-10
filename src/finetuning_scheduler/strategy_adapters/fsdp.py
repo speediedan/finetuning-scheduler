@@ -16,7 +16,10 @@ Fine-Tuning Scheduler Strategy Adapters
 Classes to extend Fine-Tuning Scheduler support of complex or custom training strategies
 
 """
+import itertools
+import os
 import weakref
+from collections import Counter
 from contextlib import contextmanager
 from copy import deepcopy
 from functools import partial, wraps
@@ -43,7 +46,12 @@ else:
     BackwardPrefetch = None  # type: ignore[misc,assignment]
     CPUOffload = None  # type: ignore[misc,assignment]
 
+
 FTS_TMP_KEY = "__ftskey__"
+FSDP_OPT_WARN_BASE = (
+    "Training an FSDP wrapped model requires one or more FSDP parameters to be included in the" " optimizer."
+)
+FSDP_OPT_WARN_SUFFIX = "wrap any of the layers specified in fine-tuning phase 0."
 
 
 class FSDPStrategyAdapter(StrategyAdapter):
@@ -63,6 +71,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
         self.phase_constrain_awp = phase_constrain_awp
         self._fsdp_flat_to_unflat_mapping: Dict
         self._fsdp_unflat_to_flat_mapping: Dict
+        self._ft_schedule_module_map: Dict
+        self._min_wrap_validated: bool = False
         self.exec_ft_phase = partial(StrategyAdapter.base_ft_phase, translation_func=self.logical_param_translation)
 
     def on_before_init_fts(self) -> None:
@@ -91,8 +101,21 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """Override this hook for FSDP to defer first ft schedule phase initialization until after model
         wrapped."""
 
-    # NEXT: debug phase_constrain_awp false issue not adding params to optimizer and/or wrapping issue,
-    # gonna squash that mutha!...
+    def on_before_fts_fit_start(self) -> None:
+        self._validate_fsdp_phases_disjoint()
+        if not self._min_wrap_validated:
+            wrapped_statuses = []
+            for m in self._ft_schedule_module_map[0]:
+                is_wrapped = isinstance(self.fts_handle.pl_module.get_submodule(m), FullyShardedDataParallel)
+                wrapped_statuses.append(is_wrapped)
+            if not any(wrapped_statuses):
+                csm_wrap_ref = "The `configure_sharded_model policy` you have specified did not"
+                raise MisconfigurationException(
+                    f"{FSDP_OPT_WARN_BASE} {csm_wrap_ref} {FSDP_OPT_WARN_SUFFIX} Ensure your overridden"
+                    " `configure_sharded_model` method wraps at least one module included in phase `0`, or avoid"
+                    " overriding `configure_sharded_model` and use explicit or implicit auto wrapping of the model."
+                )
+
     def fts_optim_view(self, orig_pl: List) -> List:
         """FSDP requires an FTS adapter transformation of schedule parameters for optimizer operations."""
         return self.fsdp_param_transform(orig_pl)
@@ -111,6 +134,44 @@ class FSDPStrategyAdapter(StrategyAdapter):
                     logical_param_names.append(n)
         return logical_param_names
 
+    def _validate_fsdp_phases_disjoint(self) -> None:
+        """Validate that the defined schedule does not specify any module in multiple phases.
+
+        Raises:
+            MisconfigurationException: Provides a list of the parameters specified in more than one phase.
+        """
+        phase_lists = [list(self._ft_schedule_module_map[d]) for d in self._ft_schedule_module_map.keys()]
+        mods = Counter(list(itertools.chain(*phase_lists)))
+        unique_mods = Counter(list(set().union(*phase_lists)))
+        mods.subtract(unique_mods)
+        dup_mods = list(mods.elements())
+        if dup_mods:
+            ft_sched = self.fts_handle.ft_schedule
+            dup_mod_dict = {
+                m: list(
+                    itertools.chain(
+                        *[
+                            self._fsdp_flat_to_unflat_mapping[p]
+                            for p in self.fts_handle.pl_module.get_submodule(m).parameters()
+                        ]
+                    )
+                )
+                for m in dup_mods
+            }
+            phase_mod_intersect: Dict = {}
+            for m, plist in dup_mod_dict.items():
+                phase_mod_intersect[m] = {}
+                for phase in ft_sched.keys():
+                    if set(plist).intersection(set(ft_sched[phase]["params"])):
+                        phase_mod_intersect[m][phase] = set(plist).intersection(set(ft_sched[phase]["params"]))
+            warn_msg = (
+                "Fine-tuning schedule phases do not have disjoint module sets. FSDP currently wraps at a module level"
+                " which requires fine-tuning schedules avoid thawing parameters of the same module in different phases."
+                " The following modules span fine-tuning phases (with associated parameters by phase):"
+                f" {os.linesep}{phase_mod_intersect}"
+            )
+            raise MisconfigurationException(warn_msg)
+
     def _phase_aligned_configure_sharded_model(self) -> None:
         for m in self.fts_handle.pl_module.modules():
             # if the model is already wrapped with FSDP, tracing with auto-policy would fail
@@ -121,7 +182,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 )
         # link phase params to modules, until PT adds fix for param-level specificaiton
         if self.phase_constrain_awp:
-            self._phase_constrained_auto_wrap(self._gen_ft_sched_module_map())
+            self._gen_ft_sched_module_map()
+            self._phase_constrained_auto_wrap()
         self._after_configure_sharded_model()
 
     def _after_configure_sharded_model(self) -> None:
@@ -155,6 +217,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
         self._fsdp_unflat_to_flat_mapping = {
             up: fpn for fpn, upl in self._fsdp_flat_to_unflat_mapping.items() for up in upl
         }
+        if not hasattr(self, "_ft_schedule_module_map"):
+            self._gen_ft_sched_module_map()
 
     def _inspect_policy_trace(self, phase_mods: List) -> Dict:
         phase_fsdp = weakref.proxy(
@@ -197,34 +261,35 @@ class FSDPStrategyAdapter(StrategyAdapter):
             init_layer_sizes[modp] = sum(p.numel() for p in self.fts_handle.pl_module.get_submodule(modp).parameters())
         force_wrap_m = max(init_layer_sizes, key=lambda k: init_layer_sizes[k])
         # TODO: update this warning message with override options
+        auto_wrap_ref = "The auto_wrap_policy you have specified would not"
         rank_zero_warn(
-            "Training an FSDP wrapped model requires one or more FSDP parameters to be included in the optimizer."
-            " The auto_wrap_policy you have specified would not wrap any of the layers specified in fine-tuning"
-            " phase 0. To enable training in this context, Fine-Tuning Scheduler by default wraps the largest layer"
-            f" in phase 0, (in this case {force_wrap_m}). If you would like to override this behavior..."
+            f"{FSDP_OPT_WARN_BASE} {auto_wrap_ref} {FSDP_OPT_WARN_SUFFIX} To enable training in this context,"
+            f" Fine-Tuning Scheduler by default wraps the largest layer in phase 0, (in this case {force_wrap_m}). If"
+            " you would like to override this behavior..."
         )
         should_wrap[force_wrap_m] = True
         return should_wrap
 
-    def _gen_ft_sched_module_map(self) -> Dict:
+    def _gen_ft_sched_module_map(self) -> None:
         assert isinstance(self.fts_handle.ft_schedule, Dict)
-        ft_schedule_module_map: Dict = {}
+        module_map: Dict = {}
         for depth in self.fts_handle.ft_schedule.keys():  # type: ignore[union-attr]
             phase_params = self.fts_handle.ft_schedule[depth].get("params", [])  # type: ignore[union-attr]
-            ft_schedule_module_map[depth] = set()
+            module_map[depth] = set()
             for p in phase_params:
                 module_path, _, param_name = p.rpartition(".")
                 mod: torch.nn.Module = self.fts_handle.pl_module.get_submodule(module_path)
                 if not hasattr(mod, param_name):
                     raise AttributeError(mod._get_name() + " has no attribute `" + param_name + "`")
-                ft_schedule_module_map[depth].add(module_path)
-        return ft_schedule_module_map
+                module_map[depth].add(module_path)
+        self._ft_schedule_module_map = module_map
 
-    def _phase_constrained_auto_wrap(self, module_map: Dict) -> None:
-        for phase, mod_paths in module_map.items():
+    def _phase_constrained_auto_wrap(self) -> None:
+        for phase, mod_paths in self._ft_schedule_module_map.items():
             should_wrap = self._inspect_policy_trace(mod_paths)
             if phase == 0:
                 should_wrap = self._validate_min_wrap_condition(should_wrap, mod_paths)
+                self._min_wrap_validated = True
             self._apply_phase_wrap(should_wrap, mod_paths)
         with self._enable_explicit_wrap():
             for n, m in self.fts_handle.pl_module.named_children():
