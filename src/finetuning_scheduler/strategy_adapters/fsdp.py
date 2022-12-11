@@ -48,6 +48,7 @@ else:
 
 
 FTS_TMP_KEY = "__ftskey__"
+LIGHTNING_WRAPPER_BASE_PREFIX = "_forward_module"
 FSDP_OPT_WARN_BASE = (
     "Training an FSDP wrapped model requires one or more FSDP parameters to be included in the" " optimizer."
 )
@@ -213,9 +214,14 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
     def _init_fsdp_param_map(self) -> None:
         # TODO: make weakrefs?
-        self._fsdp_flat_to_unflat_mapping = _get_param_to_unflat_param_names(self.fts_handle.pl_module)
+        # we need to initialize fsdp adapter parameter mapping using using the `_LightningModuleWrapperBase` wrapped
+        # `LightningModule` in case the user requests the auto_wrap_policy be directly applied in non-phase constrained
+        # manner. In that scenario, there may be parameters that exist only in the outermost FSDP instance
+        self._fsdp_flat_to_unflat_mapping = _get_param_to_unflat_param_names(self.fts_handle.pl_module.trainer.model)
         self._fsdp_unflat_to_flat_mapping = {
-            up: fpn for fpn, upl in self._fsdp_flat_to_unflat_mapping.items() for up in upl
+            up.replace(f"{LIGHTNING_WRAPPER_BASE_PREFIX}.", ""): fpn
+            for fpn, upl in self._fsdp_flat_to_unflat_mapping.items()
+            for up in upl
         }
         if not hasattr(self, "_ft_schedule_module_map"):
             self._gen_ft_sched_module_map()

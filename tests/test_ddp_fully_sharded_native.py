@@ -12,7 +12,7 @@
 from copy import deepcopy
 from logging import DEBUG
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import pytest
 import torch
@@ -166,10 +166,13 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
 
 
 class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
-    def __init__(self, fsdp_mask: Dict, outer_is_wrapped: bool = True, *args, **kwargs):
+    def __init__(
+        self, fsdp_mask: Dict, outer_is_wrapped: bool = True, precision_key: Optional[str] = None, *args, **kwargs
+    ):
         super().__init__(*args, **kwargs)
         self.fsdp_mask = fsdp_mask
         self.outer_is_wrapped = outer_is_wrapped
+        self.precision_key = precision_key
 
         # self.layer: Optional[torch.nn.Module] = None
         self.layer = torch.nn.Sequential(
@@ -242,17 +245,19 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
             assert isinstance(self.layer, FullyShardedDataParallel)
         else:
             assert isinstance(self.layer, torch.nn.Sequential)
-        # assert isinstance(self.trainer.strategy.precision_plugin, FullyShardedNativeNativeMixedPrecisionPlugin)
-        # precision = torch.float16 if self.precision == 16 else torch.bfloat16
+        if self.precision_key == "auto_16":
+            assert isinstance(self.trainer.strategy.precision_plugin, FullyShardedNativeNativeMixedPrecisionPlugin)
+            precision = torch.float16 if self.precision == 16 else torch.bfloat16
         # ensure our ignored module is not wrapped
         for i in self.fsdp_mask["unwrapped_mods"]:
             assert not isinstance(self.layer[i], FullyShardedDataParallel)
         # but that all other modules are wrapped
         for i in self.fsdp_mask["wrapped_mods"]:
-            # assert self.layer[layer_num].mixed_precision.param_dtype == precision
-            # assert self.layer[layer_num].mixed_precision.reduce_dtype == precision
-            # assert self.layer[layer_num].mixed_precision.buffer_dtype == precision
             assert isinstance(self.layer[i], FullyShardedDataParallel)
+            if self.precision_key:
+                assert self.layer[i].mixed_precision.param_dtype == precision
+                assert self.layer[i].mixed_precision.reduce_dtype == precision
+                assert self.layer[i].mixed_precision.buffer_dtype == precision
 
 
 class FTSCsmFSDPModel(FTSBaseFSDPModel):
@@ -321,6 +326,8 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "warn_auto_noprec": (("Training an FSDP wrapped model requires",), None),
     "non_disjoint_phase_mods": (None, "not have disjoint"),
     "no_fsdp_params_p0": (None, "one or more FSDP"),
+    "cust_auto_prec": (None, None),
+    "no_phase_constrain_auto_prec": (None, None),
 }
 
 
@@ -389,10 +396,34 @@ EXPECTED_FSDP_FTS_RESULTS = {
             None,
             {"fsdp_mask": {"wrapped_mods": list(range(5)), "unwrapped_mods": [5, 7]}},
         ),
-        # TODO: test with provided size based policy
-        # TODO: enable precision tests
-        # TODO: test with CPUOffload = False?
+        (
+            "cust_auto_prec",
+            FTSBaseFSDPModel,
+            custom_auto_wrap_policy,
+            True,
+            10,
+            False,
+            None,
+            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "precision_key": "auto_16"},
+        ),
+        (
+            "no_phase_constrain_auto_prec",
+            FTSBaseFSDPModel,
+            custom_auto_wrap_policy,
+            True,
+            10,
+            False,
+            {"phase_constrain_awp": False},
+            {
+                "fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]},
+                # "fsdp_mask": {"wrapped_mods": list(range(6)) + [7], "unwrapped_mods": []},
+                "outer_is_wrapped": False,
+                "precision_key": "auto_16",
+            },
+        ),
         # TODO: test precision with BatchNorm
+        # TODO: test with CPUOffload = False?
+        # TODO: test with provided size based policy (set to default?)
     ],
     ids=[
         "cust_auto_noprec",
@@ -400,7 +431,9 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "no_phase_constrain_auto",
         "warn_auto_noprec",
         "non_disjoint_phase_mods",
-        "no_fsdp_params_p0"
+        "no_fsdp_params_p0",
+        "cust_auto_prec",
+        "no_phase_constrain_auto_prec"
         # "fts_size_auto_no_prec"
         # "fts_user_auto_only_no_prec",
         # "fts_cust_auto_prec"
@@ -427,8 +460,8 @@ def test_fsdp_native_multi_gpus(
     exception_expected = expected_state[1]
     seed_everything(42)
     model = model(**model_cfg)
-    test_ignored = False
-    ignored_modules = [model.layer[1]] if test_ignored else None
+    # test_ignored = False
+    # ignored_modules = [model.layer[1]] if test_ignored else None
     fts_cls = FitStartOnlyFTS if fit_start_only else FinetuningScheduler
     callbacks = [
         fts_cls(
@@ -438,12 +471,12 @@ def test_fsdp_native_multi_gpus(
         FTSCheckpoint(monitor="val_loss", save_last=True, verbose=True),
     ]
 
-    # precision_config = MixedPrecision(reduce_dtype=torch.float32, param_dtype=torch.float32,
-    # buffer_dtype=torch.float32)
+    # precision_config = MixedPrecision(reduce_dtype=torch.float16, param_dtype=torch.float16,
+    # buffer_dtype=torch.float16)
     strategy = DDPFullyShardedNativeStrategy(
         auto_wrap_policy=auto_wrap_policy,
         cpu_offload=CPUOffload(offload_params=True),
-        ignored_modules=ignored_modules,
+        # ignored_modules=ignored_modules,
         # mixed_precision=precision_config if use_precision else None
     )
     precision_opts = {"precision": 16} if use_precision else {}
