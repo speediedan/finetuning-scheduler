@@ -21,10 +21,11 @@ from pytorch_lightning.plugins.precision.fsdp_native_native_amp import FullyShar
 from pytorch_lightning.strategies import DDPFullyShardedNativeStrategy
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.imports import _TORCH_GREATER_EQUAL_1_12
+from torch.utils.data import DataLoader
 
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from tests.helpers import BoringModel
-from tests.helpers.boring_model import unexpected_warns, unmatched_warns
+from tests.helpers.boring_model import RandomDataset, unexpected_warns, unmatched_warns
 from tests.helpers.runif import RunIf
 from tests.test_finetuning_scheduler_callback import (
     EXPECTED_WARNS,
@@ -141,6 +142,9 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     fsdp_gen_sched_dict[0]["max_transition_epoch"] = 1
     fsdp_gen_sched_dict[1]["params"] = ["layer.[1-4].*"]
     fsdp_gen_sched_dict[1]["max_transition_epoch"] = 2
+    fsdp_bn_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
+    fsdp_bn_gen_sched_dict[0]["params"] = ["layer.(8|[4-6]).*"]
+    fsdp_bn_gen_sched_dict[1]["params"] = ["layer.[1-3].*"]
     fsdp_nondis_mod_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_nondis_mod_sched_dict[1]["params"] = ["layer.[1-4].*", "layer.0.bias"]
     fsdp_nondis_mod_sched_dict[2]["params"] = ["layer.0.weight"]
@@ -162,6 +166,7 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
         fsdp_twotrans_sched_dict,
         fsdp_gen_sched_dict,
         fsdp_nondis_mod_sched_dict,
+        fsdp_bn_gen_sched_dict,
     )
 
 
@@ -274,6 +279,26 @@ class FTSCsmFSDPModel(FTSBaseFSDPModel):
         self.layer = wrap(self.layer)
 
 
+class FTSBatchNormFSDPModel(FTSBaseFSDPModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.layer = torch.nn.Sequential(
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.BatchNorm1d(32),
+            torch.nn.Linear(32, 32),
+            torch.nn.ReLU(),
+            torch.nn.Linear(32, 2),
+        )
+
+    def train_dataloader(self):
+        # when testing BatchNorm layers, we need to ensure there are more than 1 samples per batch
+        return DataLoader(RandomDataset(32, 64), batch_size=2)
+
+
 def custom_auto_wrap_policy(
     module,
     recurse,
@@ -328,10 +353,11 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "no_fsdp_params_p0": (None, "one or more FSDP"),
     "cust_auto_prec": (None, None),
     "no_phase_constrain_auto_prec": (None, None),
+    "batch_norm_auto_prec": ("Both mixed precision", None),
 }
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False, min_torch="1.12")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.12")
 @pytest.mark.parametrize(
     "model_cfg_key, model, auto_wrap_policy, use_precision, ft_sched_idx, fit_start_only, strategy_adapter_cfg,\
          test_model_cfg",
@@ -416,12 +442,20 @@ EXPECTED_FSDP_FTS_RESULTS = {
             {"phase_constrain_awp": False},
             {
                 "fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]},
-                # "fsdp_mask": {"wrapped_mods": list(range(6)) + [7], "unwrapped_mods": []},
                 "outer_is_wrapped": False,
                 "precision_key": "auto_16",
             },
         ),
-        # TODO: test precision with BatchNorm
+        (
+            "batch_norm_auto_prec",
+            FTSBatchNormFSDPModel,
+            custom_auto_wrap_policy,
+            True,
+            12,
+            False,
+            None,
+            {"fsdp_mask": {"wrapped_mods": list(range(7)), "unwrapped_mods": [8]}, "precision_key": "auto_16"},
+        ),
         # TODO: test with CPUOffload = False?
         # TODO: test with provided size based policy (set to default?)
     ],
@@ -433,7 +467,8 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "non_disjoint_phase_mods",
         "no_fsdp_params_p0",
         "cust_auto_prec",
-        "no_phase_constrain_auto_prec"
+        "no_phase_constrain_auto_prec",
+        "batch_norm_auto_prec"
         # "fts_size_auto_no_prec"
         # "fts_user_auto_only_no_prec",
         # "fts_cust_auto_prec"
