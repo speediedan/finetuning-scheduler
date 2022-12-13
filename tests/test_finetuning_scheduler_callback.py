@@ -218,7 +218,6 @@ class TestFinetuningScheduler(FinetuningScheduler):
         self.mock_strategy = mock_strategy
         self.best_ckpt_test_weight = None
         self.restored_best_cnt = 0
-        self.was_global_zero = True
 
     def setup(self, trainer, pl_module, stage: Optional[str] = None) -> None:
         if self.mock_strategy:

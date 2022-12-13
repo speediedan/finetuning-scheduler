@@ -50,7 +50,7 @@ else:
 FTS_TMP_KEY = "__ftskey__"
 LIGHTNING_WRAPPER_BASE_PREFIX = "_forward_module"
 FSDP_OPT_WARN_BASE = (
-    "Training an FSDP wrapped model requires one or more FSDP parameters to be included in the" " optimizer."
+    "Training an FSDP wrapped model requires one or more FSDP parameters to be included in the optimizer."
 )
 FSDP_OPT_WARN_SUFFIX = "wrap any of the layers specified in fine-tuning phase 0."
 
@@ -219,7 +219,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
         # manner. In that scenario, there may be parameters that exist only in the outermost FSDP instance
         self._fsdp_flat_to_unflat_mapping = _get_param_to_unflat_param_names(self.fts_handle.pl_module.trainer.model)
         self._fsdp_unflat_to_flat_mapping = {
-            up.replace(f"{LIGHTNING_WRAPPER_BASE_PREFIX}.", ""): fpn
+            # up.replace(f"{LIGHTNING_WRAPPER_BASE_PREFIX}.", ""): fpn
+            up: fpn
             for fpn, upl in self._fsdp_flat_to_unflat_mapping.items()
             for up in upl
         }

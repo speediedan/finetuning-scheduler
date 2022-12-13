@@ -12,7 +12,7 @@
 from copy import deepcopy
 from logging import DEBUG
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import pytest
 import torch
@@ -32,6 +32,7 @@ from tests.test_finetuning_scheduler_callback import (
     FinetuningSchedulerBoringModel,
     FitStartOnlyFTS,
     get_fts,
+    TestFinetuningScheduler,
 )
 
 if _TORCH_GREATER_EQUAL_1_12:
@@ -299,6 +300,24 @@ class FTSBatchNormFSDPModel(FTSBaseFSDPModel):
         return DataLoader(RandomDataset(32, 64), batch_size=2)
 
 
+class FSDPTestFinetuningScheduler(TestFinetuningScheduler):
+    def state_dict(self) -> Dict[str, Any]:
+        return super(TestFinetuningScheduler, self).state_dict()
+
+    def restore_best_ckpt(self) -> None:
+        super(TestFinetuningScheduler, self).restore_best_ckpt()
+
+    def on_train_epoch_start(self, trainer, pl_module):
+        super(TestFinetuningScheduler, self).on_train_epoch_start(trainer, pl_module)
+        state_key = trainer.current_epoch
+        current_state = (
+            len(self._fts_state._curr_thawed_params),
+            len(self.strategy_adapter.logical_param_translation(self._fts_state._curr_thawed_params)),
+        )
+        if self.expected_state:
+            assert current_state == self.expected_state[state_key]
+
+
 def custom_auto_wrap_policy(
     module,
     recurse,
@@ -345,19 +364,54 @@ def test_fsdp_custom_mixed_precision(tmpdir):
 
 
 EXPECTED_FSDP_FTS_RESULTS = {
-    "cust_auto_noprec": (None, None),
-    "no_auto_noprec": (None, None),
-    "no_phase_constrain_auto": (None, None),
-    "warn_auto_noprec": (("Training an FSDP wrapped model requires",), None),
-    "non_disjoint_phase_mods": (None, "not have disjoint"),
-    "no_fsdp_params_p0": (None, "one or more FSDP"),
-    "cust_auto_prec": (None, None),
-    "no_phase_constrain_auto_prec": (None, None),
-    "batch_norm_auto_prec": ("Both mixed precision", None),
+    "cust_auto_noprec": (
+        {
+            0: (2, 4),
+            1: (6, 12),
+            2: (7, 14),
+        },
+        None,
+        None,
+    ),
+    "no_auto_noprec": (
+        {
+            0: (2, 4),
+            1: (6, 12),
+            2: (7, 14),
+        },
+        None,
+        None,
+    ),
+    "no_phase_constrain_auto": (None, None),  # TODO: add intrafit inspection and fix expected behavior
+    "warn_auto_noprec": (
+        ("Training an FSDP wrapped model requires",),
+        None,
+    ),  # TODO: add intrafit inspection and fix expected behavior
+    "non_disjoint_phase_mods": ({}, None, "not have disjoint"),
+    "no_fsdp_params_p0": ({}, None, "one or more FSDP"),
+    "cust_auto_prec": (
+        {
+            0: (2, 4),
+            1: (6, 12),
+            2: (7, 14),
+        },
+        None,
+        None,
+    ),
+    "no_phase_constrain_auto_prec": (None, None),  # TODO: add intrafit inspection and fix expected behavior
+    "batch_norm_auto_prec": (
+        {
+            0: (4, 8),
+            1: (7, 14),
+            2: (8, 16),
+        },
+        "Both mixed precision",
+        None,
+    ),
 }
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.12")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False, min_torch="1.12")
 @pytest.mark.parametrize(
     "model_cfg_key, model, auto_wrap_policy, use_precision, ft_sched_idx, fit_start_only, strategy_adapter_cfg,\
          test_model_cfg",
@@ -382,23 +436,24 @@ EXPECTED_FSDP_FTS_RESULTS = {
             None,
             {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
         ),
-        (
-            "no_phase_constrain_auto",
-            FTSBaseFSDPModel,
-            aggressive_auto_wrap_policy,
-            False,
-            10,
-            False,
-            {"phase_constrain_awp": False},
-            {"fsdp_mask": {"wrapped_mods": list(range(6)) + [7], "unwrapped_mods": []}, "outer_is_wrapped": False},
-        ),
+        # (
+        #     "no_phase_constrain_auto",
+        #     FTSBaseFSDPModel,
+        #     aggressive_auto_wrap_policy,
+        #     False,
+        #     10,
+        #     False,
+        #     {"phase_constrain_awp": False},
+        #     {"fsdp_mask": {"wrapped_mods": list(range(6)) + [7], "unwrapped_mods": []}, "outer_is_wrapped": False},
+        # ),
         (
             "warn_auto_noprec",
             FTSBaseFSDPModel,
             warn_custom_auto_wrap_policy,
             False,
             10,
-            True,
+            # True,
+            False,
             None,
             {"fsdp_mask": {"wrapped_mods": [5], "unwrapped_mods": [i for i in list(range(8)) if i != 5]}},
         ),
@@ -432,20 +487,20 @@ EXPECTED_FSDP_FTS_RESULTS = {
             None,
             {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "precision_key": "auto_16"},
         ),
-        (
-            "no_phase_constrain_auto_prec",
-            FTSBaseFSDPModel,
-            custom_auto_wrap_policy,
-            True,
-            10,
-            False,
-            {"phase_constrain_awp": False},
-            {
-                "fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]},
-                "outer_is_wrapped": False,
-                "precision_key": "auto_16",
-            },
-        ),
+        # (
+        #     "no_phase_constrain_auto_prec",
+        #     FTSBaseFSDPModel,
+        #     custom_auto_wrap_policy,
+        #     True,
+        #     10,
+        #     False,
+        #     {"phase_constrain_awp": False},
+        #     {
+        #         "fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]},
+        #         "outer_is_wrapped": False,
+        #         "precision_key": "auto_16",
+        #     },
+        # ),
         (
             "batch_norm_auto_prec",
             FTSBatchNormFSDPModel,
@@ -462,12 +517,12 @@ EXPECTED_FSDP_FTS_RESULTS = {
     ids=[
         "cust_auto_noprec",
         "no_auto_noprec",
-        "no_phase_constrain_auto",
+        # "no_phase_constrain_auto",
         "warn_auto_noprec",
         "non_disjoint_phase_mods",
         "no_fsdp_params_p0",
         "cust_auto_prec",
-        "no_phase_constrain_auto_prec",
+        # "no_phase_constrain_auto_prec",
         "batch_norm_auto_prec"
         # "fts_size_auto_no_prec"
         # "fts_user_auto_only_no_prec",
@@ -491,16 +546,19 @@ def test_fsdp_native_multi_gpus(
     fsdp_warns = FSDP_BASE_WARNS
     model_cfg = test_model_cfg or {}
     expected_state = EXPECTED_FSDP_FTS_RESULTS[model_cfg_key]
-    warns_expected = expected_state[0]
-    exception_expected = expected_state[1]
+    warns_expected = expected_state[1]
+    exception_expected = expected_state[2]
     seed_everything(42)
     model = model(**model_cfg)
     # test_ignored = False
     # ignored_modules = [model.layer[1]] if test_ignored else None
-    fts_cls = FitStartOnlyFTS if fit_start_only else FinetuningScheduler
+    fts_cls = FitStartOnlyFTS if fit_start_only else FSDPTestFinetuningScheduler
     callbacks = [
         fts_cls(
-            ft_schedule=fsdp_ft_schedules[ft_sched_idx], logging_level=DEBUG, strategy_adapter_cfg=strategy_adapter_cfg
+            ft_schedule=fsdp_ft_schedules[ft_sched_idx],
+            logging_level=DEBUG,
+            strategy_adapter_cfg=strategy_adapter_cfg,
+            expected_state=expected_state[0],
         ),
         FTSEarlyStopping(monitor="val_loss", patience=1),
         FTSCheckpoint(monitor="val_loss", save_last=True, verbose=True),
