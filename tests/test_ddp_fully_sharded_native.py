@@ -64,80 +64,14 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     with pytest.raises(SystemExit):
         trainer.fit(model)
     mod_sched_dict = get_fts(trainer).load_yaml_schedule(unmod_schedule_file)
-    reinitlr_sched_dict = deepcopy(mod_sched_dict)
-    lambdalr_sched_dict = deepcopy(mod_sched_dict)
-    rlrop_sched_dict = deepcopy(mod_sched_dict)
     mod_sched_dict[0]["params"].extend(mod_sched_dict.pop(1)["params"])
     mod_sched_dict[0]["max_transition_epoch"] = 3
     mod_sched_dict[1] = mod_sched_dict.pop(2)
     mod_sched_dict[1]["lr"] = 1e-06
     mod_sched_dict[2] = mod_sched_dict.pop(3)
     mod_sched_dict[2]["params"] = ["layer.0.*"]
-    epoch_only_sched = deepcopy(mod_sched_dict)
-    epoch_only_sched[1]["max_transition_epoch"] = 2
-    epoch_only_sched[2]["max_transition_epoch"] = 2
-    reinitlr_sched_dict[1]["new_lr_scheduler"] = {
-        "lr_scheduler_init": {
-            "class_path": "torch.optim.lr_scheduler.StepLR",
-            "init_args": {"step_size": 1, "gamma": 0.7, "verbose": True},
-        },
-        "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
-    }
-    reinitlr_sched_dict[2]["lr"] = 3.0e-06
-    reinitlr_sched_dict[2]["new_lr_scheduler"] = {
-        "lr_scheduler_init": {
-            "class_path": "torch.optim.lr_scheduler.CosineAnnealingWarmRestarts",
-            "init_args": {"T_0": 1, "T_mult": 2, "eta_min": 1.0e-07},
-        },
-        "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
-        "init_pg_lrs": [1.0e-06, 2.0e-06],
-    }
-    lambdalr_sched_dict[1]["new_lr_scheduler"] = {
-        "lr_scheduler_init": {
-            "class_path": "tests.helpers.boring_model.LinearWarmupLR",
-            "init_args": {"num_warmup_steps": 100, "num_training_steps": 1000},
-        },
-        "pl_lrs_cfg": {"interval": "step", "frequency": 1, "name": "Custom_Reinit_LR"},
-    }
-    lambdalr_sched_dict[2]["lr"] = 3.0e-06
-    lambdalr_sched_dict[2]["new_lr_scheduler"] = {
-        "lr_scheduler_init": {
-            "class_path": "tests.helpers.boring_model.LinearWarmupLR",
-            "init_args": {"num_warmup_steps": 100, "num_training_steps": 1000},
-        },
-        "pl_lrs_cfg": {"interval": "step", "frequency": 1, "name": "Custom_Reinit_LR"},
-        "init_pg_lrs": [1.0e-06, 2.0e-06],
-    }
-    rlrop_sched_dict[0]["max_transition_epoch"] = 4
-    rlrop_sched_dict[1]["max_transition_epoch"] = 8
-    rlrop_sched_dict[1]["new_lr_scheduler"] = {
-        "lr_scheduler_init": {
-            "class_path": "torch.optim.lr_scheduler.ReduceLROnPlateau",
-            "init_args": {"patience": 1, "min_lr": [2.0e-07, 1.0e-07]},
-        },
-        "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "monitor": "val_loss", "name": "Custom_Reinit_LR"},
-        "init_pg_lrs": [1.5e-06],
-    }
-    rlrop_sched_dict[2]["lr"] = 3.0e-06
-    rlrop_sched_dict[2]["max_transition_epoch"] = 10
-    rlrop_sched_dict[2]["new_lr_scheduler"] = {
-        "lr_scheduler_init": {
-            "class_path": "torch.optim.lr_scheduler.StepLR",
-            "init_args": {"step_size": 1, "gamma": 0.7, "verbose": True},
-        },
-        "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
-        "init_pg_lrs": [2.0e-06, 3.0e-06],
-    }
     fsdp_sched_dict = deepcopy(mod_sched_dict)
     fsdp_sched_dict[0]["params"] = ["layer.(4|2).*"]
-    fsdp_single_trans_sched_dict = deepcopy(fsdp_sched_dict)
-    fsdp_single_trans_sched_dict[0]["max_transition_epoch"] = 1
-    fsdp_single_trans_sched_dict[1]["params"] = ["layer.(1|0).*"]
-    del fsdp_single_trans_sched_dict[2]
-    fsdp_twotrans_sched_dict = deepcopy(fsdp_sched_dict)
-    fsdp_twotrans_sched_dict[0]["max_transition_epoch"] = 1
-    fsdp_twotrans_sched_dict[1]["params"] = ["layer.1.bias", "layer.1.weight"]
-    fsdp_twotrans_sched_dict[2]["params"] = ["layer.0.*"]
     fsdp_gen_sched_dict = deepcopy(fsdp_sched_dict)
     fsdp_gen_sched_dict[0]["params"] = ["layer.(7|5).*"]
     fsdp_gen_sched_dict[0]["max_transition_epoch"] = 1
@@ -146,29 +80,14 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     fsdp_bn_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_bn_gen_sched_dict[0]["params"] = ["layer.(8|[4-6]).*"]
     fsdp_bn_gen_sched_dict[1]["params"] = ["layer.[1-3].*"]
+    fsdp_shared_param_sched_dict = deepcopy(fsdp_gen_sched_dict)
+    fsdp_shared_param_sched_dict[0]["params"] = ["layer.(7|4).*", "layer.5.weight", "layer.5.bias"]
+    fsdp_shared_param_sched_dict[1]["params"] = ["layer.2.*", "layer.3.weight", "layer.3.bias"]
+    fsdp_shared_param_sched_dict[2]["params"] = ["layer.[0-1].*"]
     fsdp_nondis_mod_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_nondis_mod_sched_dict[1]["params"] = ["layer.[1-4].*", "layer.0.bias"]
     fsdp_nondis_mod_sched_dict[2]["params"] = ["layer.0.weight"]
-    fsdp_all_sched_dict = deepcopy(fsdp_sched_dict)
-    fsdp_all_sched_dict[0]["params"] = ["layer.*"]
-    fsdp_all_sched_dict[0]["max_transition_epoch"] = 1
-    for i in range(1, 3):
-        del fsdp_all_sched_dict[i]
-    return (
-        unmod_schedule_file,
-        mod_sched_dict,
-        epoch_only_sched,
-        reinitlr_sched_dict,
-        lambdalr_sched_dict,
-        rlrop_sched_dict,
-        fsdp_sched_dict,
-        fsdp_all_sched_dict,
-        fsdp_single_trans_sched_dict,
-        fsdp_twotrans_sched_dict,
-        fsdp_gen_sched_dict,
-        fsdp_nondis_mod_sched_dict,
-        fsdp_bn_gen_sched_dict,
-    )
+    return (fsdp_gen_sched_dict, fsdp_nondis_mod_sched_dict, fsdp_bn_gen_sched_dict, fsdp_shared_param_sched_dict)
 
 
 class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
@@ -180,7 +99,6 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
         self.outer_is_wrapped = outer_is_wrapped
         self.precision_key = precision_key
 
-        # self.layer: Optional[torch.nn.Module] = None
         self.layer = torch.nn.Sequential(
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
@@ -261,9 +179,14 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
         for i in self.fsdp_mask["wrapped_mods"]:
             assert isinstance(self.layer[i], FullyShardedDataParallel)
             if self.precision_key:
-                assert self.layer[i].mixed_precision.param_dtype == precision
-                assert self.layer[i].mixed_precision.reduce_dtype == precision
-                assert self.layer[i].mixed_precision.buffer_dtype == precision
+                if isinstance(self.layer[i].module, torch.nn.modules.batchnorm._BatchNorm):
+                    assert self.layer[i].mixed_precision.param_dtype is None
+                    assert self.layer[i].mixed_precision.reduce_dtype is None
+                    assert self.layer[i].mixed_precision.buffer_dtype is None
+                else:
+                    assert self.layer[i].mixed_precision.param_dtype == precision
+                    assert self.layer[i].mixed_precision.reduce_dtype == precision
+                    assert self.layer[i].mixed_precision.buffer_dtype == precision
 
 
 class FTSCsmFSDPModel(FTSBaseFSDPModel):
@@ -300,6 +223,25 @@ class FTSBatchNormFSDPModel(FTSBaseFSDPModel):
         return DataLoader(RandomDataset(32, 64), batch_size=2)
 
 
+class FTSSharedParamFSDPModel(FTSBaseFSDPModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.layer = torch.nn.Sequential(
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.ReLU(),
+            torch.nn.Linear(32, 2),
+        )
+        self.layer[4].weight = self.layer[5].weight
+        self.layer[4].bias = self.layer[5].bias
+        self.layer[3].weight = self.layer[1].weight
+        self.layer[3].bias = self.layer[1].bias
+
+
 class FSDPTestFinetuningScheduler(TestFinetuningScheduler):
     def state_dict(self) -> Dict[str, Any]:
         return super(TestFinetuningScheduler, self).state_dict()
@@ -325,15 +267,6 @@ def custom_auto_wrap_policy(
     min_num_params: int = int(1e8),
 ) -> bool:
     return unwrapped_params >= 67
-
-
-def aggressive_auto_wrap_policy(
-    module,
-    recurse,
-    unwrapped_params: int,
-    min_num_params: int = int(1e8),
-) -> bool:
-    return unwrapped_params >= 2
 
 
 def warn_custom_auto_wrap_policy(
@@ -364,7 +297,16 @@ def test_fsdp_custom_mixed_precision(tmpdir):
 
 
 EXPECTED_FSDP_FTS_RESULTS = {
-    "cust_auto_noprec": (
+    "default_awp_noprec": (
+        {
+            0: (2, 4),
+            1: (6, 12),
+            2: (7, 14),
+        },
+        "Because `fts_flex_awp`",
+        None,
+    ),
+    "override_csm_noprec": (
         {
             0: (2, 4),
             1: (6, 12),
@@ -373,23 +315,10 @@ EXPECTED_FSDP_FTS_RESULTS = {
         None,
         None,
     ),
-    "no_auto_noprec": (
-        {
-            0: (2, 4),
-            1: (6, 12),
-            2: (7, 14),
-        },
-        None,
-        None,
-    ),
-    "no_phase_constrain_auto": (None, None),  # TODO: add intrafit inspection and fix expected behavior
-    "warn_auto_noprec": (
-        ("Training an FSDP wrapped model requires",),
-        None,
-    ),  # TODO: add intrafit inspection and fix expected behavior
+    "non_disjoint_phase_fsdp_params": ({}, None, "do not have disjoint FSDP-flattened parameter"),
     "non_disjoint_phase_mods": ({}, None, "not have disjoint"),
     "no_fsdp_params_p0": ({}, None, "one or more FSDP"),
-    "cust_auto_prec": (
+    "cust_awp_prec": (
         {
             0: (2, 4),
             1: (6, 12),
@@ -398,7 +327,6 @@ EXPECTED_FSDP_FTS_RESULTS = {
         None,
         None,
     ),
-    "no_phase_constrain_auto_prec": (None, None),  # TODO: add intrafit inspection and fix expected behavior
     "batch_norm_auto_prec": (
         {
             0: (4, 8),
@@ -408,125 +336,124 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "Both mixed precision",
         None,
     ),
+    "shared_params_auto_prec": (
+        {
+            0: (2, 4),
+            1: (3, 6),
+            2: (5, 10),
+        },
+        "Pruning explicitly specified",
+        None,
+    ),
 }
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False, min_torch="1.12")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.12")
 @pytest.mark.parametrize(
     "model_cfg_key, model, auto_wrap_policy, use_precision, ft_sched_idx, fit_start_only, strategy_adapter_cfg,\
-         test_model_cfg",
+         test_model_cfg, test_fts_cfg",
     [
         (
-            "cust_auto_noprec",
+            "default_awp_noprec",
             FTSBaseFSDPModel,
             custom_auto_wrap_policy,
             False,
-            10,
+            0,
             False,
             None,
-            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
+            {"fsdp_mask": {"wrapped_mods": list(range(6)) + [7], "unwrapped_mods": []}},
+            None,
         ),
         (
-            "no_auto_noprec",
+            "override_csm_noprec",
             FTSCsmFSDPModel,
             None,
             False,
-            10,
+            0,
             False,
             None,
             {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
+            None,
         ),
-        # (
-        #     "no_phase_constrain_auto",
-        #     FTSBaseFSDPModel,
-        #     aggressive_auto_wrap_policy,
-        #     False,
-        #     10,
-        #     False,
-        #     {"phase_constrain_awp": False},
-        #     {"fsdp_mask": {"wrapped_mods": list(range(6)) + [7], "unwrapped_mods": []}, "outer_is_wrapped": False},
-        # ),
         (
-            "warn_auto_noprec",
+            "non_disjoint_phase_fsdp_params",
             FTSBaseFSDPModel,
             warn_custom_auto_wrap_policy,
             False,
-            10,
-            # True,
+            0,
             False,
-            None,
+            {"fts_flex_awp": False},
             {"fsdp_mask": {"wrapped_mods": [5], "unwrapped_mods": [i for i in list(range(8)) if i != 5]}},
+            None,
         ),
         (
             "non_disjoint_phase_mods",
             FTSCsmFSDPModel,
             None,
             False,
-            11,
+            1,
             False,
             None,
             {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
+            None,
         ),
         (
             "no_fsdp_params_p0",
             FTSCsmFSDPModel,
             None,
             False,
-            10,
+            0,
             False,
             None,
             {"fsdp_mask": {"wrapped_mods": list(range(5)), "unwrapped_mods": [5, 7]}},
+            None,
         ),
         (
-            "cust_auto_prec",
+            "cust_awp_prec",
             FTSBaseFSDPModel,
             custom_auto_wrap_policy,
             True,
-            10,
+            0,
             False,
+            {"fts_flex_awp": False},
+            {
+                "fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]},
+                "precision_key": "auto_16",
+            },
             None,
-            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "precision_key": "auto_16"},
         ),
-        # (
-        #     "no_phase_constrain_auto_prec",
-        #     FTSBaseFSDPModel,
-        #     custom_auto_wrap_policy,
-        #     True,
-        #     10,
-        #     False,
-        #     {"phase_constrain_awp": False},
-        #     {
-        #         "fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]},
-        #         "outer_is_wrapped": False,
-        #         "precision_key": "auto_16",
-        #     },
-        # ),
         (
             "batch_norm_auto_prec",
             FTSBatchNormFSDPModel,
             custom_auto_wrap_policy,
             True,
-            12,
+            2,
             False,
-            None,
+            {"fts_flex_awp": False},
             {"fsdp_mask": {"wrapped_mods": list(range(7)), "unwrapped_mods": [8]}, "precision_key": "auto_16"},
+            None,
         ),
-        # TODO: test with CPUOffload = False?
-        # TODO: test with provided size based policy (set to default?)
+        (
+            "shared_params_auto_prec",
+            FTSSharedParamFSDPModel,
+            custom_auto_wrap_policy,
+            True,
+            3,
+            False,
+            {"fts_flex_awp": False},
+            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "precision_key": "auto_16"},
+            None,
+        ),
     ],
     ids=[
-        "cust_auto_noprec",
-        "no_auto_noprec",
-        # "no_phase_constrain_auto",
-        "warn_auto_noprec",
+        "default_awp_noprec",
+        "override_csm_noprec",
+        "non_disjoint_phase_fsdp_params",
         "non_disjoint_phase_mods",
         "no_fsdp_params_p0",
-        "cust_auto_prec",
-        # "no_phase_constrain_auto_prec",
-        "batch_norm_auto_prec"
-        # "fts_size_auto_no_prec"
-        # "fts_user_auto_only_no_prec",
-        # "fts_cust_auto_prec"
+        "cust_awp_prec",
+        "batch_norm_auto_prec",
+        "shared_params_auto_prec",
     ],
 )
 def test_fsdp_native_multi_gpus(
@@ -541,17 +468,17 @@ def test_fsdp_native_multi_gpus(
     fit_start_only,
     strategy_adapter_cfg,
     test_model_cfg,
+    test_fts_cfg,
 ):
     """Test to ensure that checkpoint is saved correctly when using multiple GPUs, and all stages can be run."""
     fsdp_warns = FSDP_BASE_WARNS
     model_cfg = test_model_cfg or {}
+    additional_fts_cfg = test_fts_cfg or {}
     expected_state = EXPECTED_FSDP_FTS_RESULTS[model_cfg_key]
     warns_expected = expected_state[1]
     exception_expected = expected_state[2]
     seed_everything(42)
     model = model(**model_cfg)
-    # test_ignored = False
-    # ignored_modules = [model.layer[1]] if test_ignored else None
     fts_cls = FitStartOnlyFTS if fit_start_only else FSDPTestFinetuningScheduler
     callbacks = [
         fts_cls(
@@ -559,18 +486,14 @@ def test_fsdp_native_multi_gpus(
             logging_level=DEBUG,
             strategy_adapter_cfg=strategy_adapter_cfg,
             expected_state=expected_state[0],
+            **additional_fts_cfg,
         ),
         FTSEarlyStopping(monitor="val_loss", patience=1),
         FTSCheckpoint(monitor="val_loss", save_last=True, verbose=True),
     ]
-
-    # precision_config = MixedPrecision(reduce_dtype=torch.float16, param_dtype=torch.float16,
-    # buffer_dtype=torch.float16)
     strategy = DDPFullyShardedNativeStrategy(
         auto_wrap_policy=auto_wrap_policy,
         cpu_offload=CPUOffload(offload_params=True),
-        # ignored_modules=ignored_modules,
-        # mixed_precision=precision_config if use_precision else None
     )
     precision_opts = {"precision": 16} if use_precision else {}
     trainer = Trainer(
