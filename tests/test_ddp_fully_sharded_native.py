@@ -24,7 +24,6 @@ from pytorch_lightning.utilities.imports import _TORCH_GREATER_EQUAL_1_12
 from torch.utils.data import DataLoader
 
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
-from tests.helpers import BoringModel
 from tests.helpers.boring_model import RandomDataset, unexpected_warns, unmatched_warns
 from tests.helpers.runif import RunIf
 from tests.test_finetuning_scheduler_callback import (
@@ -36,13 +35,13 @@ from tests.test_finetuning_scheduler_callback import (
 )
 
 if _TORCH_GREATER_EQUAL_1_12:
-    from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload, FullyShardedDataParallel, MixedPrecision
+    from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload, FullyShardedDataParallel
     from torch.distributed.fsdp.wrap import wrap
 
 additional_fsdp_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
     "is still running",  # TODO: explicitly cleanup subprocess
-    "Deallocating Tensor that still",  # TODO: can be triggered by policy tracing, suppress or potentially open PR
+    # "Deallocating Tensor that still",  # TODO: can be triggered by policy tracing, suppress or potentially open PR
     "Please use torch.distributed.all_gather_into_tensor",  # can be removed once PyTorch stops using internally,
     "Please use torch.distributed.reduce_scatter_tensor",  # can be removed once PyTorch stops using internally,
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
@@ -278,24 +277,6 @@ def warn_custom_auto_wrap_policy(
     return unwrapped_params >= 1100
 
 
-@RunIf(min_torch="1.12", min_cuda_gpus=1)
-@pytest.mark.parametrize("precision, expected", [(16, torch.float16), ("bf16", torch.bfloat16)])
-def test_precision_plugin_config(precision, expected):
-    plugin = FullyShardedNativeNativeMixedPrecisionPlugin(precision=precision, device="cuda")
-    config = plugin.mixed_precision_config
-    assert config.param_dtype == expected
-    assert config.buffer_dtype == expected
-    assert config.reduce_dtype == expected
-
-
-@RunIf(min_torch="1.12")
-def test_fsdp_custom_mixed_precision(tmpdir):
-    """Test to ensure that passing a custom mixed precision config works."""
-    config = MixedPrecision()
-    strategy = DDPFullyShardedNativeStrategy(mixed_precision=config)
-    assert strategy.mixed_precision_config == config
-
-
 EXPECTED_FSDP_FTS_RESULTS = {
     "default_awp_noprec": (
         {
@@ -527,25 +508,3 @@ def test_fsdp_native_multi_gpus(
         # ensure no unexpected warnings detected
         unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=fsdp_warns)
         assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
-
-
-@RunIf(min_cuda_gpus=1, skip_windows=True, standalone=True, min_torch="1.12")
-def test_invalid_parameters_in_optimizer(tmpdir):
-    trainer = Trainer(strategy="fsdp_native", accelerator="cuda", devices=1)
-
-    class EmptyParametersModel(BoringModel):
-        def configure_optimizers(self):
-            return torch.optim.Adam(self.parameters(), lr=1e-2)
-
-    model = EmptyParametersModel()
-    with pytest.raises(ValueError, match="The optimizer does not seem to reference any FSDP parameters"):
-        trainer.fit(model)
-
-    class NoFlatParametersModel(BoringModel):
-        def configure_optimizers(self):
-            layer = torch.nn.Linear(4, 5)
-            return torch.optim.Adam(layer.parameters(), lr=1e-2)
-
-    model = NoFlatParametersModel()
-    with pytest.raises(ValueError, match="The optimizer does not seem to reference any FSDP parameters"):
-        trainer.fit(model)
