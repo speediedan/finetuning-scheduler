@@ -42,6 +42,7 @@ from pytorch_lightning.callbacks.lr_monitor import LearningRateMonitor
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.core.optimizer import _MockOptimizer
 from pytorch_lightning.trainer.states import TrainerFn
+from pytorch_lightning.utilities import find_shared_parameters
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.imports import _TORCH_GREATER_EQUAL_1_10
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
@@ -525,9 +526,11 @@ class ScheduleParsingMixin(ABC):
         self._validate_schedule_keys()
         self._validate_lr_scheduler_cfg()
         named_params = dict(self.pl_module.named_parameters()).keys()
+        model_shared_params = find_shared_parameters(self.pl_module)
+        msp_ref = tuple((model_shared_params, set(itertools.chain(*model_shared_params))))
         for depth in self.ft_schedule.keys():  # type: ignore[union-attr]
             max_phase = max(max_phase, depth)
-            self._parse_phase(depth, named_params)
+            self._parse_phase(depth, named_params, msp_ref)
             if depth > 0:
                 assert isinstance(self.ft_schedule, Dict)
                 curr_max_epoch = self.ft_schedule[depth]["max_transition_epoch"]
@@ -799,12 +802,16 @@ class ScheduleParsingMixin(ABC):
                 )
                 del self.ft_schedule[depth]["lr"]
 
-    def _parse_phase(self, depth: int, named_params: KeysView) -> None:
-        """Expand any regex expressions specified in an ft_schedule phase to fully qualified parameter names.
+    def _parse_phase(self, depth: int, named_params: KeysView, shared_params: Tuple) -> None:
+        """Expand any regex expressions specified in an ft_schedule phase to fully qualified parameter names. If
+        any shared parameter copies are explicitly specified in the schedule, the copies will be pruned from the
+        schedule with a warning.
 
         Args:
             depth (int): Schedule depth/phase to parse
             named_params (KeysView): The named parameters of the model
+            shared_params (Tuple): A tuple containing the shared parameter names of the current model in both
+                associative list and set forms.
 
         Raises:
             MisconfigurationException: If a specified parameter or regex does not resolve to at least one parameter.
@@ -825,11 +832,19 @@ class ScheduleParsingMixin(ABC):
                 regex_params = [n for n in named_params if ppat.match(n)]
                 resolved_params.extend(regex_params)
             if not (regex_params or explicit_params):
-                raise MisconfigurationException(
-                    f"The parameter or regex '{p}' specified in phase {depth} of the "
-                    "provided explicit schedule did not match any named parameter in the "
-                    "model."
-                )
+                if p in shared_params[1]:
+                    pruning_param_msg = (
+                        f"Pruning explicitly specified shared parameter {p} from provided schedule (it will be thawed "
+                        f" when its registered source parameter {[pl[0] for pl in shared_params[0] if p in pl][0]} is"
+                        " thawed."
+                    )
+                    rank_zero_warn(pruning_param_msg)
+                else:
+                    raise MisconfigurationException(
+                        f"The parameter or regex '{p}' specified in phase {depth} of the "
+                        "provided explicit schedule did not match any named parameter in the "
+                        "model."
+                    )
         self.ft_schedule[depth]["params"] = resolved_params
 
     def _validate_phases_disjoint(self) -> None:
