@@ -1,0 +1,17 @@
+0:
+  params:
+  - model.classifier.bias
+  - model.classifier.weight
+1:
+  params:
+  - model.pooler.dense.bias
+  - model.pooler.dense.weight
+2:
+  params:
+  - model.deberta.encoder.LayerNorm.bias
+  - model.deberta.encoder.LayerNorm.weight
+  - model.deberta.encoder.rel_embeddings.weight
+  - model.deberta.encoder.layer.{0,11}.(output|attention|intermediate).*
+  - model.deberta.embeddings.LayerNorm.bias
+  - model.deberta.embeddings.LayerNorm.weight
+  - model.deberta.embeddings.word_embeddings.weight

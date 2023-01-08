@@ -1,0 +1,76 @@
+data:
+  class_path: fts_examples.fts_fsdp_superglue.RteBoolqDataModule
+  init_args:
+    model_name_or_path: microsoft/deberta-v3-base
+    task_name: rte
+    tokenizers_parallelism: false
+    max_seq_length: 128
+    train_batch_size: 16
+    eval_batch_size: 16
+model:
+  class_path: fts_examples.fts_fsdp_superglue.RteBoolqModule
+  init_args:
+    optimizer_init:
+      class_path: torch.optim.AdamW
+      init_args:
+        weight_decay: 1.0e-05
+        eps: 1.0e-07
+        lr: 1.0e-05
+    lr_scheduler_init:
+      class_path: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+      init_args:
+        T_0: 1
+        T_mult: 2
+        eta_min: 1.0e-07
+    pl_lrs_cfg:
+      interval: epoch
+      frequency: 1
+      name: CosineAnnealingWithWarmRestartsLR
+trainer:
+  limit_train_batches: 7
+  max_epochs: 2
+  devices: 2
+  callbacks:
+  - class_path: finetuning_scheduler.FinetuningScheduler
+    init_args:
+      ft_schedule: ./src/fts_examples/config/RteBoolqModule_ft_schedule_deberta_base_fsdp.yaml
+      max_depth: 1
+      strategy_adapter_cfg:
+        awp_overrides: ["model.pooler.dense", "model.classifier"]
+  - class_path: finetuning_scheduler.FTSCheckpoint
+    init_args:
+      save_top_k: 1
+      monitor: val_loss
+      verbose: true
+  - class_path: finetuning_scheduler.FTSEarlyStopping
+    init_args:
+      monitor: val_loss
+      min_delta: 0.001
+      patience: 2 # limited patience for example
+      verbose: false
+      mode: min
+  logger:
+    class_path: pytorch_lightning.loggers.TensorBoardLogger
+    init_args:
+      save_dir: lightning_logs
+      name: fts_fsdp_awp_override_profile
+  profiler:
+    class_path: pytorch_lightning.profilers.pytorch.PyTorchProfiler
+    init_args:
+      filename: fts_fsdp_awp_text_profile
+    dict_kwargs:
+      use_cuda: true
+      with_stack: true
+      profile_memory: true
+      record_shapes: true
+      row_limit: 50
+      export_to_flame_graph: true
+      metric: self_cuda_time_total
+  strategy:
+    class_path: pytorch_lightning.strategies.DDPFullyShardedNativeStrategy
+    init_args:
+      cpu_offload:
+        class_path: torch.distributed.fsdp.fully_sharded_data_parallel.CPUOffload
+        init_args:
+          offload_params: False
+      auto_wrap_policy: fts_examples.fts_fsdp_superglue.deberta_awp

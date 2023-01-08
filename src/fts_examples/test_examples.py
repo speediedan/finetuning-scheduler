@@ -53,6 +53,7 @@ if Version(torch_version) < Version(MAX_VERSION_WARNS):
 else:
     EXPECTED_WARNS.extend(EXPECTED_VERSION_WARNS[MAX_VERSION_WARNS])
 ADV_EXPECTED_WARNS = EXPECTED_WARNS + ["Found an `init_pg_lrs` key"]
+FSDP_EXPECTED_WARNS = EXPECTED_WARNS + ["is still running", "Please use torch.distributed."]
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")

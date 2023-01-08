@@ -391,6 +391,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert self.pl_module.trainer.state.fn is not None
         if self.pl_module.trainer.state.fn == TrainerFn.FITTING:
             try:
+                # enable strategy adapters to restore optimizer if Strategy.lightning_restore_optimizer is overridden
+                self.strategy_adapter.on_before_restore_optimizers_and_lrs()
                 # restore optimizers and schedulers state
                 checkpoint_connector.restore_optimizers_and_schedulers()
             except KeyError:

@@ -19,6 +19,7 @@ Base adapter class to extend Fine-Tuning Scheduler support of complex or custom 
 from typing import Callable, List, Optional, Tuple
 
 from pytorch_lightning.callbacks import Callback
+from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
 from torch.nn import Module
 
@@ -30,10 +31,23 @@ class StrategyAdapter:
         self,
     ) -> None:
         self.fts_handle: Callback
+        self.fts_restore_optimizer: bool = False
         self.exec_ft_phase = StrategyAdapter.base_ft_phase
 
     def connect(self, fts_parent: Callback) -> None:
         self.fts_handle = fts_parent
+
+    @property
+    def pls_handle(self) -> Strategy:
+        return self.fts_handle.pl_module._trainer.strategy
+
+    @property
+    def lightning_restore_optimizer(self) -> bool:
+        """Override to disable Lightning restoring optimizers/schedulers.
+
+        This is useful for plugins which manage restoring optimizers/schedulers.
+        """
+        return True
 
     def on_before_init_fts(self) -> None:
         """Hook executed in Fine-Tuning Scheduler setup immediately before `init_fts`"""
@@ -48,6 +62,10 @@ class StrategyAdapter:
 
     def on_before_fts_fit_start(self) -> None:
         """_summary_"""
+        pass
+
+    def on_before_restore_optimizers_and_lrs(self) -> None:
+        """summary."""
         pass
 
     def fts_optim_view(self, orig_pl: List) -> List:
