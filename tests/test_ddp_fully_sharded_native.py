@@ -86,6 +86,10 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     fsdp_nondis_mod_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_nondis_mod_sched_dict[1]["params"] = ["layer.[1-4].*", "layer.0.bias"]
     fsdp_nondis_mod_sched_dict[2]["params"] = ["layer.0.weight"]
+    fsdp_nondis_mod_ex_sched_dict = deepcopy(fsdp_gen_sched_dict)
+    fsdp_nondis_mod_ex_sched_dict[1]["params"] = ["layer.[2-4].*"]
+    del fsdp_nondis_mod_ex_sched_dict[1]["max_transition_epoch"]
+    del fsdp_nondis_mod_ex_sched_dict[2]
     fsdp_adam_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_adam_gen_sched_dict[0]["max_transition_epoch"] = 2
     fsdp_adam_gen_sched_dict[1]["max_transition_epoch"] = 4
@@ -95,6 +99,7 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
         fsdp_bn_gen_sched_dict,
         fsdp_shared_param_sched_dict,
         fsdp_adam_gen_sched_dict,
+        fsdp_nondis_mod_ex_sched_dict,
     )
 
 
@@ -366,6 +371,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
     ),
     "non_disjoint_phase_fsdp_params": ({}, None, "do not have disjoint FSDP-flattened parameter"),
     "non_disjoint_phase_mods": ({}, None, "not have disjoint"),
+    "non_disjoint_excluded_phase_mod": ({}, None, "parameters not included in"),
     "no_fsdp_params_p0": ({}, None, "one or more FSDP"),
     "unmatched_awp_overrides": ({}, None, "did not match any named modules"),
     "cust_awp_prec": (
@@ -481,6 +487,18 @@ EXPECTED_FSDP_FTS_RESULTS = {
             None,
         ),
         (
+            "non_disjoint_excluded_phase_mod",
+            FTSCsmFSDPModel,
+            None,
+            False,
+            5,
+            False,
+            None,
+            {"fsdp_mask": {"wrapped_mods": [2, 3, 4, 5], "unwrapped_mods": [0, 1, 7]}},
+            None,
+            None,
+        ),
+        (
             "no_fsdp_params_p0",
             FTSCsmFSDPModel,
             None,
@@ -576,6 +594,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "override_csm_noprec",
         "non_disjoint_phase_fsdp_params",
         "non_disjoint_phase_mods",
+        "non_disjoint_excluded_phase_mod",
         "no_fsdp_params_p0",
         "unmatched_awp_overrides",
         "cust_awp_prec",

@@ -21,6 +21,7 @@ import os
 import re
 from collections import Counter
 from contextlib import contextmanager
+from copy import deepcopy
 from functools import partial, wraps
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
 
@@ -66,6 +67,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         self._fsdp_flat_to_unflat_mapping: Dict
         self._fsdp_unflat_to_flat_mapping: Dict
         self._ft_schedule_module_map: Dict
+        self._unscheduled_params: List
         self._min_wrap_validated: bool = False
         self.exec_ft_phase = partial(StrategyAdapter.base_ft_phase, translation_func=self.logical_param_translation)
 
@@ -174,16 +176,19 @@ class FSDPStrategyAdapter(StrategyAdapter):
         dup_elems = set(elems.elements())
         return dup_elems
 
-    def _phase_unaligned_fsdp_params(self) -> Set:
+    def _phase_unaligned_fsdp_params(self, check_unsched: bool = False) -> Set:
         fsdp_param_sets: dict = {}
-        for d, pl in self.fts_handle.ft_schedule.items():
+        inspection_map = deepcopy(self.fts_handle.ft_schedule)
+        if check_unsched:
+            inspection_map[-1] = {"params": self._unscheduled_params}
+        for d, pl in inspection_map.items():
             fsdp_param_sets[d] = set()
             for lp in pl["params"]:
                 fsdp_param_sets[d].update(self._fsdp_flat_to_unflat_mapping[self._fsdp_unflat_to_flat_mapping[lp]])
         fsdp_phase_lists = [list(fsdp_param_sets[d]) for d in fsdp_param_sets.keys()]
         return FSDPStrategyAdapter._phasewise_intersection(fsdp_phase_lists)
 
-    def _fsdp_param_phase_overlap_feedback(self, dup_params: Set) -> str:
+    def _fsdp_param_phase_overlap_feedback(self, dup_params: Set, unsched_msg: bool = False) -> str:
         def get_fsdp_owner(lp: str) -> str:
             owner = "no owner found"
             for fsdp_mod in FullyShardedDataParallel.fsdp_modules(self.pl_module):
@@ -193,15 +198,22 @@ class FSDPStrategyAdapter(StrategyAdapter):
             return owner
 
         dup_params_fsdp_mapping = {lp: get_fsdp_owner(lp) for lp in dup_params}
+        unsched_param_msg = (
+            "In this particular case, there are parameters not included in your fine-tuning schedule that span one or"
+            " more fine-tuning phases. HINT: parameters associated with unwrapped modules will be included in the"
+            " top-level (aka 'root') FSDP instance so ensuring all modules associated with fine-tuning scheduled"
+            " parameters are wrapped separately from the top-level FSDP instance may avoid triggering this exception."
+        )
         warn_msg = (
             "Fine-tuning schedule phases do not have disjoint FSDP-flattened parameter sets. Because the"
             " `requires_grad` attribute of FSDP-flattened parameters currently must be the same for all flattened"
             " parameters, fine-tuning schedules must avoid thawing parameters in the same FSDP-flattened parameter in"
-            " different phases. Please either ensure parameters associated with each phase are wrapped in separate"
-            " phase-aligned FSDP instances."
-            " The following logical parameters are associated with an FSDP-flattened parameter that spans one or more"
-            " fine-tuning phases. The mapping of each logical parameter and a representation of its associated FSDP"
-            " instance is provided below:"
+            " different phases. Please ensure parameters associated with each phase are wrapped in separate"
+            " phase-aligned FSDP instances.\n\n"
+            f"""{unsched_param_msg if unsched_msg else ''}\n\n"""
+            "The following logical parameters are associated with an FSDP-flattened parameter that spans one or more"
+            " fine-tuning phases. The mapping of each logical parameter and the module name wrapped by its associated"
+            " FSDP instance is provided below:"
             f" {os.linesep}{dup_params_fsdp_mapping}"
         )
         return warn_msg
@@ -236,14 +248,21 @@ class FSDPStrategyAdapter(StrategyAdapter):
         Raises:
             MisconfigurationException: Provides a list of the parameters specified in more than one phase.
         """
-        mod_phase_lists = [list(self._ft_schedule_module_map[d]) for d in self._ft_schedule_module_map.keys()]
-        ft_sched_dup_mods = FSDPStrategyAdapter._phasewise_intersection(mod_phase_lists)
+        scheduled_mod_lists = [list(self._ft_schedule_module_map[d]) for d in self._ft_schedule_module_map.keys()]
+        ft_sched_dup_mods = FSDPStrategyAdapter._phasewise_intersection(scheduled_mod_lists)
         fsdp_dup_params = self._phase_unaligned_fsdp_params()
+        unsched_dup_params = self._phase_unaligned_fsdp_params(check_unsched=True)
         fsdp_feedback_msgs = []
         if ft_sched_dup_mods:
             fsdp_feedback_msgs.append(self._module_overlap_feedback(ft_sched_dup_mods))
-        if fsdp_dup_params:
-            fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(fsdp_dup_params))
+        if fsdp_dup_params or unsched_dup_params:
+            # conditionally emphasize the presence of parameters not included in the fine-tuning schedule
+            if unsched_dup_params:
+                fsdp_feedback_msgs.append(
+                    self._fsdp_param_phase_overlap_feedback(unsched_msg=True, dup_params=unsched_dup_params)
+                )
+            else:
+                fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(fsdp_dup_params))
         return tuple(fsdp_feedback_msgs)
 
     def _fts_auto_configure_sharded_model(self) -> None:
@@ -270,6 +289,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def _wrapped_configure_sharded_model(self, csm_func: Callable) -> Callable:
         @wraps(csm_func)
         def wrapped_func() -> None:
+            self._gen_ft_sched_module_map()
             csm_func()
             self._after_configure_sharded_model()
 
@@ -289,8 +309,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
         self._fsdp_unflat_to_flat_mapping = {
             up: fpn for fpn, upl in self._fsdp_flat_to_unflat_mapping.items() for up in upl
         }
-        if not hasattr(self, "_ft_schedule_module_map"):
-            self._gen_ft_sched_module_map()
 
     def _validate_min_wrap_condition(self) -> Optional[str]:
         wrapped_statuses = []
@@ -319,6 +337,13 @@ class FSDPStrategyAdapter(StrategyAdapter):
                     raise AttributeError(mod._get_name() + " has no attribute `" + param_name + "`")
                 module_map[depth].add(module_path)
         self._ft_schedule_module_map = module_map
+        scheduled_mods = list(set().union(*module_map.values()))
+        unscheduled_mods = tuple(
+            n for n, m in self.pl_module.named_modules() if n not in scheduled_mods and m._parameters
+        )
+        self._unscheduled_params = [
+            f"{m}.{n}" for m in unscheduled_mods for n, _ in self.pl_module.get_submodule(m).named_parameters()
+        ]
 
     def get_wrapped_name_from_unwrapped(self, unwrapped_name: str) -> str:
         for n, m in self.pl_module.named_modules():
