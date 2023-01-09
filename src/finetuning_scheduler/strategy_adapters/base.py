@@ -18,6 +18,7 @@ Base adapter class to extend Fine-Tuning Scheduler support of complex or custom 
 """
 from typing import Callable, List, Optional, Tuple
 
+from pytorch_lightning import LightningModule
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
@@ -38,8 +39,13 @@ class StrategyAdapter:
         self.fts_handle = fts_parent
 
     @property
+    def pl_module(self) -> LightningModule:
+        return self.fts_handle.pl_module
+
+    @property
     def pls_handle(self) -> Strategy:
-        return self.fts_handle.pl_module._trainer.strategy
+        assert self.pl_module._trainer is not None
+        return self.pl_module._trainer.strategy
 
     @property
     def lightning_restore_optimizer(self) -> bool:
@@ -55,7 +61,7 @@ class StrategyAdapter:
     def on_after_init_fts(self) -> None:
         """Hook executed in Fine-Tuning Scheduler setup immediately after `init_fts`"""
         _, self.fts_handle._fts_state._curr_thawed_params = self.exec_ft_phase(
-            self.fts_handle.pl_module,
+            self.pl_module,
             thaw_pl=self.fts_optim_view(self.fts_handle.ft_schedule[0]["params"]),
             init_thaw=True,
         )

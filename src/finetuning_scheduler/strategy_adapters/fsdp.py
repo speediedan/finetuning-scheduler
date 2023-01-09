@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
 
 import torch
 from lightning_lite.utilities import rank_zero_info, rank_zero_warn
-from pytorch_lightning import LightningModule, Trainer
+from pytorch_lightning import Trainer
 from pytorch_lightning.strategies.fully_sharded_native import _fsdp_available
 from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.trainer.connectors.checkpoint_connector import CheckpointConnector
@@ -70,10 +70,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
         self.exec_ft_phase = partial(StrategyAdapter.base_ft_phase, translation_func=self.logical_param_translation)
 
     @property
-    def pl_module(self) -> LightningModule:
-        return self.fts_handle.pl_module
-
-    @property
     def lightning_restore_optimizer(self) -> bool:
         return False
 
@@ -83,7 +79,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         setattr(Strategy, "lightning_restore_optimizer", self.lightning_restore_optimizer)
         if self.awp_overrides:
             self._validate_awp_overrides()
-        if is_overridden("configure_sharded_model", self.fts_handle.pl_module):
+        if is_overridden("configure_sharded_model", self.pl_module):
             rank_zero_info(
                 "You have overridden the `LightningModule.configure_sharded_model` hook. Fine-Tuning Scheduler"
                 " will validate that you have wrapped the provided model in a manner that aligns with the"
@@ -92,10 +88,10 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 " policy, avoid overriding `configure_sharded_model` in your module and provide the desired"
                 " auto wrap policy."
             )
-            csm_func = self._wrapped_configure_sharded_model(self.fts_handle.pl_module.configure_sharded_model)
-            setattr(self.fts_handle.pl_module, "configure_sharded_model", csm_func)
+            csm_func = self._wrapped_configure_sharded_model(self.pl_module.configure_sharded_model)
+            setattr(self.pl_module, "configure_sharded_model", csm_func)
         else:
-            setattr(self.fts_handle.pl_module, "configure_sharded_model", self._fts_auto_configure_sharded_model)
+            setattr(self.pl_module, "configure_sharded_model", self._fts_auto_configure_sharded_model)
 
     def on_after_init_fts(self) -> None:
         """Override this hook for FSDP to defer first ft schedule phase initialization until after model
@@ -108,7 +104,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
     def on_before_restore_optimizers_and_lrs(self) -> None:
         """summary."""
-        checkpoint_connector = self.fts_handle.pl_module.trainer._checkpoint_connector
+        checkpoint_connector = self.pl_module.trainer._checkpoint_connector
         if not checkpoint_connector._loaded_checkpoint:
             return
 
@@ -127,11 +123,11 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
     def fsdp_param_transform(self, orig_thaw_pl: List) -> List:
         flat_next_tl = {self._fsdp_unflat_to_flat_mapping[p] for p in orig_thaw_pl}
-        return [n for n, p in self.fts_handle.pl_module.named_parameters() if p in flat_next_tl]
+        return [n for n, p in self.pl_module.named_parameters() if p in flat_next_tl]
 
     def logical_param_translation(self, param_names: List) -> List:
         logical_param_names = []
-        for n, p in self.fts_handle.pl_module.named_parameters():
+        for n, p in self.pl_module.named_parameters():
             if n in param_names:
                 if self._fsdp_flat_to_unflat_mapping.get(p):
                     logical_param_names.extend(self._fsdp_flat_to_unflat_mapping[p])
@@ -190,7 +186,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def _fsdp_param_phase_overlap_feedback(self, dup_params: Set) -> str:
         def get_fsdp_owner(lp: str) -> str:
             owner = "no owner found"
-            for fsdp_mod in FullyShardedDataParallel.fsdp_modules(self.fts_handle.pl_module):
+            for fsdp_mod in FullyShardedDataParallel.fsdp_modules(self.pl_module):
                 for p in fsdp_mod.params:
                     if self._fsdp_unflat_to_flat_mapping[lp] is p:
                         owner = fsdp_mod.module._get_name()
@@ -215,10 +211,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         dup_mod_dict = {
             m: list(
                 itertools.chain(
-                    *[
-                        self._fsdp_flat_to_unflat_mapping[p]
-                        for p in self.fts_handle.pl_module.get_submodule(m).parameters()
-                    ]
+                    *[self._fsdp_flat_to_unflat_mapping[p] for p in self.pl_module.get_submodule(m).parameters()]
                 )
             )
             for m in dup_mods
@@ -254,7 +247,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         return tuple(fsdp_feedback_msgs)
 
     def _fts_auto_configure_sharded_model(self) -> None:
-        for m in self.fts_handle.pl_module.modules():
+        for m in self.pl_module.modules():
             # if the model is already wrapped with FSDP, tracing with auto-policy would fail
             if isinstance(m, FullyShardedDataParallel):
                 raise MisconfigurationException(
@@ -269,7 +262,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         assert isinstance(self.fts_handle.ft_schedule, Dict)  # TODO: move/consolidate ft_schedule assertions
         self._init_fsdp_param_map()
         _, self.fts_handle._fts_state._curr_thawed_params = self.exec_ft_phase(
-            self.fts_handle.pl_module,
+            self.pl_module,
             thaw_pl=self.fts_optim_view(self.fts_handle.ft_schedule[0]["params"]),
             init_thaw=True,
         )
@@ -292,7 +285,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
     def _init_fsdp_param_map(self) -> None:
         # TODO: make weakrefs?
-        self._fsdp_flat_to_unflat_mapping = _get_param_to_unflat_param_names(self.fts_handle.pl_module)
+        self._fsdp_flat_to_unflat_mapping = _get_param_to_unflat_param_names(self.pl_module)
         self._fsdp_unflat_to_flat_mapping = {
             up: fpn for fpn, upl in self._fsdp_flat_to_unflat_mapping.items() for up in upl
         }
@@ -302,7 +295,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def _validate_min_wrap_condition(self) -> Optional[str]:
         wrapped_statuses = []
         for m in self._ft_schedule_module_map[0]:
-            is_wrapped = isinstance(self.fts_handle.pl_module.get_submodule(m), FullyShardedDataParallel)
+            is_wrapped = isinstance(self.pl_module.get_submodule(m), FullyShardedDataParallel)
             wrapped_statuses.append(is_wrapped)
         if not any(wrapped_statuses):
             fts_p0_err = (
@@ -321,21 +314,21 @@ class FSDPStrategyAdapter(StrategyAdapter):
             module_map[depth] = set()
             for p in phase_params:
                 module_path, _, param_name = p.rpartition(".")
-                mod: torch.nn.Module = self.fts_handle.pl_module.get_submodule(module_path)
+                mod: torch.nn.Module = self.pl_module.get_submodule(module_path)
                 if not hasattr(mod, param_name):
                     raise AttributeError(mod._get_name() + " has no attribute `" + param_name + "`")
                 module_map[depth].add(module_path)
         self._ft_schedule_module_map = module_map
 
     def get_wrapped_name_from_unwrapped(self, unwrapped_name: str) -> str:
-        for n, m in self.fts_handle.pl_module.named_modules():
-            if self.fts_handle.pl_module.get_submodule(unwrapped_name) is m:
+        for n, m in self.pl_module.named_modules():
+            if self.pl_module.get_submodule(unwrapped_name) is m:
                 return n
         raise MisconfigurationException(f"Module {unwrapped_name} was not found and so cannot be explicitly wrapped.")
 
     def _apply_awp_overrides(self) -> None:
         for om in self.awp_overrides:
-            if isinstance(self.fts_handle.pl_module.get_submodule(om), FullyShardedDataParallel):
+            if isinstance(self.pl_module.get_submodule(om), FullyShardedDataParallel):
                 rank_zero_warn(
                     f"You specified a module ({om}) in `awp_overrides` that the provided `auto_wrap_policy`"
                     f" ({_ConfigAutoWrap.kwargs['auto_wrap_policy'].__name__}) has already wrapped. Skipping manual"
@@ -347,8 +340,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
                     setattr(self.pl_module.get_submodule(pn), cn, wrap(self.pl_module.get_submodule(om)))
 
     def _fts_auto_wrap(self) -> None:
-        for n, m in self.fts_handle.pl_module.named_children():
-            setattr(self.fts_handle.pl_module, n, wrap(m))
+        for n, m in self.pl_module.named_children():
+            setattr(self.pl_module, n, wrap(m))
         if self.awp_overrides:
             self._apply_awp_overrides()
 
