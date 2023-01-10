@@ -255,6 +255,12 @@ class FTSCsmFSDPModel(FTSBaseFSDPModel):
         self.layer = wrap(self.layer)
 
 
+class FTSNoDecayFSDPModel(FTSBaseFSDPModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.no_decay = ["bias"]
+
+
 class FTSCsmAdamFSDPModel(FTSBaseFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -371,8 +377,9 @@ EXPECTED_FSDP_FTS_RESULTS = {
     ),
     "non_disjoint_phase_fsdp_params": ({}, None, "do not have disjoint FSDP-flattened parameter"),
     "non_disjoint_phase_mods": ({}, None, "not have disjoint"),
-    "non_disjoint_excluded_phase_mod": ({}, None, "parameters not included in"),
+    "non_disjoint_excluded_ft_params": ({}, None, "parameters not included in"),
     "no_fsdp_params_p0": ({}, None, "one or more FSDP"),
+    "warn_unsupp_nodecay": ({}, "will now be unset", None),
     "unmatched_awp_overrides": ({}, None, "did not match any named modules"),
     "cust_awp_prec": (
         {
@@ -487,7 +494,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             None,
         ),
         (
-            "non_disjoint_excluded_phase_mod",
+            "non_disjoint_excluded_ft_params",
             FTSCsmFSDPModel,
             None,
             False,
@@ -507,6 +514,18 @@ EXPECTED_FSDP_FTS_RESULTS = {
             False,
             None,
             {"fsdp_mask": {"wrapped_mods": list(range(5)), "unwrapped_mods": [5, 7]}},
+            None,
+            None,
+        ),
+        (
+            "warn_unsupp_nodecay",
+            FTSNoDecayFSDPModel,
+            custom_auto_wrap_policy,
+            False,
+            0,
+            False,
+            None,
+            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
             None,
             None,
         ),
@@ -594,8 +613,9 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "override_csm_noprec",
         "non_disjoint_phase_fsdp_params",
         "non_disjoint_phase_mods",
-        "non_disjoint_excluded_phase_mod",
+        "non_disjoint_excluded_ft_params",
         "no_fsdp_params_p0",
+        "warn_unsupp_nodecay",
         "unmatched_awp_overrides",
         "cust_awp_prec",
         "batch_norm_auto_prec",
@@ -620,12 +640,11 @@ def test_fsdp_native_multi_gpus(
     extra_trainer_cfg,
 ):
     """Test to ensure that checkpoint is saved correctly when using multiple GPUs, and all stages can be run."""
-    fsdp_warns = FSDP_BASE_WARNS
     model_cfg = test_model_cfg or {}
-    additional_fts_cfg = test_fts_cfg or {}
-    additional_trainer_cfg = extra_trainer_cfg or {"max_epochs": 3}
     expected_state = EXPECTED_FSDP_FTS_RESULTS[model_cfg_key]
     warns_expected = expected_state[1]
+    additional_fts_cfg = test_fts_cfg or {}
+    additional_trainer_cfg = extra_trainer_cfg or {"max_epochs": 3}
     exception_expected = expected_state[2]
     seed_everything(42)
     model = model_cls(**model_cfg)
@@ -669,13 +688,7 @@ def test_fsdp_native_multi_gpus(
         assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
     if trainer.is_global_zero:
-        if warns_expected:
-            unmatched = unmatched_warns(rec_warns=recwarn.list, expected_warns=warns_expected)
-            assert not unmatched
-            fsdp_warns.extend(warns_expected)
-        # ensure no unexpected warnings detected
-        unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=fsdp_warns)
-        assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
+        check_fts_fsdp_warns(warns_expected, recwarn)
 
 
 @RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.12")
@@ -704,7 +717,6 @@ def test_fsdp_native_multi_gpus_resume(
     test_model_cfg,
 ):
     """Test to ensure that checkpoint is saved correctly when using multiple GPUs, and all stages can be run."""
-    fsdp_warns = FSDP_BASE_WARNS
     model_cfg = test_model_cfg or {}
     expected_state = EXPECTED_FSDP_FTS_RESULTS[model_cfg_key]
     warns_expected = expected_state[1]
@@ -733,10 +745,15 @@ def test_fsdp_native_multi_gpus_resume(
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
     if trainer.is_global_zero:
-        if warns_expected:
-            unmatched = unmatched_warns(rec_warns=recwarn.list, expected_warns=warns_expected)
-            assert not unmatched
-            fsdp_warns.extend(warns_expected)
-        # ensure no unexpected warnings detected
-        unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=fsdp_warns)
-        assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
+        check_fts_fsdp_warns(warns_expected, recwarn)
+
+
+def check_fts_fsdp_warns(warns_expected, recwarn):
+    fsdp_warns = FSDP_BASE_WARNS
+    if warns_expected:
+        unmatched = unmatched_warns(rec_warns=recwarn.list, expected_warns=warns_expected)
+        assert not unmatched
+        fsdp_warns.extend(warns_expected)
+    # ensure no unexpected warnings detected
+    unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=fsdp_warns)
+    assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)

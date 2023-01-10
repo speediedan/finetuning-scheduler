@@ -56,6 +56,11 @@ class FSDPStrategyAdapter(StrategyAdapter):
         StrategyAdapter (_type_): _description_
     """
 
+    _fsdp_flat_to_unflat_mapping: Dict
+    _fsdp_unflat_to_flat_mapping: Dict
+    _ft_schedule_module_map: Dict
+    _unscheduled_params: List
+
     def __init__(self, awp_overrides: Optional[List] = None, *args: Any, **kwargs: Any) -> None:
         """_summary_
 
@@ -64,10 +69,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         super().__init__(*args, **kwargs)
         self.awp_overrides = awp_overrides or []
-        self._fsdp_flat_to_unflat_mapping: Dict
-        self._fsdp_unflat_to_flat_mapping: Dict
-        self._ft_schedule_module_map: Dict
-        self._unscheduled_params: List
         self._min_wrap_validated: bool = False
         self.exec_ft_phase = partial(StrategyAdapter.base_ft_phase, translation_func=self.logical_param_translation)
 
@@ -79,6 +80,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """Hook executed in Fine-Tuning Scheduler setup immediately before `init_fts`"""
         # hack to avoid subclassing FSDP strategy for adapter
         setattr(Strategy, "lightning_restore_optimizer", self.lightning_restore_optimizer)
+        self._prune_nodecay()
         if self.awp_overrides:
             self._validate_awp_overrides()
         if is_overridden("configure_sharded_model", self.pl_module):
@@ -136,6 +138,15 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 else:
                     logical_param_names.append(n)
         return logical_param_names
+
+    def _prune_nodecay(self) -> None:
+        if self.pl_module.no_decay:
+            rank_zero_warn(
+                "Specifying a `no_decay` lightning module attribute is not currently supported by the Fine-Tuning"
+                f" Scheduler FSDP strategy adapter. The `no_decay` attribute currently set ({self.pl_module.no_decay})"
+                " will now be unset by the adapter to allow training to proceed."
+            )
+            setattr(self.pl_module, "no_decay", None)
 
     def _validate_fsdp_fts_config(self) -> List:
         # collect all validation errors before returning them to the user to facilitate faster remediation
@@ -248,21 +259,20 @@ class FSDPStrategyAdapter(StrategyAdapter):
         Raises:
             MisconfigurationException: Provides a list of the parameters specified in more than one phase.
         """
+        fsdp_dup_params: Set
+        unsched_dup_params: Set
         scheduled_mod_lists = [list(self._ft_schedule_module_map[d]) for d in self._ft_schedule_module_map.keys()]
         ft_sched_dup_mods = FSDPStrategyAdapter._phasewise_intersection(scheduled_mod_lists)
-        fsdp_dup_params = self._phase_unaligned_fsdp_params()
         unsched_dup_params = self._phase_unaligned_fsdp_params(check_unsched=True)
+        if not unsched_dup_params:  # unsched_dup_params will be a superset of fsdp_dup_params
+            fsdp_dup_params = self._phase_unaligned_fsdp_params()
         fsdp_feedback_msgs = []
         if ft_sched_dup_mods:
             fsdp_feedback_msgs.append(self._module_overlap_feedback(ft_sched_dup_mods))
-        if fsdp_dup_params or unsched_dup_params:
-            # conditionally emphasize the presence of parameters not included in the fine-tuning schedule
-            if unsched_dup_params:
-                fsdp_feedback_msgs.append(
-                    self._fsdp_param_phase_overlap_feedback(unsched_msg=True, dup_params=unsched_dup_params)
-                )
-            else:
-                fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(fsdp_dup_params))
+        if unsched_dup_params:  # conditionally emphasize parameters not included in the fine-tuning schedule
+            fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(unsched_dup_params, unsched_msg=True))
+        elif fsdp_dup_params:
+            fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(fsdp_dup_params))
         return tuple(fsdp_feedback_msgs)
 
     def _fts_auto_configure_sharded_model(self) -> None:

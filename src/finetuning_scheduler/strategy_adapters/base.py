@@ -28,10 +28,11 @@ from torch.nn import Module
 class StrategyAdapter:
     """Base class for all strategies that change the behaviour of the training, validation and test- loop."""
 
+    fts_handle: Callback
+
     def __init__(
         self,
     ) -> None:
-        self.fts_handle: Callback
         self.fts_restore_optimizer: bool = False
         self.exec_ft_phase = StrategyAdapter.base_ft_phase
 
