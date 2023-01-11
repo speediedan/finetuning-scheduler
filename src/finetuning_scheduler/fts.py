@@ -22,9 +22,9 @@ from typing import Any, Dict, Optional, Sequence, Union
 
 import pytorch_lightning as pl
 import torch
-from lightning_lite.utilities import rank_zero_info
-from lightning_lite.utilities.distributed import ReduceOp
-from lightning_lite.utilities.enums import _StrategyType
+from lightning_fabric.utilities import rank_zero_info
+from lightning_fabric.utilities.distributed import ReduceOp
+from lightning_fabric.utilities.enums import _StrategyType
 from pytorch_lightning.callbacks import BaseFinetuning
 from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.trainer.states import TrainerFn
@@ -143,7 +143,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 with may be included. Additionally, one may optionally include arguments to pass to PyTorch Lightning's
                 lr scheduler configuration :class:`~pytorch_lightning.utilities.types.LRSchedulerConfig` in the
                 ``pl_lrs_cfg`` dictionary. By way of example, one could configure this dictionary via the
-                :external+pl:class:`~pytorch_lightning.utilities.cli.LightningCLI` with the following:
+                :external+pl:class:`~pytorch_lightning.cli.LightningCLI` with the following:
 
                 .. code-block:: yaml
 

@@ -1266,6 +1266,20 @@ def test_finetuningscheduling_opt_warns():
             [FinetuningScheduler(), FTSCheckpoint(monitor="val_loss", save_top_k=0)],
             "Please set save_top_k to a non-zero value",
         ),
+<<<<<<< HEAD
+        # ([FinetuningScheduler(), FinetuningScheduler(), FTSCheckpoint(monitor="val_loss")], "one stateful callback"),
+        # (
+        #     [
+        #         FinetuningScheduler(),
+        #         EarlyStopping(monitor="val_loss"),
+        #         FTSEarlyStopping(monitor="val_loss"),
+        #         FTSCheckpoint(monitor="val_loss"),
+        #         FTSCheckpoint(monitor="val_loss"),
+        #     ],
+        #     "maximum of one",
+        # ),
+=======
+>>>>>>> main
         ([FinetuningScheduler(), FTSCheckpoint(monitor=None)], "but has no quantity to monitor"),
         ([FinetuningScheduler(ft_schedule="/tmp/fnf")], "Could not find specified fine-tuning scheduling file"),
         (
@@ -1301,6 +1315,11 @@ def test_finetuningscheduling_opt_warns():
         "nofts_ckpt",
         "nofts_es",
         "topk0",
+<<<<<<< HEAD
+        # "multifts",
+        # "multidep",
+=======
+>>>>>>> main
         "nomon",
         "schedfnf",
         "imp_reinit_pg",
