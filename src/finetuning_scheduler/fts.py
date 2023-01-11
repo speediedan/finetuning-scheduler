@@ -237,7 +237,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             _StrategyType.DDP,
             _StrategyType.DDP_FORK,
             _StrategyType.DDP_SPAWN,
-            # _StrategyType.DEEPSPEED,  # support to be re-evaluated if add optimizer pg functionality added to DS API
+            # _StrategyType.DEEPSPEED,  # relevant FTS strategy adapter not yet available, PRs welcome!
             _StrategyType.DDP_SHARDED,
             _StrategyType.DDP_SHARDED_SPAWN,
             "single_device",

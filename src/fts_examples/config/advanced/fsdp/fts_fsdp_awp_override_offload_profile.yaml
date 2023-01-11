@@ -1,5 +1,5 @@
 data:
-  class_path: fts_examples.fts_fsdp_superglue.RteBoolqDataModule
+  class_path: fts_examples.fts_superglue.RteBoolqDataModule
   init_args:
     model_name_or_path: microsoft/deberta-v3-base
     task_name: rte
@@ -8,7 +8,7 @@ data:
     train_batch_size: 16
     eval_batch_size: 16
 model:
-  class_path: fts_examples.fts_fsdp_superglue.RteBoolqModule
+  class_path: fts_examples.fts_fsdp_superglue.RteBoolqModuleFSDP
   init_args:
     optimizer_init:
       class_path: torch.optim.AdamW
@@ -30,6 +30,7 @@ trainer:
   limit_train_batches: 7
   max_epochs: 2
   devices: 2
+  precision: 32 # profile w/o precision until https://github.com/pytorch/pytorch/issues/82206 is resolved
   callbacks:
   - class_path: finetuning_scheduler.FinetuningScheduler
     init_args:
@@ -53,7 +54,7 @@ trainer:
     class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: lightning_logs
-      name: fts_fsdp_awp_override_profile
+      name: fts_fsdp_awp_override_offload_profile
   profiler:
     class_path: pytorch_lightning.profilers.pytorch.PyTorchProfiler
     init_args:
@@ -64,13 +65,11 @@ trainer:
       profile_memory: true
       record_shapes: true
       row_limit: 50
-      export_to_flame_graph: true
-      metric: self_cuda_time_total
+      # uncomment below to enable flamegraph export (after relevant PL patch)
+      # export_to_flame_graph: true
+      # metric: self_cuda_time_total
   strategy:
     class_path: pytorch_lightning.strategies.DDPFullyShardedNativeStrategy
     init_args:
-      cpu_offload:
-        class_path: torch.distributed.fsdp.fully_sharded_data_parallel.CPUOffload
-        init_args:
-          offload_params: False
+      cpu_offload: true
       auto_wrap_policy: fts_examples.fts_fsdp_superglue.deberta_awp

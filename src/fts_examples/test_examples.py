@@ -92,7 +92,7 @@ def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_fi
     from fts_examples.fts_superglue import cli_main
 
     example_script = os.path.join(os.path.dirname(__file__), "fts_superglue.py")
-    config_loc = [os.path.join(os.path.dirname(__file__), "config/advanced", config_file)]
+    config_loc = [os.path.join(os.path.dirname(__file__), "config/advanced/reinit_lr", config_file)]
     cli_args = [
         f"--trainer.default_root_dir={tmpdir.strpath}",
         "--trainer.max_epochs=10",

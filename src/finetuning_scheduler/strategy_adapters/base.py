@@ -112,7 +112,6 @@ class StrategyAdapter:
             rank_zero_debug(
                 f"{'Initializing with' if init_thaw else 'Thawed'} the following module parameters: "
                 f"{translation_func(thawed_p_names) if translation_func else [n for n in thawed_p_names]}"
-                # f"{[n for n in thawed_p_names]}"
             )
         curr_thawed.extend(thawed_p_names)
         rank_zero_debug(

@@ -256,7 +256,7 @@ we'll proceed to those next.
 Advanced Usage Examples: Explicit and Implicit Mode LR Scheduler Reinitialization
 *********************************************************************************
 Demonstration LR scheduler reinitialization configurations for both explicit and implicit fine-tuning scheduling contexts
-are available under ``./fts_examples/config/advanced/``.
+are available under ``./fts_examples/config/advanced/reinit_lr``.
 
 The LR scheduler reinitialization examples use the same code and have the same dependencies as the basic
 :ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples except PyTorch >= ``1.10`` is
@@ -269,10 +269,10 @@ The two different demo schedule configurations are composed with shared defaults
 
     cd ./fts_examples/
     # Demo LR scheduler reinitialization with an explicitly defined fine-tuning schedule:
-    python fts_superglue.py fit --config config/advanced/fts_explicit_reinit_lr.yaml
+    python fts_superglue.py fit --config config/advanced/reinit_lr/fts_explicit_reinit_lr.yaml
 
     # Demo LR scheduler reinitialization with an implicitly defined fine-tuning schedule:
-    python fts_superglue.py fit --config config/advanced/fts_implicit_reinit_lr.yaml
+    python fts_superglue.py fit --config config/advanced/reinit_lr/fts_implicit_reinit_lr.yaml
 
 
 Notice in the explicitly defined schedule scenario, we are using three distinct lr schedulers for three different
@@ -289,10 +289,10 @@ Phase ``0`` in :yellow-highlight:`yellow` (passed to our
 :external+pl:class:`~pytorch_lightning.core.module.LightningModule` via the ``model``
 definition in our :external+pl:class:`~pytorch_lightning.cli.LightningCLI` configuration) uses a
 :external+torch:class:`~torch.optim.lr_scheduler.LinearLR` scheduler (defined in
-``./config/advanced/fts_explicit_reinit_lr.yaml``) with the initial lr defined via the shared initial optimizer
+``./config/advanced/reinit_lr/fts_explicit_reinit_lr.yaml``) with the initial lr defined via the shared initial optimizer
 configuration (defined in ``./config/fts_defaults.yaml``).
 
-This is the effective phase ``0`` config (defined in ``./config/advanced/fts_explicit_reinit_lr.yaml``, applying
+This is the effective phase ``0`` config (defined in ``./config/advanced/reinit_lr/fts_explicit_reinit_lr.yaml``, applying
 defaults defined in ``./config/fts_defaults.yaml``):
 
 .. code-block:: yaml
@@ -336,7 +336,7 @@ initial lr for the existing parameter groups (``2.0e-06``).
           :alt: Explicit pg3
 
 
-This is the phase ``1`` config (defined in our explicit schedule ``./config/advanced/explicit_reinit_lr.yaml``):
+This is the phase ``1`` config (defined in our explicit schedule ``./config/advanced/reinit_lr/explicit_reinit_lr.yaml``):
 
 .. code-block:: yaml
   :linenos:
@@ -379,7 +379,7 @@ the assigned initial lr for each of the parameter groups (``1.0e-06`` for pg1 an
 
 
 This is the phase ``2`` config (like all non-zero phases, defined in our explicit schedule
-``./config/advanced/explicit_reinit_lr.yaml``):
+``./config/advanced/reinit_lr/explicit_reinit_lr.yaml``):
 
 .. code-block:: yaml
   :linenos:

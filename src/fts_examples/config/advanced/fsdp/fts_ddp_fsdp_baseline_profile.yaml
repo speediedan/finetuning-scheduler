@@ -1,5 +1,5 @@
 data:
-  class_path: fts_examples.fts_fsdp_superglue.RteBoolqDataModule
+  class_path: fts_examples.fts_superglue.RteBoolqDataModule
   init_args:
     model_name_or_path: microsoft/deberta-v3-base
     task_name: rte
@@ -8,7 +8,7 @@ data:
     train_batch_size: 16
     eval_batch_size: 16
 model:
-  class_path: fts_examples.fts_fsdp_superglue.RteBoolqModule
+  class_path: fts_examples.fts_fsdp_superglue.RteBoolqModuleFSDP
   init_args:
     optimizer_init:
       class_path: torch.optim.AdamW
@@ -51,24 +51,17 @@ trainer:
     class_path: pytorch_lightning.loggers.TensorBoardLogger
     init_args:
       save_dir: lightning_logs
-      name: fts_fsdp_awp_profile
+      name: fts_ddp_fsdp_baseline_profile
   profiler:
     class_path: pytorch_lightning.profilers.pytorch.PyTorchProfiler
     init_args:
       filename: fts_fsdp_awp_text_profile
     dict_kwargs:
-      use_cuda: true  # override deprecated argument until it is removed
+      use_cuda: true
       with_stack: true
       profile_memory: true
       record_shapes: true
       row_limit: 50
-      export_to_flame_graph: true
-      metric: self_cuda_time_total
-  strategy:
-    class_path: pytorch_lightning.strategies.DDPFullyShardedNativeStrategy
-    init_args:
-      cpu_offload:
-        class_path: torch.distributed.fsdp.fully_sharded_data_parallel.CPUOffload
-        init_args:
-          offload_params: False
-      auto_wrap_policy: fts_examples.fts_fsdp_superglue.deberta_auto_wrap_policy
+      # uncomment below to enable flamegraph export (after relevant PL patch)
+      # export_to_flame_graph: true
+      # metric: self_cuda_time_total

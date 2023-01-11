@@ -26,7 +26,7 @@ from functools import partial, wraps
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
 
 import torch
-from lightning_lite.utilities import rank_zero_info, rank_zero_warn
+from lightning_fabric.utilities import rank_zero_info, rank_zero_warn
 from pytorch_lightning import Trainer
 from pytorch_lightning.strategies.fully_sharded_native import _fsdp_available
 from pytorch_lightning.strategies.strategy import Strategy
@@ -314,7 +314,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
         return wrapped_func
 
     def _init_fsdp_param_map(self) -> None:
-        # TODO: make weakrefs?
         self._fsdp_flat_to_unflat_mapping = _get_param_to_unflat_param_names(self.pl_module)
         self._fsdp_unflat_to_flat_mapping = {
             up: fpn for fpn, upl in self._fsdp_flat_to_unflat_mapping.items() for up in upl

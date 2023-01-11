@@ -16,11 +16,11 @@ from typing import Any, Dict, Optional, Tuple
 
 import pytest
 import torch
+from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_12
 from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.plugins.precision.fsdp_native_native_amp import FullyShardedNativeNativeMixedPrecisionPlugin
 from pytorch_lightning.strategies import DDPFullyShardedNativeStrategy
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
-from pytorch_lightning.utilities.imports import _TORCH_GREATER_EQUAL_1_12
 from torch.utils.data import DataLoader
 
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
@@ -40,8 +40,8 @@ if _TORCH_GREATER_EQUAL_1_12:
 
 additional_fsdp_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
-    "is still running",  # TODO: explicitly cleanup subprocess
-    # "Deallocating Tensor that still",  # TODO: can be triggered by policy tracing, suppress or potentially open PR
+    "The distutils package is deprecated",  # for tensorboard import as of PT 1.13.1
+    "is still running",  # subprocess is implicitly cleaned up
     "Please use torch.distributed.all_gather_into_tensor",  # can be removed once PyTorch stops using internally,
     "Please use torch.distributed.reduce_scatter_tensor",  # can be removed once PyTorch stops using internally,
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
@@ -149,44 +149,6 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
             torch.nn.ReLU(),
             torch.nn.Linear(32, 2),
         )
-
-    # reference working version for inspection
-    def dev_configure_sharded_model(self) -> None:
-        # the model is already wrapped with FSDP: no need to wrap again!
-        if isinstance(self.layer, FullyShardedDataParallel):
-            return
-        module_map = self.trainer.callbacks[0]._gen_ft_sched_module_map()
-        with self.trainer.callbacks[0]._enable_explicit_wrap():
-            for _, mod_paths in module_map.items():
-                # trace_state_dicts[phase] = self.state_dict()
-                for modp in mod_paths:
-                    parent_name, _, child_name = modp.rpartition(".")
-                    if modp != "layer.7":
-                        setattr(self.get_submodule(parent_name), child_name, wrap(self.get_submodule(modp)))
-            for n, m in self.named_children():
-                setattr(self, n, wrap(m))
-
-    def tmp_configure_sharded_model(self) -> None:
-        for m in self.modules():
-            # if the model is already wrapped with FSDP, tracing with auto-policy would fail
-            if isinstance(m, FullyShardedDataParallel):
-                raise MisconfigurationException(
-                    "The provided model is already wrapped by FSDP. Cannot apply an FSDP auto-wrapping policy along"
-                    " fine-tuning schedule phase boundaries if the model is already wrapped."
-                )
-        # # link phase params to modules, until PT adds fix for param-level specificaiton
-        # module_map = self.trainer.callbacks[0]._gen_ft_sched_module_map()  # TODO: move to fts setup?
-        # for _, mod_paths in module_map.items():
-        #     should_wrap = self.trainer.callbacks[0]._inspect_policy_trace(mod_paths)
-        #     self.trainer.callbacks[0]._apply_phase_wrap(should_wrap, mod_paths)
-        # with self.trainer.callbacks[0]._enable_explicit_wrap():
-        #     for n, m in self.named_children():
-        #         setattr(self, n, wrap(m))
-        self.trainer.callbacks[0]._phase_constrained_auto_wrap()
-        # with self.trainer.callbacks[0]._enable_explicit_wrap():
-        #     for n, m in self.named_children():
-        #         setattr(self, n, wrap(m))
-        assert self
 
     def configure_optimizers(self):
         parameters = filter(lambda x: x.requires_grad, self.parameters())
