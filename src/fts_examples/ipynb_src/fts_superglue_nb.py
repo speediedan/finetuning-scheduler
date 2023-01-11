@@ -180,7 +180,7 @@ import evaluate
 import pytorch_lightning as pl
 import torch
 from datasets import logging as datasets_logging
-from lightning_lite.accelerators.cuda import is_cuda_available
+from lightning_fabric.accelerators.cuda import is_cuda_available
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers.tensorboard import TensorBoardLogger
 from pytorch_lightning.utilities import rank_zero_warn
@@ -299,7 +299,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.dataset["validation"], batch_size=self.hparams.eval_batch_size, **self.dataloader_kwargs)
 
-    def _convert_to_features(self, example_batch: datasets.arrow_dataset.Batch) -> BatchEncoding:
+    def _convert_to_features(self, example_batch: datasets.arrow_dataset.LazyDict) -> BatchEncoding:
         """Convert raw text examples to a :class:`~transformers.tokenization_utils_base.BatchEncoding` container
         (derived from python dict) of features that includes helpful methods for translating between word/character
         space and token space.

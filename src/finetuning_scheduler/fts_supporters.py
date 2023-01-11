@@ -33,9 +33,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 import pytorch_lightning as pl
 import torch
 import yaml
-from lightning_lite.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
-from lightning_lite.utilities.cloud_io import get_filesystem
-from lightning_lite.utilities.distributed import _distributed_available
+from lightning_fabric.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
+from lightning_fabric.utilities.cloud_io import get_filesystem
+from lightning_fabric.utilities.distributed import _distributed_available
+from lightning_fabric.utilities.types import _TORCH_LRSCHEDULER, ReduceLROnPlateau
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks.lr_monitor import LearningRateMonitor
@@ -43,7 +44,6 @@ from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.core.optimizer import _MockOptimizer
 from pytorch_lightning.trainer.states import TrainerFn
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
-from pytorch_lightning.utilities.imports import _TORCH_GREATER_EQUAL_1_10
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
 from pytorch_lightning.utilities.types import LRSchedulerConfig
 from torch import Tensor
@@ -93,11 +93,11 @@ supported_lrs = [
     "CosineAnnealingLR",
     "ReduceLROnPlateau",
     "CosineAnnealingWarmRestarts",
+    "ConstantLR",
+    "LinearLR",
 ]
-if _TORCH_GREATER_EQUAL_1_10:
-    supported_lrs.extend(["ConstantLR", "LinearLR"])
 FTSLRSchedulerTypeTuple = tuple(getattr(torch.optim.lr_scheduler, lr_class) for lr_class in supported_lrs)
-FTSLRSchedulerType = Union[Type[pl.utilities.types._LRScheduler], Type[pl.utilities.types.ReduceLROnPlateau]]
+FTSLRSchedulerType = Union[Type[_TORCH_LRSCHEDULER], Type[ReduceLROnPlateau]]
 
 
 class CallbackResolverMixin(ABC):

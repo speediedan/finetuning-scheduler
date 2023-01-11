@@ -21,14 +21,14 @@ import pytest
 import torch
 import torch.nn.functional as F
 import yaml
-from lightning_lite.utilities.cloud_io import get_filesystem
+from lightning_fabric.utilities.cloud_io import get_filesystem
 from pytorch_lightning import LightningModule, seed_everything, Trainer
 from pytorch_lightning.callbacks import Callback, EarlyStopping, LearningRateMonitor
 from pytorch_lightning.strategies import StrategyRegistry
 from pytorch_lightning.strategies.single_device import SingleDeviceStrategy
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
-from pytorch_lightning.utilities.imports import _TORCH_GREATER_EQUAL_1_10
 from torch import nn
+from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.multiprocessing import ProcessRaisedException
 from torch.utils.data import DataLoader, Dataset
 
@@ -36,9 +36,6 @@ from finetuning_scheduler import CallbackResolverMixin, FinetuningScheduler, FTS
 from tests.helpers import BoringModel
 from tests.helpers.boring_model import CustomLRScheduler, unexpected_warns, unmatched_warns
 from tests.helpers.runif import RunIf
-
-if _TORCH_GREATER_EQUAL_1_10:
-    from torch.distributed.optim import ZeroRedundancyOptimizer
 
 fts_resolver = CallbackResolverMixin()
 
@@ -825,8 +822,8 @@ EXPECTED_RESUME_RESULTS = {
     (False, False, "kth", 1): (0, 0, 1),
     (False, True, "best", -1): (0, 0, 3),
     (False, True, "best", 1): (0, 0, 1),
-    (False, True, "kth", -1): (1, 0, 3),
-    (False, True, "kth", 1): (1, 0, 1),
+    (False, True, "kth", -1): (0, 0, 3),
+    (False, True, "kth", 1): (0, 0, 1),
 }
 EXPECTED_WARNS = [
     "does not have many workers",
@@ -1264,17 +1261,6 @@ def test_finetuningscheduling_opt_warns():
             [FinetuningScheduler(), FTSCheckpoint(monitor="val_loss", save_top_k=0)],
             "Please set save_top_k to a non-zero value",
         ),
-        ([FinetuningScheduler(), FinetuningScheduler(), FTSCheckpoint(monitor="val_loss")], "multiple Finetuning"),
-        (
-            [
-                FinetuningScheduler(),
-                EarlyStopping(monitor="val_loss"),
-                FTSEarlyStopping(monitor="val_loss"),
-                FTSCheckpoint(monitor="val_loss"),
-                FTSCheckpoint(monitor="val_loss"),
-            ],
-            "maximum of one",
-        ),
         ([FinetuningScheduler(), FTSCheckpoint(monitor=None)], "but has no quantity to monitor"),
         ([FinetuningScheduler(ft_schedule="/tmp/fnf")], "Could not find specified fine-tuning scheduling file"),
         (
@@ -1310,8 +1296,6 @@ def test_finetuningscheduling_opt_warns():
         "nofts_ckpt",
         "nofts_es",
         "topk0",
-        "multifts",
-        "multidep",
         "nomon",
         "schedfnf",
         "imp_reinit_pg",

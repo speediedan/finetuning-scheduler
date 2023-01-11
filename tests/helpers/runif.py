@@ -16,12 +16,12 @@ from typing import Optional
 
 import pytest
 import torch
-from lightning_lite.accelerators.cuda import num_cuda_devices
-from lightning_lite.strategies.fairscale import _FAIRSCALE_AVAILABLE
+from lightning_fabric.accelerators.cuda import num_cuda_devices
+from lightning_fabric.strategies.fairscale import _FAIRSCALE_AVAILABLE
 from packaging.version import Version
 from pkg_resources import get_distribution
 from pytorch_lightning.strategies.deepspeed import _DEEPSPEED_AVAILABLE
-from pytorch_lightning.utilities.imports import _HOROVOD_AVAILABLE, _TORCH_GREATER_EQUAL_1_10
+from pytorch_lightning.strategies.horovod import _HOROVOD_AVAILABLE
 
 _HOROVOD_NCCL_AVAILABLE = False
 if _HOROVOD_AVAILABLE:
@@ -111,7 +111,7 @@ class RunIf:
 
         if bf16_cuda:
             try:
-                cond = not (torch.cuda.is_available() and _TORCH_GREATER_EQUAL_1_10 and torch.cuda.is_bf16_supported())
+                cond = not (torch.cuda.is_available() and torch.cuda.is_bf16_supported())
             except (AssertionError, RuntimeError) as e:
                 # AssertionError: Torch not compiled with CUDA enabled
                 # RuntimeError: Found no NVIDIA driver on your system.

@@ -50,7 +50,7 @@ from fts_examples.cli_experiment_utils import collect_env_info, instantiate_clas
 if _HF_AVAILABLE:
     import datasets
     import evaluate
-    from datasets.arrow_dataset import Batch
+    from datasets.arrow_dataset import LazyDict
     from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer
     from transformers import logging as transformers_logging
     from transformers.tokenization_utils_base import BatchEncoding
@@ -147,7 +147,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.dataset["validation"], batch_size=self.hparams.eval_batch_size, **self.dataloader_kwargs)
 
-    def _convert_to_features(self, example_batch: Batch) -> BatchEncoding:
+    def _convert_to_features(self, example_batch: LazyDict) -> BatchEncoding:
         """Convert raw text examples to a :class:`~transformers.tokenization_utils_base.BatchEncoding` container
         (derived from python dict) of features that includes helpful methods for translating between word/character
         space and token space.
@@ -189,7 +189,7 @@ class RteBoolqModule(pl.LightningModule):
     ):
         """In this example, this :class:`~pytorch_lightning.core.module.LightningModule` is initialized by composing
         the ./config/fts_defaults.yaml default configuration with various scheduled fine-tuning yaml configurations
-        via the :class:`~pytorch_lightning.utilities.cli.LightningCLI` but it can be used like any other
+        via the :class:`~pytorch_lightning.cli.LightningCLI` but it can be used like any other
         :class:`~pytorch_lightning.core.module.LightningModule` as well.
 
         Args:
@@ -316,7 +316,7 @@ class RteBoolqModule(pl.LightningModule):
 
 
 class CustLightningCLI(LightningCLI):
-    """Customize the :class:`~pytorch_lightning.utilities.cli.LightningCLI` to ensure the
+    """Customize the :class:`~pytorch_lightning.cli.LightningCLI` to ensure the
     :class:`~pytorch_lighting.core.LightningDataModule` and :class:`~pytorch_lightning.core.module.LightningModule`
     use the same Hugging Face model, SuperGLUE task and custom logging tag."""
 

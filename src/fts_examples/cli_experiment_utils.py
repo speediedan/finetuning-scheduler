@@ -4,8 +4,8 @@ from collections import namedtuple
 from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
-from lightning_lite.accelerators.cuda import is_cuda_available
-from lightning_lite.utilities.imports import _TORCH_GREATER_EQUAL_1_13
+from lightning_fabric.accelerators.cuda import is_cuda_available
+from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from torch.utils import collect_env
 
