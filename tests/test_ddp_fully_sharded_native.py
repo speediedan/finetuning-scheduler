@@ -447,6 +447,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         None,
         None,
     ),
+    "warn_ignore_awp_override": ({}, "will be unset and not applied", None),
     "cust_noprec_resume": (
         {
             0: (2, 4),
@@ -501,7 +502,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             {"fsdp_mask": {"wrapped_mods": [0, 1, 2, 3, 5], "unwrapped_mods": [4, 7]}},
             None,
             None,
-            {"test_ignored_modules_name": "layer.4", "cpu_offload": False},
+            {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False},
         ),
         (
             "non_disjoint_phase_fsdp_params",
@@ -683,6 +684,19 @@ EXPECTED_FSDP_FTS_RESULTS = {
             None,
             None,
         ),
+        (
+            "warn_ignore_awp_override",
+            FTSCsmFSDPModel,
+            None,
+            False,
+            0,
+            False,
+            {"awp_overrides": ["layer.7"]},
+            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
+            None,
+            None,
+            None,
+        ),
     ],
     ids=[
         "cust_awp_noprec",
@@ -701,6 +715,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "override_csm_adam_noprec",
         "cust_awp_override_prec",
         "cust_awp_override_prec_ext",
+        "warn_ignore_awp_override",
     ],
 )
 def test_fsdp_native_multi_gpus(
@@ -741,8 +756,10 @@ def test_fsdp_native_multi_gpus(
         FTSEarlyStopping(monitor="val_loss", patience=2),
         FTSCheckpoint(monitor="val_loss", save_top_k=3, verbose=True),
     ]
-    if strategy_cfg.get("test_ignored_modules_name", None):
-        strategy_cfg["ignored_modules"] = [model.get_submodule(strategy_cfg.pop("test_ignored_modules_name"))]
+    if strategy_cfg.get("test_ignored_modules_names", None):
+        strategy_cfg["ignored_modules"] = [
+            model.get_submodule(n) for n in strategy_cfg.pop("test_ignored_modules_names")
+        ]
     strategy = DDPFullyShardedNativeStrategy(auto_wrap_policy=auto_wrap_policy, **strategy_cfg)
     precision_opts = {"precision": 16} if use_precision else {}
     trainer = Trainer(

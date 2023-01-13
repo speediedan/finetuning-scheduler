@@ -75,16 +75,14 @@ class FSDPStrategyAdapter(StrategyAdapter):
         # hack to avoid subclassing FSDP strategy for adapter
         setattr(Strategy, "lightning_restore_optimizer", self.lightning_restore_optimizer)
         self._prune_nodecay()
-        if self.awp_overrides:
-            self._validate_awp_overrides()
+        self._validate_awp_overrides()
         if is_overridden("configure_sharded_model", self.pl_module):
             rank_zero_info(
                 "You have overridden the `LightningModule.configure_sharded_model` hook. Fine-Tuning Scheduler"
-                " will validate that you have wrapped the provided model in a manner that aligns with the"
+                " will attempt to validate that you have wrapped the provided model in a manner that aligns with the"
                 " defined fine-tuning schedule phases. If you would like to have Fine-Tuning Scheduler"
-                " automatically wrap your model in a fine-tuning phase-aligned according to a given auto wrap"
-                " policy, avoid overriding `configure_sharded_model` in your module and provide the desired"
-                " auto wrap policy."
+                " automatically wrap your model according to a given auto wrap policy, avoid overriding"
+                " `configure_sharded_model` in your module and provide the desired auto wrap policy."
             )
             csm_func = self._wrapped_configure_sharded_model(self.pl_module.configure_sharded_model)
             setattr(self.pl_module, "configure_sharded_model", csm_func)
@@ -148,6 +146,16 @@ class FSDPStrategyAdapter(StrategyAdapter):
         Raises:
             MisconfigurationException: If a specified parameter or regex does not resolve to at least one parameter.
         """
+        if not self.awp_overrides:
+            return
+        if is_overridden("configure_sharded_model", self.pl_module):
+            rank_zero_warn(
+                "You have overridden the `LightningModule.configure_sharded_model` hook but also provided"
+                " an `awp_overrides` configuration. Since `awp_overrides` only applies to configurations that use"
+                f" policy-based FSDP wrapping, this configuration ({self.awp_overrides}) will be unset and not applied."
+            )
+            self.awp_overrides = []
+            return
         named_modules = dict(self.pl_module.named_modules()).keys()
         resolved_modules = []
         for m in self.awp_overrides:
