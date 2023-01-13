@@ -25,9 +25,7 @@ from copy import deepcopy
 from functools import partial, wraps
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
 
-import torch
 from lightning_fabric.utilities import rank_zero_info, rank_zero_warn
-from pytorch_lightning import Trainer
 from pytorch_lightning.strategies.fully_sharded_native import _fsdp_available
 from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.trainer.connectors.checkpoint_connector import CheckpointConnector
@@ -42,11 +40,6 @@ if _fsdp_available:
         FullyShardedDataParallel,
     )
     from torch.distributed.fsdp.wrap import _ConfigAutoWrap, wrap
-else:
-    FullyShardedDataParallel = None  # type: ignore[misc,assignment]
-    MixedPrecision = None  # type: ignore[misc,assignment]
-    BackwardPrefetch = None  # type: ignore[misc,assignment]
-    CPUOffload = None  # type: ignore[misc,assignment]
 
 
 class FSDPStrategyAdapter(StrategyAdapter):
@@ -60,6 +53,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     _fsdp_unflat_to_flat_mapping: Dict
     _ft_schedule_module_map: Dict
     _unscheduled_params: List
+    _ignored_modules: List
 
     def __init__(self, awp_overrides: Optional[List] = None, *args: Any, **kwargs: Any) -> None:
         """_summary_
@@ -109,8 +103,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def on_before_restore_optimizers_and_lrs(self) -> None:
         """summary."""
         checkpoint_connector = self.pl_module.trainer._checkpoint_connector
-        if not checkpoint_connector._loaded_checkpoint:
-            return
 
         # Restore the optimizer states from the pre-loaded checkpoint.
         self.load_optimizer_state_dict(checkpoint_connector)
@@ -119,7 +111,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
         optimizer_states = checkpoint_connector._loaded_checkpoint["optimizer_states"]
         for optimizer, opt_state in zip(self.pls_handle.optimizers, optimizer_states):
             optimizer.load_state_dict(opt_state)
-            # _optimizer_to_device(optimizer, self.root_device)
 
     def fts_optim_view(self, orig_pl: List) -> List:
         """FSDP requires an FTS adapter transformation of schedule parameters for optimizer operations."""
@@ -133,10 +124,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         logical_param_names = []
         for n, p in self.pl_module.named_parameters():
             if n in param_names:
-                if self._fsdp_flat_to_unflat_mapping.get(p):
-                    logical_param_names.extend(self._fsdp_flat_to_unflat_mapping[p])
-                else:
-                    logical_param_names.append(n)
+                logical_param_names.extend(self._fsdp_flat_to_unflat_mapping[p])
         return logical_param_names
 
     def _prune_nodecay(self) -> None:
@@ -263,16 +251,16 @@ class FSDPStrategyAdapter(StrategyAdapter):
         unsched_dup_params: Set
         scheduled_mod_lists = [list(self._ft_schedule_module_map[d]) for d in self._ft_schedule_module_map.keys()]
         ft_sched_dup_mods = FSDPStrategyAdapter._phasewise_intersection(scheduled_mod_lists)
-        unsched_dup_params = self._phase_unaligned_fsdp_params(check_unsched=True)
-        if not unsched_dup_params:  # unsched_dup_params will be a superset of fsdp_dup_params
-            fsdp_dup_params = self._phase_unaligned_fsdp_params()
+        fsdp_dup_params = self._phase_unaligned_fsdp_params()
+        if not fsdp_dup_params:  # unsched_dup_params will be a superset of fsdp_dup_params
+            unsched_dup_params = self._phase_unaligned_fsdp_params(check_unsched=True)
         fsdp_feedback_msgs = []
         if ft_sched_dup_mods:
             fsdp_feedback_msgs.append(self._module_overlap_feedback(ft_sched_dup_mods))
-        if unsched_dup_params:  # conditionally emphasize parameters not included in the fine-tuning schedule
-            fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(unsched_dup_params, unsched_msg=True))
-        elif fsdp_dup_params:
+        if fsdp_dup_params:
             fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(fsdp_dup_params))
+        elif unsched_dup_params:  # conditionally emphasize parameters not included in the fine-tuning schedule
+            fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(unsched_dup_params, unsched_msg=True))
         return tuple(fsdp_feedback_msgs)
 
     def _fts_auto_configure_sharded_model(self) -> None:
@@ -305,14 +293,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
         return wrapped_func
 
-    def _wrapped_before_optim_setup(self, before_optim_setup_func: Callable) -> Callable:
-        @wraps(before_optim_setup_func)
-        def wrapped_func(trainer: "Trainer") -> None:
-            self._after_configure_sharded_model()
-            before_optim_setup_func(trainer)
-
-        return wrapped_func
-
     def _init_fsdp_param_map(self) -> None:
         self._fsdp_flat_to_unflat_mapping = _get_param_to_unflat_param_names(self.pl_module)
         self._fsdp_unflat_to_flat_mapping = {
@@ -340,11 +320,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             phase_params = self.fts_handle.ft_schedule[depth].get("params", [])  # type: ignore[union-attr]
             module_map[depth] = set()
             for p in phase_params:
-                module_path, _, param_name = p.rpartition(".")
-                mod: torch.nn.Module = self.pl_module.get_submodule(module_path)
-                if not hasattr(mod, param_name):
-                    raise AttributeError(mod._get_name() + " has no attribute `" + param_name + "`")
-                module_map[depth].add(module_path)
+                module_map[depth].add(p.rpartition(".")[0])
         self._ft_schedule_module_map = module_map
         scheduled_mods = list(set().union(*module_map.values()))
         unscheduled_mods = tuple(
@@ -354,11 +330,10 @@ class FSDPStrategyAdapter(StrategyAdapter):
             f"{m}.{n}" for m in unscheduled_mods for n, _ in self.pl_module.get_submodule(m).named_parameters()
         ]
 
-    def get_wrapped_name_from_unwrapped(self, unwrapped_name: str) -> str:
+    def get_wrapped_name_from_unwrapped(self, unwrapped_name: str) -> Optional[str]:
         for n, m in self.pl_module.named_modules():
             if self.pl_module.get_submodule(unwrapped_name) is m:
                 return n
-        raise MisconfigurationException(f"Module {unwrapped_name} was not found and so cannot be explicitly wrapped.")
 
     def _apply_awp_overrides(self) -> None:
         for om in self.awp_overrides:
@@ -370,7 +345,9 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 )
             else:
                 with self._enable_explicit_wrap():
-                    pn, _, cn = self.get_wrapped_name_from_unwrapped(om).rpartition(".")
+                    wrapped_name = self.get_wrapped_name_from_unwrapped(om)
+                    assert wrapped_name
+                    pn, _, cn = wrapped_name.rpartition(".")
                     setattr(self.pl_module.get_submodule(pn), cn, wrap(self.pl_module.get_submodule(om)))
 
     def _fts_auto_wrap(self) -> None:

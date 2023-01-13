@@ -23,7 +23,7 @@ import torch.nn.functional as F
 import yaml
 from lightning_fabric.utilities.cloud_io import get_filesystem
 from pytorch_lightning import LightningModule, seed_everything, Trainer
-from pytorch_lightning.callbacks import Callback, EarlyStopping, LearningRateMonitor
+from pytorch_lightning.callbacks import Callback, EarlyStopping, LearningRateFinder, LearningRateMonitor
 from pytorch_lightning.strategies import StrategyRegistry
 from pytorch_lightning.strategies.single_device import SingleDeviceStrategy
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
@@ -1257,11 +1257,34 @@ def test_finetuningscheduling_opt_warns():
         fts.add_optimizer_groups(lm, opt, thawed_pl)
 
 
+class TestConnectWarn(Callback, CallbackResolverMixin):
+    """A callback that facilitates configuration testing of the CallbackResolverMixin."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.callback_attrs = ("lr_finder",)
+        # choosing this callback because it's simple and has an attribute to find during target callback resolution
+        self.target_callback_ref = "LearningRateFinder"
+
+    def setup(self, trainer: "Trainer", pl_module: "LightningModule", stage: str) -> None:
+        self.connect_callback(trainer)
+
+    @property
+    def state_key(self) -> str:
+        # we want to generate arbitrary numbers of this test instance so need unique state keys
+        return self._generate_state_key(id=id(self))
+
+
 @pytest.mark.parametrize(
     "callbacks, expected",
     [
         ([FTSCheckpoint(monitor="val_loss", verbose=True)], "please use the standard ModelCheckpoint callback."),
         ([FTSEarlyStopping(monitor="val_loss")], "please use the standard EarlyStopping callback."),
+        ([FinetuningScheduler(), LearningRateFinder(), LearningRateFinder(), TestConnectWarn()], "Use of multiple"),
+        (
+            [FinetuningScheduler(), FTSCheckpoint(monitor="val_loss"), FTSCheckpoint(monitor="val_loss", mode="max")],
+            "maximum of one",
+        ),
         (
             [FinetuningScheduler(), FTSCheckpoint(monitor="val_loss", save_top_k=0)],
             "Please set save_top_k to a non-zero value",
@@ -1300,6 +1323,8 @@ def test_finetuningscheduling_opt_warns():
     ids=[
         "nofts_ckpt",
         "nofts_es",
+        "no_multi_targ",
+        "no_multi_fts",
         "topk0",
         "nomon",
         "schedfnf",

@@ -93,6 +93,8 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     fsdp_adam_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_adam_gen_sched_dict[0]["max_transition_epoch"] = 2
     fsdp_adam_gen_sched_dict[1]["max_transition_epoch"] = 4
+    fsdp_ext_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
+    fsdp_ext_gen_sched_dict[0]["params"] = ["layer.(5|[7-8]).*"]
     return (
         fsdp_gen_sched_dict,
         fsdp_nondis_mod_sched_dict,
@@ -100,6 +102,7 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
         fsdp_shared_param_sched_dict,
         fsdp_adam_gen_sched_dict,
         fsdp_nondis_mod_ex_sched_dict,
+        fsdp_ext_gen_sched_dict,
     )
 
 
@@ -223,6 +226,16 @@ class FTSNoDecayFSDPModel(FTSBaseFSDPModel):
         self.no_decay = ["bias"]
 
 
+class AlreadyWrappedFSDPModel(FTSBaseFSDPModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def setup(self, stage: str):
+        with self._trainer.strategy.model_sharded_context():
+            self.layer[0] = wrap(self.layer[0])
+            assert isinstance(self.layer[0], FullyShardedDataParallel)
+
+
 class FTSCsmAdamFSDPModel(FTSBaseFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -241,6 +254,22 @@ class FTSCsmAdamFSDPModel(FTSBaseFSDPModel):
             if i in self.fsdp_mask["wrapped_mods"]:
                 self.layer[i] = wrap(layer)
         self.layer = wrap(self.layer)
+
+
+class FTSExtFSDPModel(FTSBaseFSDPModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.layer = torch.nn.Sequential(
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.Linear(32, 32),
+            torch.nn.ReLU(),
+            torch.nn.Linear(32, 16),
+            torch.nn.Linear(16, 2),
+        )
 
 
 class FTSBatchNormFSDPModel(FTSBaseFSDPModel):
@@ -309,6 +338,15 @@ def custom_auto_wrap_policy(
     return unwrapped_params >= 67
 
 
+def custom_auto_wrap_ext_policy(
+    module,
+    recurse,
+    unwrapped_params: int,
+    min_num_params: int = int(1e8),
+) -> bool:
+    return unwrapped_params >= 529
+
+
 def warn_custom_auto_wrap_policy(
     module,
     recurse,
@@ -337,9 +375,19 @@ EXPECTED_FSDP_FTS_RESULTS = {
         None,
         None,
     ),
+    "cust_awp_noprec_ignore_no_offload": (
+        {
+            0: (2, 4),
+            1: (7, 12),
+            2: (8, 14),
+        },
+        None,
+        None,
+    ),
     "non_disjoint_phase_fsdp_params": ({}, None, "do not have disjoint FSDP-flattened parameter"),
     "non_disjoint_phase_mods": ({}, None, "not have disjoint"),
     "non_disjoint_excluded_ft_params": ({}, None, "parameters not included in"),
+    "already_fsdp_wrapped": ({}, None, "already wrapped by FSDP"),
     "no_fsdp_params_p0": ({}, None, "one or more FSDP"),
     "warn_unsupp_nodecay": ({}, "will now be unset", None),
     "unmatched_awp_overrides": ({}, None, "did not match any named modules"),
@@ -390,6 +438,15 @@ EXPECTED_FSDP_FTS_RESULTS = {
         None,
         None,
     ),
+    "cust_awp_override_prec_ext": (
+        {
+            0: (2, 6),
+            1: (6, 14),
+            2: (7, 16),
+        },
+        None,
+        None,
+    ),
     "cust_noprec_resume": (
         {
             0: (2, 4),
@@ -405,7 +462,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
 @RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.12")
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, fit_start_only, strategy_adapter_cfg,\
-         test_model_cfg, test_fts_cfg, extra_trainer_cfg",
+         model_cfg, fts_cfg, trainer_cfg, strategy_cfg",
     [
         (
             "cust_awp_noprec",
@@ -416,6 +473,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             False,
             None,
             {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
+            None,
             None,
             None,
         ),
@@ -430,16 +488,33 @@ EXPECTED_FSDP_FTS_RESULTS = {
             {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
             None,
             None,
+            None,
         ),
         (
-            "non_disjoint_phase_fsdp_params",
+            "cust_awp_noprec_ignore_no_offload",
             FTSBaseFSDPModel,
-            warn_custom_auto_wrap_policy,
+            custom_auto_wrap_policy,
             False,
             0,
             False,
             None,
-            {"fsdp_mask": {"wrapped_mods": [5], "unwrapped_mods": [i for i in list(range(8)) if i != 5]}},
+            {"fsdp_mask": {"wrapped_mods": [0, 1, 2, 3, 5], "unwrapped_mods": [4, 7]}},
+            None,
+            None,
+            {"test_ignored_modules_name": "layer.4", "cpu_offload": False},
+        ),
+        (
+            "non_disjoint_phase_fsdp_params",
+            FTSBaseFSDPModel,  # FTSCsmFSDPModel,
+            warn_custom_auto_wrap_policy,  # None,
+            False,
+            0,
+            False,
+            None,
+            {
+                "fsdp_mask": {"wrapped_mods": [5], "unwrapped_mods": [i for i in list(range(8)) if i != 5]}
+            },  # {"fsdp_mask": {"wrapped_mods": [0,1,2,3,5], "unwrapped_mods": [4, 7]}}
+            None,
             None,
             None,
         ),
@@ -454,6 +529,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
             None,
             None,
+            None,
         ),
         (
             "non_disjoint_excluded_ft_params",
@@ -464,6 +540,20 @@ EXPECTED_FSDP_FTS_RESULTS = {
             False,
             None,
             {"fsdp_mask": {"wrapped_mods": [2, 3, 4, 5], "unwrapped_mods": [0, 1, 7]}},
+            None,
+            None,
+            None,
+        ),
+        (
+            "already_fsdp_wrapped",
+            AlreadyWrappedFSDPModel,
+            custom_auto_wrap_policy,
+            False,
+            0,
+            False,
+            None,
+            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
+            None,
             None,
             None,
         ),
@@ -478,6 +568,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             {"fsdp_mask": {"wrapped_mods": list(range(5)), "unwrapped_mods": [5, 7]}},
             None,
             None,
+            None,
         ),
         (
             "warn_unsupp_nodecay",
@@ -490,6 +581,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
             None,
             None,
+            None,
         ),
         (
             "unmatched_awp_overrides",
@@ -500,6 +592,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             False,
             {"awp_overrides": ["layer.9", "layer.5"]},
             {"fsdp_mask": {"wrapped_mods": [5, 7], "unwrapped_mods": [i for i in list(range(8)) if i not in [5, 7]]}},
+            None,
             None,
             None,
         ),
@@ -517,6 +610,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             },
             None,
             None,
+            None,
         ),
         (
             "batch_norm_auto_prec",
@@ -527,6 +621,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             False,
             None,
             {"fsdp_mask": {"wrapped_mods": list(range(7)), "unwrapped_mods": [8]}, "precision_key": "auto_16"},
+            None,
             None,
             None,
         ),
@@ -541,6 +636,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "precision_key": "auto_16"},
             None,
             None,
+            None,
         ),
         (
             "override_csm_adam_noprec",
@@ -553,6 +649,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "diverge_on_epoch": 1},
             None,
             {"max_epochs": 5},
+            None,
         ),
         (
             "cust_awp_override_prec",
@@ -568,14 +665,33 @@ EXPECTED_FSDP_FTS_RESULTS = {
             },
             None,
             None,
+            None,
+        ),
+        (
+            "cust_awp_override_prec_ext",
+            FTSExtFSDPModel,
+            custom_auto_wrap_ext_policy,
+            True,
+            6,
+            False,
+            {"awp_overrides": ["l.*yer.8", "layer.7"]},
+            {
+                "fsdp_mask": {"wrapped_mods": list(range(6)) + [7, 8], "unwrapped_mods": []},
+                "precision_key": "auto_16",
+            },
+            None,
+            None,
+            None,
         ),
     ],
     ids=[
         "cust_awp_noprec",
         "override_csm_noprec",
+        "cust_awp_noprec_ignore_no_offload",
         "non_disjoint_phase_fsdp_params",
         "non_disjoint_phase_mods",
         "non_disjoint_excluded_ft_params",
+        "already_fsdp_wrapped",
         "no_fsdp_params_p0",
         "warn_unsupp_nodecay",
         "unmatched_awp_overrides",
@@ -584,6 +700,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "shared_params_auto_prec",
         "override_csm_adam_noprec",
         "cust_awp_override_prec",
+        "cust_awp_override_prec_ext",
     ],
 )
 def test_fsdp_native_multi_gpus(
@@ -597,16 +714,18 @@ def test_fsdp_native_multi_gpus(
     ft_sched_idx,
     fit_start_only,
     strategy_adapter_cfg,
-    test_model_cfg,
-    test_fts_cfg,
-    extra_trainer_cfg,
+    model_cfg,
+    fts_cfg,
+    trainer_cfg,
+    strategy_cfg,
 ):
     """Test to ensure that checkpoint is saved correctly when using multiple GPUs, and all stages can be run."""
-    model_cfg = test_model_cfg or {}
+    model_cfg = model_cfg or {}
     expected_state = EXPECTED_FSDP_FTS_RESULTS[model_cfg_key]
     warns_expected = expected_state[1]
-    additional_fts_cfg = test_fts_cfg or {}
-    additional_trainer_cfg = extra_trainer_cfg or {"max_epochs": 3}
+    fts_cfg = fts_cfg or {}
+    trainer_cfg = trainer_cfg or {"max_epochs": 3}
+    strategy_cfg = strategy_cfg or {"cpu_offload": True, "ignored_modules": None}
     exception_expected = expected_state[2]
     seed_everything(42)
     model = model_cls(**model_cfg)
@@ -617,15 +736,14 @@ def test_fsdp_native_multi_gpus(
             logging_level=DEBUG,
             strategy_adapter_cfg=strategy_adapter_cfg,
             expected_state=expected_state[0],
-            **additional_fts_cfg,
+            **fts_cfg,
         ),
         FTSEarlyStopping(monitor="val_loss", patience=2),
         FTSCheckpoint(monitor="val_loss", save_top_k=3, verbose=True),
     ]
-    strategy = DDPFullyShardedNativeStrategy(
-        auto_wrap_policy=auto_wrap_policy,
-        cpu_offload=CPUOffload(offload_params=True),
-    )
+    if strategy_cfg.get("test_ignored_modules_name", None):
+        strategy_cfg["ignored_modules"] = [model.get_submodule(strategy_cfg.pop("test_ignored_modules_name"))]
+    strategy = DDPFullyShardedNativeStrategy(auto_wrap_policy=auto_wrap_policy, **strategy_cfg)
     precision_opts = {"precision": 16} if use_precision else {}
     trainer = Trainer(
         default_root_dir=tmpdir,
@@ -633,7 +751,7 @@ def test_fsdp_native_multi_gpus(
         devices=2,
         strategy=strategy,
         callbacks=callbacks,
-        **additional_trainer_cfg,
+        **trainer_cfg,
         **precision_opts,
     )
     if exception_expected:
@@ -655,7 +773,7 @@ def test_fsdp_native_multi_gpus(
 
 @RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.12")
 @pytest.mark.parametrize(
-    "model_cfg_key, model_cls, auto_wrap_policy, ft_sched_idx, test_model_cfg",
+    "model_cfg_key, model_cls, auto_wrap_policy, ft_sched_idx, model_cfg",
     [
         (
             "cust_noprec_resume",
@@ -676,10 +794,10 @@ def test_fsdp_native_multi_gpus_resume(
     model_cls,
     auto_wrap_policy,
     ft_sched_idx,
-    test_model_cfg,
+    model_cfg,
 ):
     """Test to ensure that checkpoint is saved correctly when using multiple GPUs, and all stages can be run."""
-    model_cfg = test_model_cfg or {}
+    model_cfg = model_cfg or {}
     expected_state = EXPECTED_FSDP_FTS_RESULTS[model_cfg_key]
     warns_expected = expected_state[1]
     seed_everything(42)

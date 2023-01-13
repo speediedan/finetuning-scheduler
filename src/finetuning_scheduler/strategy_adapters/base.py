@@ -48,14 +48,6 @@ class StrategyAdapter:
         assert self.pl_module._trainer is not None
         return self.pl_module._trainer.strategy
 
-    @property
-    def lightning_restore_optimizer(self) -> bool:
-        """Override to disable Lightning restoring optimizers/schedulers.
-
-        This is useful for plugins which manage restoring optimizers/schedulers.
-        """
-        return True
-
     def on_before_init_fts(self) -> None:
         """Hook executed in Fine-Tuning Scheduler setup immediately before `init_fts`"""
 
