@@ -415,7 +415,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             1: (3, 6),
             2: (5, 10),
         },
-        ("Pruning explicitly specified", "already wrapped"),
+        ("Pruning explicitly specified",),
         None,
     ),
     "override_csm_adam_noprec": (
@@ -440,9 +440,9 @@ EXPECTED_FSDP_FTS_RESULTS = {
     ),
     "cust_awp_override_prec_ext": (
         {
-            0: (2, 6),
-            1: (6, 14),
-            2: (7, 16),
+            0: (3, 6),
+            1: (7, 14),
+            2: (8, 16),
         },
         None,
         None,

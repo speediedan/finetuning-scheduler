@@ -39,7 +39,7 @@ if _fsdp_available:
         _get_param_to_unflat_param_names,
         FullyShardedDataParallel,
     )
-    from torch.distributed.fsdp.wrap import _ConfigAutoWrap, wrap
+    from torch.distributed.fsdp.wrap import _ConfigAutoWrap, _or_policy, lambda_auto_wrap_policy, wrap
 
 
 class FSDPStrategyAdapter(StrategyAdapter):
@@ -338,36 +338,19 @@ class FSDPStrategyAdapter(StrategyAdapter):
             f"{m}.{n}" for m in unscheduled_mods for n, _ in self.pl_module.get_submodule(m).named_parameters()
         ]
 
-    def get_wrapped_name_from_unwrapped(self, unwrapped_name: str) -> Optional[str]:
-        for n, m in self.pl_module.named_modules():
-            if self.pl_module.get_submodule(unwrapped_name) is m:
-                return n
-
-    def _apply_awp_overrides(self) -> None:
-        for om in self.awp_overrides:
-            if isinstance(self.pl_module.get_submodule(om), FullyShardedDataParallel):
-                rank_zero_warn(
-                    f"You specified a module ({om}) in `awp_overrides` that the provided `auto_wrap_policy`"
-                    f" ({_ConfigAutoWrap.kwargs['auto_wrap_policy'].__name__}) has already wrapped. Skipping manual"
-                    " application of FSDP wrap to avoid double-wrapping of this module."
-                )
-            else:
-                with self._enable_explicit_wrap():
-                    wrapped_name = self.get_wrapped_name_from_unwrapped(om)
-                    assert wrapped_name
-                    pn, _, cn = wrapped_name.rpartition(".")
-                    setattr(self.pl_module.get_submodule(pn), cn, wrap(self.pl_module.get_submodule(om)))
-
     def _fts_auto_wrap(self) -> None:
-        for n, m in self.pl_module.named_children():
-            setattr(self.pl_module, n, wrap(m))
-        if self.awp_overrides:
-            self._apply_awp_overrides()
+        with self._enable_name_based_overrides():
+            for n, m in self.pl_module.named_children():
+                setattr(self.pl_module, n, wrap(m))
 
     @contextmanager
-    def _enable_explicit_wrap(self) -> Generator:
-        auto_wrap_policy_handle = _ConfigAutoWrap.kwargs.get("auto_wrap_policy", None)
-        _ConfigAutoWrap.kwargs["auto_wrap_policy"] = None
+    def _enable_name_based_overrides(self) -> Generator:
+        auto_wrap_policy_handle = _ConfigAutoWrap.kwargs.pop("auto_wrap_policy", None)
+        override_ids = [id(m) for n, m in self.pl_module.named_modules() if n in self.awp_overrides]
+        lambda_fn = lambda m: id(m) in override_ids
+        name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda_fn)
+        name_based_override_or_policy = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
+        _ConfigAutoWrap.kwargs["auto_wrap_policy"] = name_based_override_or_policy
         try:
             yield
         finally:
