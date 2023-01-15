@@ -118,8 +118,8 @@ class CallbackResolverMixin(ABC):
         target_callback_ref: str = TARGET_CALLBACK_REF,
         support_multiple_targets: bool = False,
     ) -> None:
-        """Initialize the user-provided callback depedency resolver in accordance with the user-provided module
-        configuration.
+        """Arguments used to initialize the user-provided callback depedency resolver in accordance with the user-
+        provided module configuration:
 
         Args:
             callback_attrs (Tuple, optional): Attribute signature of user-provided callback to be structurally detected
@@ -187,10 +187,10 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
     used if a :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is detected
     and :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is ``False``
 
-    .. warning::
+    .. note::
 
-       :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` is in beta and subject to change. For detailed
-       usage information, see :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`.
+       For detailed usage information,
+       see :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`.
 
     .. note::
 
@@ -351,9 +351,9 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
     :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` will automatically be used if a
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is detected.
 
-    .. warning::
-        :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is in beta and subject to change. For detailed usage
-        information, see :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`.
+    .. note::
+        For detailed usage information, see
+        :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`.
 
     .. note::
 
@@ -872,8 +872,8 @@ class ScheduleParsingMixin(ABC):
         Args:
             new_lr_scheduler (Dict): A dictionary defining the new lr scheduler configuration to be initialized.
             trainer (pl.Trainer): The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object.
-            optimizer (class:`~torch.optim.Optimizer`): The :class:`~torch.optim.Optimizer` around which the new lr
-                scheduler will be wrapped.
+            optimizer (:external+torch:class:`~torch.optim.Optimizer`): The
+                :external+torch:class:`~torch.optim.Optimizer` around which the new lr scheduler will be wrapped.
         """
         lr_scheduler_init = new_lr_scheduler["lr_scheduler_init"]
         lrs_class = self._import_lr_scheduler(lr_scheduler_init)
@@ -1038,12 +1038,18 @@ class ScheduleImplMixin(ABC):
         pass
 
     def init_fts(self) -> None:
-        """Initializes the fine-tuning schedule and prepares the first scheduled level
+        """Initializes the fine-tuning schedule and prepares the first scheduled level.
+
+        Calls the relevant
+        :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` hooks before and after fine-tuning schedule
+        initialization.
         1. Generate the default fine-tuning schedule and/or load it into
         :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.ft_schedule`.
-        2. Prepare the first scheduled fine-tuning level, unfreezing the relevant parameters."""
+        2. Prepare the first scheduled fine-tuning level, unfreezing the relevant parameters.
+        """
+        self.strategy_adapter.on_before_init_fts()
         self.init_ft_sched()
-        # TODO: update docstring for new functionality
+        self.strategy_adapter.on_after_init_fts()
 
     def gen_or_load_sched(self) -> None:
         """Load an explicitly specified fine-tuning schedule if one provided, otherwise generate a default one."""
@@ -1242,8 +1248,8 @@ class ScheduleImplMixin(ABC):
         Args:
             module (:class:`~torch.nn.Module`): The :class:`~torch.nn.Module` from which the target optimizer parameters
                 will be read.
-            optimizer (:class:`~torch.optim.Optimizer`): The :class:`~torch.optim.Optimizer` to which parameter groups
-                will be configured and added.
+            optimizer (:external+torch:class:`~torch.optim.Optimizer`): The
+                :external+torch:class:`~torch.optim.Optimizer` to which parameter groups will be configured and added.
             thawed_pl: The list of thawed/unfrozen parameters that should be added to the new parameter group(s)
             no_decay: A list of parameters that should always have weight_decay set to 0. e.g.:
                 ["bias", "LayerNorm.weight"]. Defaults to ``None``.
@@ -1317,6 +1323,11 @@ class ScheduleImplMixin(ABC):
                 setattr(o, a, agg)
 
     def _inspect_fts_opt_state(self) -> Tuple:
+        """Distills relevant initialized optimizer state for validation prior to fit start.
+
+        Returns:
+            Tuple: Distilled optimizer state to be validated.
+        """
         assert isinstance(self.ft_schedule, Dict)
         opt = self.pl_module.trainer.optimizers[0]
         sched = self.ft_schedule
@@ -1372,8 +1383,8 @@ class CallbackDepMixin(ABC):
     """Functionality for validating/managing callback dependencies."""
 
     def __init__(self, callback_dep_parents: Dict = CALLBACK_DEP_PARENTS) -> None:
-        """Initialize the user-provided callback dependency validation in accordance with the user-provided module
-        configuration.
+        """Arguments used to initialize the user-provided callback dependency validation in accordance with the
+        user-provided module configuration:
 
         Args:
             callback_dep_parents (Dict, optional): The parent classes of all user-provided callbacks in the module that
@@ -1444,6 +1455,25 @@ class CallbackDepMixin(ABC):
         target_callbacks = [c for c in callbacks if isinstance(c, target_callback)]
         other_callbacks = [c for c in callbacks if not isinstance(c, target_callback)]
         return other_callbacks + target_callbacks
+
+    def _callback_dep_setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
+        """Ensures all :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback dependencies are met, adding
+        and configuring them if necessary.
+
+        Args:
+            trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The
+                :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
+            pl_module (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The
+                :external+pl:class:`~pytorch_lightning.core.module.LightningModule` object
+            stage: The ``RunningStage.{SANITY_CHECKING,TRAINING,VALIDATING}``. Defaults to None.
+        """
+        trainer.callbacks, added_es_fts, added_ckpt_fts = self._configure_callback_deps(trainer)
+        # if we added callbacks for the user after the setup hooks loop was initiated from trainer, we'll need to
+        # explicitly call the setup hooks for those added callbacks
+        if added_ckpt_fts:
+            trainer.checkpoint_callback.setup(trainer, pl_module, stage)  # type: ignore[union-attr]
+        if added_es_fts:
+            trainer.early_stopping_callback.setup(trainer, pl_module, stage)  # type: ignore[union-attr]
 
     def _configure_callback_deps(self, trainer: "pl.Trainer") -> Tuple[List[Callback], bool, bool]:
         """Ensures FTSCheckpoint and :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`

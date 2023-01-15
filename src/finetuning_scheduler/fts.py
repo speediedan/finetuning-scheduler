@@ -104,7 +104,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         logging_level: int = logging.INFO,
     ):
         r"""
-        Define and configure a scheduled fine-tuning training session.
+        Arguments used to define and configure a scheduled fine-tuning training session:
 
         Args:
             ft_schedule: The fine-tuning schedule to be executed. Usually will be a .yaml file path but can also be a
@@ -176,8 +176,11 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                     Most unsupported strategies and schedulers, however, are currently unsupported because they require
                     varying degrees of modification to be compatible.
 
-                    For instance, with respect to strategies, ``deepspeed`` requires an ``add_param_group`` method,
-                    ``tpu_spawn`` an override of the current broadcast method to include python objects.
+                    For instance, with respect to strategies, ``deepspeed`` will require a
+                    :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` similar to the one written for
+                    ``FSDP`` (:class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter`) to be written before
+                    support can be added (PRs welcome!), while ``tpu_spawn`` would require an override of the current
+                    broadcast method to include python objects.
 
                     Regarding lr schedulers, :external+torch:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
                     :external+torch:class:`~torch.optim.lr_scheduler.SequentialLR` are examples of schedulers not
@@ -194,6 +197,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
 
         Attributes:
             _fts_state: The internal :class:`~finetuning_scheduler.fts.FinetuningScheduler` state.
+            epoch_transitions_only: Whether to use epoch-driven stopping criteria exclusively.
         """
         super().__init__()
         self._fts_state = FTSState()
@@ -289,8 +293,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.current_depth`
 
         Args:
-            optimizer (:class:`~torch.optim.Optimizer`): The :class:`~torch.optim.Optimizer` to which parameter groups
-                will be configured and added.
+            optimizer (:external+torch:class:`~torch.optim.Optimizer`): The
+                :external+torch:class:`~torch.optim.Optimizer` to which parameter groups will be configured and added.
             depth: The maximum index of the fine-tuning schedule for which to configure the optimizer parameter
                 groups.
             depth_sync: If ``True``, configure optimizer parameter groups for all depth indices greater
@@ -391,7 +395,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert self.pl_module.trainer.state.fn is not None
         if self.pl_module.trainer.state.fn == TrainerFn.FITTING:
             try:
-                # enable strategy adapters to restore optimizer if Strategy.lightning_restore_optimizer is overridden
+                # enable strategy adapters to restore optimizer if `Strategy.lightning_restore_optimizer` is overridden
                 self.strategy_adapter.on_before_restore_optimizers_and_lrs()
                 # restore optimizers and schedulers state
                 checkpoint_connector.restore_optimizers_and_schedulers()
@@ -444,6 +448,39 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             rank_zero_warn(warn_msg)
             early_stopping_callback._transition_es_phase()
 
+    def _strategy_setup(self, trainer: "pl.Trainer") -> None:
+        """Validate a compatible :external+pl:class:`~pytorch_lightning.strategies.Strategy` strategy is being used
+        and connects the relevant :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`.
+
+        Args:
+            trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The
+                :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
+
+        Raises:
+            MisconfigurationException: If the
+                :external+pl:class:`~pytorch_lightning.strategies.Strategy` strategy being used is not currently
+                compatible with the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback.
+        """
+        strategy = trainer.strategy
+        supported = [t.lower() for t in self._supported_strategy_types()]
+        if strategy.strategy_name and strategy.strategy_name not in supported:  # type: ignore[attr-defined]
+            if not self.allow_untested:
+                raise MisconfigurationException(
+                    "FTS is has not yet been adapted for or rigorously tested using the specified distributed strategy."
+                    f" Please select from currently compatible distributed strategies ({supported}) or if you would"
+                    " like to attempt to use the currently specified strategy, pass ``allow_untested=True`` to the"
+                    " FinetuningScheduler callback when adding it."
+                )
+            else:
+                warn_msg = (
+                    "Allowing untested strategy"
+                    f" '{strategy.strategy_name}' because ``allow_untested`` is ``True``."  # type: ignore[attr-defined]
+                )
+                rank_zero_warn(warn_msg)
+        strategy_cls = STRATEGY_ADAPTERS.get(strategy.strategy_name, StrategyAdapter)
+        self.strategy_adapter = strategy_cls(**self.strategy_adapter_cfg)
+        self.strategy_adapter.connect(self)
+
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
         """Validate a compatible :external+pl:class:`~pytorch_lightning.strategies.Strategy` strategy is being used and
         ensure all :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback dependencies are met. If a valid
@@ -464,56 +501,25 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
 
         Raises:
             SystemExit: Gracefully exit before training if only generating and not executing a fine-tuning schedule.
-            MisconfigurationException: If the
-                :external+pl:class:`~pytorch_lightning.strategies.Strategy` strategy being used is not currently
-                compatible with the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback.
         """
-        trainer.callbacks, added_es_fts, added_ckpt_fts = self._configure_callback_deps(trainer)
-        strategy = trainer.strategy
-        # if we added callbacks for the user after the setup hooks loop was initiated from trainer, we'll need to
-        # explicitly call the setup hooks for those added callbacks
-        if added_ckpt_fts:
-            trainer.checkpoint_callback.setup(trainer, pl_module, stage)  # type: ignore[union-attr]
-        if added_es_fts:
-            trainer.early_stopping_callback.setup(trainer, pl_module, stage)  # type: ignore[union-attr]
-        assert pl_module is not None and pl_module.trainer is not None
-        supported = [t.lower() for t in self._supported_strategy_types()]
-        if strategy.strategy_name and strategy.strategy_name not in supported:  # type: ignore[attr-defined]
-            if not self.allow_untested:
-                raise MisconfigurationException(
-                    "FTS is has not yet been adapted for or rigorously tested using the specified distributed strategy."
-                    f" Please select from currently compatible distributed strategies ({supported}) or if you would"
-                    " like to attempt to use the currently specified strategy, pass ``allow_untested=True`` to the"
-                    " FinetuningScheduler callback when adding it."
-                )
-            else:
-                warn_msg = (
-                    "Allowing untested strategy"
-                    f" '{strategy.strategy_name}' because ``allow_untested`` is ``True``."  # type: ignore[attr-defined]
-                )
-                rank_zero_warn(warn_msg)
-        strategy_cls = STRATEGY_ADAPTERS.get(strategy.strategy_name, StrategyAdapter)
-        self.strategy_adapter = strategy_cls(**self.strategy_adapter_cfg)
-        self.strategy_adapter.connect(self)
+        self._callback_dep_setup(trainer, pl_module, stage)
+        self._strategy_setup(trainer)
         if self.gen_ft_sched_only:
             if trainer.is_global_zero:
                 assert trainer.log_dir is not None
                 _ = self.gen_ft_schedule(pl_module, trainer.log_dir)
                 log.info("Bypassing training, generating fine-tuning schedule for review and subsequent fine-tuning")
             raise SystemExit()
-        else:  # TODO: remove this unecessary else after fsdp and other tests validated
-            if not self.epoch_transitions_only:
-                assert isinstance(trainer.early_stopping_callback, FTSEarlyStopping)
-                trainer.early_stopping_callback.final_phase = False
-                trainer.early_stopping_callback.es_phase_complete = False
-            self._fts_state._ft_sync_objects = pl_module.trainer.fit_loop, self._fts_state
-            if trainer.ckpt_path:
-                self._fts_state._resume_fit_from_ckpt = True
-            self.freeze_before_training(pl_module)
-            self.pl_module = pl_module  # save pl_module ref for downstream configuration convenience
-            self.strategy_adapter.on_before_init_fts()  # TODO: pass ptl args to hook? maybe continue to use fts handle
-        self.init_fts()  # TODO: wrap fts hooks into init_fts method after unesting if
-        self.strategy_adapter.on_after_init_fts()
+        if not self.epoch_transitions_only:
+            assert isinstance(trainer.early_stopping_callback, FTSEarlyStopping)
+            trainer.early_stopping_callback.final_phase = False
+            trainer.early_stopping_callback.es_phase_complete = False
+        self._fts_state._ft_sync_objects = pl_module.trainer.fit_loop, self._fts_state
+        if trainer.ckpt_path:
+            self._fts_state._resume_fit_from_ckpt = True
+        self.freeze_before_training(pl_module)
+        self.pl_module = pl_module  # save pl_module ref for downstream configuration convenience
+        self.init_fts()
 
     def on_fit_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
         """Before beginning training, ensure an optimizer configuration supported by
@@ -677,8 +683,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
             pl_module  (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The
                 :external+pl:class:`~pytorch_lightning.core.module.LightningModule` object
-            optimizer (:class:`~torch.optim.Optimizer`): The :class:`~torch.optim.Optimizer` to which parameter groups
-                will be configured and added.
+            optimizer (:external+torch:class:`~torch.optim.Optimizer`): The
+                :external+torch:class:`~torch.optim.Optimizer` to which parameter groups will be configured and added.
         """
         self._fts_state._ft_global_steps += 1
 

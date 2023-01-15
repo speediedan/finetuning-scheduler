@@ -9,3 +9,4 @@ Fine-Tuning Scheduler API
 
     fts
     fts_supporters
+    strategy_adapters

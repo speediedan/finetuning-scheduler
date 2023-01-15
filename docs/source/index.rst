@@ -75,7 +75,7 @@ and :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks with
 The Default Fine-Tuning Schedule
 ********************************
 Schedule definition is facilitated via
-:meth:`~finetuning_scheduler.fts_supporters.SchedulingMixin.gen_ft_schedule` which dumps
+:meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.gen_ft_schedule` which dumps
 a default fine-tuning schedule (by default using a naive, 2-parameters per level heuristic) which can be adjusted as
 desired by the user and/or subsequently passed to the callback. Using the default/implicitly generated schedule will
 often be less computationally efficient than a user-defined fine-tuning schedule but can often serve as a
@@ -297,10 +297,12 @@ configurations.
       :columns: 3
 
       * :external+pl:class:`~pytorch_lightning.strategies.ddp.DDPStrategy`
+      * :external+pl:class:`~pytorch_lightning.strategies.fully_sharded_native.DDPFullyShardedNativeStrategy`
       * :external+pl:class:`~pytorch_lightning.strategies.sharded.DDPShardedStrategy`
       * :external+pl:class:`~pytorch_lightning.strategies.ddp_spawn.DDPSpawnStrategy`
       * :external+pl:class:`~pytorch_lightning.strategies.sharded_spawn.DDPSpawnShardedStrategy`
       * :external+pl:class:`~pytorch_lightning.strategies.dp.DataParallelStrategy`
+      * ``DDP_FORK`` (i.e., ``ddp_spawn``-based aliases like ``ddp_fork`` and ``ddp_notebook``)
 
 .. _supported_lr_schedulers:
 
@@ -331,8 +333,10 @@ configurations.
     unsupported strategies and schedulers, however, are currently unsupported because they require varying degrees of
     modification to be compatible.
 
-    For instance, with respect to strategies, ``deepspeed`` requires an
-    ``add_param_group`` method, ``tpu_spawn`` an override of the current broadcast method to include python objects.
+    For instance, with respect to strategies, ``deepspeed`` will require a
+    :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` similar to the one written for ``FSDP``
+    (:class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter`) to be written before support can be added,
+    while ``tpu_spawn`` would require an override of the current broadcast method to include python objects.
 
     Regarding lr schedulers, :external+torch:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
     :external+torch:class:`~torch.optim.lr_scheduler.SequentialLR` are examples of schedulers not currently supported
@@ -460,8 +464,6 @@ behavior to maximizing performance.
 .. figure:: _static/images/fts/fts_explicit_loss_anim.gif
    :alt: FinetuningScheduler Explicit Loss Animation
    :width: 300
-
-.. note:: The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is currently in beta.
 
 Footnotes
 *********

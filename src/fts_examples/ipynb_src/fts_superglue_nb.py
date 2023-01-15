@@ -149,13 +149,15 @@
 #
 # - ``DP``
 # - ``DDP``
+# - ``fsdp_native`` (and associated alias ``fsdp_native_full_shard_offload``)
 # - ``DDP_FORK`` (and its aliases e.g. ``ddp_notebook``)
 # - ``DDP_SPAWN``
 # - ``DDP_SHARDED``
 # - ``DDP_SHARDED_SPAWN``
 #
 # Custom or officially unsupported strategies can be used by setting [FinetuningScheduler.allow_untested](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html?highlight=allow_untested#finetuning_scheduler.fts.FinetuningScheduler.params.allow_untested) to ``True``.
-# Note that most currently unsupported strategies are so because they require varying degrees of modification to be compatible (e.g. ``deepspeed`` requires an ``add_param_group`` method, ``tpu_spawn`` an override of the current broadcast method to include python objects)
+# Note that most currently unsupported strategies are so because they require varying degrees of modification to be compatible (e.g. ``deepspeed`` will require a StrategyAdapter similar to the one written for ``FSDP`` (``FSDPStrategyAdapter``) to be written before support can be added (PRs welcome!),
+# while ``tpu_spawn`` would require an override of the current broadcast method to include python objects)
 # </div>
 
 # %% [markdown]

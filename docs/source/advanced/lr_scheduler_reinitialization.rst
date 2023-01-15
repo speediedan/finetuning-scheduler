@@ -107,7 +107,7 @@ sanity-checked prior to training initiation.
     number of optimizer parameter groups created in previous phases (and if using
     :external+torch:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau` with a list of ``min_lr`` s, the
     current number parameter groups). This number of groups is dependent on a number of
-    factors including the ``nodecay`` mapping of parameters specified in previous phases and isn't yet
+    factors including the ``no_decay`` mapping of parameters specified in previous phases and isn't yet
     introspected/simulated in the current :class:`~finetuning_scheduler.fts.FinetuningScheduler` version.
 
 Note that specifying LR scheduler reinitialization configurations is only supported for phases >= ``1``. This is because
