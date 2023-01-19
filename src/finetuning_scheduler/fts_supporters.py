@@ -51,7 +51,7 @@ from torch import Tensor
 from torch.nn import Module
 from torch.optim.optimizer import Optimizer
 
-from finetuning_scheduler.strategy_adapters.fsdp import FSDPStrategyAdapter
+from finetuning_scheduler.strategy_adapters.fsdp import FSDPStrategyAdapter, StrategyAdapter
 
 log = logging.getLogger(__name__)
 
@@ -971,6 +971,41 @@ class ScheduleParsingMixin(ABC):
             rank_zero_warn(error_msg)
             raise MisconfigurationException(error_msg)
         return lrs_class
+
+    @staticmethod
+    def _import_strategy_adapter(strategy_key: str, adapter_map: Dict[str, str]) -> Type[StrategyAdapter]:
+        """Import the custom strategy adapter specified in the ``custom_strategy_adapter`` configuration.
+
+        Args:
+            qualname (Dict): The user-provided custom strategy adapter fully qualified class name.
+
+        Raises:
+            MisconfigurationException: If the specified custom strategy adapter cannot be imported successfully.
+            MisconfigurationException: If the specified `strategy_key` does not match the current strategy.
+
+        Returns:
+            StrategyAdapter: The custom strategy adapter class to be instantiated.
+        """
+        try:
+            qualname = adapter_map.get(strategy_key, None)
+            if not qualname:
+                raise MisconfigurationException(
+                    f"Current strategy name ({strategy_key}) does not map to a custom strategy adapter in the"
+                    f" provided `custom_strategy_adapter` mapping ({adapter_map})."
+                )
+            class_module, class_name = qualname.rsplit(".", 1)
+            module = __import__(class_module, fromlist=[class_name])
+            custom_strategy_adapter_cls = getattr(module, class_name)
+            issubclass(custom_strategy_adapter_cls, StrategyAdapter)
+        except (ImportError, AttributeError) as err:
+            error_msg = (
+                "Could not import the specified custom strategy adapter class using the provided fully qualified class"
+                f" name ({qualname}). Recieved the following error while importing: {err}. Please validate specified"
+                " path."
+            )
+            rank_zero_warn(error_msg)
+            raise MisconfigurationException(error_msg)
+        return custom_strategy_adapter_cls
 
     def _lr_scheduler_sanity_chk(self, lr_scheduler_init: Dict, is_implicit_mode: bool = False) -> None:
         """Before beginning execution of defined fine-tuning schedule, perform a sanity check of the specified lr

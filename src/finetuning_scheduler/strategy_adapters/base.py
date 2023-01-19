@@ -26,11 +26,24 @@ from torch.nn import Module
 
 
 class StrategyAdapter:
-    """Base class for all strategy adapters. Implements the default
+    r"""Base class for all strategy adapters. Implements the default
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` hooks. Can be subclassed to extend
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` support for a complex or custom
     :external+pl:class:`~pytorch_lightning.strategies.Strategy` via an associated
     :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`.
+
+    .. warning::
+
+        :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is in BETA and subject to change. The interface
+        can bring breaking changes and new features with the next release of FTS.
+
+    .. tip::
+
+        If you want to extend FTS to use a custom, currently unsupported strategy or override current FTS behavior in
+        the context of a given training strategy, subclassing
+        :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is a way to do so. See
+        :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` for an example implementation.
+
     """
 
     fts_handle: Callback

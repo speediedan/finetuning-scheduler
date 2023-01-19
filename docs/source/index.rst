@@ -503,6 +503,7 @@ Footnotes
    :caption: Advanced Usage
 
    advanced/lr_scheduler_reinitialization
+   advanced/fsdp_scheduled_fine_tuning
 
 .. toctree::
    :maxdepth: 1

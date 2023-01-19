@@ -18,14 +18,17 @@ Fully Sharded Data Parallel training.
 
 """
 import itertools
+import logging
 import os
 import re
 from collections import Counter
 from contextlib import contextmanager
 from copy import deepcopy
 from functools import partial, wraps
+from pprint import pformat
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
 
+from lightning_fabric.strategies.fsdp import _setup_activation_checkpointing
 from lightning_fabric.utilities import rank_zero_info, rank_zero_warn
 from pytorch_lightning.strategies.fully_sharded_native import _fsdp_available
 from pytorch_lightning.strategies.strategy import Strategy
@@ -63,14 +66,16 @@ class FSDPStrategyAdapter(StrategyAdapter):
     To facilitate module wrapping in alignment with fine-tuning schedule phases, FTS provides the
     :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides` feature which allows users to
     provide module name-based complements to a given ``auto_wrap_policy``. See the
-    `Scheduled Fine-Tuning with FSDP  <https://pytorch.org/tutorials/intermediate/FSDP_tutorial.html>`_ tutorial for a
-    concrete example and additional guidance.
+    `Fully Sharded Data Parallel Scheduled Fine-Tuning
+    <https://finetuning-scheduler.readthedocs.io/en/stable/advanced/lr_scheduler_reinitialization.html>`_ tutorial for
+    a concrete example and additional guidance.
 
     FTS will attempt to validate that the module is wrapped in a manner that aligns with the defined fine-tuning
     schedule phases prior to the start of training and provided detailed feedback for the user if a misalignment is
     discovered.
 
     .. warning::
+
         :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` is in BETA and subject to change. The
         interface can bring breaking changes and new features with the next release of PyTorch.
 
@@ -86,16 +91,16 @@ class FSDPStrategyAdapter(StrategyAdapter):
        :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is not currently supported in the context of
        FSDP fine-tuning.
 
-    .. note::
+    .. tip::
 
        Because of inter-module dependencies (among other reasons), wrapping every submodule in its own separate FSDP
        instance is often not a viable approach to ensuring fine-tuning schedule/module wrapping alignment. Starting
        with a provided ``auto_wrap_policy`` (e.g. ``transformer_auto_wrap_policy``) and providing module name-based
-       supplements as needed using
-       :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides` is usually the most effective
-       approach to auto-wrapping. As always, if needed, one can override ``configure_sharded_model`` and manually wrap
-       a given :external+pl:class:`~pytorch_lightning.core.module.LightningModule` to align with a desired fine-tuning
-       schedule.
+       complements as needed using
+       :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides` is often the most expedient
+       approach to auto-wrapping in alignment with a fine-tuning schedule. As always, if needed, one can override
+       ``configure_sharded_model`` and manually wrap a given
+       :external+pl:class:`~pytorch_lightning.core.module.LightningModule` to align with a desired fine-tuning schedule.
     """
 
     _fsdp_flat_to_unflat_mapping: Dict
@@ -103,14 +108,14 @@ class FSDPStrategyAdapter(StrategyAdapter):
     _ft_schedule_module_map: Dict
     _unscheduled_params: List
     _ignored_modules: List
+    RANK_ZERO_LOG_FQN = "pytorch_lightning.utilities.rank_zero"
 
     def __init__(self, awp_overrides: Optional[List] = None, *args: Any, **kwargs: Any) -> None:
         """The only user-facing configuration for
         :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` is
         :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides`, an optional list of
         module names that should be wrapped in separate FSDP instances, complementing the modules that would be
-        individually wrapped by ``auto_wrap_policy`` provided in the.
-
+        individually wrapped by ``auto_wrap_policy`` provided in the
         :external+pl:class:`~pytorch_lightning.strategies.fully_sharded_native.DDPFullyShardedNativeStrategy` strategy
         configuration.
 
@@ -124,11 +129,12 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 Defaults to None.
 
         Attributes:
-            awp_overrides: A list of module names to wrap in separate FSDP instances.
+            awp_overrides: A list of mod0ule names to wrap in separate FSDP instances.
         """
         super().__init__(*args, **kwargs)
         self.awp_overrides = awp_overrides or []
         self._min_wrap_validated: bool = False
+        self._suppress_csm_warns()
         self.exec_ft_phase = partial(StrategyAdapter.base_ft_phase, translation_func=self.logical_param_translation)
 
     @property
@@ -186,8 +192,13 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 thrown. The provided exceptions provide detailed feedback for the user to address the misalignment.
         """
         fsdp_fts_cfg_errors = self._validate_fsdp_fts_config()
+        # feedback could be narrowed to per-node instead of per-rank here but we're conservatively allowing all ranks to
+        # print the feedback because of the future possibility per-rank wrapping differences
         if fsdp_fts_cfg_errors:
-            raise MisconfigurationException(fsdp_fts_cfg_errors)
+            exceptions = []
+            for err_msg in fsdp_fts_cfg_errors:
+                exceptions.append(MisconfigurationException(err_msg))
+            raise MisconfigurationException(*exceptions)
 
     def on_before_restore_optimizers_and_lrs(self) -> None:
         """Allow the :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` to override the default
@@ -276,6 +287,20 @@ class FSDPStrategyAdapter(StrategyAdapter):
             )
             setattr(self.pl_module, "no_decay", None)
 
+    def _suppress_csm_warns(self) -> None:
+        """Because Fine-Tuning Scheduler internally leverages the ``configure_sharded_model`` method to implement
+        FSDP auto-wrapping enhancements, we suppress superfluous warnings about ``configure_sharded_model``
+        overrides."""
+        try:
+            # attach to the relevant logger instead of handler because we want to suppress this message narrowly
+            rank_zero_logger = logging.getLogger(self.RANK_ZERO_LOG_FQN)
+            lpat = "will assume that all the layers are already wrapped"
+            rank_zero_logger.addFilter(lambda record: lpat not in getattr(record, "msg"))
+        except Exception:
+            # suppressing this message is largely cosmetic so if we cannot suppress this message for any reason at all
+            # (e.g. logger rename) continue anyway
+            pass
+
     def _validate_fsdp_fts_config(self) -> List:
         """Execute fine-tuning schedule/module wrapping misalignment checks, generating and aggregating detailed
         feedback to facilitate the user's remediation of the issue.
@@ -346,8 +371,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
         Returns:
             Tuple: Any fine-tuning schedule/wrapped module misalignment feedback messages to be provided to the user.
         """
-        fsdp_dup_params: Set
-        unsched_dup_params: Set
+        fsdp_dup_params = set()
+        unsched_dup_params = set()
         scheduled_mod_lists = [list(self._ft_schedule_module_map[d]) for d in self._ft_schedule_module_map.keys()]
         ft_sched_dup_mods = FSDPStrategyAdapter._phasewise_intersection(scheduled_mod_lists)
         fsdp_dup_params = self._phase_unaligned_fsdp_params()
@@ -356,10 +381,10 @@ class FSDPStrategyAdapter(StrategyAdapter):
         fsdp_feedback_msgs = []
         if ft_sched_dup_mods:
             fsdp_feedback_msgs.append(self._module_overlap_feedback(ft_sched_dup_mods))
-        if fsdp_dup_params:
-            fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(fsdp_dup_params))
-        elif unsched_dup_params:  # conditionally emphasize parameters not included in the fine-tuning schedule
+        if unsched_dup_params:  # conditionally emphasize parameters not included in the fine-tuning schedule
             fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(unsched_dup_params, unsched_msg=True))
+        elif fsdp_dup_params:
+            fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(fsdp_dup_params))
         return tuple(fsdp_feedback_msgs)
 
     def _validate_min_wrap_condition(self) -> Optional[str]:
@@ -390,8 +415,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
         Args:
             check_unsched (bool, optional): Whether to include parameters not in the fine-tuning schedule in the
-                disjointedness check. The unscheduled parameter disjointedness check will only be executed if the
-                scheduled parameter phase disjointedness check passes (since the unscheduled check is a superset of the
+                disjointness check. The unscheduled parameter disjointness check will only be executed if the
+                scheduled parameter phase disjointness check passes (since the unscheduled check is a superset of the
                 scheduled one). Defaults to False.
 
         Returns:
@@ -433,21 +458,21 @@ class FSDPStrategyAdapter(StrategyAdapter):
         dup_params_fsdp_mapping = {lp: get_fsdp_owner(lp) for lp in dup_params}
         unsched_param_msg = (
             "In this particular case, there are parameters not included in your fine-tuning schedule that span more"
-            " than one fine-tuning phase. HINT: parameters associated with unwrapped modules will be included in the"
+            " than one fine-tuning phase.\nHINT: parameters associated with unwrapped modules will be included in the"
             " top-level (aka 'root') FSDP instance so ensuring all modules associated with fine-tuning scheduled"
             " parameters are wrapped separately from the top-level FSDP instance may avoid triggering this exception."
         )
         warn_msg = (
-            "Fine-tuning schedule phases do not have disjoint FSDP-flattened parameter sets. Because the"
+            "\n\nFine-tuning schedule phases do not have disjoint FSDP-flattened parameter sets. Because the"
             " `requires_grad` attribute of FSDP-flattened parameters currently must be the same for all flattened"
             " parameters, fine-tuning schedules must avoid thawing parameters in the same FSDP-flattened parameter in"
             " different phases. Please ensure parameters associated with each phase are wrapped in separate"
             " phase-aligned FSDP instances.\n\n"
             f"""{unsched_param_msg if unsched_msg else ''}\n\n"""
             "The following logical parameters are associated with an FSDP-flattened parameter that spans more than one"
-            " fine-tuning phase. The mapping of each logical parameter and the module name wrapped by its associated"
-            " FSDP instance is provided below:"
-            f" {os.linesep}{dup_params_fsdp_mapping}"
+            " fine-tuning phase. The mapping of each logical parameter with the module name wrapped by its associated"
+            " FSDP instance is provided below:\n"
+            f"{pformat(dup_params_fsdp_mapping)}{os.linesep}"
         )
         return warn_msg
 
@@ -511,7 +536,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def _gen_ft_sched_module_map(self) -> None:
         """Generate a module-level mapping of the modules associated with each fine-tuning phase, including modules
         not present in the fine-tuning schedule grouped together into a single unscheduled phase to facilitate the
-        relevant disjointedness check."""
+        relevant disjointness check."""
         assert isinstance(self.fts_handle.ft_schedule, Dict)
         module_map: Dict = {}
         for depth in self.fts_handle.ft_schedule.keys():  # type: ignore[union-attr]
@@ -530,10 +555,17 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
     def _fts_auto_wrap(self) -> None:
         """Apply the provided ``auto_wrap_policy`` within a context-manager that composes any ``awp_overrides``
-        directives with the policy."""
+        directives with the policy.
+
+        Subsequently, apply activation checkpointing wrappers if requested
+        """
         with self._enable_name_based_overrides():
             for n, m in self.pl_module.named_children():
                 setattr(self.pl_module, n, wrap(m))
+
+        # apply wrappers to enable activation checkpointing if requested
+        if self.pls_handle._activation_checkpointing:  # Lightning handles the requisite torch version check upstream
+            _setup_activation_checkpointing(module=self.pl_module, layers=self.pls_handle._activation_checkpointing)
 
     def _after_configure_sharded_model(self) -> None:
         """Generate the parameter-level bi-directional translations the FTS FSDP adapter requires and then execute

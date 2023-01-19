@@ -194,9 +194,6 @@ class FTSCustLRModel(FinetuningSchedulerBoringModel):
         ...
 
 
-MOCK_STRATEGY_MAPPING = {"mock_stgy": ("single_tpu", False), "allow_untest": ("single_tpu", True)}
-
-
 class TestFinetuningScheduler(FinetuningScheduler):
     """Extends :class:`~finetuning_scheduler.FinetuningScheduler` to facilitate intra- fit state inspection during
     testing of scheduled finetuning."""
@@ -220,6 +217,7 @@ class TestFinetuningScheduler(FinetuningScheduler):
         if self.mock_strategy:
             trainer.strategy.strategy_name = MOCK_STRATEGY_MAPPING[self.mock_strategy][0]
             self.allow_untested = MOCK_STRATEGY_MAPPING[self.mock_strategy][1]
+            self.custom_strategy_adapter = MOCK_STRATEGY_MAPPING[self.mock_strategy][2]
         super().setup(trainer, pl_module, stage)
         if self.mock_strategy and self.allow_untested:
             raise SystemExit()
@@ -1451,34 +1449,76 @@ def test_finetuningscheduling_invalid_schedules(tmpdir, invalid_schedules, sched
         assert valid_dict[1]["params"][0] == expected[1]
 
 
+EXPECTED_MOCK_STRATEGY_RESULTS = {
+    "allow_untest": ("Allowing untested strategy", {"expected_exception": BaseException}),
+    "disallow_untest": (None, {"expected_exception": MisconfigurationException, "match": "not yet been adapt"}),
+    "cust_stgy_adapter_found": (None, {"expected_exception": BaseException}),
+    "cust_stgy_adapter_not_found": (
+        None,
+        {"expected_exception": MisconfigurationException, "match": "does not map to a custom strategy"},
+    ),
+    "cust_stgy_adapter_not_importable": (
+        None,
+        {"expected_exception": MisconfigurationException, "match": "import the specified custom"},
+    ),
+}
+
+MOCK_STRATEGY_MAPPING = {
+    "stgy_disallow_untest": ("single_tpu", False, None),
+    "stgy_allow_untest": ("single_tpu", True, None),
+    "cust_stgy_adapter_found": (
+        "test_strategy",
+        True,
+        {"test_strategy": "finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter"},
+    ),
+    "cust_stgy_adapter_not_found": (
+        "test_strategy",
+        True,
+        {"IAmMissing": "finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter"},
+    ),
+    "cust_stgy_adapter_not_importable": (
+        "test_strategy",
+        True,
+        {"test_strategy": "finetuning_scheduler.strategy_adapters.IAmMissing"},
+    ),
+}
+
+
 @pytest.mark.parametrize(
-    "strategy, gpus, plugins, mockconf",
+    "strategy, gpus, strategy_conf, results_key",
     [
-        pytest.param("cust_stgy", None, None, "allow_untest"),
-        pytest.param("ddp", None, None, "mock_stgy"),
-        pytest.param("ddp_fully_sharded", 1, None, None, marks=RunIf(min_cuda_gpus=1)),
-        pytest.param("horovod", None, None, None, marks=RunIf(horovod=True, min_cuda_gpus=1)),
-        pytest.param("deepspeed_stage_2", 1, None, None, marks=RunIf(deepspeed=True, min_cuda_gpus=1)),
+        pytest.param("test_strategy", None, "stgy_allow_untest", "allow_untest"),
+        pytest.param("ddp", None, "stgy_disallow_untest", "disallow_untest"),
+        pytest.param("test_strategy", None, "cust_stgy_adapter_found", "cust_stgy_adapter_found"),
+        pytest.param("test_strategy", None, "cust_stgy_adapter_not_found", "cust_stgy_adapter_not_found"),
+        pytest.param("test_strategy", None, "cust_stgy_adapter_not_importable", "cust_stgy_adapter_not_importable"),
+        # pytest.param("ddp_fully_sharded", 1, None, None, marks=RunIf(min_cuda_gpus=1)),
+        # pytest.param("horovod", None, None, None, marks=RunIf(horovod=True, min_cuda_gpus=1)),
+        pytest.param("deepspeed_stage_2", 1, None, "disallow_untest", marks=RunIf(deepspeed=True, min_cuda_gpus=1)),
     ],
-    ids=["cust_stgy", "mock_stgy", "ddp_fully_sharded", "horovod", "deepspeed_stage_2"],
+    ids=[
+        "allow_untested_stgy",
+        "disallow_untested_stgy",
+        "csa_found",
+        "csa_not_found",
+        "csa_not_importable",
+        # "ddp_fully_sharded",
+        # "horovod",
+        "deepspeed_stage_2",
+    ],
 )
-def test_finetuningscheduling_distributed_compat(tmpdir, strategy, gpus, plugins, mockconf):
+def test_finetuningscheduling_distributed_compat(tmpdir, strategy, gpus, strategy_conf, results_key):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly raised
     for currently unsupported strategies."""
-    if mockconf == "allow_untest":
-        expected_err = "some error"
-        expected_warn = "Allowing untested strategy"
-        strategy = "test_strategy"
-        raise_cond = {"expected_exception": BaseException}
-    else:
-        expected_err = "has not yet been adapted"
-        expected_warn = "*"
-        raise_cond = {"expected_exception": MisconfigurationException, "match": expected_err}
-    callbacks = [TestFinetuningScheduler(mock_strategy=mockconf)]
+    expected_warn, raise_cond = EXPECTED_MOCK_STRATEGY_RESULTS[results_key]
+    callbacks = [TestFinetuningScheduler(mock_strategy=strategy_conf)]
     model = FinetuningSchedulerBoringModel()
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy=strategy, gpus=gpus, plugins=plugins)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy=strategy, gpus=gpus)
     with pytest.raises(**raise_cond):
-        with pytest.warns(UserWarning, match=expected_warn):
+        if expected_warn:
+            with pytest.warns(UserWarning, match=expected_warn):
+                trainer.fit(model)
+        else:
             trainer.fit(model)
 
 

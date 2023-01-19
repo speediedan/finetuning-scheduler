@@ -88,6 +88,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
        :external+torch:class:`~torch.distributed.optim.ZeroRedundancyOptimizer`, setting ``overlap_with_ddp`` to
        ``True`` is not supported because that optimizer mode only supports a single parameter group.
     """
+    pl_module: pl.LightningModule
+    strategy_adapter: StrategyAdapter
 
     def __init__(
         self,
@@ -99,6 +101,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         epoch_transitions_only: bool = False,
         reinit_lr_cfg: Optional[Dict] = None,
         strategy_adapter_cfg: Optional[Dict] = None,
+        custom_strategy_adapter: Optional[Dict[str, str]] = None,
         allow_untested: bool = False,
         apply_lambdas_new_pgs: bool = False,
         logging_level: int = logging.INFO,
@@ -158,11 +161,6 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                                 frequency: 1
                                 name: Implicit_Reinit_LR_Scheduler
 
-            strategy_adapter_cfg: A configuration dictionary that will be applied to the
-                :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` associated with the current training
-                :external+pl:class:`~pytorch_lightning.strategies.Strategy`. See the relevant
-                :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` documentation for strategy-specific
-                configuration options.
             allow_untested: If ``True``, allows the use of custom or unsupported training strategies and lr schedulers
                 (e.g. ``single_tpu``, ``MyCustomStrategy``, ``MyCustomLRScheduler``) . Defaults to ``False``.
 
@@ -188,6 +186,16 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                     introduce. If a supported torch lr scheduler does not meet your requirements, one can always
                     subclass a supported lr scheduler and modify it as required
                     (e.g. :external+torch:class:`~torch.optim.lr_scheduler.LambdaLR` is especially useful for this).
+            strategy_adapter_cfg: A configuration dictionary that will be applied to the
+                :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` associated with the current training
+                :external+pl:class:`~pytorch_lightning.strategies.Strategy`. See the relevant
+                :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` documentation for strategy-specific
+                configuration options. Defaults to None.
+            custom_strategy_adapter: A dictionary associating the canonical ``strategy_name`` of a
+                :external+pl:class:`~pytorch_lightning.strategies.Strategy` (potentially a custom user-registered one)
+                to the fully qualified path of a
+                :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` subclass. This is an experimental
+                feature that is subject to change. Requires ``allow_untested`` to be set to ``True``. Defaults to None.
             apply_lambdas_new_pgs: If ``True``, applies most recent lambda in ``lr_lambdas`` list to newly added
                 optimizer groups for lr schedulers that have a ``lr_lambdas`` attribute. Note this option only applies
                 to phases without reinitialized lr schedulers. Phases with defined lr scheduler reinitialization configs
@@ -197,6 +205,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
 
         Attributes:
             _fts_state: The internal :class:`~finetuning_scheduler.fts.FinetuningScheduler` state.
+            strategy_adapter_cfg: A configuration dictionary that will be applied to the
+                :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` associated with the current training
+                :external+pl:class:`~pytorch_lightning.strategies.Strategy`.
             epoch_transitions_only: Whether to use epoch-driven stopping criteria exclusively.
         """
         super().__init__()
@@ -209,10 +220,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.epoch_transitions_only = epoch_transitions_only
         self.reinit_lr_cfg = reinit_lr_cfg
         self.strategy_adapter_cfg = strategy_adapter_cfg or {}
+        self.custom_strategy_adapter = custom_strategy_adapter
         self.allow_untested = allow_untested
         self.apply_lambdas_new_pgs = apply_lambdas_new_pgs
-        self.pl_module: pl.LightningModule
-        self.strategy_adapter: StrategyAdapter
         rz_logger = logging.getLogger("pytorch_lightning.utilities.rank_zero")
         rz_logger.setLevel(logging_level)
 
@@ -477,7 +487,14 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                     f" '{strategy.strategy_name}' because ``allow_untested`` is ``True``."  # type: ignore[attr-defined]
                 )
                 rank_zero_warn(warn_msg)
-        strategy_cls = STRATEGY_ADAPTERS.get(strategy.strategy_name, StrategyAdapter)
+        if self.custom_strategy_adapter:
+            strategy_cls = self._import_strategy_adapter(strategy.strategy_name, self.custom_strategy_adapter)
+            rank_zero_info(
+                f"Imported custom strategy adapter class type `{strategy_cls}` associated with the current strategy"
+                f" `{strategy.strategy_name}`."
+            )
+        else:
+            strategy_cls = STRATEGY_ADAPTERS.get(strategy.strategy_name, StrategyAdapter)
         self.strategy_adapter = strategy_cls(**self.strategy_adapter_cfg)
         self.strategy_adapter.connect(self)
 

@@ -10,9 +10,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from copy import deepcopy
+from functools import partial
 from logging import DEBUG
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+from unittest import mock
 
 import pytest
 import torch
@@ -21,9 +23,15 @@ from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.plugins.precision.fsdp_native_native_amp import FullyShardedNativeNativeMixedPrecisionPlugin
 from pytorch_lightning.strategies import DDPFullyShardedNativeStrategy
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    apply_activation_checkpointing,
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
 from torch.utils.data import DataLoader
 
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
+from finetuning_scheduler.strategy_adapters import FSDPStrategyAdapter
 from tests.helpers.boring_model import RandomDataset, unexpected_warns, unmatched_warns
 from tests.helpers.runif import RunIf
 from tests.test_finetuning_scheduler_callback import (
@@ -218,6 +226,14 @@ class FTSCsmFSDPModel(FTSBaseFSDPModel):
             if i in self.fsdp_mask["wrapped_mods"]:
                 self.layer[i] = wrap(layer)
         self.layer = wrap(self.layer)
+
+        # verify activation checkpointing can be manually applied
+        check_fn = lambda submodule: isinstance(submodule, tuple([torch.nn.Linear]))
+        wrapper = partial(
+            checkpoint_wrapper,
+            checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+        )
+        apply_activation_checkpointing(self.layer, checkpoint_wrapper_fn=wrapper, check_fn=check_fn)
 
 
 class FTSNoDecayFSDPModel(FTSBaseFSDPModel):
@@ -429,7 +445,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         None,
         None,
     ),
-    "cust_awp_override_prec": (
+    "cust_awp_overrides_prec": (
         {
             0: (2, 4),
             1: (6, 12),
@@ -438,7 +454,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         None,
         None,
     ),
-    "cust_awp_override_prec_ext": (
+    "cust_awp_overrides_prec_ext": (
         {
             0: (3, 6),
             1: (7, 14),
@@ -476,7 +492,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
             None,
             None,
-            None,
+            {"activation_checkpointing": [torch.nn.Linear]},
         ),
         (
             "override_csm_noprec",
@@ -653,7 +669,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             None,
         ),
         (
-            "cust_awp_override_prec",
+            "cust_awp_overrides_prec",
             FTSBaseFSDPModel,
             custom_auto_wrap_policy,
             True,
@@ -669,7 +685,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             None,
         ),
         (
-            "cust_awp_override_prec_ext",
+            "cust_awp_overrides_prec_ext",
             FTSExtFSDPModel,
             custom_auto_wrap_ext_policy,
             True,
@@ -713,8 +729,8 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "batch_norm_auto_prec",
         "shared_params_auto_prec",
         "override_csm_adam_noprec",
-        "cust_awp_override_prec",
-        "cust_awp_override_prec_ext",
+        "cust_awp_overrides_prec",
+        "cust_awp_overrides_prec_ext",
         "warn_ignore_awp_override",
     ],
 )
@@ -772,8 +788,13 @@ def test_fsdp_native_multi_gpus(
         **precision_opts,
     )
     if exception_expected:
-        with pytest.raises(MisconfigurationException, match=exception_expected):
-            trainer.fit(model)
+        if model_cfg_key == "no_fsdp_params_p0":
+            with mock.patch.object(FSDPStrategyAdapter, "RANK_ZERO_LOG_FQN", 42):
+                with pytest.raises(MisconfigurationException, match=exception_expected):
+                    trainer.fit(model)
+        else:
+            with pytest.raises(MisconfigurationException, match=exception_expected):
+                trainer.fit(model)
     elif fit_start_only:
         with pytest.raises(SystemExit):
             trainer.fit(model)
