@@ -53,7 +53,6 @@ def restore_env_variables():
     os.environ.update(env_backup)
     # these are currently known leakers - ideally these would not be allowed
     allowlist = {
-        "CUDA_MODULE_LOADING",
         "CUBLAS_WORKSPACE_CONFIG",  # enabled with deterministic flag
         "CUDA_DEVICE_ORDER",
         "LOCAL_RANK",
@@ -64,19 +63,15 @@ def restore_env_variables():
         "PL_GLOBAL_SEED",
         "PL_SEED_WORKERS",
         "WANDB_MODE",
-        "HOROVOD_FUSION_THRESHOLD",
+        "WANDB_REQUIRE_SERVICE",
+        "WANDB_SERVICE",
+        "HOROVOD_FUSION_THRESHOLD",  # set by HorovodStrategy # TODO: remove in v2.0.0
         "RANK",  # set by DeepSpeed
         "POPLAR_ENGINE_OPTIONS",  # set by IPUStrategy
-        # set by XLA
-        "TF2_BEHAVIOR",
-        "XRT_MESH_SERVICE_ADDRESS",
-        "XRT_TORCH_DIST_ROOT",
-        "XRT_MULTI_PROCESSING_DEVICE",
-        "XRT_SHARD_WORLD_SIZE",
-        "XRT_LOCAL_WORKER",
-        "XRT_HOST_WORLD_SIZE",
-        "XRT_SHARD_ORDINAL",
-        "XRT_SHARD_LOCAL_ORDINAL",
+        "CUDA_MODULE_LOADING",  # leaked since PyTorch 1.13
+        "KMP_INIT_AT_FORK",  # leaked since PyTorch 1.13
+        "KMP_DUPLICATE_LIB_OK",  # leaked since PyTorch 1.13
+        "CRC32C_SW_MODE",  # leaked by tensorboardX
     }
     leaked_vars.difference_update(allowlist)
     assert not leaked_vars, f"test is leaking environment variable(s): {set(leaked_vars)}"

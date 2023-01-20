@@ -16,9 +16,7 @@ pytest -v
 To test models that require GPU make sure to run the above command on a GPU machine.
 The GPU machine must have at least 2 GPUs to run distributed tests.
 
-Note that this setup will not run tests that require specific packages installed
-such as Horovod, FairScale, NVIDIA/apex, NVIDIA/DALI, etc.
-You can rely on our CI to make sure all these tests pass.
+Note that this setup will not run tests that require specific packages installed.
 
 ## Running Coverage
 

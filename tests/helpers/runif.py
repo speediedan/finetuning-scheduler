@@ -17,24 +17,10 @@ from typing import Optional
 import pytest
 import torch
 from lightning_fabric.accelerators.cuda import num_cuda_devices
-from lightning_fabric.strategies.fairscale import _FAIRSCALE_AVAILABLE
 from packaging.version import Version
 from pkg_resources import get_distribution
+from pytorch_lightning.overrides.fairscale import _FAIRSCALE_AVAILABLE
 from pytorch_lightning.strategies.deepspeed import _DEEPSPEED_AVAILABLE
-from pytorch_lightning.strategies.horovod import _HOROVOD_AVAILABLE
-
-_HOROVOD_NCCL_AVAILABLE = False
-if _HOROVOD_AVAILABLE:
-    import horovod
-
-    try:
-
-        # `nccl_built` returns an integer
-        _HOROVOD_NCCL_AVAILABLE = bool(horovod.torch.nccl_built())
-    except AttributeError:
-        # AttributeError can be raised if MPI is not available:
-        # https://github.com/horovod/horovod/blob/v0.23.0/horovod/torch/__init__.py#L33-L34
-        pass
 
 
 class RunIf:
@@ -56,8 +42,6 @@ class RunIf:
         max_torch: Optional[str] = None,
         min_python: Optional[str] = None,
         bf16_cuda: bool = False,
-        horovod: bool = False,
-        horovod_nccl: bool = False,
         skip_windows: bool = False,
         standalone: bool = False,
         fairscale: bool = False,
@@ -73,8 +57,6 @@ class RunIf:
             max_torch: Require that PyTorch is less than this version.
             min_python: Require that Python is greater or equal than this version.
             bf16_cuda: Require that CUDA device supports bf16.
-            horovod: Require that Horovod is installed.
-            horovod_nccl: Require that Horovod is installed with NCCL support.
             skip_windows: Skip for Windows platform.
             standalone: Mark the test as standalone, our CI will run it in a separate process.
                 This requires that the ``PL_RUN_STANDALONE_TESTS=1`` environment variable is set.
@@ -126,14 +108,6 @@ class RunIf:
         if skip_windows:
             conditions.append(sys.platform == "win32")
             reasons.append("unimplemented on Windows")
-
-        if horovod:
-            conditions.append(not _HOROVOD_AVAILABLE)
-            reasons.append("Horovod")
-
-        if horovod_nccl:
-            conditions.append(not _HOROVOD_NCCL_AVAILABLE)
-            reasons.append("Horovod with NCCL")
 
         if standalone:
             env_flag = os.getenv("PL_RUN_STANDALONE_TESTS", "0")

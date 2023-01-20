@@ -48,7 +48,8 @@ if _TORCH_GREATER_EQUAL_1_12:
 
 additional_fsdp_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
-    "The distutils package is deprecated",  # for tensorboard import as of PT 1.13.1
+    "The distutils package is deprecated",  # for tensorboard (but not tensorboardX) import as of PT 1.13.1
+    "`tensorboardX` has been removed as a depend",  # in case tensorboard/tensorboardX are not available
     "is still running",  # subprocess is implicitly cleaned up
     "Please use torch.distributed.all_gather_into_tensor",  # can be removed once PyTorch stops using internally,
     "Please use torch.distributed.reduce_scatter_tensor",  # can be removed once PyTorch stops using internally,
@@ -67,7 +68,7 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     model = FinetuningSchedulerBoringModel()
     tmpdir = tmpdir_factory.getbasetemp()
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
-    unmod_schedule_file = tmpdir / "lightning_logs" / "version_0" / f"{model.__class__.__name__}_ft_schedule.yaml"
+    unmod_schedule_file = Path(trainer.log_dir) / f"{model.__class__.__name__}_ft_schedule.yaml"
     with pytest.raises(SystemExit):
         trainer.fit(model)
     mod_sched_dict = get_fts(trainer).load_yaml_schedule(unmod_schedule_file)

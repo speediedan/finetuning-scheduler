@@ -21,8 +21,8 @@
 # <div style="display:inline" id="a1">
 #
 # Fundamentally, [Fine-Tuning Scheduler](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) enables
-# scheduled, multi-phase, fine-tuning of foundational models. Gradual unfreezing (i.e. thawing) can help maximize
-# foundational model knowledge retention while allowing (typically upper layers of) the model to
+# scheduled, multi-phase, fine-tuning of foundation models. Gradual unfreezing (i.e. thawing) can help maximize
+# foundation model knowledge retention while allowing (typically upper layers of) the model to
 # optimally adapt to new tasks during transfer learning [1, 2, 3](#f1)
 #
 # </div>
@@ -111,7 +111,7 @@
 #
 #
 #
-# The end-to-end example in this notebook ([Scheduled Fine-Tuning For SuperGLUE](#superglue)) uses [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) in explicit mode to fine-tune a small foundational model on the [RTE](https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte) task of [SuperGLUE](https://super.gluebenchmark.com/).
+# The end-to-end example in this notebook ([Scheduled Fine-Tuning For SuperGLUE](#superglue)) uses [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) in explicit mode to fine-tune a small foundation model on the [RTE](https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte) task of [SuperGLUE](https://super.gluebenchmark.com/).
 # Please see the [official Fine-Tuning Scheduler documentation](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) if you are interested in a similar [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/stable/index.html#example-scheduled-fine-tuning-for-superglue) using the LightningCLI.
 
 # %% [markdown]
@@ -147,13 +147,12 @@
 #
 # **Note:** Currently, [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) supports the following strategy types:
 #
-# - ``DP``
-# - ``DDP``
-# - ``fsdp_native`` (and associated alias ``fsdp_native_full_shard_offload``)
-# - ``DDP_FORK`` (and its aliases e.g. ``ddp_notebook``)
-# - ``DDP_SPAWN``
-# - ``DDP_SHARDED``
-# - ``DDP_SHARDED_SPAWN``
+# - ``ddp``, (and alias ``ddp_find_unused_parameters_false``)
+# - ``fsdp_native`` (and alias ``fsdp_native_full_shard_offload``)
+# - ``ddp_spawn``, (and aliases ``ddp_fork``, ``ddp_notebook``)
+# - ``dp``
+# - ``ddp_sharded`` (deprecated, to be removed in 2.0)
+# - ``ddp_sharded_spawn`` (deprecated, to be removed in 2.0)
 #
 # Custom or officially unsupported strategies can be used by setting [FinetuningScheduler.allow_untested](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html?highlight=allow_untested#finetuning_scheduler.fts.FinetuningScheduler.params.allow_untested) to ``True``.
 # Note that most currently unsupported strategies are so because they require varying degrees of modification to be compatible (e.g. ``deepspeed`` will require a StrategyAdapter similar to the one written for ``FSDP`` (``FSDPStrategyAdapter``) to be written before support can be added (PRs welcome!),
@@ -165,7 +164,7 @@
 #
 # ## Scheduled Fine-Tuning For SuperGLUE
 #
-# The following example demonstrates the use of [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) to fine-tune a small foundational model on the [RTE](https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte) task of [SuperGLUE](https://super.gluebenchmark.com/). Iterative early-stopping will be applied according to a user-specified schedule.
+# The following example demonstrates the use of [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) to fine-tune a small foundation model on the [RTE](https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte) task of [SuperGLUE](https://super.gluebenchmark.com/). Iterative early-stopping will be applied according to a user-specified schedule.
 #
 
 # %%
@@ -324,8 +323,8 @@ class RteBoolqDataModule(pl.LightningDataModule):
 
 # %%
 class RteBoolqModule(pl.LightningModule):
-    """A ``LightningModule`` that can be used to fine-tune a foundational model on either the RTE or BoolQ
-    SuperGLUE tasks using Hugging Face implementations of a given model and the `SuperGLUE Hugging Face dataset."""
+    """A ``LightningModule`` that can be used to fine-tune a foundation model on either the RTE or BoolQ SuperGLUE
+    tasks using Hugging Face implementations of a given model and the `SuperGLUE Hugging Face dataset."""
 
     def __init__(
         self,
@@ -496,7 +495,7 @@ dm = RteBoolqDataModule(model_name_or_path="microsoft/deberta-v3-base", tokenize
 # Though other optimizers can arguably yield some marginal advantage contingent on the context,
 # the Adam optimizer (and the [AdamW version](https://pytorch.org/docs/stable/_modules/torch/optim/adamw.html#AdamW) which
 # implements decoupled weight decay) remains robust to hyperparameter choices and is commonly used for fine-tuning
-# foundational language models.  See [(Sivaprasad et al., 2020)](#f2) and [(Mosbach, Andriushchenko & Klakow, 2020)](#f3) for theoretical and systematic empirical justifications of Adam and its use in fine-tuning
+# foundation language models.  See [(Sivaprasad et al., 2020)](#f2) and [(Mosbach, Andriushchenko & Klakow, 2020)](#f3) for theoretical and systematic empirical justifications of Adam and its use in fine-tuning
 # large transformer-based language models. The values used here have some justification
 # in the referenced literature but have been largely empirically determined and while a good
 # starting point could be could be further tuned.

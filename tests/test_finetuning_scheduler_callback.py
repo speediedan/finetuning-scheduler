@@ -315,7 +315,8 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     model = FinetuningSchedulerBoringModel()
     tmpdir = tmpdir_factory.getbasetemp()
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
-    unmod_schedule_file = tmpdir / "lightning_logs" / "version_0" / f"{model.__class__.__name__}_ft_schedule.yaml"
+    # unmod_schedule_file = tmpdir / "lightning_logs" / "version_0" / f"{model.__class__.__name__}_ft_schedule.yaml"]
+    unmod_schedule_file = Path(trainer.log_dir) / f"{model.__class__.__name__}_ft_schedule.yaml"
     with pytest.raises(SystemExit):
         trainer.fit(model)
     mod_sched_dict = get_fts(trainer).load_yaml_schedule(unmod_schedule_file)
@@ -1492,8 +1493,6 @@ MOCK_STRATEGY_MAPPING = {
         pytest.param("test_strategy", None, "cust_stgy_adapter_found", "cust_stgy_adapter_found"),
         pytest.param("test_strategy", None, "cust_stgy_adapter_not_found", "cust_stgy_adapter_not_found"),
         pytest.param("test_strategy", None, "cust_stgy_adapter_not_importable", "cust_stgy_adapter_not_importable"),
-        # pytest.param("ddp_fully_sharded", 1, None, None, marks=RunIf(min_cuda_gpus=1)),
-        # pytest.param("horovod", None, None, None, marks=RunIf(horovod=True, min_cuda_gpus=1)),
         pytest.param("deepspeed_stage_2", 1, None, "disallow_untest", marks=RunIf(deepspeed=True, min_cuda_gpus=1)),
     ],
     ids=[
@@ -1502,8 +1501,6 @@ MOCK_STRATEGY_MAPPING = {
         "csa_found",
         "csa_not_found",
         "csa_not_importable",
-        # "ddp_fully_sharded",
-        # "horovod",
         "deepspeed_stage_2",
     ],
 )
@@ -1810,7 +1807,7 @@ def test_fts_multi_ddp(tmpdir):
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
-@RunIf(standalone=True, fairscale=True, min_cuda_gpus=2)
+@RunIf(standalone=True, fairscale=True, min_cuda_gpus=2)  # TODO: remove in 2.0
 def test_fts_multi_ddp_sharded(tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_sharded'
     distributed context."""
@@ -1839,7 +1836,7 @@ def test_fts_multi_ddp_spawn(monkeypatch, tmpdir):
     assert trainer.callback_metrics["val_loss"] < 0.1
 
 
-@RunIf(standalone=True, fairscale=True, min_cuda_gpus=2)
+@RunIf(standalone=True, fairscale=True, min_cuda_gpus=2)  # TODO: remove in 2.0
 def test_fts_multi_ddp_sharded_spawn(monkeypatch, tmpdir):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported
     'ddp_sharded_spawn' distributed context."""

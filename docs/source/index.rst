@@ -9,7 +9,7 @@ Introduction to the Fine-Tuning Scheduler
 =========================================
 
 The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback accelerates and enhances
-foundational model experimentation with flexible fine-tuning schedules. Training with the
+foundation model experimentation with flexible fine-tuning schedules. Training with the
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is simple and confers a host of benefits:
 
 * it dramatically increases fine-tuning flexibility
@@ -39,8 +39,8 @@ Additional installation options (from source etc.) are discussed under "Addition
 Motivation
 **********
 Fundamentally, the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback enables
-multi-phase, scheduled fine-tuning of foundational models. Gradual unfreezing (i.e. thawing) can help maximize
-foundational model knowledge retention while allowing (typically upper layers of) the model to optimally adapt to new
+multi-phase, scheduled fine-tuning of foundation models. Gradual unfreezing (i.e. thawing) can help maximize
+foundation model knowledge retention while allowing (typically upper layers of) the model to optimally adapt to new
 tasks during transfer learning [#]_ [#]_ [#]_ .
 
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` orchestrates the gradual unfreezing
@@ -290,19 +290,20 @@ configurations.
 .. _supported_strategies:
 
 .. note::
-   Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the following
-   :external+pl:class:`~pytorch_lightning.strategies.Strategy` s:
+
+   Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the following strategies:
 
    .. hlist::
-      :columns: 3
+      :columns: 2
 
-      * :external+pl:class:`~pytorch_lightning.strategies.ddp.DDPStrategy`
-      * :external+pl:class:`~pytorch_lightning.strategies.fully_sharded_native.DDPFullyShardedNativeStrategy`
-      * :external+pl:class:`~pytorch_lightning.strategies.sharded.DDPShardedStrategy`
-      * :external+pl:class:`~pytorch_lightning.strategies.ddp_spawn.DDPSpawnStrategy`
-      * :external+pl:class:`~pytorch_lightning.strategies.sharded_spawn.DDPSpawnShardedStrategy`
-      * :external+pl:class:`~pytorch_lightning.strategies.dp.DataParallelStrategy`
-      * ``DDP_FORK`` (i.e., ``ddp_spawn``-based aliases like ``ddp_fork`` and ``ddp_notebook``)
+      * :external+pl:class:`~pytorch_lightning.strategies.ddp.DDPStrategy`:``ddp``, ``ddp_find_unused_parameters_false``
+      * :external+pl:class:`~pytorch_lightning.strategies.fully_sharded_native.DDPFullyShardedNativeStrategy`:
+        ``fsdp_native``, ``fsdp_native_full_shard_offload``
+      * :external+pl:class:`~pytorch_lightning.strategies.ddp_spawn.DDPSpawnStrategy`: ``ddp_spawn``, ``ddp_fork``,
+        ``ddp_notebook``
+      * :external+pl:class:`~pytorch_lightning.strategies.dp.DataParallelStrategy`: ``dp``
+      * ``ddp_sharded`` (deprecated)
+      * ``ddp_sharded_spawn`` (deprecated)
 
 .. _supported_lr_schedulers:
 

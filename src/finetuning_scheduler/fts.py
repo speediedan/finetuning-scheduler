@@ -24,7 +24,6 @@ import pytorch_lightning as pl
 import torch
 from lightning_fabric.utilities import rank_zero_info
 from lightning_fabric.utilities.distributed import ReduceOp
-from lightning_fabric.utilities.enums import _StrategyType
 from pytorch_lightning.callbacks import BaseFinetuning
 from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.trainer.states import TrainerFn
@@ -47,8 +46,8 @@ log = logging.getLogger(__name__)
 
 class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMixin, BaseFinetuning):
     r"""
-    This callback enables flexible, multi-phase, scheduled fine-tuning of foundational models. Gradual
-    unfreezing/thawing can help maximize foundational model knowledge retention while allowing (typically upper layers
+    This callback enables flexible, multi-phase, scheduled fine-tuning of foundation models. Gradual
+    unfreezing/thawing can help maximize foundation model knowledge retention while allowing (typically upper layers
     of) the model to optimally adapt to new tasks during transfer learning.
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` orchestrates the gradual unfreezing of models via a
     fine-tuning schedule that is either implicitly generated (the default) or explicitly provided by the user (more
@@ -245,18 +244,21 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         return max(self.max_depth - self._fts_state._curr_depth, 0)
 
     @staticmethod
-    def _supported_strategy_types() -> Sequence[Union[_StrategyType, str]]:
+    def _supported_strategy_types() -> Sequence[str]:
         return (
-            _StrategyType.DP,
-            _StrategyType.DDP,
-            _StrategyType.DDP_FORK,
-            _StrategyType.DDP_SPAWN,
-            # _StrategyType.DEEPSPEED,  # relevant FTS strategy adapter not yet available, PRs welcome!
-            _StrategyType.DDP_SHARDED,
-            _StrategyType.DDP_SHARDED_SPAWN,
+            "dp",
+            "ddp",
+            "ddp_find_unused_parameters_false",
+            "ddp_spawn",
+            "ddp_fork",
+            "ddp_notebook",
             "single_device",
-            "fsdp_native_full_shard_offload",
+            # TODO: `native` suffix will be removed from `fsdp` strategies in 2.0
             "fsdp_native",
+            "fsdp_native_full_shard_offload",
+            "ddp_sharded",  # TODO: remove in 2.0
+            "ddp_sharded_spawn"  # TODO: remove in 2.0,
+            # "deepspeed",  # relevant FTS strategy adapter not yet available, PRs welcome!
         )
 
     def freeze_before_training(self, pl_module: "pl.LightningModule") -> None:
