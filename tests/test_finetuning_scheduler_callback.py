@@ -1527,7 +1527,7 @@ def test_finetuningscheduling_distributed_compat(tmpdir, strategy, gpus, strateg
             "ddp",
             (MisconfigurationException, ProcessRaisedException),
             "overlap_with_ddp",
-            marks=RunIf(min_cuda_gpus=2, skip_windows=True, min_torch="1.10", standalone=True),
+            marks=RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True),
         ),
         (MultiOptFTSBoringModel(), None, (MisconfigurationException,), "single-optimizer configuration"),
     ],
@@ -1659,7 +1659,7 @@ class OptInspectFTS(TestFinetuningScheduler):
         assert self.curr_depth == self.max_depth
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, min_torch="1.10")
+@RunIf(min_cuda_gpus=2, skip_windows=True)
 @pytest.mark.parametrize("strategy", (pytest.param("ddp", marks=RunIf(standalone=True)), "ddp_spawn"))
 def test_fts_zero_opt_support(monkeypatch, tmpdir, strategy):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in

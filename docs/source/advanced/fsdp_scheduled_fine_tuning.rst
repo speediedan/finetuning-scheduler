@@ -30,13 +30,13 @@ Demonstration FTS FSDP training/profiling configurations and a DDP baseline for 
 ``./fts_examples/config/advanced/fsdp``.
 
 This FTS FSDP training example has the same dependencies as the basic
-:ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples except PyTorch >= ``1.12`` is
+:ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples except PyTorch >= ``1.13`` is
 required.
 
 .. note::
 
     This version of :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` supports stable PyTorch
-    releases >= 1.12. Support for PyTorch 2.0 is expected upon its release.
+    releases >= 1.13. Support for PyTorch 2.0 is expected upon its release.
 
 .. note::
 

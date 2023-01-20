@@ -85,7 +85,7 @@ def test_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
 @RunIf(min_cuda_gpus=1, skip_windows=True)
 @pytest.mark.parametrize(
     "config_file",
-    [pytest.param("fts_explicit_reinit_lr.yaml", marks=RunIf(min_torch="1.10")), "fts_implicit_reinit_lr.yaml"],
+    ["fts_explicit_reinit_lr.yaml", "fts_implicit_reinit_lr.yaml"],
     ids=["fts_explicit_reinit_lr", "fts_implicit_reinit_lr"],
 )
 def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):

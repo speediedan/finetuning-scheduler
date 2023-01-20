@@ -18,16 +18,11 @@ from unittest import mock
 
 import pytest
 import torch
-from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_12
+from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13
 from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.plugins.precision.fsdp_native_native_amp import FullyShardedNativeNativeMixedPrecisionPlugin
 from pytorch_lightning.strategies import DDPFullyShardedNativeStrategy
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    apply_activation_checkpointing,
-    checkpoint_wrapper,
-    CheckpointImpl,
-)
 from torch.utils.data import DataLoader
 
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
@@ -42,7 +37,12 @@ from tests.test_finetuning_scheduler_callback import (
     TestFinetuningScheduler,
 )
 
-if _TORCH_GREATER_EQUAL_1_12:
+if _TORCH_GREATER_EQUAL_1_13:
+    from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+        apply_activation_checkpointing,
+        checkpoint_wrapper,
+        CheckpointImpl,
+    )
     from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload, FullyShardedDataParallel
     from torch.distributed.fsdp.wrap import wrap
 
@@ -401,6 +401,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         None,
         None,
     ),
+    "unsupp_torch_version": ({}, None, "is supported from PyTorch"),
     "non_disjoint_phase_fsdp_params": ({}, None, "do not have disjoint FSDP-flattened parameter"),
     "non_disjoint_phase_mods": ({}, None, "not have disjoint"),
     "non_disjoint_excluded_ft_params": ({}, None, "parameters not included in"),
@@ -477,7 +478,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
 }
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.12")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, fit_start_only, strategy_adapter_cfg,\
          model_cfg, fts_cfg, trainer_cfg, strategy_cfg",
@@ -522,16 +523,27 @@ EXPECTED_FSDP_FTS_RESULTS = {
             {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False},
         ),
         (
-            "non_disjoint_phase_fsdp_params",
-            FTSBaseFSDPModel,  # FTSCsmFSDPModel,
-            warn_custom_auto_wrap_policy,  # None,
+            "unsupp_torch_version",
+            FTSBaseFSDPModel,
+            custom_auto_wrap_policy,
             False,
             0,
             False,
             None,
-            {
-                "fsdp_mask": {"wrapped_mods": [5], "unwrapped_mods": [i for i in list(range(8)) if i != 5]}
-            },  # {"fsdp_mask": {"wrapped_mods": [0,1,2,3,5], "unwrapped_mods": [4, 7]}}
+            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
+            None,
+            None,
+            None,
+        ),
+        (
+            "non_disjoint_phase_fsdp_params",
+            FTSBaseFSDPModel,
+            warn_custom_auto_wrap_policy,
+            False,
+            0,
+            False,
+            None,
+            {"fsdp_mask": {"wrapped_mods": [5], "unwrapped_mods": [i for i in list(range(8)) if i != 5]}},
             None,
             None,
             None,
@@ -715,10 +727,11 @@ EXPECTED_FSDP_FTS_RESULTS = {
             None,
         ),
     ],
-    ids=[
+    ids=[  # TODO:
         "cust_awp_noprec",
         "override_csm_noprec",
         "cust_awp_noprec_ignore_no_offload",
+        "unsupp_torch_version",
         "non_disjoint_phase_fsdp_params",
         "non_disjoint_phase_mods",
         "non_disjoint_excluded_ft_params",
@@ -752,6 +765,7 @@ def test_fsdp_native_multi_gpus(
     strategy_cfg,
 ):
     """Test to ensure that checkpoint is saved correctly when using multiple GPUs, and all stages can be run."""
+    # TODO: decompose this test function and simplify it
     model_cfg = model_cfg or {}
     expected_state = EXPECTED_FSDP_FTS_RESULTS[model_cfg_key]
     warns_expected = expected_state[1]
@@ -793,6 +807,10 @@ def test_fsdp_native_multi_gpus(
             with mock.patch.object(FSDPStrategyAdapter, "RANK_ZERO_LOG_FQN", 42):
                 with pytest.raises(MisconfigurationException, match=exception_expected):
                     trainer.fit(model)
+        elif model_cfg_key == "unsupp_torch_version":
+            with mock.patch("finetuning_scheduler.strategy_adapters.fsdp._TORCH_GREATER_EQUAL_1_13", False):
+                with pytest.raises(MisconfigurationException, match=exception_expected):
+                    trainer.fit(model)
         else:
             with pytest.raises(MisconfigurationException, match=exception_expected):
                 trainer.fit(model)
@@ -810,7 +828,7 @@ def test_fsdp_native_multi_gpus(
         check_fts_fsdp_warns(warns_expected, recwarn)
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.12")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, ft_sched_idx, model_cfg",
     [

@@ -17,7 +17,6 @@ from typing import Dict, List, Optional, Set, Type, Union
 import torch
 from lightning_fabric.accelerators.cuda import is_cuda_available
 from lightning_fabric.utilities import rank_zero_info
-from packaging.version import Version
 from pytorch_lightning.profilers.pytorch import PyTorchProfiler
 from pytorch_lightning.utilities.imports import _KINETO_AVAILABLE
 from torch.profiler.profiler import ProfilerActivity
@@ -75,10 +74,6 @@ class RteBoolqModuleFSDP(RteBoolqModule):
     # we override `configure_optimizers` because use of the `no_decay` lightning module attribute is not currently
     # supported with FTS FSDP strategy adapter
     def configure_optimizers(self):
-        if Version(torch.__version__) == Version("1.12.0") or torch.__version__.startswith("1.12.0"):
-            # we need to use a patched version of AdamW to fix https://github.com/pytorch/pytorch/issues/80809
-            # and allow examples to succeed with torch 1.12.0 (this torch bug is fixed in 1.12.1)
-            self.hparams.optimizer_init["class_path"] = "fts_examples.patched_adamw.AdamW"
         parameters = filter(lambda x: x.requires_grad, self.model.parameters())
         optimizer = instantiate_class(args=parameters, init=self.hparams.optimizer_init)
         scheduler = {

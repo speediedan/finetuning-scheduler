@@ -28,9 +28,10 @@ from functools import partial, wraps
 from pprint import pformat
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
 
+import torch
 from lightning_fabric.strategies.fsdp import _setup_activation_checkpointing
 from lightning_fabric.utilities import rank_zero_info, rank_zero_warn
-from pytorch_lightning.strategies.fully_sharded_native import _fsdp_available
+from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13
 from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.trainer.connectors.checkpoint_connector import CheckpointConnector
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
@@ -38,7 +39,9 @@ from pytorch_lightning.utilities.model_helpers import is_overridden
 
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
-if _fsdp_available:
+_distributed_available = torch.distributed.is_available()
+_min_fsdp_available = _TORCH_GREATER_EQUAL_1_13 and _distributed_available
+if _min_fsdp_available:
     from torch.distributed.fsdp.fully_sharded_data_parallel import (
         _get_param_to_unflat_param_names,
         FullyShardedDataParallel,
@@ -82,7 +85,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     .. note::
 
        This version of :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` supports stable PyTorch
-       releases >= 1.12. Support for PyTorch 2.0 is expected upon its release.
+       releases >= 1.13. Support for PyTorch 2.0 is expected upon its release.
 
     .. note::
 
@@ -129,8 +132,13 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 Defaults to None.
 
         Attributes:
-            awp_overrides: A list of mod0ule names to wrap in separate FSDP instances.
+            awp_overrides: A list of module names to wrap in separate FSDP instances.
         """
+        if not _TORCH_GREATER_EQUAL_1_13:  # because `lambda_auto_wrap_policy` is used to adapt FSDP for FTS
+            raise MisconfigurationException(
+                "Use of Fine-Tuning Scheduler with FSDP (via the `FSDPStrategyAdapter`) is supported from PyTorch"
+                " v1.13.0 onwards."
+            )
         super().__init__(*args, **kwargs)
         self.awp_overrides = awp_overrides or []
         self._min_wrap_validated: bool = False
@@ -564,7 +572,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 setattr(self.pl_module, n, wrap(m))
 
         # apply wrappers to enable activation checkpointing if requested
-        if self.pls_handle._activation_checkpointing:  # Lightning handles the requisite torch version check upstream
+        if self.pls_handle._activation_checkpointing:
             _setup_activation_checkpointing(module=self.pl_module, layers=self.pls_handle._activation_checkpointing)
 
     def _after_configure_sharded_model(self) -> None:
