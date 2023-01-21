@@ -32,7 +32,6 @@ from tests.helpers.runif import RunIf
 from tests.test_finetuning_scheduler_callback import (
     EXPECTED_WARNS,
     FinetuningSchedulerBoringModel,
-    FitStartOnlyFTS,
     get_fts,
     TestFinetuningScheduler,
 )
@@ -57,6 +56,12 @@ additional_fsdp_warns = [
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
+
+nones = lambda x: (None,) * x
+
+##########################
+# FTS FSDP Test Fixtures #
+##########################
 
 
 @pytest.fixture(scope="function")
@@ -140,6 +145,11 @@ def fsdp_ckpt(tmpdir_factory, fsdp_ft_schedules) -> Dict:
     )
     trainer.fit(model)
     return trainer.checkpoint_callback.best_model_path
+
+
+########################
+# FTS FSDP Test Models #
+########################
 
 
 class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
@@ -346,6 +356,35 @@ class FSDPTestFinetuningScheduler(TestFinetuningScheduler):
             assert current_state == self.expected_state[state_key]
 
 
+# model aliases
+base_model = FTSBaseFSDPModel
+cust_model = FTSCsmFSDPModel
+wrapped_model = AlreadyWrappedFSDPModel
+nodecay_model = FTSNoDecayFSDPModel
+BN_model = FTSBatchNormFSDPModel
+shared_model = FTSSharedParamFSDPModel
+csm_adam_model = FTSCsmAdamFSDPModel
+ext_model = FTSExtFSDPModel
+
+# model configuration aliases
+fp16_cfg = {"precision_key": "auto_16"}
+unwrap_7 = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}}
+unwrap_4_7 = {"fsdp_mask": {"wrapped_mods": [0, 1, 2, 3, 5], "unwrapped_mods": [4, 7]}}
+unwrap_5_7 = {"fsdp_mask": {"wrapped_mods": list(range(5)), "unwrapped_mods": [5, 7]}}
+unwrap_0_1_7 = {"fsdp_mask": {"wrapped_mods": [2, 3, 4, 5], "unwrapped_mods": [0, 1, 7]}}
+wrap_5_7 = {"fsdp_mask": {"wrapped_mods": [5, 7], "unwrapped_mods": [i for i in list(range(8)) if i not in [5, 7]]}}
+wrap_5 = {"fsdp_mask": {"wrapped_mods": [5], "unwrapped_mods": [i for i in list(range(8)) if i != 5]}}
+unwrap_7_diverge = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "diverge_on_epoch": 1}
+unwrap_7_mp = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, **fp16_cfg}
+unwrap_8_mp = {"fsdp_mask": {"wrapped_mods": list(range(7)), "unwrapped_mods": [8]}, **fp16_cfg}
+wrap_all_mp = {"fsdp_mask": {"wrapped_mods": list(range(6)) + [7], "unwrapped_mods": []}, **fp16_cfg}
+wrap_ext_mp = {"fsdp_mask": {"wrapped_mods": list(range(6)) + [7, 8], "unwrapped_mods": []}, **fp16_cfg}
+
+##########################
+# FTS FSDP Test Policies #
+##########################
+
+
 def custom_auto_wrap_policy(
     module,
     recurse,
@@ -373,34 +412,36 @@ def warn_custom_auto_wrap_policy(
     return unwrapped_params >= 1100
 
 
+# auto-wrap policy aliases
+cust_awp = custom_auto_wrap_policy
+cust_ext_awp = custom_auto_wrap_ext_policy
+warn_cust_awp = warn_custom_auto_wrap_policy
+
+# awp_overrides configuration aliases
+awp_5_9 = {"awp_overrides": ["layer.9", "layer.5"]}
+awp_1 = {"awp_overrides": ["l.*yer.1"]}
+awp_7 = {"awp_overrides": ["layer.7"]}
+awp_7_8 = {"awp_overrides": ["l.*yer.8", "layer.7"]}
+
+# FSDP strategy configuration aliases
+act_ckpt_cfg = {"activation_checkpointing": [torch.nn.Linear]}
+test_ignore_cfg = {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False}
+
+# trainer configuration alias
+max_epoch_5 = {"max_epochs": 5}
+
+# expected training path aliases
+path_default = {0: (2, 4), 1: (6, 12), 2: (7, 14)}
+path_8_14 = {0: (2, 4), 1: (7, 12), 2: (8, 14)}
+path_8_16 = {0: (4, 8), 1: (7, 14), 2: (8, 16)}
+path_5_10 = {0: (2, 4), 1: (3, 6), 2: (5, 10)}
+path_ext_7_14 = {0: (2, 4), 1: (2, 4), 2: (6, 12), 3: (6, 12), 4: (7, 14)}
+path_ext_8_16 = {0: (3, 6), 1: (7, 14), 2: (8, 16)}
+
 EXPECTED_FSDP_FTS_RESULTS = {
-    "cust_awp_noprec": (
-        {
-            0: (2, 4),
-            1: (6, 12),
-            2: (7, 14),
-        },
-        None,
-        None,
-    ),
-    "override_csm_noprec": (
-        {
-            0: (2, 4),
-            1: (6, 12),
-            2: (7, 14),
-        },
-        None,
-        None,
-    ),
-    "cust_awp_noprec_ignore_no_offload": (
-        {
-            0: (2, 4),
-            1: (7, 12),
-            2: (8, 14),
-        },
-        None,
-        None,
-    ),
+    "cust_awp_noprec": (path_default, *nones(2)),
+    "override_csm_noprec": (path_default, *nones(2)),
+    "cust_awp_noprec_ignore_no_offload": (path_8_14, *nones(2)),
     "unsupp_torch_version": ({}, None, "is supported from PyTorch"),
     "non_disjoint_phase_fsdp_params": ({}, None, "do not have disjoint FSDP-flattened parameter"),
     "non_disjoint_phase_mods": ({}, None, "not have disjoint"),
@@ -409,325 +450,42 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "no_fsdp_params_p0": ({}, None, "one or more FSDP"),
     "warn_unsupp_nodecay": ({}, "will now be unset", None),
     "unmatched_awp_overrides": ({}, None, "did not match any named modules"),
-    "cust_awp_prec": (
-        {
-            0: (2, 4),
-            1: (6, 12),
-            2: (7, 14),
-        },
-        None,
-        None,
-    ),
-    "batch_norm_auto_prec": (
-        {
-            0: (4, 8),
-            1: (7, 14),
-            2: (8, 16),
-        },
-        "Both mixed precision",
-        None,
-    ),
-    "shared_params_auto_prec": (
-        {
-            0: (2, 4),
-            1: (3, 6),
-            2: (5, 10),
-        },
-        ("Pruning explicitly specified",),
-        None,
-    ),
-    "override_csm_adam_noprec": (
-        {
-            0: (2, 4),
-            1: (2, 4),
-            2: (6, 12),
-            3: (6, 12),
-            4: (7, 14),
-        },
-        None,
-        None,
-    ),
-    "cust_awp_overrides_prec": (
-        {
-            0: (2, 4),
-            1: (6, 12),
-            2: (7, 14),
-        },
-        None,
-        None,
-    ),
-    "cust_awp_overrides_prec_ext": (
-        {
-            0: (3, 6),
-            1: (7, 14),
-            2: (8, 16),
-        },
-        None,
-        None,
-    ),
+    "cust_awp_prec": (path_default, *nones(2)),
+    "batch_norm_auto_prec": (path_8_16, "Both mixed precision", None),
+    "shared_params_auto_prec": (path_5_10, ("Pruning explicitly specified",), None),
+    "override_csm_adam_noprec": (path_ext_7_14, *nones(2)),
+    "cust_awp_overrides_prec": (path_default, *nones(2)),
+    "cust_awp_overrides_prec_ext": (path_ext_8_16, *nones(2)),
     "warn_ignore_awp_override": ({}, "will be unset and not applied", None),
-    "cust_noprec_resume": (
-        {
-            0: (2, 4),
-            1: (6, 12),
-            2: (7, 14),
-        },
-        None,
-        None,
-    ),
+    "cust_noprec_resume": (path_default, *nones(2)),
 }
 
 
 @RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
 @pytest.mark.parametrize(
-    "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, fit_start_only, strategy_adapter_cfg,\
-         model_cfg, fts_cfg, trainer_cfg, strategy_cfg",
+    "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, model_cfg, strategy_adapter_cfg, fts_cfg,\
+          trainer_cfg, strategy_cfg",
     [
-        (
-            "cust_awp_noprec",
-            FTSBaseFSDPModel,
-            custom_auto_wrap_policy,
-            False,
-            0,
-            False,
-            None,
-            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
-            None,
-            None,
-            {"activation_checkpointing": [torch.nn.Linear]},
-        ),
-        (
-            "override_csm_noprec",
-            FTSCsmFSDPModel,
-            None,
-            False,
-            0,
-            False,
-            None,
-            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
-            None,
-            None,
-            None,
-        ),
-        (
-            "cust_awp_noprec_ignore_no_offload",
-            FTSBaseFSDPModel,
-            custom_auto_wrap_policy,
-            False,
-            0,
-            False,
-            None,
-            {"fsdp_mask": {"wrapped_mods": [0, 1, 2, 3, 5], "unwrapped_mods": [4, 7]}},
-            None,
-            None,
-            {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False},
-        ),
-        (
-            "unsupp_torch_version",
-            FTSBaseFSDPModel,
-            custom_auto_wrap_policy,
-            False,
-            0,
-            False,
-            None,
-            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
-            None,
-            None,
-            None,
-        ),
-        (
-            "non_disjoint_phase_fsdp_params",
-            FTSBaseFSDPModel,
-            warn_custom_auto_wrap_policy,
-            False,
-            0,
-            False,
-            None,
-            {"fsdp_mask": {"wrapped_mods": [5], "unwrapped_mods": [i for i in list(range(8)) if i != 5]}},
-            None,
-            None,
-            None,
-        ),
-        (
-            "non_disjoint_phase_mods",
-            FTSCsmFSDPModel,
-            None,
-            False,
-            1,
-            False,
-            None,
-            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
-            None,
-            None,
-            None,
-        ),
-        (
-            "non_disjoint_excluded_ft_params",
-            FTSCsmFSDPModel,
-            None,
-            False,
-            5,
-            False,
-            None,
-            {"fsdp_mask": {"wrapped_mods": [2, 3, 4, 5], "unwrapped_mods": [0, 1, 7]}},
-            None,
-            None,
-            None,
-        ),
-        (
-            "already_fsdp_wrapped",
-            AlreadyWrappedFSDPModel,
-            custom_auto_wrap_policy,
-            False,
-            0,
-            False,
-            None,
-            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
-            None,
-            None,
-            None,
-        ),
-        (
-            "no_fsdp_params_p0",
-            FTSCsmFSDPModel,
-            None,
-            False,
-            0,
-            False,
-            None,
-            {"fsdp_mask": {"wrapped_mods": list(range(5)), "unwrapped_mods": [5, 7]}},
-            None,
-            None,
-            None,
-        ),
-        (
-            "warn_unsupp_nodecay",
-            FTSNoDecayFSDPModel,
-            custom_auto_wrap_policy,
-            False,
-            0,
-            False,
-            None,
-            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
-            None,
-            None,
-            None,
-        ),
-        (
-            "unmatched_awp_overrides",
-            FTSBaseFSDPModel,
-            warn_custom_auto_wrap_policy,
-            True,
-            0,
-            False,
-            {"awp_overrides": ["layer.9", "layer.5"]},
-            {"fsdp_mask": {"wrapped_mods": [5, 7], "unwrapped_mods": [i for i in list(range(8)) if i not in [5, 7]]}},
-            None,
-            None,
-            None,
-        ),
-        (
-            "cust_awp_prec",
-            FTSBaseFSDPModel,
-            custom_auto_wrap_policy,
-            True,
-            0,
-            False,
-            None,
-            {
-                "fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]},
-                "precision_key": "auto_16",
-            },
-            None,
-            None,
-            None,
-        ),
-        (
-            "batch_norm_auto_prec",
-            FTSBatchNormFSDPModel,
-            custom_auto_wrap_policy,
-            True,
-            2,
-            False,
-            None,
-            {"fsdp_mask": {"wrapped_mods": list(range(7)), "unwrapped_mods": [8]}, "precision_key": "auto_16"},
-            None,
-            None,
-            None,
-        ),
-        (
-            "shared_params_auto_prec",
-            FTSSharedParamFSDPModel,
-            custom_auto_wrap_policy,
-            True,
-            3,
-            False,
-            {"awp_overrides": ["l.*yer.1"]},
-            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "precision_key": "auto_16"},
-            None,
-            None,
-            None,
-        ),
-        (
-            "override_csm_adam_noprec",
-            FTSCsmAdamFSDPModel,
-            None,
-            False,
-            4,
-            False,
-            None,
-            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "diverge_on_epoch": 1},
-            None,
-            {"max_epochs": 5},
-            None,
-        ),
-        (
-            "cust_awp_overrides_prec",
-            FTSBaseFSDPModel,
-            custom_auto_wrap_policy,
-            True,
-            0,
-            False,
-            {"awp_overrides": ["l.*yer.7"]},
-            {
-                "fsdp_mask": {"wrapped_mods": list(range(6)) + [7], "unwrapped_mods": []},
-                "precision_key": "auto_16",
-            },
-            None,
-            None,
-            None,
-        ),
-        (
-            "cust_awp_overrides_prec_ext",
-            FTSExtFSDPModel,
-            custom_auto_wrap_ext_policy,
-            True,
-            6,
-            False,
-            {"awp_overrides": ["l.*yer.8", "layer.7"]},
-            {
-                "fsdp_mask": {"wrapped_mods": list(range(6)) + [7, 8], "unwrapped_mods": []},
-                "precision_key": "auto_16",
-            },
-            None,
-            None,
-            None,
-        ),
-        (
-            "warn_ignore_awp_override",
-            FTSCsmFSDPModel,
-            None,
-            False,
-            0,
-            False,
-            {"awp_overrides": ["layer.7"]},
-            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
-            None,
-            None,
-            None,
-        ),
+        ("cust_awp_noprec", base_model, cust_awp, False, 0, unwrap_7, *nones(3), act_ckpt_cfg),
+        ("override_csm_noprec", cust_model, None, False, 0, unwrap_7, *nones(4)),
+        ("cust_awp_noprec_ignore_no_offload", base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), test_ignore_cfg),
+        ("unsupp_torch_version", base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
+        ("non_disjoint_phase_fsdp_params", base_model, warn_cust_awp, False, 0, wrap_5, *nones(4)),
+        ("non_disjoint_phase_mods", cust_model, None, False, 1, unwrap_7, *nones(4)),
+        ("non_disjoint_excluded_ft_params", cust_model, None, False, 5, unwrap_0_1_7, *nones(4)),
+        ("already_fsdp_wrapped", wrapped_model, cust_awp, False, 0, unwrap_7, *nones(4)),
+        ("no_fsdp_params_p0", cust_model, None, False, 0, unwrap_5_7, *nones(4)),
+        ("warn_unsupp_nodecay", nodecay_model, cust_awp, False, 0, unwrap_7, *nones(4)),
+        ("unmatched_awp_overrides", base_model, warn_cust_awp, True, 0, wrap_5_7, awp_5_9, *nones(3)),
+        ("cust_awp_prec", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
+        ("batch_norm_auto_prec", BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(4)),
+        ("shared_params_auto_prec", shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(3)),
+        ("override_csm_adam_noprec", csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, None),
+        ("cust_awp_overrides_prec", base_model, cust_awp, True, 0, wrap_all_mp, awp_7, *nones(3)),
+        ("cust_awp_overrides_prec_ext", ext_model, cust_ext_awp, True, 6, wrap_ext_mp, awp_7_8, *nones(3)),
+        ("warn_ignore_awp_override", cust_model, None, False, 0, unwrap_7, awp_7, *nones(3)),
     ],
-    ids=[  # TODO:
+    ids=[
         "cust_awp_noprec",
         "override_csm_noprec",
         "cust_awp_noprec_ignore_no_offload",
@@ -757,132 +515,117 @@ def test_fsdp_native_multi_gpus(
     auto_wrap_policy,
     use_precision,
     ft_sched_idx,
-    fit_start_only,
-    strategy_adapter_cfg,
     model_cfg,
+    strategy_adapter_cfg,
     fts_cfg,
     trainer_cfg,
     strategy_cfg,
 ):
-    """Test to ensure that checkpoint is saved correctly when using multiple GPUs, and all stages can be run."""
-    # TODO: decompose this test function and simplify it
-    model_cfg = model_cfg or {}
-    expected_state = EXPECTED_FSDP_FTS_RESULTS[model_cfg_key]
-    warns_expected = expected_state[1]
-    fts_cfg = fts_cfg or {}
-    trainer_cfg = trainer_cfg or {"max_epochs": 3}
-    strategy_cfg = strategy_cfg or {"cpu_offload": True, "ignored_modules": None}
-    exception_expected = expected_state[2]
+    """Conservative (end-to-end) set of tests for FTS support of FSDP."""
+    cfg = init_test_cfg(model_cfg_key, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precision)
+    fts_state, warns_expected, exception_expected, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts = cfg
     seed_everything(42)
     model = model_cls(**model_cfg)
-    fts_cls = FitStartOnlyFTS if fit_start_only else FSDPTestFinetuningScheduler
-    callbacks = [
-        fts_cls(
-            ft_schedule=fsdp_ft_schedules[ft_sched_idx],
-            logging_level=DEBUG,
-            strategy_adapter_cfg=strategy_adapter_cfg,
-            expected_state=expected_state[0],
-            **fts_cfg,
-        ),
-        FTSEarlyStopping(monitor="val_loss", patience=2),
-        FTSCheckpoint(monitor="val_loss", save_top_k=3, verbose=True),
-    ]
-    if strategy_cfg.get("test_ignored_modules_names", None):
-        strategy_cfg["ignored_modules"] = [
-            model.get_submodule(n) for n in strategy_cfg.pop("test_ignored_modules_names")
-        ]
+    strategy_cfg = load_ignored_modules(strategy_cfg, model)
+    ft_sched = fsdp_ft_schedules[ft_sched_idx]
+    test_cfg = init_fts_cfg(fts_state, strategy_adapter_cfg, fts_cfg)
+    callbacks = callbacks_cfg(FSDPTestFinetuningScheduler, ft_sched, test_cfg, {"patience": 2}, {"save_top_k": 3})
     strategy = DDPFullyShardedNativeStrategy(auto_wrap_policy=auto_wrap_policy, **strategy_cfg)
-    precision_opts = {"precision": 16} if use_precision else {}
-    trainer = Trainer(
-        default_root_dir=tmpdir,
-        accelerator="gpu",
-        devices=2,
-        strategy=strategy,
-        callbacks=callbacks,
-        **trainer_cfg,
-        **precision_opts,
-    )
+    trainer = configure_trainer(tmpdir, strategy, callbacks, {**trainer_cfg, **precision_opts})
     if exception_expected:
-        if model_cfg_key == "no_fsdp_params_p0":
-            with mock.patch.object(FSDPStrategyAdapter, "RANK_ZERO_LOG_FQN", 42):
-                with pytest.raises(MisconfigurationException, match=exception_expected):
-                    trainer.fit(model)
-        elif model_cfg_key == "unsupp_torch_version":
-            with mock.patch("finetuning_scheduler.strategy_adapters.fsdp._TORCH_GREATER_EQUAL_1_13", False):
-                with pytest.raises(MisconfigurationException, match=exception_expected):
-                    trainer.fit(model)
-        else:
-            with pytest.raises(MisconfigurationException, match=exception_expected):
-                trainer.fit(model)
-    elif fit_start_only:
-        with pytest.raises(SystemExit):
-            trainer.fit(model)
+        gen_exceptions(trainer, model, model_cfg_key, exception_expected)
     else:
         trainer.fit(model)
-        finetuningscheduler_callback = get_fts(trainer)
-        assert finetuningscheduler_callback.depth_remaining == 0
-        assert finetuningscheduler_callback.curr_depth == 2
-        assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
-
+        default_fts_sanity_chk(trainer)
     if trainer.is_global_zero:
         check_fts_fsdp_warns(warns_expected, recwarn)
 
 
 @RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
 @pytest.mark.parametrize(
-    "model_cfg_key, model_cls, auto_wrap_policy, ft_sched_idx, model_cfg",
-    [
-        (
-            "cust_noprec_resume",
-            FTSBaseFSDPModel,
-            custom_auto_wrap_policy,
-            0,
-            {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}},
-        ),
-    ],
+    "model_cfg_key, model_cls, awp, ft_sched_idx, model_cfg",
+    [("cust_noprec_resume", base_model, cust_awp, 0, unwrap_7)],
     ids=["cust_noprec_resume"],
 )
 def test_fsdp_native_multi_gpus_resume(
-    tmpdir,
-    recwarn,
-    fsdp_ft_schedules,
-    fsdp_ckpt,
-    model_cfg_key,
-    model_cls,
-    auto_wrap_policy,
-    ft_sched_idx,
-    model_cfg,
+    tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, model_cfg_key, model_cls, awp, ft_sched_idx, model_cfg
 ):
-    """Test to ensure that checkpoint is saved correctly when using multiple GPUs, and all stages can be run."""
+    """Conservative (end-to-end) test for FTS training resumption with FSDP."""
     model_cfg = model_cfg or {}
     expected_state = EXPECTED_FSDP_FTS_RESULTS[model_cfg_key]
     warns_expected = expected_state[1]
     seed_everything(42)
     model = model_cls(**model_cfg)
-    callbacks = [
-        FinetuningScheduler(ft_schedule=fsdp_ft_schedules[ft_sched_idx]),
-        FTSEarlyStopping(monitor="val_loss", patience=1),
-        FTSCheckpoint(monitor="val_loss", save_last=True, verbose=True),
-    ]
-    strategy = DDPFullyShardedNativeStrategy(
-        auto_wrap_policy=auto_wrap_policy, cpu_offload=CPUOffload(offload_params=True)
-    )
-    trainer = Trainer(
-        default_root_dir=tmpdir,
-        accelerator="gpu",
-        devices=2,
-        strategy=strategy,
-        callbacks=callbacks,
-        max_epochs=3,
-    )
+    ft_sched = fsdp_ft_schedules[ft_sched_idx]
+    callbacks = callbacks_cfg(FinetuningScheduler, ft_sched, {}, {"patience": 1}, {"save_last": True})
+    strategy = DDPFullyShardedNativeStrategy(auto_wrap_policy=awp, cpu_offload=CPUOffload(offload_params=True))
+    trainer = configure_trainer(tmpdir, strategy, callbacks, {"max_epochs": 3})
     trainer.fit(model, ckpt_path=fsdp_ckpt)
-    finetuningscheduler_callback = get_fts(trainer)
-    assert finetuningscheduler_callback.depth_remaining == 0
-    assert finetuningscheduler_callback.curr_depth == 2
-    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
-
+    default_fts_sanity_chk(trainer)
     if trainer.is_global_zero:
         check_fts_fsdp_warns(warns_expected, recwarn)
+
+
+def gen_exceptions(trainer, model, model_cfg_key, exception_expected):
+    if model_cfg_key == "no_fsdp_params_p0":
+        with mock.patch.object(FSDPStrategyAdapter, "RANK_ZERO_LOG_FQN", 42):
+            with pytest.raises(MisconfigurationException, match=exception_expected):
+                trainer.fit(model)
+    elif model_cfg_key == "unsupp_torch_version":
+        with mock.patch("finetuning_scheduler.strategy_adapters.fsdp._TORCH_GREATER_EQUAL_1_13", False):
+            with pytest.raises(MisconfigurationException, match=exception_expected):
+                trainer.fit(model)
+    else:
+        with pytest.raises(MisconfigurationException, match=exception_expected):
+            trainer.fit(model)
+
+
+def init_fts_cfg(fts_state, strategy_adapter_cfg, fts_cfg):
+    def_fts_cfg = {"logging_level": DEBUG, "expected_state": fts_state, "strategy_adapter_cfg": strategy_adapter_cfg}
+    test_cfg = {**fts_cfg, **def_fts_cfg}
+    return test_cfg
+
+
+def init_test_cfg(model_cfg_key, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precision):
+    expected_state = EXPECTED_FSDP_FTS_RESULTS[model_cfg_key]
+    fts_state, warns_expected, exception_expected = expected_state
+    init_cfg = model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precision
+    model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts = map_component_cfgs(*init_cfg)
+    return fts_state, warns_expected, exception_expected, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts
+
+
+def map_component_cfgs(model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precision):
+    trainer_cfg = trainer_cfg or {"max_epochs": 3}
+    model_cfg = model_cfg or {}
+    fts_cfg = fts_cfg or {}
+    strategy_cfg = strategy_cfg or {"cpu_offload": True, "ignored_modules": None}
+    precision_opts = {"precision": 16} if use_precision else {}
+    return model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts
+
+
+def load_ignored_modules(strategy_cfg, model):
+    if strategy_cfg.get("test_ignored_modules_names", None):
+        strategy_cfg["ignored_modules"] = [
+            model.get_submodule(n) for n in strategy_cfg.pop("test_ignored_modules_names")
+        ]
+    return strategy_cfg
+
+
+def callbacks_cfg(fts_cls, ft_sched, non_def_fts_cfg, fts_es_cfg, fts_ckpt_cfg):
+    default_dep_cfg = {"monitor": "val_loss", "verbose": True}
+    fts_es_cfg = {**fts_es_cfg, **default_dep_cfg}
+    fts_ckpt_cfg = {**fts_ckpt_cfg, **default_dep_cfg}
+    default_fts_cfg = {"ft_schedule": ft_sched}
+    fts_cfg = {**non_def_fts_cfg, **default_fts_cfg}
+    callbacks = [fts_cls(**fts_cfg), FTSEarlyStopping(**fts_es_cfg), FTSCheckpoint(**fts_ckpt_cfg)]
+    return callbacks
+
+
+def configure_trainer(tmpdir, strategy, callbacks, extra_trainer_cfg):
+    defaults = {"accelerator": "gpu", "devices": 2, "default_root_dir": tmpdir}
+    base_config = {"strategy": strategy, "callbacks": callbacks, **defaults}
+    trainer = Trainer(**base_config, **extra_trainer_cfg)
+    return trainer
 
 
 def check_fts_fsdp_warns(warns_expected, recwarn):
@@ -894,3 +637,10 @@ def check_fts_fsdp_warns(warns_expected, recwarn):
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=fsdp_warns)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
+
+
+def default_fts_sanity_chk(trainer):
+    finetuningscheduler_callback = get_fts(trainer)
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == 2
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
