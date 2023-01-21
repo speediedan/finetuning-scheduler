@@ -123,8 +123,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 being executed. Defaults to -1.
             base_max_lr: The default maximum learning rate to use for the parameter groups associated with each
                 scheduled fine-tuning depth if not explicitly specified in the fine-tuning schedule. If overridden to
-                ``None``, will be set to the ``lr`` of the first scheduled fine-tuning depth scaled by 1e-1. Defaults to
-                1e-5.
+                ``None``, will be set to the ``lr`` of the first scheduled fine-tuning depth. Defaults to 1e-5.
             restore_best: If ``True``, restore the best available (defined by the
                 :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint`) checkpoint
                 before fine-tuning depth transitions. Defaults to ``True``.
@@ -208,6 +207,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` associated with the current training
                 :external+pl:class:`~pytorch_lightning.strategies.Strategy`.
             epoch_transitions_only: Whether to use epoch-driven stopping criteria exclusively.
+            base_max_lr: The default maximum learning rate to use for the parameter groups associated with each
+                scheduled fine-tuning depth if not explicitly specified in the fine-tuning schedule. If overridden to
+                ``None``, will be set to the ``lr`` of the first scheduled fine-tuning depth. Defaults to 1e-5.
         """
         super().__init__()
         self._fts_state = FTSState()
@@ -342,19 +344,20 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                         new_lr_scheduler=new_scheduler_cfg, trainer=self.pl_module.trainer, optimizer=optimizer
                     )
                 else:
-                    for config in self.pl_module.trainer.lr_scheduler_configs:
-                        show_warn_lambdas = (
-                            hasattr(config.scheduler, "lr_lambdas")
-                            and config.scheduler.lr_lambdas[-1] is not None  # type: ignore[union-attr]
-                            and not self.apply_lambdas_new_pgs
-                        )
-                        if show_warn_lambdas:
-                            rank_zero_warn(
-                                "The lr scheduler used in this phase has lr_lambdas but will use a "
-                                "configured lr for new parameter groups because `apply_lambdas_new_pgs` is "
-                                "set to the default of `False`. If you would like new groups to have lr "
-                                "lambdas applied, set `apply_lambdas_new_pgs` to `True`."
+                    if self.pl_module.trainer.lr_scheduler_configs:
+                        for config in self.pl_module.trainer.lr_scheduler_configs:
+                            show_warn_lambdas = (
+                                hasattr(config.scheduler, "lr_lambdas")
+                                and config.scheduler.lr_lambdas[-1] is not None  # type: ignore[union-attr]
+                                and not self.apply_lambdas_new_pgs
                             )
+                            if show_warn_lambdas:
+                                rank_zero_warn(
+                                    "The lr scheduler used in this phase has lr_lambdas but will use a "
+                                    "configured lr for new parameter groups because `apply_lambdas_new_pgs` is "
+                                    "set to the default of `False`. If you would like new groups to have lr "
+                                    "lambdas applied, set `apply_lambdas_new_pgs` to `True`."
+                                )
 
     def restore_best_ckpt(self) -> None:
         """Restore the current best model checkpoint, according to

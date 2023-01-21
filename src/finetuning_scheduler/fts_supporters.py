@@ -1291,57 +1291,88 @@ class ScheduleImplMixin(ABC):
             lr: The initial learning rate for the new parameter group(s). If not specified,
                 the ``lr`` of the first scheduled fine-tuning depth will be used. Defaults to ``None``.
             apply_lambdas: Whether to apply lr lambdas to newly added groups. Defaults to False.
+
+        .. note::
+
+            If one relies upon the default FTS schedule, the lr provided to this method will be
+            :attr:`~finetuning_scheduler.fts.FinetuningScheduler.base_max_lr` which defaults to ``1e-05``.
         """
         if len(thawed_pl) == 0:
             rank_zero_warn("No thawed parameters passed so no new optimizer groups will be added.")
         else:
             phase_lr = optimizer.param_groups[0]["lr"] if lr is None else float(lr)
             orig_lr_factor = phase_lr
-            for config in module.trainer.lr_scheduler_configs:  # type: ignore[union-attr]
-                scheduler = config.scheduler
-                if hasattr(scheduler, "lr_lambdas") and scheduler.lr_lambdas and apply_lambdas:
-                    phase_lr = phase_lr * scheduler.lr_lambdas[-1](scheduler.last_epoch)
-                added_pgs = 0
-                if no_decay:
-                    optimizer.add_param_group(
-                        {
-                            "params": [
-                                p
-                                for n, p in module.named_parameters()
-                                if not any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
-                            ],
-                            "lr": phase_lr,
-                            "initial_lr": phase_lr,
-                        }
-                    )
-                    optimizer.add_param_group(
-                        {
-                            "params": [
-                                p
-                                for n, p in module.named_parameters()
-                                if any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
-                            ],
-                            "weight_decay": 0.0,
-                            "lr": phase_lr,
-                            "initial_lr": phase_lr,
-                        }
-                    )
-                    added_pgs = 2
-                else:
-                    optimizer.add_param_group(
-                        {
-                            "params": [p for n, p in module.named_parameters() if n in thawed_pl and p.requires_grad],
-                            "lr": phase_lr,
-                            "initial_lr": phase_lr,
-                        }
-                    )
-                    added_pgs = 1
-                if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    scheduler.min_lrs.extend([scheduler.min_lrs[0]] * added_pgs)  # type: ignore[attr-defined]
-                else:
-                    scheduler.base_lrs.extend([orig_lr_factor] * added_pgs)
-                    if hasattr(scheduler, "lr_lambdas"):
-                        scheduler.lr_lambdas.extend([scheduler.lr_lambdas[-1]] * added_pgs)
+            if module.trainer.lr_scheduler_configs:  # type: ignore[union-attr]
+                for config in module.trainer.lr_scheduler_configs:  # type: ignore[union-attr]
+                    scheduler = config.scheduler
+                    if hasattr(scheduler, "lr_lambdas") and scheduler.lr_lambdas and apply_lambdas:
+                        phase_lr = phase_lr * scheduler.lr_lambdas[-1](scheduler.last_epoch)
+                    added_pgs = 0
+                    added_pgs = ScheduleImplMixin._add_groups(no_decay, optimizer, module, thawed_pl, phase_lr)
+                    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                        scheduler.min_lrs.extend([scheduler.min_lrs[0]] * added_pgs)  # type: ignore[attr-defined]
+                    else:
+                        scheduler.base_lrs.extend([orig_lr_factor] * added_pgs)
+                        if hasattr(scheduler, "lr_lambdas"):
+                            scheduler.lr_lambdas.extend([scheduler.lr_lambdas[-1]] * added_pgs)
+            else:
+                _ = ScheduleImplMixin._add_groups(no_decay, optimizer, module, thawed_pl, phase_lr)
+
+    @staticmethod
+    def _add_groups(
+        no_decay: Optional[list], optimizer: Optimizer, module: Module, thawed_pl: List, phase_lr: float
+    ) -> int:
+        """The actual addition of optimizer groups is done here, separated from ``add_optimizer_groups`` to
+        accommodate corner cases where FTS is being used without an lr scheduler configuration.
+
+        Args:
+            no_decay: A list of parameters that should always have weight_decay set to 0. e.g.:
+                ["bias", "LayerNorm.weight"]. Defaults to ``None``.
+            optimizer (:external+torch:class:`~torch.optim.Optimizer`): The
+                :external+torch:class:`~torch.optim.Optimizer` to which parameter groups will be configured and added.
+            module (:class:`~torch.nn.Module`): The :class:`~torch.nn.Module` from which the target optimizer parameters
+                will be read.
+            thawed_pl: The list of thawed/unfrozen parameters that should be added to the new parameter group(s)
+            phase_lr (float): The initial learning rate for the new parameter group(s).
+
+        Returns:
+            int: The number of optimizer parameter groups that were added.
+        """
+        if no_decay:
+            optimizer.add_param_group(
+                {
+                    "params": [
+                        p
+                        for n, p in module.named_parameters()
+                        if not any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
+                    ],
+                    "lr": phase_lr,
+                    "initial_lr": phase_lr,
+                }
+            )
+            optimizer.add_param_group(
+                {
+                    "params": [
+                        p
+                        for n, p in module.named_parameters()
+                        if any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
+                    ],
+                    "weight_decay": 0.0,
+                    "lr": phase_lr,
+                    "initial_lr": phase_lr,
+                }
+            )
+            added_pgs = 2
+        else:
+            optimizer.add_param_group(
+                {
+                    "params": [p for n, p in module.named_parameters() if n in thawed_pl and p.requires_grad],
+                    "lr": phase_lr,
+                    "initial_lr": phase_lr,
+                }
+            )
+            added_pgs = 1
+        return added_pgs
 
     @staticmethod
     def sync(objs: Tuple, asets: Tuple, agg_func: Callable = max) -> None:

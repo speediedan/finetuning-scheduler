@@ -33,17 +33,10 @@ ARGS_GPU = ARGS_DEFAULT + "--trainer.gpus 1 "
 EXPECTED_WARNS = [
     "does not have many workers",
     "is smaller than the logging interval",
-    "torch.distributed._sharded_tensor will be deprecated",
-    "`np.object` is a deprecated alias",
-    "`np.int` is a deprecated alias",
     "sentencepiece tokenizer that you are converting",
-    "Torchmetrics v0.9",  # temporarily allow until _ResultMetric updated,
-    "copy construct from a tensor",
-    "'dataset_info': token",  # can remove w datasets ver 0.12 per https://github.com/huggingface/datasets/issues/4990
-    "BILINEAR is deprecated",
-    "NEAREST is deprecated",
+    "distutils Version classes are deprecated",
 ]
-MIN_VERSION_WARNS = "1.9"
+MIN_VERSION_WARNS = "1.10"
 MAX_VERSION_WARNS = "1.13"
 # torch version-specific warns will go here
 EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [], MAX_VERSION_WARNS: []}
@@ -53,7 +46,6 @@ if Version(torch_version) < Version(MAX_VERSION_WARNS):
 else:
     EXPECTED_WARNS.extend(EXPECTED_VERSION_WARNS[MAX_VERSION_WARNS])
 ADV_EXPECTED_WARNS = EXPECTED_WARNS + ["Found an `init_pg_lrs` key"]
-FSDP_EXPECTED_WARNS = EXPECTED_WARNS + ["is still running", "Please use torch.distributed."]
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")

@@ -276,6 +276,13 @@ class MultiOptFTSBoringModel(FinetuningSchedulerBoringModel):
         return [optimizer0, optimizer1]
 
 
+class NoLRSBoringModel(FinetuningSchedulerBoringModel):
+    def configure_optimizers(self):
+        parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
+        optimizer = torch.optim.SGD(parameters, lr=0.1)
+        return optimizer
+
+
 class FTSZeroRedundancyOptimizerModel(FinetuningSchedulerBoringModel):
     def __init__(self, test_overlap: Optional[bool] = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -886,6 +893,47 @@ def test_fts_callback_resume(
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=resume_warns)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
+
+
+EXPECTED_NOLRS_INTRAFIT_STATE = {
+    0: (0, 3, 0, 0, 0, 0, 2, 1, 0, 0),
+    1: (0, 3, 1, 0, 0, 1, 2, 1, 0, 0),
+    2: (0, 3, 2, 0, 0, 1, 2, 1, 0, 0),
+    3: (0, 3, 3, 0, 0, 1, 2, 1, 0, 0),
+    4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0),
+    5: (2, 1, 5, 0, 0, 1, 6, 3, 0, 0),
+    6: (3, 0, 6, 0, 0, 1, 8, 4, 0, 0),
+}
+
+EXPECTED_NOLRS_LR_STATE = {
+    0: (0.1,),
+    1: (0.1,),
+    2: (0.1,),
+    3: (0.1,),
+    4: (0.1, 1e-05),
+    5: (0.1, 1e-05, 1e-05),
+    6: (0.1, 1e-05, 1e-05, 1e-05),
+}
+
+
+def test_finetuningscheduling_nolrs_intrafit(tmpdir):
+    """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
+    both restore_best modes."""
+    seed_everything(42)
+    model = NoLRSBoringModel()
+    callbacks = [
+        TestFinetuningScheduler(expected_state=EXPECTED_NOLRS_INTRAFIT_STATE, lrs_state=EXPECTED_NOLRS_LR_STATE),
+        FTSEarlyStopping(monitor="val_loss", patience=1),
+        LearningRateMonitor(),
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer.fit(model)
+    finetuningscheduler_callback = get_fts(trainer)
+    callbacks_dict = {type(c): i for i, c in enumerate(finetuningscheduler_callback.pl_module.trainer.callbacks)}
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == 3
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+    assert callbacks_dict[TestFinetuningScheduler] < callbacks_dict[LearningRateMonitor] < callbacks_dict[FTSCheckpoint]
 
 
 EXPECTED_INTRAFIT_STATE = {
