@@ -12,5 +12,3 @@ sphinx-copybutton>=0.3
 typing-extensions  # already in `base.txt` but the docs CI job does not install it
 jinja2>=3.0.0,<3.1.0
 git+https://github.com/speediedan/lightning_sphinx_theme.git@057f4c3e669948bc618eec1688b016f07140cc0d#egg=pt_lightning_sphinx_theme
-
--r ../.actions/requires.txt

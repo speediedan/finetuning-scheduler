@@ -17,7 +17,7 @@ ARG OS_VER=ubuntu20.04
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
 ARG PYTHON_VERSION=3.10
-ARG PYTORCH_VERSION=1.13.0
+ARG PYTORCH_VERSION=1.13.1
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
 
@@ -92,16 +92,6 @@ RUN \
 RUN \
     CUDA_VERSION_MAJOR=$(python -c "import torch; print(torch.version.cuda.split('.')[0])") && \
     py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.10'.split('.')))")
-
-# RUN \
-#     # install FairScale
-#     pip install "fairscale>=0.4.5" && \
-#     python -c "import fairscale; print(fairscale.__version__)"
-
-# RUN \ # removing deepspeed from extras unless/until add optimizer pg interface added to DS API
-#     # install DeepSpeed
-#     pip install deepspeed==0.5.7 && \
-#     python -c "import deepspeed; print(deepspeed.__version__)"
 
 RUN \
     # Show what we have

@@ -81,7 +81,8 @@ setup(
     package_dir={"": "src"},
     package_data={
         "fts_examples.config": ["*.yaml"],
-        "fts_examples.config.advanced": ["*.yaml"],
+        "fts_examples.config.advanced.fsdp": ["*.yaml"],
+        "fts_examples.config.advanced.reinit_lr": ["*.yaml"],
     },
     include_package_data=True,
     long_description=long_description,

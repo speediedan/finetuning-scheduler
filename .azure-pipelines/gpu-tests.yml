@@ -45,7 +45,7 @@ jobs:
     strategy:
       matrix:
         'PyTorch - stable':
-          image: "speediedan/finetuning-scheduler:py3.10-pt1.13.0-azpl-init"
+          image: "speediedan/finetuning-scheduler:py3.10-pt1.13.1-azpl-init"
     # how long to run the job before automatically cancelling
     timeoutInMinutes: "100"
     # how much time to give 'run always even if cancelled tasks' before stopping them
@@ -84,7 +84,7 @@ jobs:
       displayName: 'Testing: standard'
 
     - bash: |
-        bash ./tests/standalone_tests.sh -k test_fts_
+        bash ./tests/standalone_tests.sh -k test_f
       # env:
       #   PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       displayName: 'Testing: standalone multi-gpu'
