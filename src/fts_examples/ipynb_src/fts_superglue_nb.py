@@ -299,7 +299,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.dataset["validation"], batch_size=self.hparams.eval_batch_size, **self.dataloader_kwargs)
 
-    def _convert_to_features(self, example_batch: datasets.arrow_dataset.Batch) -> BatchEncoding:
+    def _convert_to_features(self, example_batch: datasets.arrow_dataset.LazyDict) -> BatchEncoding:
         """Convert raw text examples to a :class:`~transformers.tokenization_utils_base.BatchEncoding` container
         (derived from python dict) of features that includes helpful methods for translating between word/character
         space and token space.

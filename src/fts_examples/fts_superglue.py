@@ -50,7 +50,7 @@ from fts_examples.cli_experiment_utils import collect_env_info, instantiate_clas
 if _HF_AVAILABLE:
     import datasets
     import evaluate
-    from datasets.arrow_dataset import Batch
+    from datasets.arrow_dataset import LazyDict
     from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer
     from transformers import logging as transformers_logging
     from transformers.tokenization_utils_base import BatchEncoding
@@ -147,7 +147,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.dataset["validation"], batch_size=self.hparams.eval_batch_size, **self.dataloader_kwargs)
 
-    def _convert_to_features(self, example_batch: Batch) -> BatchEncoding:
+    def _convert_to_features(self, example_batch: LazyDict) -> BatchEncoding:
         """Convert raw text examples to a :class:`~transformers.tokenization_utils_base.BatchEncoding` container
         (derived from python dict) of features that includes helpful methods for translating between word/character
         space and token space.
