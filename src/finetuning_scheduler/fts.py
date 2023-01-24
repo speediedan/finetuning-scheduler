@@ -277,8 +277,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         """Prepare and execute the next scheduled fine-tuning level
         1. Restore the current best model checkpoint if appropriate
         2. Thaw model parameters according the the defined schedule
-        3. Synchronize the states of :external+pl:class:`~pytorch_lightning.loops.FitLoop` and
-        :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`
+        3. Synchronize the states of ``FitLoop`` and :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`
 
         .. note::
 
