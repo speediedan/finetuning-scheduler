@@ -68,10 +68,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
     To facilitate module wrapping in alignment with fine-tuning schedule phases, FTS provides the
     :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides` feature which allows users to
-    provide module name-based complements to a given ``auto_wrap_policy``. See the
-    `Fully Sharded Data Parallel Scheduled Fine-Tuning
-    <https://finetuning-scheduler.readthedocs.io/en/stable/advanced/lr_scheduler_reinitialization.html>`_ tutorial for
-    a concrete example and additional guidance.
+    provide module name-based complements to a given ``auto_wrap_policy``. See the :ref:`fsdp-fine-tuning-example`
+    tutorial for a concrete example and additional guidance.
 
     FTS will attempt to validate that the module is wrapped in a manner that aligns with the defined fine-tuning
     schedule phases prior to the start of training and provided detailed feedback for the user if a misalignment is

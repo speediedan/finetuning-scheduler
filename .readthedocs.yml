@@ -44,9 +44,15 @@ build:
     - texlive-latex-extra
     - dvipng
     - texlive-pictures
+  jobs:
+    pre_install:
+      - echo ${READTHEDOCS_VERSION}
+      - env
 
 # Optionally set the version of Python and requirements required to build your docs
 python:
   install:
     - requirements: requirements/base.txt
     - requirements: requirements/docs.txt
+    - method: pip
+      path: .
