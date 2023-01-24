@@ -79,14 +79,10 @@ jobs:
 
     - bash: |
         python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
-      # env:
-      #   PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       displayName: 'Testing: standard'
 
     - bash: |
         bash ./tests/standalone_tests.sh -k test_f
-      # env:
-      #   PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       displayName: 'Testing: standalone multi-gpu'
 
     - bash: |
@@ -98,20 +94,7 @@ jobs:
         CODECOV_TOK: $(CODECOV_TOKEN)  # explicit mapping required for secret azure pipeline variables
       displayName: 'Statistics'
 
-    # - task: PublishTestResults@2
-    #   displayName: 'Publish test results'
-    #   inputs:
-    #     testResultsFiles: '$(Build.Repository.LocalPath)/test-results.xml'
-    #     testRunTitle: 'Python $(python.version)'
-    #   condition: succeededOrFailed()
-
     - script: |
         set -e
         python -m pytest src/fts_examples -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
-      # env:
-      #   PATH: /home/az_pipeline_agent_azpcontainer/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       displayName: 'Testing: examples'
-
-    # - script: |
-    #     python fts_examples/fts_superglue.py fit --config fts_examples/config/fts_explicit.yaml
-    #   displayName: 'Testing: full explicit example benchmark'
