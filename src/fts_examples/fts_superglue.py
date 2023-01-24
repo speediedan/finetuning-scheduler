@@ -169,7 +169,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
 
 
 class RteBoolqModule(pl.LightningModule):
-    """A :class:`~pytorch_lightning.core.module.LightningModule` that can be used to fine-tune a foundational model
+    """A :class:`~pytorch_lightning.core.module.LightningModule` that can be used to fine-tune a foundation model
     on either the RTE or BoolQ `SuperGLUE <https://super.gluebenchmark.com/>`_ tasks using Hugging Face
     implementations of a given model and the `SuperGLUE Hugging Face dataset.
 

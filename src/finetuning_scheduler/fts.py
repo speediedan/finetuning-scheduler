@@ -45,8 +45,8 @@ log = logging.getLogger(__name__)
 
 class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMixin, BaseFinetuning):
     r"""
-    This callback enables flexible, multi-phase, scheduled fine-tuning of foundational models. Gradual
-    unfreezing/thawing can help maximize foundational model knowledge retention while allowing (typically upper layers
+    This callback enables flexible, multi-phase, scheduled fine-tuning of foundation models. Gradual
+    unfreezing/thawing can help maximize foundation model knowledge retention while allowing (typically upper layers
     of) the model to optimally adapt to new tasks during transfer learning.
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` orchestrates the gradual unfreezing of models via a
     fine-tuning schedule that is either implicitly generated (the default) or explicitly provided by the user (more
