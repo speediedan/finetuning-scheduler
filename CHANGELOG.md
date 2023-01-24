@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+
+## [0.3.4] - 2023-01-24
+
+### Added
+
+- support for `pytorch-lightning` 1.8.6
+- Notify the user when ``max_depth`` is reached and provide the current training session stopping conditions. Resolves [#7](https://github.com/speediedan/finetuning-scheduler/issues/7).
+
+### Changed
+
+- set package version ceilings for the examples requirements along with a note regarding their introduction for stability
+- promoted PL CLI references to top-level package
+
+### Fixed
+
+- replaced deprecated ``Batch`` object reference with ``LazyDict``
+
+
 ## [0.3.3] - 2022-12-09
 
 ### Added

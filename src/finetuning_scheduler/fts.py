@@ -300,6 +300,13 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert self._fts_state._ft_sync_objects is not None
         FinetuningScheduler.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
         rank_zero_info(f"Multi-phase fine-tuned training continuing at level {self.curr_depth}.")
+        if self.depth_remaining == 0:
+            max_epochs_msg = f"`max_epochs` ({self.pl_module.trainer.fit_loop.max_epochs}) is reached."
+            composition_msg = "the early stopping conditions are met or " + max_epochs_msg
+            rank_zero_info(
+                f"Given the current configuration of `max_depth` ({self.max_depth}), this training session"
+                f" will now end when {max_epochs_msg if self.epoch_transitions_only else composition_msg}"
+            )
 
     def step_pg(self, optimizer: Optimizer, depth: int, depth_sync: bool = True) -> None:
         """Configure optimizer parameter groups for the next scheduled fine-tuning level, adding parameter groups
