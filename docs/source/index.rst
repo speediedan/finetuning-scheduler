@@ -19,7 +19,7 @@ foundation model experimentation with flexible fine-tuning schedules. Training w
 .. note::
    If you're exploring using the :class:`~finetuning_scheduler.fts.FinetuningScheduler`, this is a great place
    to start!
-   You may also find the `notebook-based tutorial <https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html>`_
+   You may also find the `notebook-based tutorial <https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html>`_
    useful and for those using the :doc:`LightningCLI<cli/lightning_cli>`, there is a
    :ref:`CLI-based<scheduled-fine-tuning-superglue>` example at the bottom of this introduction.
 
@@ -230,7 +230,7 @@ and transitions will be exclusively epoch-driven.
 For a practical end-to-end example of using
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` in implicit versus explicit modes,
 see :ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` below or the
-`notebook-based tutorial <https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html>`_.
+`notebook-based tutorial <https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html>`_.
 
 
 Resuming Scheduled Fine-Tuning Training Sessions
@@ -511,8 +511,8 @@ Footnotes
    :name: Examples
    :caption: Examples
 
-   Notebook-based Fine-Tuning Scheduler tutorial <https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html>
-   CLI-based Fine-Tuning Scheduler tutorial <https://finetuning-scheduler.readthedocs.io/en/latest/#example-scheduled-fine-tuning-for-superglue>
+   Notebook-based Fine-Tuning Scheduler tutorial <https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html>
+   CLI-based Fine-Tuning Scheduler tutorial <https://finetuning-scheduler.readthedocs.io/en/stable/#example-scheduled-fine-tuning-for-superglue>
 
 .. toctree::
    :maxdepth: 1
