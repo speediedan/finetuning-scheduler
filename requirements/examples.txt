@@ -1,6 +1,10 @@
-datasets
-evaluate
-transformers>=4.18.0
-scikit-learn
-sentencepiece
-tensorboardX>=2.2
+
+
+# NOTE: The Fine-Tuning Scheduler (FTS) examples will likely work with higher dependency versions than the ones
+#       below. These ceilings reflect the highest package versions with which the FTS examples have been tested.
+datasets<=2.8.0
+evaluate<=0.4.0
+transformers>=4.18.0, <=4.26.0
+scikit-learn<=1.2.1
+sentencepiece<=0.1.97
+tensorboardX>=2.2, <=2.5.1
