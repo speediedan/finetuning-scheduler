@@ -20,17 +20,20 @@ Note that this setup will not run tests that require specific packages installed
 
 ## Running Coverage
 
-Make sure to run coverage on a GPU machine with at least 2 GPUs
+### To generate full-coverage (requires minimum of 2 GPUS)
 
 ```bash
 cd finetuning-scheduler
+python -m coverage erase && \
+python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v && \
+(./tests/standalone_tests.sh -k test_f --no-header 2>&1 > /tmp/standalone.out) > /dev/null && \
+egrep '(Running|passed|failed|error)' /tmp/standalone.out && \
+python -m coverage report -m )
+```
 
-# generate coverage (coverage is also installed as part of dev dependencies under requirements/devel.txt)
+### To generate cpu-only coverage:
+
+```bash
+cd finetuning-scheduler
 python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v
-
-# print coverage stats
-coverage report -m
-
-# exporting results
-coverage xml
 ```
