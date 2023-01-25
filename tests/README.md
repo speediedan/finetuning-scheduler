@@ -28,7 +28,7 @@ python -m coverage erase && \
 python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v && \
 (./tests/standalone_tests.sh -k test_f --no-header 2>&1 > /tmp/standalone.out) > /dev/null && \
 egrep '(Running|passed|failed|error)' /tmp/standalone.out && \
-python -m coverage report -m )
+python -m coverage report -m
 ```
 
 ### To generate cpu-only coverage:
