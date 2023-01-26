@@ -326,7 +326,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert isinstance(self.pl_module, pl.LightningModule)
         assert isinstance(self.pl_module.trainer, pl.Trainer)
         if depth_sync:
-            thaw_layers = {d: l for d, l in self.ft_schedule.items() if d > self._fts_state._best_ckpt_depth}.items()
+            thaw_layers = {d: tl for d, tl in self.ft_schedule.items() if d > self._fts_state._best_ckpt_depth}.items()
         else:
             thaw_layers = {depth: self.ft_schedule[depth]}.items()
         for i, orig_next_tl in thaw_layers:
