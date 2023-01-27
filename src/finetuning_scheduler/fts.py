@@ -255,11 +255,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             "ddp_fork",
             "ddp_notebook",
             "single_device",
-            # TODO: `native` suffix will be removed from `fsdp` strategies in 2.0
-            "fsdp_native",
-            "fsdp_native_full_shard_offload",
-            "ddp_sharded",  # TODO: remove in 2.0
-            "ddp_sharded_spawn"  # TODO: remove in 2.0,
+            "fsdp",
+            "fsdp_cpu_offload",
             # "deepspeed",  # relevant FTS strategy adapter not yet available, PRs welcome!
         )
 

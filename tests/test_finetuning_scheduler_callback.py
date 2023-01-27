@@ -13,6 +13,7 @@ import os
 import re
 from collections import OrderedDict
 from copy import deepcopy
+from logging import DEBUG
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -702,7 +703,8 @@ def test_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expe
     trainer_opts = {"default_root_dir": tmpdir, "callbacks": callbacks}
     if dist_mode:
         trainer_opts["strategy"] = "ddp"
-        trainer_opts["gpus"] = 2
+        trainer_opts["accelerator"] = "auto"
+        trainer_opts["devices"] = 2
     trainer = Trainer(**trainer_opts)
     ft_schedule = tmpdir / "lightning_logs" / "version_0" / f"{model.__class__.__name__}_ft_schedule.yaml"
     with pytest.raises(SystemExit):
@@ -764,7 +766,7 @@ def test_finetuningscheduling_explicit_implicit(tmpdir, boring_ft_schedule, expl
     ]
     assert not any([p.requires_grad for n, p in trainer.model.named_parameters() if n in still_frozen])
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
-    assert finetuningscheduler_callback._fts_state._ft_epoch == trainer._fit_loop.epoch_progress.current.completed
+    assert finetuningscheduler_callback._fts_state._ft_epoch == trainer.fit_loop.epoch_progress.current.completed
 
 
 EXPECTED_DECAY_RESULTS = {
@@ -815,7 +817,7 @@ def test_finetuningscheduling_decay(tmpdir, boring_ft_schedule, explicit_mode: b
     ]
     assert not any([p.requires_grad for n, p in trainer.model.named_parameters() if n in still_frozen])
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
-    assert finetuningscheduler_callback._fts_state._ft_epoch == trainer._fit_loop.epoch_progress.current.completed
+    assert finetuningscheduler_callback._fts_state._ft_epoch == trainer.fit_loop.epoch_progress.current.completed
 
 
 EXPECTED_RESUME_RESULTS = {
@@ -866,13 +868,14 @@ def test_fts_callback_resume(
             monitor="val_loss", dirpath=dirpath, save_on_train_epoch_end=train_chk_mode, verbose=True, save_top_k=3
         ),
     ]
-    resume_callbacks.append(FinetuningScheduler(max_depth=max_depth))
+    resume_callbacks.append(FinetuningScheduler(max_depth=max_depth, logging_level=DEBUG))
 
     seed_everything(42)
     model = FinetuningSchedulerBoringModel()
     trainer = Trainer(default_root_dir=tmpdir, callbacks=resume_callbacks)
     finetuningscheduler_callback = get_fts(trainer)
-    trainer.fit(model, ckpt_path=ckpt_set[ckpt])
+    trainer.ckpt_path = ckpt_set[ckpt]
+    trainer.fit(model)
     # note if save_on_train_epoch_end is set to `None` then it will be False by default
     expected_state = EXPECTED_RESUME_RESULTS[
         (
@@ -1534,7 +1537,7 @@ MOCK_STRATEGY_MAPPING = {
 
 
 @pytest.mark.parametrize(
-    "strategy, gpus, strategy_conf, results_key",
+    "strategy, devices, strategy_conf, results_key",
     [
         pytest.param("test_strategy", None, "stgy_allow_untest", "allow_untest"),
         pytest.param("ddp", None, "stgy_disallow_untest", "disallow_untest"),
@@ -1552,13 +1555,13 @@ MOCK_STRATEGY_MAPPING = {
         "deepspeed_stage_2",
     ],
 )
-def test_finetuningscheduling_distributed_compat(tmpdir, strategy, gpus, strategy_conf, results_key):
+def test_finetuningscheduling_distributed_compat(tmpdir, strategy, devices, strategy_conf, results_key):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly raised
     for currently unsupported strategies."""
     expected_warn, raise_cond = EXPECTED_MOCK_STRATEGY_RESULTS[results_key]
     callbacks = [TestFinetuningScheduler(mock_strategy=strategy_conf)]
     model = FinetuningSchedulerBoringModel()
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy=strategy, gpus=gpus)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy=strategy, devices=devices)
     with pytest.raises(**raise_cond):
         if expected_warn:
             with pytest.warns(UserWarning, match=expected_warn):
@@ -1760,7 +1763,7 @@ def test_finetuningscheduling_epoch_trans_only(tmpdir, boring_ft_schedule, epoch
         for pg in range(expected_state[0][5]):
             assert trainer.optimizers[0].param_groups[pg]["params"][0].requires_grad
         assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
-        assert finetuningscheduler_callback._fts_state._ft_epoch == trainer._fit_loop.epoch_progress.current.completed
+        assert finetuningscheduler_callback._fts_state._ft_epoch == trainer.fit_loop.epoch_progress.current.completed
     else:
         with pytest.raises(MisconfigurationException, match=expected_state[1]):
             trainer.fit(model)
@@ -1832,7 +1835,7 @@ def test_fts_multi_dp(tmpdir):
     seed_everything(42)
     model = FinetuningSchedulerBoringModel()
     callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="dp", gpus=2)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="dp", devices=2)
     finetuningscheduler_callback = get_fts(trainer)
     trainer.fit(model)
     assert finetuningscheduler_callback.depth_remaining == 0
@@ -1847,22 +1850,7 @@ def test_fts_multi_ddp(tmpdir):
     seed_everything(42)
     model = FinetuningSchedulerBoringModel()
     callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp", gpus=2)
-    finetuningscheduler_callback = get_fts(trainer)
-    trainer.fit(model)
-    assert finetuningscheduler_callback.depth_remaining == 0
-    assert finetuningscheduler_callback.curr_depth == 3
-    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
-
-
-@RunIf(standalone=True, fairscale=True, min_cuda_gpus=2)  # TODO: remove in 2.0
-def test_fts_multi_ddp_sharded(tmpdir):
-    """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_sharded'
-    distributed context."""
-    seed_everything(42)
-    model = FinetuningSchedulerBoringModel()
-    callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_sharded", gpus=2)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp", devices=2)
     finetuningscheduler_callback = get_fts(trainer)
     trainer.fit(model)
     assert finetuningscheduler_callback.depth_remaining == 0
@@ -1879,21 +1867,7 @@ def test_fts_multi_ddp_spawn(monkeypatch, tmpdir):
     seed_everything(42)
     model = FinetuningSchedulerBoringModel()
     callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_spawn", gpus=2)
-    trainer.fit(model)
-    assert trainer.callback_metrics["val_loss"] < 0.1
-
-
-@RunIf(standalone=True, fairscale=True, min_cuda_gpus=2)  # TODO: remove in 2.0
-def test_fts_multi_ddp_sharded_spawn(monkeypatch, tmpdir):
-    """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported
-    'ddp_sharded_spawn' distributed context."""
-    # TODO: remove once re-emergence of https://github.com/pytorch/pytorch/issues/37377 is patched
-    monkeypatch.setenv("MKL_THREADING_LAYER", "GNU")
-    seed_everything(42)
-    model = FinetuningSchedulerBoringModel()
-    callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_sharded_spawn", gpus=2)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_spawn", devices=2)
     trainer.fit(model)
     assert trainer.callback_metrics["val_loss"] < 0.1
 
@@ -1905,6 +1879,6 @@ def test_fts_multi_ddp_fork(tmpdir):
     seed_everything(42)
     model = FinetuningSchedulerBoringModel()
     callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_fork", gpus=2)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_fork", devices=2)
     trainer.fit(model)
     assert trainer.callback_metrics["val_loss"] < 0.1

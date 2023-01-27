@@ -51,14 +51,6 @@ for ex in ["extra", "examples"]:
 extras["dev"] = extras["extra"] + extras["test"] + extras["ipynb"]
 extras["all"] = extras["dev"] + extras["examples"]
 
-# These packages shall be installed only on GPU machines
-PACKAGES_GPU_ONLY = ["fairscale"]
-# create a version for CPU machines
-for ex in ("cpu", "cpu-extra"):
-    kw = ex.split("-")[1] if "-" in ex else "all"
-    # filter cpu only packages
-    extras[ex] = [pkg for pkg in extras[kw] if not any(pgpu.lower() in pkg.lower() for pgpu in PACKAGES_GPU_ONLY)]
-
 long_description = setup_tools._load_readme_description(
     _PATH_ROOT, homepage=about.__homepage__, version=about.__version__
 )
@@ -93,7 +85,7 @@ setup(
     setup_requires=[],
     # install_requires=setup_tools._load_requirements(_PATH_REQUIRE),
     install_requires=setup_tools._load_requirements(
-        _PATH_REQUIRE, pl_commit="fc195b95405e9e2629466e5b28c6a9243209d596"
+        _PATH_REQUIRE, pl_commit="c3a9bf0419f8f3aa1e67ecd0972a8b59ffdcccb7"
     ),
     extras_require=extras,
     project_urls={

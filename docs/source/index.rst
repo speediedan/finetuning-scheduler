@@ -250,7 +250,9 @@ special metadata.
     from pytorch_lightning import Trainer
     from finetuning_scheduler import FinetuningScheduler
 
-    trainer = Trainer(callbacks=[FinetuningScheduler()], ckpt_path="some/path/to/my_checkpoint.ckpt")
+    trainer = Trainer(callbacks=[FinetuningScheduler()])
+    trainer.ckpt_path = "some/path/to/my_checkpoint.ckpt"
+    trainer.fit(...)
 
 Training will resume at the depth/level of the provided checkpoint according the specified schedule. Schedules can be
 altered between training sessions but schedule compatibility is left to the user for maximal flexibility. If executing a
@@ -267,10 +269,9 @@ sessions.
 
     .. code-block:: python
 
-        trainer = Trainer(
-            callbacks=[FinetuningScheduler()],
-            ckpt_path="some/path/to/my_kth_best_checkpoint.ckpt",
-        )
+        trainer = Trainer(callbacks=[FinetuningScheduler()])
+        trainer.ckpt_path = "some/path/to/my_kth_best_checkpoint.ckpt"
+        trainer.fit(...)
 
     Note that similar to the behavior of
     :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`,
@@ -297,13 +298,11 @@ configurations.
       :columns: 2
 
       * :external+pl:class:`~pytorch_lightning.strategies.ddp.DDPStrategy`:``ddp``, ``ddp_find_unused_parameters_false``
-      * :external+pl:class:`~pytorch_lightning.strategies.fully_sharded_native.DDPFullyShardedNativeStrategy`:
-        ``fsdp_native``, ``fsdp_native_full_shard_offload``
+      * :external+pl:class:`~pytorch_lightning.strategies.fsdp.FSDPStrategy`:
+        ``fsdp``, ``fsdp_cpu_offload``
       * :external+pl:class:`~pytorch_lightning.strategies.ddp_spawn.DDPSpawnStrategy`: ``ddp_spawn``, ``ddp_fork``,
         ``ddp_notebook``
       * :external+pl:class:`~pytorch_lightning.strategies.dp.DataParallelStrategy`: ``dp``
-      * ``ddp_sharded`` (deprecated)
-      * ``ddp_sharded_spawn`` (deprecated)
 
 .. _supported_lr_schedulers:
 

@@ -19,7 +19,6 @@ import torch
 from lightning_fabric.accelerators.cuda import num_cuda_devices
 from packaging.version import Version
 from pkg_resources import get_distribution
-from pytorch_lightning.overrides.fairscale import _FAIRSCALE_AVAILABLE
 from pytorch_lightning.strategies.deepspeed import _DEEPSPEED_AVAILABLE
 
 
@@ -44,7 +43,6 @@ class RunIf:
         bf16_cuda: bool = False,
         skip_windows: bool = False,
         standalone: bool = False,
-        fairscale: bool = False,
         deepspeed: bool = False,
         slow: bool = False,
         **kwargs,
@@ -60,7 +58,6 @@ class RunIf:
             skip_windows: Skip for Windows platform.
             standalone: Mark the test as standalone, our CI will run it in a separate process.
                 This requires that the ``PL_RUN_STANDALONE_TESTS=1`` environment variable is set.
-            fairscale: Require that facebookresearch/fairscale is installed.
             deepspeed: Require that microsoft/DeepSpeed is installed.
             slow: Mark the test as slow, our CI will run it in a separate job.
                 This requires that the ``PL_RUN_SLOW_TESTS=1`` environment variable is set.
@@ -115,10 +112,6 @@ class RunIf:
             reasons.append("Standalone execution")
             # used in conftest.py::pytest_collection_modifyitems
             kwargs["standalone"] = True
-
-        if fairscale:
-            conditions.append(not _FAIRSCALE_AVAILABLE)
-            reasons.append("Fairscale")
 
         if deepspeed:
             conditions.append(not _DEEPSPEED_AVAILABLE)

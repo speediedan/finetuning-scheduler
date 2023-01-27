@@ -48,7 +48,7 @@ trainer:
       record_shapes: true
       row_limit: 50
   strategy:
-    class_path: pytorch_lightning.strategies.DDPFullyShardedNativeStrategy
+    class_path: pytorch_lightning.strategies.FSDPStrategy
     init_args:
       cpu_offload: true
       activation_checkpointing:

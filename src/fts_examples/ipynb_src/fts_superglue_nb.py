@@ -126,7 +126,8 @@
 # from pytorch_lightning import Trainer
 # from finetuning_scheduler import FinetuningScheduler
 # trainer = Trainer(callbacks=[FinetuningScheduler()])
-# trainer.fit(..., ckpt_path="some/path/to/my_checkpoint.ckpt")
+# trainer.ckpt_path="some/path/to/my_checkpoint.ckpt"
+# trainer.fit(...)
 # ```
 #
 # Training will resume at the depth/level of the provided checkpoint according to the specified schedule. Schedules can be altered between training sessions but schedule compatibility is left to the user for maximal flexibility. If executing a user-defined schedule, typically the same schedule should be provided for the original and resumed training sessions.
@@ -135,7 +136,8 @@
 #
 # ```python
 # trainer = Trainer(callbacks=[FinetuningScheduler()])
-# trainer.fit(..., ckpt_path="some/path/to/my_kth_best_checkpoint.ckpt")
+# trainer.ckpt_path="some/path/to/my_kth_best_checkpoint.ckpt"
+# trainer.fit(...)
 # ```
 #
 # Note that similar to the behavior of [ModelCheckpoint](https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.callbacks.ModelCheckpoint.html), (specifically [this PR](https://github.com/Lightning-AI/lightning/pull/12045)),
@@ -148,11 +150,9 @@
 # **Note:** Currently, [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) supports the following strategy types:
 #
 # - ``ddp`` (and alias ``ddp_find_unused_parameters_false``)
-# - ``fsdp_native`` (and alias ``fsdp_native_full_shard_offload``)
+# - ``fsdp`` (and alias ``fsdp_cpu_offload``)
 # - ``ddp_spawn`` (and aliases ``ddp_fork``, ``ddp_notebook``)
 # - ``dp``
-# - ``ddp_sharded`` (deprecated, to be removed in 2.0)
-# - ``ddp_sharded_spawn`` (deprecated, to be removed in 2.0)
 #
 # Custom or officially unsupported strategies can be used by setting [FinetuningScheduler.allow_untested](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html?highlight=allow_untested#finetuning_scheduler.fts.FinetuningScheduler.params.allow_untested) to ``True``.
 # Note that most currently unsupported strategies are so because they require varying degrees of modification to be compatible. For example, ``deepspeed`` will require a ``StrategyAdapter`` to be written (similar to the one for ``FSDP``, ``FSDPStrategyAdapter``) before support can be added (PRs welcome!),

@@ -58,7 +58,7 @@ log = logging.getLogger(__name__)
 CALLBACK_DEP_PARENTS = {"ModelCheckpoint": ModelCheckpoint, "EarlyStopping": EarlyStopping}
 CALLBACK_ATTRS = ("ft_schedule", "max_depth")
 TARGET_CALLBACK_REF = "FinetuningScheduler"
-STRATEGY_ADAPTERS = {"fsdp_native": FSDPStrategyAdapter}
+STRATEGY_ADAPTERS = {"fsdp": FSDPStrategyAdapter}
 
 
 @dataclass
