@@ -576,6 +576,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         if self.curr_depth == 0:
             assert isinstance(self.ft_schedule, Dict)
             self._validate_opt_init()
+        trainer.optimizers[0].param_groups.clear()
+        trainer.optimizers[0].state.clear()
         super().on_fit_start(trainer, pl_module)
 
     def state_dict(self) -> Dict[str, Any]:
