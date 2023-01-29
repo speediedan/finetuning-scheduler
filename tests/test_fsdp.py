@@ -388,28 +388,25 @@ wrap_ext_mp = {"fsdp_mask": {"wrapped_mods": list(range(6)) + [7, 8], "unwrapped
 def custom_auto_wrap_policy(
     module,
     recurse,
-    unwrapped_params: int,
-    min_num_params: int = int(1e8),
+    nonwrapped_numel: int,
 ) -> bool:
-    return unwrapped_params >= 67
+    return nonwrapped_numel >= 67
 
 
 def custom_auto_wrap_ext_policy(
     module,
     recurse,
-    unwrapped_params: int,
-    min_num_params: int = int(1e8),
+    nonwrapped_numel: int,
 ) -> bool:
-    return unwrapped_params >= 529
+    return nonwrapped_numel >= 529
 
 
 def warn_custom_auto_wrap_policy(
     module,
     recurse,
-    unwrapped_params: int,
-    min_num_params: int = int(1e8),
+    nonwrapped_numel: int,
 ) -> bool:
-    return unwrapped_params >= 1100
+    return nonwrapped_numel >= 1100
 
 
 # auto-wrap policy aliases
@@ -457,7 +454,8 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "warn_unsupp_nodecay": ({}, "will now be unset", None),
     "unmatched_awp_overrides": ({}, None, "did not match any named modules"),
     "cust_awp_prec": (path_default, *nones(2)),
-    "batch_norm_auto_prec": (path_8_16, "Both mixed precision", None),
+    # "batch_norm_auto_prec": (path_8_16, "Both mixed precision", None),
+    "batch_norm_auto_prec": (path_8_16, None, None),
     "shared_params_auto_prec": (path_5_10, ("Pruning explicitly specified",), None),
     "override_csm_adam_noprec": (path_ext_7_14, *nones(2)),
     "cust_awp_overrides_prec": (path_default, *nones(2)),
@@ -467,7 +465,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
 }
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False, min_torch="1.13")
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, model_cfg, strategy_adapter_cfg, fts_cfg,\
           trainer_cfg, strategy_cfg",

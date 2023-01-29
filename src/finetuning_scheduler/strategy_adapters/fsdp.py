@@ -41,9 +41,10 @@ from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
 _distributed_available = torch.distributed.is_available()
 _min_fsdp_available = _TORCH_GREATER_EQUAL_1_13 and _distributed_available
+# TODO: handle multiple versions of pytorch if possible, otherwise, require 2.0
 if _min_fsdp_available:
-    from torch.distributed.fsdp.fully_sharded_data_parallel import (
-        _get_param_to_unflat_param_names,
+    from torch.distributed.fsdp._common_utils import _get_param_to_fqns
+    from torch.distributed.fsdp.fully_sharded_data_parallel import (  # _get_param_to_unflat_param_names,
         FullyShardedDataParallel,
     )
     from torch.distributed.fsdp.wrap import _ConfigAutoWrap, _or_policy, lambda_auto_wrap_policy, wrap
@@ -587,7 +588,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def _init_fsdp_param_map(self) -> None:
         """Generate parameter-level bi-directional translations between unflat (original) and flat (FSDP-flattened)
         parameters."""
-        self._fsdp_flat_to_unflat_mapping = _get_param_to_unflat_param_names(self.pl_module)
+        self._fsdp_flat_to_unflat_mapping = _get_param_to_fqns(self.pl_module)
         self._fsdp_unflat_to_flat_mapping = {
             up: fpn for fpn, upl in self._fsdp_flat_to_unflat_mapping.items() for up in upl
         }
@@ -630,7 +631,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         auto_wrap_policy_handle = _ConfigAutoWrap.kwargs.pop("auto_wrap_policy", None)
         override_ids = [id(m) for n, m in self.pl_module.named_modules() if n in self.awp_overrides]
-        lambda_fn = lambda m: id(m) in override_ids
+        lambda_fn = lambda m: id(m) in override_ids  # noqa E731
         name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda_fn)
         name_based_override_or_policy = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
         _ConfigAutoWrap.kwargs["auto_wrap_policy"] = name_based_override_or_policy
