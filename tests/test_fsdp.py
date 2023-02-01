@@ -454,7 +454,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "warn_unsupp_nodecay": ({}, "will now be unset", None),
     "unmatched_awp_overrides": ({}, None, "did not match any named modules"),
     "cust_awp_prec": (path_default, *nones(2)),
-    # "batch_norm_auto_prec": (path_8_16, "Both mixed precision", None),
+    # "batch_norm_auto_prec": (path_8_16, "Both mixed precision", None),  # _dynamo/allowed_functions.py suppresses
     "batch_norm_auto_prec": (path_8_16, None, None),
     "shared_params_auto_prec": (path_5_10, ("Pruning explicitly specified",), None),
     "override_csm_adam_noprec": (path_ext_7_14, *nones(2)),
