@@ -225,6 +225,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.custom_strategy_adapter = custom_strategy_adapter
         self.allow_untested = allow_untested
         self.apply_lambdas_new_pgs = apply_lambdas_new_pgs
+        self.first_epoch_number = None
         rz_logger = logging.getLogger("pytorch_lightning.utilities.rank_zero")
         rz_logger.setLevel(logging_level)
 
@@ -671,12 +672,14 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             pl_module (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The
                 :external+pl:class:`~pytorch_lightning.core.module.LightningModule` object
         """
+        if self.first_epoch_number is None:
+            self.first_epoch_number = trainer.current_epoch
         # if resuming from a ckpt, we need to sync fts_state
         if self._fts_state._resume_fit_from_ckpt:
             self.step()
             self._fts_state._resume_fit_from_ckpt = False
         # increment ft_epoch on each train epoch
-        if trainer.current_epoch > 0:
+        if trainer.current_epoch > self.first_epoch_number:
             assert self._fts_state._ft_sync_objects is not None
             self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
         else:
