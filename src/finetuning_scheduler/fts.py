@@ -30,6 +30,7 @@ from pytorch_lightning.trainer.states import TrainerFn
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug, rank_zero_warn
 from torch.optim.optimizer import Optimizer
+from pytorch_lightning.core.optimizer import _configure_optimizers, _configure_schedulers_automatic_opt
 
 from finetuning_scheduler.fts_supporters import (
     CallbackDepMixin,
@@ -576,8 +577,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         if self.curr_depth == 0:
             assert isinstance(self.ft_schedule, Dict)
             self._validate_opt_init()
-        trainer.optimizers[0].param_groups.clear()
-        trainer.optimizers[0].state.clear()
+
         super().on_fit_start(trainer, pl_module)
 
     def state_dict(self) -> Dict[str, Any]:
@@ -679,6 +679,12 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         if trainer.current_epoch > 0:
             assert self._fts_state._ft_sync_objects is not None
             self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
+        else:
+            optim_conf = trainer._call_lightning_module_hook("configure_optimizers", pl_module=pl_module)
+            optimizers, lr_schedulers, optimizer_frequencies, monitor = _configure_optimizers(optim_conf)
+            params_to_override = [p for n,p in pl_module.named_parameters() if n in self._fts_state._curr_thawed_params]
+            trainer.optimizers = [trainer.optimizers[0].__class__(params_to_override)]
+            trainer.lr_schedulers = _configure_schedulers_automatic_opt(lr_schedulers, monitor)
         if self.should_transition(trainer):
             self._fts_state._curr_depth += 1  # increment depth
             self.step()
