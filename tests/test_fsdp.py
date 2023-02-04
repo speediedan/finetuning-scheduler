@@ -423,12 +423,14 @@ awp_7_8 = {"awp_overrides": ["l.*yer.8", "layer.7"]}
 # FSDP strategy configuration aliases
 act_ckpt_cfg = {"activation_checkpointing": [torch.nn.Linear]}
 test_ignore_cfg = {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False}
+test_use_orig = {"use_orig_params": True}
 
 # trainer configuration alias
 max_epoch_5 = {"max_epochs": 5}
 
 # expected training path aliases
 path_default = {0: (2, 4), 1: (6, 12), 2: (7, 14)}
+path_default_orig = {0: (4, 4), 1: (12, 12), 2: (14, 14)}
 path_8_14 = {0: (2, 4), 1: (7, 12), 2: (8, 14)}
 path_8_16 = {0: (4, 8), 1: (7, 14), 2: (8, 16)}
 path_5_10 = {0: (2, 4), 1: (3, 6), 2: (5, 10)}
@@ -443,6 +445,7 @@ def nones(num_n) -> Tuple:
 
 EXPECTED_FSDP_FTS_RESULTS = {
     "cust_awp_noprec": (path_default, *nones(2)),
+    "cust_awp_noprec_use_orig": (path_default_orig, *nones(2)),
     "override_csm_noprec": (path_default, *nones(2)),
     "cust_awp_noprec_ignore_no_offload": (path_8_14, *nones(2)),
     "unsupp_torch_version": ({}, None, "is supported from PyTorch"),
@@ -465,12 +468,23 @@ EXPECTED_FSDP_FTS_RESULTS = {
 }
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False, min_torch="1.13")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, model_cfg, strategy_adapter_cfg, fts_cfg,\
           trainer_cfg, strategy_cfg",
     [
         ("cust_awp_noprec", base_model, cust_awp, False, 0, unwrap_7, *nones(3), act_ckpt_cfg),
+        pytest.param(
+            "cust_awp_noprec_use_orig",
+            base_model,
+            cust_awp,
+            False,
+            0,
+            unwrap_7,
+            *nones(3),
+            test_use_orig,
+            marks=RunIf(min_torch="2.0"),
+        ),
         ("override_csm_noprec", cust_model, None, False, 0, unwrap_7, *nones(4)),
         ("cust_awp_noprec_ignore_no_offload", base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), test_ignore_cfg),
         ("unsupp_torch_version", base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
@@ -491,6 +505,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
     ],
     ids=[
         "cust_awp_noprec",
+        "cust_awp_noprec_use_orig",
         "override_csm_noprec",
         "cust_awp_noprec_ignore_no_offload",
         "unsupp_torch_version",

@@ -110,6 +110,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     _ft_schedule_module_map: Dict
     _unscheduled_params: List
     _ignored_modules: List
+    _use_orig_params: bool
     RANK_ZERO_LOG_FQN = "pytorch_lightning.utilities.rank_zero"
 
     def __init__(self, awp_overrides: Optional[List] = None, *args: Any, **kwargs: Any) -> None:
@@ -166,6 +167,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         # hack to avoid subclassing FSDP strategy for this adapter
         setattr(Strategy, "lightning_restore_optimizer", self.lightning_restore_optimizer)
+        self._use_orig_params = self.pls_handle.kwargs.get("use_orig_params", False)
         self._prune_nodecay()
         self._validate_awp_overrides()
         if is_overridden("configure_sharded_model", self.pl_module):
@@ -261,7 +263,32 @@ class FSDPStrategyAdapter(StrategyAdapter):
             parameter names.
         """
         flat_next_tl = {self._fsdp_unflat_to_flat_mapping[p] for p in orig_thaw_pl}
+        if self._use_orig_params:
+            self._flat_param_thaw(flat_next_tl)
         return [n for n, p in self.pl_module.named_parameters() if p in flat_next_tl]
+
+    def _flat_param_thaw(self, flat_next_tl: Set) -> None:
+        """For FSDP modules that have been configured with ``_use_orig_params`` set to ``True``, this method
+        ensures that the ``FlatParameter`` objects containing the logically original ``Parameter`` objects require
+        grad when one or more of those contained original parameters are transformed for optimizer operations.
+
+        Args:
+            flat_next_tl (Set): The set of original ``Parameter`` s to transform for optimizer operations. These should
+            be ``Parameter`` objects rather than ``FlatParameter`` objects because ``_use_orig_params`` is ``True`` in
+            this context.
+        """
+        use_orig_flat_params_mods = set()
+        for m in self.pl_module.modules():
+            is_fsdp_managed = getattr(m, "_is_fsdp_managed_module", False)
+            if is_fsdp_managed and m._fsdp_use_orig_params and hasattr(m, "_flat_param"):
+                use_orig_flat_params_mods.add(m)
+        flat_params_to_thaw = set()
+        for m in use_orig_flat_params_mods:
+            for p in flat_next_tl:
+                if any([p is ofp for ofp in m._flat_param._params]):  # type: ignore[union-attr]
+                    flat_params_to_thaw.add(getattr(m, "_flat_param"))
+        for fp in flat_params_to_thaw:
+            fp.requires_grad = True
 
     def logical_param_translation(self, param_names: List) -> List:
         """Effectively the reverse transformation of

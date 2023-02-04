@@ -11,6 +11,7 @@
 # limitations under the License.
 # Initially based on https://bit.ly/3J5oOk4
 import os
+import re
 import sys
 from typing import Optional
 
@@ -20,6 +21,8 @@ from lightning_fabric.accelerators.cuda import num_cuda_devices
 from packaging.version import Version
 from pkg_resources import get_distribution
 from pytorch_lightning.strategies.deepspeed import _DEEPSPEED_AVAILABLE
+
+EXTENDED_VER_PAT = re.compile(r"([0-9]+\.){2}[0-9]+")
 
 
 class RunIf:
@@ -75,12 +78,14 @@ class RunIf:
 
         if min_torch:
             torch_version = get_distribution("torch").version
-            conditions.append(Version(torch_version) < Version(min_torch))
+            extended_torch_ver = EXTENDED_VER_PAT.match(torch_version).group() or torch_version
+            conditions.append(Version(extended_torch_ver) < Version(min_torch))
             reasons.append(f"torch>={min_torch}")
 
         if max_torch:
             torch_version = get_distribution("torch").version
-            conditions.append(Version(torch_version) >= Version(max_torch))
+            extended_torch_ver = EXTENDED_VER_PAT.match(torch_version).group() or torch_version
+            conditions.append(Version(extended_torch_ver) < Version(min_torch))
             reasons.append(f"torch<{max_torch}")
 
         if min_python:
