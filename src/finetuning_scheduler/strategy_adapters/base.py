@@ -16,6 +16,8 @@ Fine-Tuning Scheduler Strategy Adapters
 Base adapter class to extend Fine-Tuning Scheduler support of complex or custom training strategies.
 
 """
+from functools import partialmethod
+from pprint import pformat as pfmt
 from typing import Callable, List, Optional, Tuple
 
 from pytorch_lightning import LightningModule
@@ -95,7 +97,7 @@ class StrategyAdapter:
         """
         _, self.fts_handle._fts_state._curr_thawed_params = self.exec_ft_phase(
             self.pl_module,
-            thaw_pl=self.fts_optim_view(self.fts_handle.ft_schedule[0]["params"]),
+            thaw_pl=self.fts_optim_transform(self.fts_handle.ft_schedule[0]["params"]),
             init_thaw=True,
         )
 
@@ -108,18 +110,19 @@ class StrategyAdapter:
         """Hook executed immediately before :class:`~finetuning_scheduler.fts.FinetuningScheduler` restores
         optimizers and schedulers."""
 
-    def fts_optim_view(self, orig_pl: List) -> List:
+    def fts_optim_transform(self, orig_pl: List, inspect_only: bool = False) -> List:
         """A method that can be overridden by a :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` if
-        a.
-
-        :external+pl:class:`~pytorch_lightning.strategies.Strategy` performs parameter transformations that cause the
-        current :external+torch:class:`~torch.optim.Optimizer`'s view of parameter names to diverge from the original
-        parameter names.
-        By default, no transformation of schedule parameter names is required for optimizer operations.
+        a :external+pl:class:`~pytorch_lightning.strategies.Strategy` performs parameter transformations that cause
+        the current :external+torch:class:`~torch.optim.Optimizer`'s view of parameter names to diverge from the
+        original parameter names. By default, no transformation of schedule parameter names is required for
+        optimizer operations.
 
         Args:
             orig_pl (List): The original parameter name list before a given
                 :external+pl:class:`~pytorch_lightning.strategies.Strategy`'s transformation of them.
+            inspect_only (bool): Whether to use the specified transform in read-only (i.e. ``inspect_only``) mode,
+                avoiding any persistent state transformation that may accompany normal usage. Typically useful for state
+                inspection and validation contexts.
 
         Returns:
             List: A transformed parameter name list that matches the current
@@ -131,7 +134,7 @@ class StrategyAdapter:
 
     def logical_param_translation(self, param_names: List) -> List:
         """Effectively the reverse transformation of
-        :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.fts_optim_view`. Can be overridden by a
+        :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.fts_optim_transform`. Can be overridden by a
         :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` if a
         :external+pl:class:`~pytorch_lightning.strategies.Strategy` performs parameter transformations that cause the
         original user view of parameter names to diverge from the current
@@ -177,11 +180,13 @@ class StrategyAdapter:
         if thawed_p_names:
             rank_zero_debug(
                 f"{'Initializing with' if init_thaw else 'Thawed'} the following module parameters: "
-                f"{translation_func(thawed_p_names) if translation_func else [n for n in thawed_p_names]}"
+                f"{pfmt(translation_func(thawed_p_names)) if translation_func else pfmt([n for n in thawed_p_names])}"
             )
         curr_thawed.extend(thawed_p_names)
         rank_zero_debug(
             f"The following module parameters are currently thawed: "
-            f"{translation_func(curr_thawed) if translation_func else [n for n in curr_thawed]}"
+            f"{pfmt(translation_func(curr_thawed)) if translation_func else pfmt([n for n in curr_thawed])}"
         )
         return thawed_p_names, curr_thawed
+
+    fts_optim_inspect = partialmethod(fts_optim_transform, inspect_only=True)

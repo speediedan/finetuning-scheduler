@@ -24,7 +24,7 @@ import re
 from collections import Counter
 from contextlib import contextmanager
 from copy import deepcopy
-from functools import partial, wraps
+from functools import partial, partialmethod, wraps
 from pprint import pformat
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
 
@@ -36,6 +36,7 @@ from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.trainer.connectors.checkpoint_connector import CheckpointConnector
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.model_helpers import is_overridden
+from pytorch_lightning.utilities.rank_zero import rank_zero_debug
 
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
@@ -45,6 +46,7 @@ _min_fsdp_available = _TORCH_GREATER_EQUAL_1_13 and _distributed_available
 if _min_fsdp_available:
     from torch.distributed.fsdp._common_utils import _get_param_to_fqns
     from torch.distributed.fsdp.fully_sharded_data_parallel import (  # _get_param_to_unflat_param_names,
+        FLAT_PARAM,
         FullyShardedDataParallel,
     )
     from torch.distributed.fsdp.wrap import _ConfigAutoWrap, _or_policy, lambda_auto_wrap_policy, wrap
@@ -109,7 +111,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
     _fsdp_unflat_to_flat_mapping: Dict
     _ft_schedule_module_map: Dict
     _unscheduled_params: List
-    _ignored_modules: List
     _use_orig_params: bool
     RANK_ZERO_LOG_FQN = "pytorch_lightning.utilities.rank_zero"
 
@@ -233,7 +234,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         for optimizer, opt_state in zip(self.pls_handle.optimizers, optimizer_states):
             optimizer.load_state_dict(opt_state)
 
-    def fts_optim_view(self, orig_pl: List) -> List:
+    def fts_optim_transform(self, orig_pl: List, inspect_only: bool = False) -> List:
         """Because FSDP performs parameter transformations that cause the current.
 
         :external+torch:class:`~torch.optim.Optimizer`'s view of parameter names to diverge from the original parameter
@@ -241,21 +242,27 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
         Args:
             orig_pl (List): The original parameter name list before FSDP's transformation of them.
+            inspect_only (bool): Whether to use the specified transform in read-only (i.e. ``inspect_only``) mode,
+                avoiding any persistent state transformation that may accompany normal usage. Typically useful for state
+                inspection and validation contexts.
 
         Returns:
             List: A transformed parameter name list that matches the current
             :external+torch:class:`~torch.optim.Optimizer`'s view of them after FSDP's transformation of the original
             parameter names.
         """
-        return self.fsdp_param_transform(orig_pl)
+        return self.fsdp_param_transform(orig_pl, inspect_only)
 
-    def fsdp_param_transform(self, orig_thaw_pl: List) -> List:
+    def fsdp_param_transform(self, orig_thaw_pl: List, inspect_only: bool) -> List:
         """The parameter transformation function currently used by
-        :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_view` to transform original
+        :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_transform` to transform original
         parameter lists for optimizer operations.
 
         Args:
             orig_thaw_pl (List): The original parameter name list before FSDP's transformation of them.
+            inspect_only (bool): Whether to use the specified transform in read-only (i.e. ``inspect_only``) mode,
+                avoiding any persistent state transformation that may accompany normal usage. Typically useful for state
+                inspection and validation contexts.
 
         Returns:
             List: A transformed parameter name list that matches the current
@@ -263,7 +270,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             parameter names.
         """
         flat_next_tl = {self._fsdp_unflat_to_flat_mapping[p] for p in orig_thaw_pl}
-        if self._use_orig_params:
+        if self._use_orig_params and not inspect_only:
             self._flat_param_thaw(flat_next_tl)
         return [n for n, p in self.pl_module.named_parameters() if p in flat_next_tl]
 
@@ -280,19 +287,27 @@ class FSDPStrategyAdapter(StrategyAdapter):
         use_orig_flat_params_mods = set()
         for m in self.pl_module.modules():
             is_fsdp_managed = getattr(m, "_is_fsdp_managed_module", False)
-            if is_fsdp_managed and m._fsdp_use_orig_params and hasattr(m, "_flat_param"):
+            if is_fsdp_managed and m._fsdp_use_orig_params and hasattr(m, FLAT_PARAM):
                 use_orig_flat_params_mods.add(m)
         flat_params_to_thaw = set()
         for m in use_orig_flat_params_mods:
             for p in flat_next_tl:
                 if any([p is ofp for ofp in m._flat_param._params]):  # type: ignore[union-attr]
-                    flat_params_to_thaw.add(getattr(m, "_flat_param"))
-        for fp in flat_params_to_thaw:
+                    flat_params_to_thaw.add((m, getattr(m, FLAT_PARAM)))
+        thawed_fp_mods = set()
+        for fpm, fp in flat_params_to_thaw:
             fp.requires_grad = True
+            thawed_fp_mods.add(fpm)
+        thawed_fp_fqns = [n + "." + FLAT_PARAM for n, m in self.pl_module.named_modules() if m in thawed_fp_mods]
+        rank_zero_debug(
+            "Since FSDP has been configured with `use_orig_params` set to `True`, the following `FlatParameter`s"
+            " have been thawed because they contain the original parameters you specified be thawed."
+            f" `FlatParameters` thawed: {os.linesep}{pformat(thawed_fp_fqns)}"
+        )
 
     def logical_param_translation(self, param_names: List) -> List:
         """Effectively the reverse transformation of
-        :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_view`.
+        :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_transform`.
 
         Args:
             param_names (List): A parameter name list from the current :external+torch:class:`~torch.optim.Optimizer`'s
@@ -608,7 +623,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         self._init_fsdp_param_map()
         _, self.fts_handle._fts_state._curr_thawed_params = self.exec_ft_phase(
             self.pl_module,
-            thaw_pl=self.fts_optim_view(self.fts_handle.ft_schedule[0]["params"]),
+            thaw_pl=self.fts_optim_transform(self.fts_handle.ft_schedule[0]["params"]),
             init_thaw=True,
         )
 
@@ -666,3 +681,5 @@ class FSDPStrategyAdapter(StrategyAdapter):
             yield
         finally:
             _ConfigAutoWrap.kwargs["auto_wrap_policy"] = auto_wrap_policy_handle
+
+    fts_optim_inspect = partialmethod(fts_optim_transform, inspect_only=True)

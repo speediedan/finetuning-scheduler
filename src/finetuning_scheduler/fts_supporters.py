@@ -1265,7 +1265,7 @@ class ScheduleImplMixin(ABC):
         for i, next_tl in self.ft_schedule.items():  # type: ignore[union-attr]
             if i <= depth:
                 _, self._fts_state._curr_thawed_params = self.strategy_adapter.exec_ft_phase(
-                    self.pl_module, thaw_pl=self.strategy_adapter.fts_optim_view(next_tl["params"])
+                    self.pl_module, thaw_pl=self.strategy_adapter.fts_optim_transform(next_tl["params"])
                 )
 
     @staticmethod
@@ -1399,8 +1399,10 @@ class ScheduleImplMixin(ABC):
         sched = self.ft_schedule
         no_grad_cnt = len([p for pg in opt.param_groups for p in pg["params"] if not p.requires_grad])
         req_grad_opt = len([p for pg in opt.param_groups for p in pg["params"] if p.requires_grad])
-        init_ft_cnt = len(self.strategy_adapter.fts_optim_view(sched[0]["params"]))
-        total_ft_cnt = len([p for phase in sched for p in self.strategy_adapter.fts_optim_view(sched[phase]["params"])])
+        init_ft_cnt = len(self.strategy_adapter.fts_optim_inspect(sched[0]["params"]))
+        total_ft_cnt = len(
+            [p for phase in sched for p in self.strategy_adapter.fts_optim_inspect(sched[phase]["params"])]
+        )
         expected_grad_params = req_grad_opt == init_ft_cnt
         return no_grad_cnt, init_ft_cnt, total_ft_cnt, req_grad_opt, expected_grad_params
 

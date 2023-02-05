@@ -422,7 +422,12 @@ awp_7_8 = {"awp_overrides": ["l.*yer.8", "layer.7"]}
 
 # FSDP strategy configuration aliases
 act_ckpt_cfg = {"activation_checkpointing": [torch.nn.Linear]}
-test_ignore_cfg = {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False}
+ignore_mod_cfg = {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False}
+ignore_params_uo_cfg = {
+    "test_ignored_parameters_names": ["layer.4.weight", "layer.4.bias"],
+    "cpu_offload": False,
+    "use_orig_params": True,
+}
 test_use_orig = {"use_orig_params": True}
 
 # trainer configuration alias
@@ -431,6 +436,7 @@ max_epoch_5 = {"max_epochs": 5}
 # expected training path aliases
 path_default = {0: (2, 4), 1: (6, 12), 2: (7, 14)}
 path_default_orig = {0: (4, 4), 1: (12, 12), 2: (14, 14)}
+path_ignore_p_uo = {0: (4, 4), 1: (12, 12), 2: (14, 14)}
 path_8_14 = {0: (2, 4), 1: (7, 12), 2: (8, 14)}
 path_8_16 = {0: (4, 8), 1: (7, 14), 2: (8, 16)}
 path_5_10 = {0: (2, 4), 1: (3, 6), 2: (5, 10)}
@@ -447,7 +453,9 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "cust_awp_noprec": (path_default, *nones(2)),
     "cust_awp_noprec_use_orig": (path_default_orig, *nones(2)),
     "override_csm_noprec": (path_default, *nones(2)),
-    "cust_awp_noprec_ignore_no_offload": (path_8_14, *nones(2)),
+    # TODO: once PyTorch deprecates ``ignored_modules``, check for that deprecation warning in this test
+    "cust_awp_nop_ignore_m_no_ofld": (path_8_14, *nones(2)),
+    "cust_awp_nop_ignore_p_no_ofld_uo": (path_ignore_p_uo, *nones(2)),
     "unsupp_torch_version": ({}, None, "is supported from PyTorch"),
     "non_disjoint_phase_fsdp_params": ({}, None, "do not have disjoint FSDP-flattened parameter"),
     "non_disjoint_phase_mods": ({}, None, "not have disjoint"),
@@ -468,7 +476,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
 }
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False, min_torch="1.13")
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, model_cfg, strategy_adapter_cfg, fts_cfg,\
           trainer_cfg, strategy_cfg",
@@ -486,7 +494,18 @@ EXPECTED_FSDP_FTS_RESULTS = {
             marks=RunIf(min_torch="2.0"),
         ),
         ("override_csm_noprec", cust_model, None, False, 0, unwrap_7, *nones(4)),
-        ("cust_awp_noprec_ignore_no_offload", base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), test_ignore_cfg),
+        ("cust_awp_nop_ignore_m_no_ofld", base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), ignore_mod_cfg),
+        pytest.param(
+            "cust_awp_nop_ignore_p_no_ofld_uo",
+            base_model,
+            cust_awp,
+            False,
+            0,
+            unwrap_4_7,
+            *nones(3),
+            ignore_params_uo_cfg,
+            marks=RunIf(min_torch="2.0"),
+        ),
         ("unsupp_torch_version", base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
         ("non_disjoint_phase_fsdp_params", base_model, warn_cust_awp, False, 0, wrap_5, *nones(4)),
         ("non_disjoint_phase_mods", cust_model, None, False, 1, unwrap_7, *nones(4)),
@@ -507,7 +526,8 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "cust_awp_noprec",
         "cust_awp_noprec_use_orig",
         "override_csm_noprec",
-        "cust_awp_noprec_ignore_no_offload",
+        "cust_awp_nop_ignore_m_no_ofld",
+        "cust_awp_nop_ignore_p_no_ofld_uo",
         "unsupp_torch_version",
         "non_disjoint_phase_fsdp_params",
         "non_disjoint_phase_mods",
@@ -545,7 +565,7 @@ def test_fsdp_multi_gpus(
     fts_state, warns_expected, exception_expected, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts = cfg
     seed_everything(42)
     model = model_cls(**model_cfg)
-    strategy_cfg = load_ignored_modules(strategy_cfg, model)
+    strategy_cfg = load_ignore_directives(strategy_cfg, model)
     ft_sched = fsdp_ft_schedules[ft_sched_idx]
     test_cfg = init_fts_cfg(fts_state, strategy_adapter_cfg, fts_cfg)
     callbacks = callbacks_cfg(FSDPTestFinetuningScheduler, ft_sched, test_cfg, {"patience": 2}, {"save_top_k": 3})
@@ -618,13 +638,17 @@ def map_component_cfgs(model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precis
     trainer_cfg = trainer_cfg or {"max_epochs": 3}
     model_cfg = model_cfg or {}
     fts_cfg = fts_cfg or {}
-    strategy_cfg = strategy_cfg or {"cpu_offload": True, "ignored_modules": None}
+    strategy_cfg = strategy_cfg or {"cpu_offload": True}
     precision_opts = {"precision": 16} if use_precision else {}
     return model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts
 
 
-def load_ignored_modules(strategy_cfg, model):
-    if strategy_cfg.get("test_ignored_modules_names", None):
+def load_ignore_directives(strategy_cfg, model):
+    if strategy_cfg.get("test_ignored_parameters_names", None):
+        strategy_cfg["ignored_parameters"] = [
+            model.get_parameter(n) for n in strategy_cfg.pop("test_ignored_parameters_names")
+        ]
+    elif strategy_cfg.get("test_ignored_modules_names", None):
         strategy_cfg["ignored_modules"] = [
             model.get_submodule(n) for n in strategy_cfg.pop("test_ignored_modules_names")
         ]
