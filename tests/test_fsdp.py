@@ -47,6 +47,9 @@ if _TORCH_GREATER_EQUAL_1_13:
 
 if _TORCH_GREATER_EQUAL_2_0:
     from torch.distributed.fsdp.wrap import _FSDPPolicy
+else:
+    _FSDPPolicy = object
+
 
 additional_fsdp_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
@@ -493,7 +496,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
 }
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False, min_torch="1.13")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, model_cfg, strategy_adapter_cfg, fts_cfg,\
           trainer_cfg, strategy_cfg",
@@ -543,7 +546,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         ("unmatched_awp_overrides", base_model, warn_cust_awp, True, 0, wrap_5_7, awp_5_9, *nones(3)),
         ("cust_awp_prec", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
         pytest.param(
-            "cust_awp_prec_pt1x", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4), marks=RunIf(max_torch="1.13")
+            "cust_awp_prec_pt1x", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4), marks=RunIf(max_torch="1.13.1")
         ),
         ("batch_norm_auto_prec", BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(4)),
         ("shared_params_auto_prec", shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(3)),
