@@ -13,12 +13,12 @@ from copy import deepcopy
 from functools import partial
 from logging import DEBUG
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 from unittest import mock
 
 import pytest
 import torch
-from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13
+from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13, _TORCH_GREATER_EQUAL_2_0
 from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.plugins.precision.fsdp import FSDPMixedPrecisionPlugin
 from pytorch_lightning.strategies import FSDPStrategy
@@ -43,7 +43,10 @@ if _TORCH_GREATER_EQUAL_1_13:
         CheckpointImpl,
     )
     from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload, FullyShardedDataParallel
-    from torch.distributed.fsdp.wrap import wrap
+    from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy, wrap
+
+if _TORCH_GREATER_EQUAL_2_0:
+    from torch.distributed.fsdp.wrap import _FSDPPolicy
 
 additional_fsdp_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
@@ -409,10 +412,22 @@ def warn_custom_auto_wrap_policy(
     return nonwrapped_numel >= 1100
 
 
+class CustomWrapPolicy(_FSDPPolicy):
+    """This is a wrapper around :func:`_module_wrap_policy`."""
+
+    def __init__(self, min_num_params: int):
+        self._policy: Callable = partial(size_based_auto_wrap_policy, min_num_params=min_num_params)
+
+    @property
+    def policy(self):
+        return self._policy
+
+
 # auto-wrap policy aliases
 cust_awp = custom_auto_wrap_policy
 cust_ext_awp = custom_auto_wrap_ext_policy
 warn_cust_awp = warn_custom_auto_wrap_policy
+awp_mwp_parity = CustomWrapPolicy(min_num_params=67)
 
 # awp_overrides configuration aliases
 awp_5_9 = {"awp_overrides": ["layer.9", "layer.5"]}
@@ -452,6 +467,7 @@ def nones(num_n) -> Tuple:
 EXPECTED_FSDP_FTS_RESULTS = {
     "cust_awp_noprec": (path_default, *nones(2)),
     "cust_awp_noprec_use_orig": (path_default_orig, *nones(2)),
+    "cust_awp_mwp_parity": (path_default, *nones(2)),
     "override_csm_noprec": (path_default, *nones(2)),
     # TODO: once PyTorch deprecates ``ignored_modules``, check for that deprecation warning in this test
     "cust_awp_nop_ignore_m_no_ofld": (path_8_14, *nones(2)),
@@ -465,6 +481,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "warn_unsupp_nodecay": ({}, "will now be unset", None),
     "unmatched_awp_overrides": ({}, None, "did not match any named modules"),
     "cust_awp_prec": (path_default, *nones(2)),
+    "cust_awp_prec_pt1x": (path_default, *nones(2)),
     # "batch_norm_auto_prec": (path_8_16, "Both mixed precision", None),  # _dynamo/allowed_functions.py suppresses
     "batch_norm_auto_prec": (path_8_16, None, None),
     "shared_params_auto_prec": (path_5_10, ("Pruning explicitly specified",), None),
@@ -493,6 +510,16 @@ EXPECTED_FSDP_FTS_RESULTS = {
             test_use_orig,
             marks=RunIf(min_torch="2.0"),
         ),
+        pytest.param(
+            "cust_awp_mwp_parity",
+            base_model,
+            awp_mwp_parity,
+            True,
+            0,
+            unwrap_7_mp,
+            *nones(4),
+            marks=RunIf(min_torch="2.0"),
+        ),
         ("override_csm_noprec", cust_model, None, False, 0, unwrap_7, *nones(4)),
         ("cust_awp_nop_ignore_m_no_ofld", base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), ignore_mod_cfg),
         pytest.param(
@@ -515,6 +542,9 @@ EXPECTED_FSDP_FTS_RESULTS = {
         ("warn_unsupp_nodecay", nodecay_model, cust_awp, False, 0, unwrap_7, *nones(4)),
         ("unmatched_awp_overrides", base_model, warn_cust_awp, True, 0, wrap_5_7, awp_5_9, *nones(3)),
         ("cust_awp_prec", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
+        pytest.param(
+            "cust_awp_prec_pt1x", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4), marks=RunIf(max_torch="1.13")
+        ),
         ("batch_norm_auto_prec", BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(4)),
         ("shared_params_auto_prec", shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(3)),
         ("override_csm_adam_noprec", csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, None),
@@ -525,6 +555,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
     ids=[
         "cust_awp_noprec",
         "cust_awp_noprec_use_orig",
+        "cust_awp_mwp_parity",
         "override_csm_noprec",
         "cust_awp_nop_ignore_m_no_ofld",
         "cust_awp_nop_ignore_p_no_ofld_uo",
@@ -537,6 +568,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "warn_unsupp_nodecay",
         "unmatched_awp_overrides",
         "cust_awp_prec",
+        "cust_awp_prec_pt1x",
         "batch_norm_auto_prec",
         "shared_params_auto_prec",
         "override_csm_adam_noprec",

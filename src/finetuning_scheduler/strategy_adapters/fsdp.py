@@ -26,12 +26,12 @@ from contextlib import contextmanager
 from copy import deepcopy
 from functools import partial, partialmethod, wraps
 from pprint import pformat
-from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
 
 import torch
 from lightning_fabric.strategies.fsdp import _setup_activation_checkpointing
 from lightning_fabric.utilities import rank_zero_info, rank_zero_warn
-from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13
+from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13, _TORCH_GREATER_EQUAL_2_0
 from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.trainer.connectors.checkpoint_connector import CheckpointConnector
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
@@ -42,14 +42,18 @@ from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
 _distributed_available = torch.distributed.is_available()
 _min_fsdp_available = _TORCH_GREATER_EQUAL_1_13 and _distributed_available
-# TODO: handle multiple versions of pytorch if possible, otherwise, require 2.0
+
 if _min_fsdp_available:
-    from torch.distributed.fsdp._common_utils import _get_param_to_fqns
-    from torch.distributed.fsdp.fully_sharded_data_parallel import (  # _get_param_to_unflat_param_names,
-        FLAT_PARAM,
-        FullyShardedDataParallel,
-    )
+    from torch.distributed.fsdp.fully_sharded_data_parallel import FLAT_PARAM, FullyShardedDataParallel
     from torch.distributed.fsdp.wrap import _ConfigAutoWrap, _or_policy, lambda_auto_wrap_policy, wrap
+
+    if _TORCH_GREATER_EQUAL_2_0:
+        from torch.distributed.fsdp._common_utils import _get_param_to_fqns
+        from torch.distributed.fsdp.wrap import _FSDPPolicy
+    else:
+        _FSDPPolicy = object  # type: ignore[assignment,misc]
+        from torch.distributed.fsdp.fully_sharded_data_parallel import _get_param_to_unflat_param_names
+    _get_params_to_fqns = _get_param_to_fqns if _TORCH_GREATER_EQUAL_2_0 else _get_param_to_unflat_param_names
 
 
 class FSDPStrategyAdapter(StrategyAdapter):
@@ -630,7 +634,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def _init_fsdp_param_map(self) -> None:
         """Generate parameter-level bi-directional translations between unflat (original) and flat (FSDP-flattened)
         parameters."""
-        self._fsdp_flat_to_unflat_mapping = _get_param_to_fqns(self.pl_module)
+        self._fsdp_flat_to_unflat_mapping = _get_params_to_fqns(self.pl_module)
         self._fsdp_unflat_to_flat_mapping = {
             up: fpn for fpn, upl in self._fsdp_flat_to_unflat_mapping.items() for up in upl
         }
@@ -673,9 +677,12 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         auto_wrap_policy_handle = _ConfigAutoWrap.kwargs.pop("auto_wrap_policy", None)
         override_ids = [id(m) for n, m in self.pl_module.named_modules() if n in self.awp_overrides]
-        lambda_fn = lambda m: id(m) in override_ids  # noqa E731
-        name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda_fn)
-        name_based_override_or_policy = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
+        name_based_override_or_policy: Union[NameDrivenPolicy, Callable]
+        if _TORCH_GREATER_EQUAL_2_0:
+            name_based_override_or_policy = NameDrivenPolicy(auto_wrap_policy_handle, override_ids=override_ids)
+        else:
+            name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda m: id(m) in override_ids)
+            name_based_override_or_policy = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
         _ConfigAutoWrap.kwargs["auto_wrap_policy"] = name_based_override_or_policy
         try:
             yield
@@ -683,3 +690,33 @@ class FSDPStrategyAdapter(StrategyAdapter):
             _ConfigAutoWrap.kwargs["auto_wrap_policy"] = auto_wrap_policy_handle
 
     fts_optim_inspect = partialmethod(fts_optim_transform, inspect_only=True)
+
+
+class NameDrivenPolicy(_FSDPPolicy):
+    """An auto-wrapping policy extension that applies module name-based override directives on top of a given base
+    ``auto_wrap_policy``.
+
+    The composition of module name-based wrapping directives with a given ``auto_wrap_policy`` is
+    achieved here by:
+        1. Generating an object id-based module name mapping lambda and passing it to the standard
+            ``lambda_auto_wrap_policy``.
+        2. Composing the user's provided ``auto_wrap_policy`` with the above name-based policy using the standard
+            ``_or_policy``.
+    """
+
+    def __init__(self, auto_wrap_policy_handle: Union[Callable, _FSDPPolicy], override_ids: List):
+        """Compose the provided ``auto_wrap_policy`` with any provided override directives.
+
+        Args:
+            auto_wrap_policy_handle (Union[Callable, _FSDPPolicy]): The user's base ``auto_wrap_policy``.
+            override_ids (List): Object ids of the desired modules to wrap even if the provided ``auto_wrap_policy``
+                otherwise would not dictate so.
+        """
+        if isinstance(auto_wrap_policy_handle, _FSDPPolicy):
+            auto_wrap_policy_handle = auto_wrap_policy_handle.policy
+        name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda m: id(m) in override_ids)
+        self._policy: Callable = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
+
+    @property
+    def policy(self) -> Callable:
+        return self._policy

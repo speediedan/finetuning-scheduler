@@ -85,8 +85,8 @@ class RunIf:
         if max_torch:
             torch_version = get_distribution("torch").version
             extended_torch_ver = EXTENDED_VER_PAT.match(torch_version).group() or torch_version
-            conditions.append(Version(extended_torch_ver) < Version(min_torch))
-            reasons.append(f"torch<{max_torch}")
+            conditions.append(Version(extended_torch_ver) > Version(max_torch))
+            reasons.append(f"torch>{max_torch}")
 
         if min_python:
             py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
