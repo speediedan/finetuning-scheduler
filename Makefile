@@ -21,7 +21,7 @@ clean:
 test: clean
 	pip install -r requirements/devel.txt
 
-	# run tests with coverage
+	# run tests with coverage (cpu-only, running gpu standalone tests required for full coverage)
 	python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v
 	python -m coverage report
 

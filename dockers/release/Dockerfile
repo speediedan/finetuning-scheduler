@@ -23,7 +23,7 @@ WORKDIR /home/finetuning-scheduler
 COPY ./tests ./tests
 COPY ./requirements ./requirements
 COPY ./src ./src
-COPY ./requirements.txt ./setup.py ./setup.cfg ./pyproject.toml ./README.md ./
+COPY ./requirements.txt ./setup.py ./pyproject.toml ./README.md ./
 
 # install dependencies
 RUN \

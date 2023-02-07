@@ -59,7 +59,7 @@ WORKDIR /home/finetuning-scheduler
 COPY ./tests ./tests
 COPY ./requirements ./requirements
 COPY ./src ./src
-COPY ./requirements.txt ./setup.py ./setup.cfg ./pyproject.toml ./README.md ./
+COPY ./requirements.txt ./setup.py ./pyproject.toml ./README.md ./
 
 ENV PATH=/root/miniconda3/envs/${CONDA_ENV}/bin:$PATH \
     CONDA_DEFAULT_ENV=${CONDA_ENV}

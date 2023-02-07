@@ -29,7 +29,7 @@ ARGS_DEFAULT = (
     "--trainer.limit_predict_batches 2 "
     "--data.batch_size 32 "
 )
-ARGS_GPU = ARGS_DEFAULT + "--trainer.gpus 1 "
+ARGS_GPU = ARGS_DEFAULT + "--trainer.devices 1 "
 EXPECTED_WARNS = [
     "does not have many workers",
     "is smaller than the logging interval",

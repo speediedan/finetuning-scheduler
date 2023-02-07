@@ -5,12 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 
+## [0.4.0] - 2023-01-25
+
+### Added
+
+- **FSDP Scheduled Fine-Tuning** is now supported! [See the tutorial here.](https://finetuning-scheduler.readthedocs.io/en/latest/advanced/fsdp_scheduled_fine_tuning.html)
+- Introduced [``StrategyAdapter``](https://finetuning-scheduler.readthedocs.io/en/latest/api/finetuning_scheduler.strategy_adapters.html#finetuning_scheduler.strategy_adapters.StrategyAdapter)s. If you want to extend Fine-Tuning Scheduler (FTS) to use a custom, currently unsupported strategy or override current FTS behavior in the context of a given training strategy, subclassing ``StrategyAdapter`` is now a way to do so. See [``FSDPStrategyAdapter``](https://finetuning-scheduler.readthedocs.io/en/latest/api/finetuning_scheduler.strategy_adapters.html#finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter) for an example implementation.
+- support for `pytorch-lightning` 1.9.0
+
+### Changed
+
+- decomposed ``add_optimizer_groups`` to accommodate the corner case where FTS is being used without an lr scheduler configuration, also cleanup unrequired example testing warning exceptions
+- updated the fts repo issue template
+
+
+### Fixed
+
+- removed PATH adjustments that are no longer necessary due to https://github.com/Lightning-AI/lightning/pull/15485
+
+### Removed
+
+- removed references to the ``finetuning-scheduler`` conda-forge package (at least temporarily) due to the current unavailability of upstream dependencies (i.e. the [pytorch-lightning conda-forge package](https://anaconda.org/conda-forge/pytorch-lightning/files) ). Installation of FTS via pip within a conda env is the recommended installation approach (both in the interim and in general).
+
+
 ## [0.3.4] - 2023-01-24
 
 ### Added
 
 - support for `pytorch-lightning` 1.8.6
 - Notify the user when ``max_depth`` is reached and provide the current training session stopping conditions. Resolves [#7](https://github.com/speediedan/finetuning-scheduler/issues/7).
+
 
 ### Changed
 

@@ -257,11 +257,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             "ddp_fork",
             "ddp_notebook",
             "single_device",
-            # TODO: `native` suffix will be removed from `fsdp` strategies in 2.0
-            "fsdp_native",
-            "fsdp_native_full_shard_offload",
-            "ddp_sharded",  # TODO: remove in 2.0
-            "ddp_sharded_spawn"  # TODO: remove in 2.0,
+            "fsdp",
+            "fsdp_cpu_offload",
             # "deepspeed",  # relevant FTS strategy adapter not yet available, PRs welcome!
         )
 
@@ -328,7 +325,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert isinstance(self.pl_module, pl.LightningModule)
         assert isinstance(self.pl_module.trainer, pl.Trainer)
         if depth_sync:
-            thaw_layers = {d: l for d, l in self.ft_schedule.items() if d > self._fts_state._best_ckpt_depth}.items()
+            thaw_layers = {d: tl for d, tl in self.ft_schedule.items() if d > self._fts_state._best_ckpt_depth}.items()
         else:
             thaw_layers = {depth: self.ft_schedule[depth]}.items()
         for i, orig_next_tl in thaw_layers:

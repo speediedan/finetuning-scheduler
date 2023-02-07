@@ -58,7 +58,7 @@ log = logging.getLogger(__name__)
 CALLBACK_DEP_PARENTS = {"ModelCheckpoint": ModelCheckpoint, "EarlyStopping": EarlyStopping}
 CALLBACK_ATTRS = ("ft_schedule", "max_depth")
 TARGET_CALLBACK_REF = "FinetuningScheduler"
-STRATEGY_ADAPTERS = {"fsdp_native": FSDPStrategyAdapter}
+STRATEGY_ADAPTERS = {"fsdp": FSDPStrategyAdapter}
 
 
 @dataclass
@@ -1209,8 +1209,8 @@ class ScheduleImplMixin(ABC):
         if len(model_params) % 2 == 1:
             param_lists.append([model_params[-1][0]])
         layer_config = {}
-        for i, l in enumerate(param_lists):
-            layer_config[i] = {"params": l}
+        for i, param_l in enumerate(param_lists):
+            layer_config[i] = {"params": param_l}
         schedule_name = f"{module.__class__.__name__}_ft_schedule.yaml"
         assert dump_loc is not None
         return ScheduleImplMixin.save_schedule(schedule_name, layer_config, dump_loc)

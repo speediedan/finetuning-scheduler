@@ -14,7 +14,7 @@ trigger:
       - "refs/tags/*"
   paths:
     include:
-      - "setup.*"  # setup.py/cfg
+      - "setup.*"  # setup.py
       - "requirements.txt"
       - "pyproject.toml"
       - ".codecov.yml"
@@ -30,7 +30,7 @@ pr:
     - release/*
   paths:
     include:
-      - "setup.*"  # setup.py/cfg
+      - "setup.*"  # setup.py
       - "requirements.txt"
       - "pyproject.toml"
       - ".codecov.yml"
