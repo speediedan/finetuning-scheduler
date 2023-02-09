@@ -30,7 +30,6 @@ from pytorch_lightning.trainer.states import TrainerFn
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug, rank_zero_warn
 from torch.optim.optimizer import Optimizer
-from pytorch_lightning.core.optimizer import _configure_optimizers, _configure_schedulers_automatic_opt
 
 from finetuning_scheduler.fts_supporters import (
     CallbackDepMixin,
@@ -105,6 +104,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         allow_untested: bool = False,
         apply_lambdas_new_pgs: bool = False,
         logging_level: int = logging.INFO,
+        enforce_phase0_params: bool = True,
     ):
         r"""
         Arguments used to define and configure a scheduled fine-tuning training session:
@@ -201,6 +201,13 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 will always apply the specified lambdas. Defaults to ``False``.
             logging_level: Sets the logging level for :class:`~finetuning_scheduler.fts.FinetuningScheduler`. Defaults
                 to ``INFO``.
+            enforce_phase0_params: Whether :class:`~finetuning_scheduler.fts.FinetuningScheduler` will reconfigure the
+                user-configured optimizer (configured via `configure_optimizers`) to optimize the parameters (and only
+                those parameters) scheduled to be optimized in phase 0 of the current fine-tuning schedule.
+                Reconfiguration will only take place if FTS discovers the set of parameters to be initially thawed
+                and present in the optimizer differs from the parameters specified in phase 0. Only the parameters
+                included in the optimizer are affected; the choice of optimizer, lr_scheduler etc. remains unaltered.
+                Defaults to ``True``.
 
         Attributes:
             _fts_state: The internal :class:`~finetuning_scheduler.fts.FinetuningScheduler` state.
@@ -225,7 +232,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.custom_strategy_adapter = custom_strategy_adapter
         self.allow_untested = allow_untested
         self.apply_lambdas_new_pgs = apply_lambdas_new_pgs
-        self.first_epoch_number = None
+        self.enforce_phase0_params = enforce_phase0_params
         rz_logger = logging.getLogger("pytorch_lightning.utilities.rank_zero")
         rz_logger.setLevel(logging_level)
 
@@ -339,7 +346,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                     module=self.pl_module,
                     optimizer=optimizer,
                     thawed_pl=next_tl["params"],
-                    lr=next_tl["lr"],
+                    lr=next_tl.get("lr", optimizer.defaults["lr"]),
                     no_decay=getattr(self.pl_module, "no_decay", None),
                     apply_lambdas=self.apply_lambdas_new_pgs,
                 )
@@ -575,7 +582,6 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         if self.curr_depth == 0:
             assert isinstance(self.ft_schedule, Dict)
             self._validate_opt_init()
-
         super().on_fit_start(trainer, pl_module)
 
     def state_dict(self) -> Dict[str, Any]:
@@ -586,6 +592,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             Dict[str, Any]: The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state dictionary
                 that will be added to the checkpoint
         """
+        # callback state such as `_ft_init_epoch` does not currently need to be persisted
         assert self.pl_module is not None and self.pl_module.trainer is not None
         trainer = self.pl_module.trainer
         checkpoint_callback = trainer.checkpoint_callback
@@ -669,22 +676,15 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             pl_module (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The
                 :external+pl:class:`~pytorch_lightning.core.module.LightningModule` object
         """
-        if self.first_epoch_number is None:
-            self.first_epoch_number = trainer.current_epoch
         # if resuming from a ckpt, we need to sync fts_state
         if self._fts_state._resume_fit_from_ckpt:
             self.step()
             self._fts_state._resume_fit_from_ckpt = False
         # increment ft_epoch on each train epoch
-        if trainer.current_epoch > self.first_epoch_number:
+        assert isinstance(self._fts_state._ft_init_epoch, int)
+        if trainer.current_epoch > self._fts_state._ft_init_epoch:
             assert self._fts_state._ft_sync_objects is not None
             self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
-        else:
-            optim_conf = trainer._call_lightning_module_hook("configure_optimizers", pl_module=pl_module)
-            optimizers, lr_schedulers, optimizer_frequencies, monitor = _configure_optimizers(optim_conf)
-            params_to_override = [p for n,p in pl_module.named_parameters() if n in self._fts_state._curr_thawed_params]
-            trainer.optimizers = [trainer.optimizers[0].__class__(params_to_override)]
-            trainer.lr_schedulers = _configure_schedulers_automatic_opt(lr_schedulers, monitor)
         if self.should_transition(trainer):
             self._fts_state._curr_depth += 1  # increment depth
             self.step()

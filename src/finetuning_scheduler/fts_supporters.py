@@ -23,11 +23,12 @@ import pathlib
 import re
 import warnings
 from abc import ABC, abstractmethod
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import KeysView
 from copy import copy
 from dataclasses import dataclass, field, fields
 from functools import reduce
+from pprint import pformat
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 import pytorch_lightning as pl
@@ -76,6 +77,7 @@ class FTSState:
         ("epoch_loop.global_step", "_ft_global_steps"),
     )
     _ft_sync_objects: Optional[Tuple] = None
+    _ft_init_epoch: Optional[int] = None
     _curr_thawed_params: List = field(default_factory=list)
     _fts_ckpt_metadata: Dict = field(default_factory=dict)
 
@@ -1066,6 +1068,10 @@ class ScheduleImplMixin(ABC):
     reinit_lr_cfg: Optional[Dict]
     max_depth: int
     _fts_state: FTSState
+    PHASE_0_DIVERGENCE_MSG = (
+        "After executing the provided `configure_optimizers` method, the optimizer state differs from the configuration"
+        " FinetuningScheduler expected at the beginning of scheduled fine-tuning (phase 0).\n"
+    )
 
     @property
     @abstractmethod
@@ -1083,6 +1089,8 @@ class ScheduleImplMixin(ABC):
         2. Prepare the first scheduled fine-tuning level, unfreezing the relevant parameters.
         """
         self.strategy_adapter.on_before_init_fts()
+        if not self._fts_state._ft_init_epoch:
+            self._fts_state._ft_init_epoch = max(self.pl_module.trainer.current_epoch, 0)
         self.init_ft_sched()
         self.strategy_adapter.on_after_init_fts()
 
@@ -1398,11 +1406,49 @@ class ScheduleImplMixin(ABC):
         opt = self.pl_module.trainer.optimizers[0]
         sched = self.ft_schedule
         no_grad_cnt = len([p for pg in opt.param_groups for p in pg["params"] if not p.requires_grad])
-        req_grad_opt = len([p for pg in opt.param_groups for p in pg["params"] if p.requires_grad])
+        # TODO: update this logic as necessary once merging separated inspect and transform modes
         init_ft_cnt = len(self.strategy_adapter.fts_optim_view(sched[0]["params"]))
         total_ft_cnt = len([p for phase in sched for p in self.strategy_adapter.fts_optim_view(sched[phase]["params"])])
-        expected_grad_params = req_grad_opt == init_ft_cnt
-        return no_grad_cnt, init_ft_cnt, total_ft_cnt, req_grad_opt, expected_grad_params
+        optim_grad_param_set = {p for pg in opt.param_groups for p in pg["params"] if p.requires_grad}
+        sched_grad_param_set = {
+            p
+            for n, p in self.pl_module.named_parameters()
+            if n in self.strategy_adapter.fts_optim_view(sched[0]["params"])
+        }
+        expected_params_sym_diff = optim_grad_param_set ^ sched_grad_param_set
+        p_diff_summary = defaultdict(list)
+        if expected_params_sym_diff:
+            for n, p in self.pl_module.named_parameters():
+                if p in optim_grad_param_set:
+                    p_diff_summary["optim_params"].append(n)
+                if p in sched_grad_param_set:
+                    p_diff_summary["phase_0_params"].append(n)
+        p_diff_summary = {k: self.strategy_adapter.logical_param_translation(v) for k, v in p_diff_summary.items()}
+        return no_grad_cnt, init_ft_cnt, total_ft_cnt, p_diff_summary
+
+    @staticmethod
+    def _grad_mismatch_feedback(w_msg: str, param_diff_summary: Dict) -> str:
+        """Assemble feedback for the user regarding the current optimizer state's divergence from the state
+        expected in scheduled fine-tuning phase 0 (with respect to thawed parameters).
+
+        Args:
+            w_msg (str): Initial warning message context.
+            param_diff_summary (Dict): A summary of the current optimizer state's divergence from the state expected in
+                scheduled fine-tuning phase 0 (with respect to thawed parameters).
+
+        Returns:
+            str: The user feedback warning with appropriate context.
+        """
+        w_msg += (
+            " a differing set of trainable parameters. Please find below a summary of the differences between"
+            " the currently thawed parameters in the optimizer and those scheduled to be optimized during fine-tuning"
+            " phase 0: \n"
+            "Currently thawed parameters included in the optimizer:\n"
+            f"{pformat(param_diff_summary['optim_params'])}{os.linesep}"
+            "Parameters expected to be thawed and optimized in phase 0:\n"
+            f"{pformat(param_diff_summary['phase_0_params'])}{os.linesep}"
+        )
+        return w_msg
 
     def _validate_opt_init(self) -> None:
         """Validate the user-initialized optimizer state (necessary for fine-tuning phase 0) and warn user if
@@ -1412,37 +1458,38 @@ class ScheduleImplMixin(ABC):
             optimizer (Optimizer): The optimizer initialized.
             ft_schedule (Dict): The fine-tuning schedule to be inspected vis-a-vis the optimizer state.
         """
-        no_grad_cnt, init_ft_cnt, total_ft_cnt, req_grad_opt, expected_grad_params = self._inspect_fts_opt_state()
-        if no_grad_cnt > 0 or not expected_grad_params:
-            warn_msg = (
-                f"FinetuningScheduler configured the provided model to have {init_ft_cnt} trainable parameters"
-                f" in phase 0 (the initial training phase) but the optimizer has subsequently been initialized with"
-            )
-            if not expected_grad_params:
-                warn_msg += f" {req_grad_opt} trainable parameters. If you have manually"
-                if req_grad_opt > init_ft_cnt:
-                    warn_msg += (
-                        " added additional trainable parameters you may want to ensure the manually added new trainable"
-                        f" parameters do not collide with the {total_ft_cnt} parameters FinetuningScheduler has been"
-                        " scheduled to thaw in the provided schedule."
-                    )
-                else:
-                    warn_msg += (
-                        " removed trainable parameters, you may want to update phase 0 of the provided fine-tuning"
-                        " schedule accordingly"
-                    )
+        no_grad_cnt, init_ft_cnt, total_ft_cnt, param_diff_summary = self._inspect_fts_opt_state()
+        if param_diff_summary or no_grad_cnt > 0:
+            if self.enforce_phase0_params:
+                # implemented in `StrategyAdapter` since override behavior may be strategy-dependent in the future
+                self.strategy_adapter.phase0_optimizer_override()
             else:
-                warn_msg += (
-                    f" {no_grad_cnt} additional parameters that do not require a gradient. If non-intentional, this"
-                    " state is commonly caused by failing to filter out parameters that do not require a gradient when"
-                    " initializing the optimizer (e.g.,"
-                    " `parameters = list(filter(lambda x: x.requires_grad, self.parameters()))`"
-                    f" If you intended to initialize the optimizer with parameters that do not require a"
-                    f" gradient you may want to ensure they are not included in the {total_ft_cnt} parameters that the"
-                    " FinetuningScheduler is currently configured to thaw (sum of all phases) to avoid triggering a "
-                    " parameter collision and training failure in pytorch during a future fine-tuning phase."
+                w_msg = ScheduleImplMixin.PHASE_0_DIVERGENCE_MSG + (
+                    " Since `enforce_phase0_params` is currently set to `False`, FinetuningScheduler will not override"
+                    " the user-configured optimizer configuration to enforce the expected phase 0 configuration of"
+                    " thawed parameters."
+                    "\n\n"
+                    "HINT: Leaving `enforce_phase0_params` to its default (`True`) will avoid discrepancies like this"
+                    " in the majority of use cases. If that solution is not desired or sufficient, please find more"
+                    " detailed information about the configuration divergence below. \n\n"
+                    f"In this case, FinetuningScheduler configured the provided model to have {init_ft_cnt} trainable"
+                    " parameters in phase 0 (the initial training phase) but the optimizer has subsequently been"
+                    " initialized with"
                 )
-            rank_zero_warn(warn_msg)
+                if param_diff_summary:
+                    w_msg = ScheduleImplMixin._grad_mismatch_feedback(w_msg, param_diff_summary)
+                if no_grad_cnt > 0:
+                    w_msg += (
+                        f"Also note that there are {no_grad_cnt} parameters in the optimizer that do not require a"
+                        " gradient. If non-intentional, this state is commonly caused by failing to filter out"
+                        " parameters that do not require a gradient when initializing the optimizer (e.g.,"
+                        " `parameters = list(filter(lambda x: x.requires_grad, self.parameters()))`. If you intended to"
+                        " initialize the optimizer with parameters that do not require a gradient you may want to"
+                        f" ensure they are not included in the {total_ft_cnt} parameters that the FinetuningScheduler"
+                        " is currently configured to thaw (sum of all phases) to avoid triggering a parameter collision"
+                        " and training failure in pytorch during a future fine-tuning phase."
+                    )
+                rank_zero_warn(w_msg)
 
 
 class CallbackDepMixin(ABC):

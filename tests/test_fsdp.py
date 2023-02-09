@@ -263,6 +263,16 @@ class AlreadyWrappedFSDPModel(FTSBaseFSDPModel):
             assert isinstance(self.layer[0], FullyShardedDataParallel)
 
 
+class FTSEnforceP0FSDPModel(FTSBaseFSDPModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.SGD(self.parameters(), lr=1e-3, weight_decay=self.weight_decay)
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
+        return [optimizer], [lr_scheduler]
+
+
 class FTSCsmAdamFSDPModel(FTSBaseFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -365,6 +375,7 @@ BN_model = FTSBatchNormFSDPModel
 shared_model = FTSSharedParamFSDPModel
 csm_adam_model = FTSCsmAdamFSDPModel
 ext_model = FTSExtFSDPModel
+enforceP0_model = FTSEnforceP0FSDPModel
 
 # model configuration aliases
 fp16_cfg = {"precision_key": "auto_16"}
@@ -457,6 +468,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "warn_unsupp_nodecay": ({}, "will now be unset", None),
     "unmatched_awp_overrides": ({}, None, "did not match any named modules"),
     "cust_awp_prec": (path_default, *nones(2)),
+    "enforceP0_cust_awp_prec": (path_default, *nones(2)),
     "batch_norm_auto_prec": (path_8_16, "Both mixed precision", None),
     "shared_params_auto_prec": (path_5_10, ("Pruning explicitly specified",), None),
     "override_csm_adam_noprec": (path_ext_7_14, *nones(2)),
@@ -484,6 +496,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         ("warn_unsupp_nodecay", nodecay_model, cust_awp, False, 0, unwrap_7, *nones(4)),
         ("unmatched_awp_overrides", base_model, warn_cust_awp, True, 0, wrap_5_7, awp_5_9, *nones(3)),
         ("cust_awp_prec", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
+        ("enforceP0_cust_awp_prec", enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
         ("batch_norm_auto_prec", BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(4)),
         ("shared_params_auto_prec", shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(3)),
         ("override_csm_adam_noprec", csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, None),
@@ -504,6 +517,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "warn_unsupp_nodecay",
         "unmatched_awp_overrides",
         "cust_awp_prec",
+        "enforceP0_cust_awp_prec",
         "batch_norm_auto_prec",
         "shared_params_auto_prec",
         "override_csm_adam_noprec",

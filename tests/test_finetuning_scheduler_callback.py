@@ -35,7 +35,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from finetuning_scheduler import CallbackResolverMixin, FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from tests.helpers import BoringModel
-from tests.helpers.boring_model import CustomLRScheduler, unexpected_warns, unmatched_warns
+from tests.helpers.boring_model import CustomLRScheduler, LinearWarmupLR, unexpected_warns, unmatched_warns
 from tests.helpers.runif import RunIf
 
 fts_resolver = CallbackResolverMixin()
@@ -141,6 +141,7 @@ class FinetuningSchedulerBoringModel(BoringModel):
         no_decay: Optional[List] = None,
         weight_decay: float = 1.0e-06,
         init_lr_key: str = None,
+        p0_params: Optional[List] = None,
     ):
         super().__init__()
         self.layer = nn.Sequential(nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 2))
@@ -148,6 +149,7 @@ class FinetuningSchedulerBoringModel(BoringModel):
         self.no_decay = no_decay
         self.weight_decay = weight_decay
         self.init_lr_key = init_lr_key
+        self.p0_params = p0_params
 
     def validation_step(self, batch, batch_idx):
         output = self(batch)
@@ -169,6 +171,12 @@ class FinetuningSchedulerBoringModel(BoringModel):
             lr_scheduler = {
                 "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2),
                 "monitor": "val_loss",
+                "frequency": 1,
+            }
+        elif self.init_lr_key == "lr_lambdas":
+            lr_scheduler = {
+                "scheduler": LinearWarmupLR(optimizer, num_warmup_steps=300, num_training_steps=1000),
+                "interval": "step",
                 "frequency": 1,
             }
         elif self.init_lr_key == "unsupp":
@@ -284,6 +292,22 @@ class NoLRSBoringModel(FinetuningSchedulerBoringModel):
         return optimizer
 
 
+class EnforcePhase0CfgOptimBoringModel(FinetuningSchedulerBoringModel):
+    def configure_optimizers(self):
+        if self.p0_params:
+            for n, p in self.named_parameters():
+                p.requires_grad = True if n in self.p0_params else False
+            parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
+            optimizer = torch.optim.SGD(parameters, lr=1e-3, weight_decay=self.weight_decay)
+        else:
+            optimizer = torch.optim.SGD(self.parameters(), lr=1e-3, weight_decay=self.weight_decay)
+        if self.init_lr_key:
+            lr_scheduler = self.cust_init_lr(optimizer)
+        else:
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
+        return [optimizer], [lr_scheduler]
+
+
 class FTSZeroRedundancyOptimizerModel(FinetuningSchedulerBoringModel):
     def __init__(self, test_overlap: Optional[bool] = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -392,11 +416,6 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
         "init_pg_lrs": [2.0e-06, 3.0e-06],
     }
-    fsdp_sched_dict = deepcopy(mod_sched_dict)
-    fsdp_sched_dict[0]["params"] = ["layer.(4|2).*"]
-    # fsdp_sched_dict[0]["max_transition_epoch"] = 3
-    # fsdp_sched_dict[1] = fsdp_sched_dict.pop(2)
-    # fsdp_sched_dict[1]["lr"] = 1e-06
     return (
         unmod_schedule_file,
         mod_sched_dict,
@@ -404,7 +423,6 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         reinitlr_sched_dict,
         lambdalr_sched_dict,
         rlrop_sched_dict,
-        fsdp_sched_dict,
     )
 
 
@@ -767,6 +785,79 @@ def test_finetuningscheduling_explicit_implicit(tmpdir, boring_ft_schedule, expl
     assert not any([p.requires_grad for n, p in trainer.model.named_parameters() if n in still_frozen])
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
     assert finetuningscheduler_callback._fts_state._ft_epoch == trainer.fit_loop.epoch_progress.current.completed
+
+
+ENFORCE_P0_INTRAFIT_STATE = {
+    "default": {
+        0: (0, 2, 0, 0, 0, 0, 2, 2, 0, 0),
+        1: (0, 2, 1, 0, 0, 1, 2, 2, 0, 0),
+        2: (0, 2, 2, 0, 0, 1, 2, 2, 0, 0),
+        3: (0, 2, 3, 0, 0, 1, 2, 2, 0, 0),
+        4: (0, 2, 4, 0, 0, 1, 2, 2, 0, 0),
+        5: (1, 1, 5, 0, 0, 1, 4, 4, 0, 0),
+        6: (2, 0, 6, 0, 0, 1, 6, 6, 0, 0),
+    },
+}
+
+
+ENFORCE_P0_LR_STATE = {
+    "step_lr": {
+        0: (0.001, 0.001),
+        1: (0.0007, 0.0007),
+        2: (0.00049, 0.00049),
+        3: (0.000343, 0.000343),
+        4: (0.0002401, 0.0002401),
+        5: (0.0002401, 0.0002401, 1e-05, 1e-05),
+        6: (0.0002401, 0.0002401, 1e-05, 1e-05, 1e-05, 1e-05),
+    },
+    "rlrop": {
+        0: (0.001, 0.001),
+        1: (0.001, 0.001),
+        2: (0.001, 0.001),
+        3: (0.001, 0.001),
+        4: (0.001, 0.001),
+        5: (0.001, 0.001, 1e-05, 1e-05),
+        6: (0.001, 0.001, 1e-05, 1e-05, 1e-05, 1e-05),
+    },
+    # note we are testing before the initial lambda lr execution in epoch 0
+    "lr_lambdas": {
+        0: (0.001, 0.001),
+        1: (0.000213333, 0.000213333),
+        2: (0.000426667, 0.000426667),
+        3: (0.00064, 0.00064),
+        4: (0.000853333, 0.000853333),
+        5: (0.000853333, 0.000853333, 1e-05, 1e-05),
+        6: (0.000853333, 0.000853333, 1e-05, 1e-05, 1e-05, 1e-05),
+    },
+}
+
+
+@pytest.mark.parametrize(
+    "init_lr_key, p0_params",
+    [(None, ["layer.0.weight", "layer.0.bias"]), ("rlrop", None), ("lr_lambdas", None)],
+    ids=["step_lr", "rlrop", "lr_lambdas"],
+)
+def test_finetuningscheduling_enforce_p0(tmpdir, init_lr_key, p0_params):
+    """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
+    both restore_best modes."""
+    seed_everything(42)
+    model = EnforcePhase0CfgOptimBoringModel(no_decay=["bias"], init_lr_key=init_lr_key, p0_params=p0_params)
+    init_lr_key = init_lr_key or "step_lr"
+    callbacks = [
+        TestFinetuningScheduler(
+            expected_state=ENFORCE_P0_INTRAFIT_STATE["default"], lrs_state=ENFORCE_P0_LR_STATE[init_lr_key], max_depth=2
+        ),
+        FTSEarlyStopping(monitor="val_loss", patience=1),
+        LearningRateMonitor(),
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer.fit(model)
+    finetuningscheduler_callback = get_fts(trainer)
+    callbacks_dict = {type(c): i for i, c in enumerate(finetuningscheduler_callback.pl_module.trainer.callbacks)}
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == 2
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+    assert callbacks_dict[TestFinetuningScheduler] < callbacks_dict[LearningRateMonitor] < callbacks_dict[FTSCheckpoint]
 
 
 EXPECTED_DECAY_RESULTS = {
@@ -1600,16 +1691,15 @@ def test_fts_optimizer_compat(
 
 
 @pytest.mark.parametrize(
-    "param_cfg_key, warn_expected",
+    "param_cfg_key, enforce_p0, warn_expected",
     [
-        ("extra_nograd", "additional parameters that do not require a gradient"),
-        ("missing_grad", "removed trainable parameters, you may want"),
-        ("extra_grad", "added additional trainable parameters you may want"),
-        ("bn_freeze", None),
+        ("extra_nograd", False, "in the optimizer that do not require a"),
+        ("grad_diff", False, "Please find below a summary of"),
+        ("bn_freeze", False, None),
     ],
-    ids=["extra_nograd", "missing_grad", "extra_grad", "bn_freeze"],
+    ids=["extra_nograd", "grad_diff", "bn_freeze"],
 )
-def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, warn_expected: str):
+def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, enforce_p0: bool, warn_expected: str):
     """Ensure :class:`~finetuning_scheduler.FinetuningScheduler` warnings associated with parameter/schedule
     consistency inspection are properly raised."""
 
@@ -1617,10 +1707,10 @@ def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, warn_exp
         def configure_optimizers(self):
             if param_cfg_key == "extra_nograd":
                 parameters = self.parameters()
-            elif param_cfg_key == "missing_grad":
-                parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
-                parameters.pop()
-            elif param_cfg_key == "extra_grad":
+            # elif param_cfg_key == "missing_grad":
+            #     parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
+            #     parameters.pop()
+            elif param_cfg_key == "grad_diff":
                 for p in self.parameters():
                     p.requires_grad = True
                 parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
@@ -1648,7 +1738,7 @@ def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, warn_exp
 
     seed_everything(42)
     model = DupParamInitBoringModel() if param_cfg_key != "bn_freeze" else BNInitBoringModel()
-    callbacks = [FitStartOnlyFTS()]
+    callbacks = [FitStartOnlyFTS(enforce_phase0_params=enforce_p0)]
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
     with pytest.raises(SystemExit):
         if not warn_expected:

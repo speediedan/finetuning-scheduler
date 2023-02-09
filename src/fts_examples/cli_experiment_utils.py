@@ -54,7 +54,7 @@ def get_pip_packages(run_lambda):
         if collect_env.get_platform() == "win32":
             system_root = os.environ.get("SYSTEMROOT", "C:\\Windows")
             findstr_cmd = os.path.join(system_root, "System32", "findstr")
-            grep_cmd = fr'{findstr_cmd} /R "numpy torch mypy transformers datasets"'
+            grep_cmd = rf'{findstr_cmd} /R "numpy torch mypy transformers datasets"'
         else:
             grep_cmd = r'grep "torch\|numpy\|mypy\|transformers\|datasets"'
         return collect_env.run_and_read_all(run_lambda, pip + " list --format=freeze | " + grep_cmd)

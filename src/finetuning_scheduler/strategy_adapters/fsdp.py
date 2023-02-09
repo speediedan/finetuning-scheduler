@@ -630,7 +630,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         auto_wrap_policy_handle = _ConfigAutoWrap.kwargs.pop("auto_wrap_policy", None)
         override_ids = [id(m) for n, m in self.pl_module.named_modules() if n in self.awp_overrides]
-        lambda_fn = lambda m: id(m) in override_ids
+        lambda_fn = lambda m: id(m) in override_ids  # noqa: E731
         name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda_fn)
         name_based_override_or_policy = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
         _ConfigAutoWrap.kwargs["auto_wrap_policy"] = name_based_override_or_policy
