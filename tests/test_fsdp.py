@@ -20,8 +20,8 @@ import pytest
 import torch
 from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13
 from pytorch_lightning import seed_everything, Trainer
-from pytorch_lightning.plugins.precision.fsdp_native_native_amp import FullyShardedNativeNativeMixedPrecisionPlugin
-from pytorch_lightning.strategies import DDPFullyShardedNativeStrategy
+from pytorch_lightning.plugins.precision.fsdp import FSDPMixedPrecisionPlugin
+from pytorch_lightning.strategies import FSDPStrategy
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from torch.utils.data import DataLoader
 
@@ -58,7 +58,6 @@ additional_fsdp_warns = [
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
 
-nones = lambda x: (None,) * x
 
 ##########################
 # FTS FSDP Test Fixtures #
@@ -126,7 +125,7 @@ def fsdp_ckpt(tmpdir_factory, fsdp_ft_schedules) -> Dict:
     """A fixture that generates a checkpoint with a sharded model."""
     seed_everything(42)
     test_model_cfg = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}}
-    strategy = DDPFullyShardedNativeStrategy(
+    strategy = FSDPStrategy(
         auto_wrap_policy=custom_auto_wrap_policy,
         cpu_offload=CPUOffload(offload_params=True),
     )
@@ -207,8 +206,8 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
         else:
             assert isinstance(self.layer, torch.nn.Sequential)
         if self.precision_key == "auto_16":
-            assert isinstance(self.trainer.strategy.precision_plugin, FullyShardedNativeNativeMixedPrecisionPlugin)
-            precision = torch.float16 if self.precision == 16 else torch.bfloat16
+            assert isinstance(self.trainer.strategy.precision_plugin, FSDPMixedPrecisionPlugin)
+            precision = torch.float16 if self.trainer.precision == "16" else torch.bfloat16
         # ensure our ignored module is not wrapped
         for i in self.fsdp_mask["unwrapped_mods"]:
             assert not isinstance(self.layer[i], FullyShardedDataParallel)
@@ -240,7 +239,7 @@ class FTSCsmFSDPModel(FTSBaseFSDPModel):
         self.layer = wrap(self.layer)
 
         # verify activation checkpointing can be manually applied
-        check_fn = lambda submodule: isinstance(submodule, tuple([torch.nn.Linear]))
+        check_fn = lambda submodule: isinstance(submodule, tuple([torch.nn.Linear]))  # noqa E731
         wrapper = partial(
             checkpoint_wrapper,
             checkpoint_impl=CheckpointImpl.NO_REENTRANT,
@@ -262,6 +261,16 @@ class AlreadyWrappedFSDPModel(FTSBaseFSDPModel):
         with self._trainer.strategy.model_sharded_context():
             self.layer[0] = wrap(self.layer[0])
             assert isinstance(self.layer[0], FullyShardedDataParallel)
+
+
+class FTSEnforceP0FSDPModel(FTSBaseFSDPModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.SGD(self.parameters(), lr=1e-3, weight_decay=self.weight_decay)
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
+        return [optimizer], [lr_scheduler]
 
 
 class FTSCsmAdamFSDPModel(FTSBaseFSDPModel):
@@ -366,6 +375,7 @@ BN_model = FTSBatchNormFSDPModel
 shared_model = FTSSharedParamFSDPModel
 csm_adam_model = FTSCsmAdamFSDPModel
 ext_model = FTSExtFSDPModel
+enforceP0_model = FTSEnforceP0FSDPModel
 
 # model configuration aliases
 fp16_cfg = {"precision_key": "auto_16"}
@@ -439,6 +449,12 @@ path_5_10 = {0: (2, 4), 1: (3, 6), 2: (5, 10)}
 path_ext_7_14 = {0: (2, 4), 1: (2, 4), 2: (6, 12), 3: (6, 12), 4: (7, 14)}
 path_ext_8_16 = {0: (3, 6), 1: (7, 14), 2: (8, 16)}
 
+
+# to help dedup config
+def nones(num_n) -> Tuple:
+    return (None,) * num_n
+
+
 EXPECTED_FSDP_FTS_RESULTS = {
     "cust_awp_noprec": (path_default, *nones(2)),
     "override_csm_noprec": (path_default, *nones(2)),
@@ -452,6 +468,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "warn_unsupp_nodecay": ({}, "will now be unset", None),
     "unmatched_awp_overrides": ({}, None, "did not match any named modules"),
     "cust_awp_prec": (path_default, *nones(2)),
+    "enforceP0_cust_awp_prec": (path_default, *nones(2)),
     "batch_norm_auto_prec": (path_8_16, "Both mixed precision", None),
     "shared_params_auto_prec": (path_5_10, ("Pruning explicitly specified",), None),
     "override_csm_adam_noprec": (path_ext_7_14, *nones(2)),
@@ -479,6 +496,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         ("warn_unsupp_nodecay", nodecay_model, cust_awp, False, 0, unwrap_7, *nones(4)),
         ("unmatched_awp_overrides", base_model, warn_cust_awp, True, 0, wrap_5_7, awp_5_9, *nones(3)),
         ("cust_awp_prec", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
+        ("enforceP0_cust_awp_prec", enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
         ("batch_norm_auto_prec", BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(4)),
         ("shared_params_auto_prec", shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(3)),
         ("override_csm_adam_noprec", csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, None),
@@ -499,6 +517,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "warn_unsupp_nodecay",
         "unmatched_awp_overrides",
         "cust_awp_prec",
+        "enforceP0_cust_awp_prec",
         "batch_norm_auto_prec",
         "shared_params_auto_prec",
         "override_csm_adam_noprec",
@@ -507,7 +526,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "warn_ignore_awp_override",
     ],
 )
-def test_fsdp_native_multi_gpus(
+def test_fsdp_multi_gpus(
     tmpdir,
     recwarn,
     fsdp_ft_schedules,
@@ -531,7 +550,7 @@ def test_fsdp_native_multi_gpus(
     ft_sched = fsdp_ft_schedules[ft_sched_idx]
     test_cfg = init_fts_cfg(fts_state, strategy_adapter_cfg, fts_cfg)
     callbacks = callbacks_cfg(FSDPTestFinetuningScheduler, ft_sched, test_cfg, {"patience": 2}, {"save_top_k": 3})
-    strategy = DDPFullyShardedNativeStrategy(auto_wrap_policy=auto_wrap_policy, **strategy_cfg)
+    strategy = FSDPStrategy(auto_wrap_policy=auto_wrap_policy, **strategy_cfg)
     trainer = configure_trainer(tmpdir, strategy, callbacks, {**trainer_cfg, **precision_opts})
     if exception_expected:
         gen_exceptions(trainer, model, model_cfg_key, exception_expected)
@@ -548,7 +567,7 @@ def test_fsdp_native_multi_gpus(
     [("cust_noprec_resume", base_model, cust_awp, 0, unwrap_7)],
     ids=["cust_noprec_resume"],
 )
-def test_fsdp_native_multi_gpus_resume(
+def test_fsdp_multi_gpus_resume(
     tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, model_cfg_key, model_cls, awp, ft_sched_idx, model_cfg
 ):
     """Conservative (end-to-end) test for FTS training resumption with FSDP."""
@@ -559,9 +578,10 @@ def test_fsdp_native_multi_gpus_resume(
     model = model_cls(**model_cfg)
     ft_sched = fsdp_ft_schedules[ft_sched_idx]
     callbacks = callbacks_cfg(FinetuningScheduler, ft_sched, {}, {"patience": 1}, {"save_last": True})
-    strategy = DDPFullyShardedNativeStrategy(auto_wrap_policy=awp, cpu_offload=CPUOffload(offload_params=True))
+    strategy = FSDPStrategy(auto_wrap_policy=awp, cpu_offload=CPUOffload(offload_params=True))
     trainer = configure_trainer(tmpdir, strategy, callbacks, {"max_epochs": 3})
-    trainer.fit(model, ckpt_path=fsdp_ckpt)
+    trainer.ckpt_path = fsdp_ckpt
+    trainer.fit(model)
     default_fts_sanity_chk(trainer)
     if trainer.is_global_zero:
         check_fts_fsdp_warns(warns_expected, recwarn)

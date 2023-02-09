@@ -18,7 +18,9 @@ Base adapter class to extend Fine-Tuning Scheduler support of complex or custom 
 """
 from typing import Callable, List, Optional, Tuple
 
-from pytorch_lightning import LightningModule
+from lightning_fabric.utilities import rank_zero_info
+from lightning_fabric.utilities.types import ReduceLROnPlateau
+from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.utilities.rank_zero import rank_zero_debug
@@ -148,6 +150,57 @@ class StrategyAdapter:
                 :external+pl:class:`~pytorch_lightning.strategies.Strategy`'s transformation.
         """
         return param_names
+
+    @staticmethod
+    def _clean_optim_lr_pgs(trainer: Trainer) -> List:
+        """Delete existing param groups from an optimizer that was found to be misaligned with respect to phase 0
+        of the specified fine-tuning schedule.
+
+        Args:
+            trainer (Trainer): The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object.
+
+        Returns:
+            List: A list of the number of parameter groups pruned for each optimizer (since only a single optimizer is
+                currently supported by FTS, this list will have only a single element in this verison.)
+        """
+        orig_num_pgs = []
+        for optimizer in trainer.optimizers:
+            orig_num_pgs.append(len(optimizer.param_groups))
+            optimizer.param_groups = []
+        for lrs_cfg in trainer.lr_scheduler_configs:
+            lrs_cfg.scheduler.base_lrs = []
+        return orig_num_pgs
+
+    def phase0_optimizer_override(self) -> None:
+        """Reconfigure the user-configured optimizer (configured via `configure_optimizers`) to optimize the
+        parameters (and only those parameters) scheduled to be optimized in phase 0 of the current fine-tuning
+        schedule.
+
+        Reconfiguration only takes place here if FTS discovers the set of parameters to be initially thawed and present
+        in the optimizer differs from the parameters specified in phase 0. Only the parameters included in the optimizer
+        are affected; the choice of optimizer, lr_scheduler etc. remains unaltered.
+        """
+        trainer = self.pl_module.trainer
+        orig_num_pgs = StrategyAdapter._clean_optim_lr_pgs(trainer)
+        # refreeze in case user has thawed parameters not present in phase 0
+        self.fts_handle.freeze_before_training(self.pl_module)
+        # thaw only params scheduled in phase 0
+        self.fts_handle.step_pg(depth=self.fts_handle.curr_depth, optimizer=trainer.optimizers[0], depth_sync=False)
+        # since we may have added parameter groups (e.g. implementing ``no_decay`` for user), we need to reinitialize
+        # certain lr_scheduler variables (including type-dependent ones like ``min_lrs`` and ``lr_lambdas``)
+        for lrs_cfg in trainer.lr_scheduler_configs:
+            lrs_cfg.scheduler._last_lr = [group["lr"] for group in lrs_cfg.scheduler.optimizer.param_groups]
+            assert lrs_cfg.opt_idx is not None
+            if isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
+                lrs_cfg.scheduler.min_lrs = lrs_cfg.scheduler.min_lrs[orig_num_pgs[lrs_cfg.opt_idx] :]
+            elif hasattr(lrs_cfg.scheduler, "lr_lambdas"):
+                lrs_cfg.scheduler.lr_lambdas = lrs_cfg.scheduler.lr_lambdas[orig_num_pgs[lrs_cfg.opt_idx] :]
+        p0_override_msg = self.fts_handle.PHASE_0_DIVERGENCE_MSG + (
+            "Since `enforce_phase0_params` is currently set to `True` (the default), FinetuningScheduler has"
+            " reconfigured the optimizer to optimize the parameters (and only those parameters) scheduled to be"
+            " optimized in phase 0 of the current fine-tuning schedule.\n\n"
+        )
+        rank_zero_info(p0_override_msg)
 
     @staticmethod
     def base_ft_phase(

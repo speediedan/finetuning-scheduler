@@ -53,8 +53,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
     r"""
     A :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that extends
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` (FTS) to support flexible, multi-phase, scheduled fine-tuning
-    with the native Fully Sharded Data Parallel (FSDP) strategy (
-    :external+pl:class:`~pytorch_lightning.strategies.fully_sharded_native.DDPFullyShardedNativeStrategy`).
+    with the Fully Sharded Data Parallel (FSDP) strategy
+    (:external+pl:class:`~pytorch_lightning.strategies.fsdp.FSDPStrategy`).
 
     As with standard FSDP usage, FSDP wrapping of a :external+pl:class:`~pytorch_lightning.core.module.LightningModule`
     can be performed either by providing an ``auto_wrap_policy`` or (for maximal control) by overriding the
@@ -117,14 +117,14 @@ class FSDPStrategyAdapter(StrategyAdapter):
         :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides`, an optional list of
         module names that should be wrapped in separate FSDP instances, complementing the modules that would be
         individually wrapped by ``auto_wrap_policy`` provided in the
-        :external+pl:class:`~pytorch_lightning.strategies.fully_sharded_native.DDPFullyShardedNativeStrategy` strategy
+        :external+pl:class:`~pytorch_lightning.strategies.fsdp.FSDPStrategy` strategy
         configuration.
 
         Args:
             awp_overrides (Optional[List]): A list of module names to wrap in separate FSDP instances (i.e.,
                 ``auto_wrap_policy`` overrides). Only applicable when complementing/overriding an ``auto_wrap_policy``
                 provided in the
-                :external+pl:class:`~pytorch_lightning.strategies.fully_sharded_native.DDPFullyShardedNativeStrategy`
+                :external+pl:class:`~pytorch_lightning.strategies.fsdp.FSDPStrategy`
                 strategy configuration. Override lists will be ignored when manually wrapping modules via a
                 ``configure_sharded_model`` method. If the named modules cannot be found, an exception will be thrown.
                 Defaults to None.
@@ -630,7 +630,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         auto_wrap_policy_handle = _ConfigAutoWrap.kwargs.pop("auto_wrap_policy", None)
         override_ids = [id(m) for n, m in self.pl_module.named_modules() if n in self.awp_overrides]
-        lambda_fn = lambda m: id(m) in override_ids
+        lambda_fn = lambda m: id(m) in override_ids  # noqa: E731
         name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda_fn)
         name_based_override_or_policy = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
         _ConfigAutoWrap.kwargs["auto_wrap_policy"] = name_based_override_or_policy

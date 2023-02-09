@@ -1,3 +1,2 @@
 # extended list of package dependencies to reach full functionality
 rich>=10.14.0,!=10.15.0.a
-fairscale>=0.4.5
