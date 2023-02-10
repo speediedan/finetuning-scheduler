@@ -1273,7 +1273,7 @@ class ScheduleImplMixin(ABC):
         for i, next_tl in self.ft_schedule.items():  # type: ignore[union-attr]
             if i <= depth:
                 _, self._fts_state._curr_thawed_params = self.strategy_adapter.exec_ft_phase(
-                    self.pl_module, thaw_pl=self.strategy_adapter.fts_optim_view(next_tl["params"])
+                    self.pl_module, thaw_pl=self.strategy_adapter.fts_optim_transform(next_tl["params"])
                 )
 
     @staticmethod
