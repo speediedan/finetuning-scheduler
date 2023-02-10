@@ -1406,14 +1406,15 @@ class ScheduleImplMixin(ABC):
         opt = self.pl_module.trainer.optimizers[0]
         sched = self.ft_schedule
         no_grad_cnt = len([p for pg in opt.param_groups for p in pg["params"] if not p.requires_grad])
-        # TODO: update this logic as necessary once merging separated inspect and transform modes
-        init_ft_cnt = len(self.strategy_adapter.fts_optim_view(sched[0]["params"]))
-        total_ft_cnt = len([p for phase in sched for p in self.strategy_adapter.fts_optim_view(sched[phase]["params"])])
+        init_ft_cnt = len(self.strategy_adapter.fts_optim_inspect(sched[0]["params"]))
+        total_ft_cnt = len(
+            [p for phase in sched for p in self.strategy_adapter.fts_optim_inspect(sched[phase]["params"])]
+        )
         optim_grad_param_set = {p for pg in opt.param_groups for p in pg["params"] if p.requires_grad}
         sched_grad_param_set = {
             p
             for n, p in self.pl_module.named_parameters()
-            if n in self.strategy_adapter.fts_optim_view(sched[0]["params"])
+            if n in self.strategy_adapter.fts_optim_inspect(sched[0]["params"])
         }
         expected_params_sym_diff = optim_grad_param_set ^ sched_grad_param_set
         p_diff_summary = defaultdict(list)

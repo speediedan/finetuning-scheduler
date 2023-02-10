@@ -24,29 +24,36 @@ import re
 from collections import Counter
 from contextlib import contextmanager
 from copy import deepcopy
-from functools import partial, wraps
+from functools import partial, partialmethod, wraps
 from pprint import pformat
-from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
 
 import torch
 from lightning_fabric.strategies.fsdp import _setup_activation_checkpointing
 from lightning_fabric.utilities import rank_zero_info, rank_zero_warn
-from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13
+from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13, _TORCH_GREATER_EQUAL_2_0
 from pytorch_lightning.strategies.strategy import Strategy
 from pytorch_lightning.trainer.connectors.checkpoint_connector import CheckpointConnector
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.model_helpers import is_overridden
+from pytorch_lightning.utilities.rank_zero import rank_zero_debug
 
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
 _distributed_available = torch.distributed.is_available()
 _min_fsdp_available = _TORCH_GREATER_EQUAL_1_13 and _distributed_available
+
 if _min_fsdp_available:
-    from torch.distributed.fsdp.fully_sharded_data_parallel import (
-        _get_param_to_unflat_param_names,
-        FullyShardedDataParallel,
-    )
+    from torch.distributed.fsdp.fully_sharded_data_parallel import FLAT_PARAM, FullyShardedDataParallel
     from torch.distributed.fsdp.wrap import _ConfigAutoWrap, _or_policy, lambda_auto_wrap_policy, wrap
+
+    if _TORCH_GREATER_EQUAL_2_0:
+        from torch.distributed.fsdp._common_utils import _get_param_to_fqns
+        from torch.distributed.fsdp.wrap import _FSDPPolicy
+    else:
+        _FSDPPolicy = object  # type: ignore[assignment,misc]
+        from torch.distributed.fsdp.fully_sharded_data_parallel import _get_param_to_unflat_param_names
+    _get_params_to_fqns = _get_param_to_fqns if _TORCH_GREATER_EQUAL_2_0 else _get_param_to_unflat_param_names
 
 
 class FSDPStrategyAdapter(StrategyAdapter):
@@ -108,7 +115,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     _fsdp_unflat_to_flat_mapping: Dict
     _ft_schedule_module_map: Dict
     _unscheduled_params: List
-    _ignored_modules: List
+    _use_orig_params: bool
     RANK_ZERO_LOG_FQN = "pytorch_lightning.utilities.rank_zero"
 
     def __init__(self, awp_overrides: Optional[List] = None, *args: Any, **kwargs: Any) -> None:
@@ -165,6 +172,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         # hack to avoid subclassing FSDP strategy for this adapter
         setattr(Strategy, "lightning_restore_optimizer", self.lightning_restore_optimizer)
+        self._use_orig_params = self.pls_handle.kwargs.get("use_orig_params", False)
         self._prune_nodecay()
         self._validate_awp_overrides()
         if is_overridden("configure_sharded_model", self.pl_module):
@@ -230,7 +238,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         for optimizer, opt_state in zip(self.pls_handle.optimizers, optimizer_states):
             optimizer.load_state_dict(opt_state)
 
-    def fts_optim_view(self, orig_pl: List) -> List:
+    def fts_optim_transform(self, orig_pl: List, inspect_only: bool = False) -> List:
         """Because FSDP performs parameter transformations that cause the current.
 
         :external+torch:class:`~torch.optim.Optimizer`'s view of parameter names to diverge from the original parameter
@@ -238,21 +246,27 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
         Args:
             orig_pl (List): The original parameter name list before FSDP's transformation of them.
+            inspect_only (bool): Whether to use the specified transform in read-only (i.e. ``inspect_only``) mode,
+                avoiding any persistent state transformation that may accompany normal usage. Typically useful for state
+                inspection and validation contexts.
 
         Returns:
             List: A transformed parameter name list that matches the current
             :external+torch:class:`~torch.optim.Optimizer`'s view of them after FSDP's transformation of the original
             parameter names.
         """
-        return self.fsdp_param_transform(orig_pl)
+        return self.fsdp_param_transform(orig_pl, inspect_only)
 
-    def fsdp_param_transform(self, orig_thaw_pl: List) -> List:
+    def fsdp_param_transform(self, orig_thaw_pl: List, inspect_only: bool) -> List:
         """The parameter transformation function currently used by
-        :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_view` to transform original
+        :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_transform` to transform original
         parameter lists for optimizer operations.
 
         Args:
             orig_thaw_pl (List): The original parameter name list before FSDP's transformation of them.
+            inspect_only (bool): Whether to use the specified transform in read-only (i.e. ``inspect_only``) mode,
+                avoiding any persistent state transformation that may accompany normal usage. Typically useful for state
+                inspection and validation contexts.
 
         Returns:
             List: A transformed parameter name list that matches the current
@@ -260,11 +274,44 @@ class FSDPStrategyAdapter(StrategyAdapter):
             parameter names.
         """
         flat_next_tl = {self._fsdp_unflat_to_flat_mapping[p] for p in orig_thaw_pl}
+        if self._use_orig_params and not inspect_only:
+            self._flat_param_thaw(flat_next_tl)
         return [n for n, p in self.pl_module.named_parameters() if p in flat_next_tl]
+
+    def _flat_param_thaw(self, flat_next_tl: Set) -> None:
+        """For FSDP modules that have been configured with ``_use_orig_params`` set to ``True``, this method
+        ensures that the ``FlatParameter`` objects containing the logically original ``Parameter`` objects require
+        grad when one or more of those contained original parameters are transformed for optimizer operations.
+
+        Args:
+            flat_next_tl (Set): The set of original ``Parameter`` s to transform for optimizer operations. These should
+            be ``Parameter`` objects rather than ``FlatParameter`` objects because ``_use_orig_params`` is ``True`` in
+            this context.
+        """
+        use_orig_flat_params_mods = set()
+        for m in self.pl_module.modules():
+            is_fsdp_managed = getattr(m, "_is_fsdp_managed_module", False)
+            if is_fsdp_managed and m._fsdp_use_orig_params and hasattr(m, FLAT_PARAM):
+                use_orig_flat_params_mods.add(m)
+        flat_params_to_thaw = set()
+        for m in use_orig_flat_params_mods:
+            for p in flat_next_tl:
+                if any([p is ofp for ofp in m._flat_param._params]):  # type: ignore[union-attr]
+                    flat_params_to_thaw.add((m, getattr(m, FLAT_PARAM)))
+        thawed_fp_mods = set()
+        for fpm, fp in flat_params_to_thaw:
+            fp.requires_grad = True
+            thawed_fp_mods.add(fpm)
+        thawed_fp_fqns = [n + "." + FLAT_PARAM for n, m in self.pl_module.named_modules() if m in thawed_fp_mods]
+        rank_zero_debug(
+            "Since FSDP has been configured with `use_orig_params` set to `True`, the following `FlatParameter`s"
+            " have been thawed because they contain the original parameters you specified be thawed."
+            f" `FlatParameters` thawed: {os.linesep}{pformat(thawed_fp_fqns)}"
+        )
 
     def logical_param_translation(self, param_names: List) -> List:
         """Effectively the reverse transformation of
-        :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_view`.
+        :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_transform`.
 
         Args:
             param_names (List): A parameter name list from the current :external+torch:class:`~torch.optim.Optimizer`'s
@@ -580,14 +627,14 @@ class FSDPStrategyAdapter(StrategyAdapter):
         self._init_fsdp_param_map()
         _, self.fts_handle._fts_state._curr_thawed_params = self.exec_ft_phase(
             self.pl_module,
-            thaw_pl=self.fts_optim_view(self.fts_handle.ft_schedule[0]["params"]),
+            thaw_pl=self.fts_optim_transform(self.fts_handle.ft_schedule[0]["params"]),
             init_thaw=True,
         )
 
     def _init_fsdp_param_map(self) -> None:
         """Generate parameter-level bi-directional translations between unflat (original) and flat (FSDP-flattened)
         parameters."""
-        self._fsdp_flat_to_unflat_mapping = _get_param_to_unflat_param_names(self.pl_module)
+        self._fsdp_flat_to_unflat_mapping = _get_params_to_fqns(self.pl_module)
         self._fsdp_unflat_to_flat_mapping = {
             up: fpn for fpn, upl in self._fsdp_flat_to_unflat_mapping.items() for up in upl
         }
@@ -630,11 +677,46 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         auto_wrap_policy_handle = _ConfigAutoWrap.kwargs.pop("auto_wrap_policy", None)
         override_ids = [id(m) for n, m in self.pl_module.named_modules() if n in self.awp_overrides]
-        lambda_fn = lambda m: id(m) in override_ids  # noqa: E731
-        name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda_fn)
-        name_based_override_or_policy = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
+        name_based_override_or_policy: Union[NameDrivenPolicy, Callable]
+        if _TORCH_GREATER_EQUAL_2_0:
+            name_based_override_or_policy = NameDrivenPolicy(auto_wrap_policy_handle, override_ids=override_ids)
+        else:
+            name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda m: id(m) in override_ids)
+            name_based_override_or_policy = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
         _ConfigAutoWrap.kwargs["auto_wrap_policy"] = name_based_override_or_policy
         try:
             yield
         finally:
             _ConfigAutoWrap.kwargs["auto_wrap_policy"] = auto_wrap_policy_handle
+
+    fts_optim_inspect = partialmethod(fts_optim_transform, inspect_only=True)
+
+
+class NameDrivenPolicy(_FSDPPolicy):
+    """An auto-wrapping policy extension that applies module name-based override directives on top of a given base
+    ``auto_wrap_policy``.
+
+    The composition of module name-based wrapping directives with a given ``auto_wrap_policy`` is
+    achieved here by:
+        1. Generating an object id-based module name mapping lambda and passing it to the standard
+            ``lambda_auto_wrap_policy``.
+        2. Composing the user's provided ``auto_wrap_policy`` with the above name-based policy using the standard
+            ``_or_policy``.
+    """
+
+    def __init__(self, auto_wrap_policy_handle: Union[Callable, _FSDPPolicy], override_ids: List):
+        """Compose the provided ``auto_wrap_policy`` with any provided override directives.
+
+        Args:
+            auto_wrap_policy_handle (Union[Callable, _FSDPPolicy]): The user's base ``auto_wrap_policy``.
+            override_ids (List): Object ids of the desired modules to wrap even if the provided ``auto_wrap_policy``
+                otherwise would not dictate so.
+        """
+        if isinstance(auto_wrap_policy_handle, _FSDPPolicy):
+            auto_wrap_policy_handle = auto_wrap_policy_handle.policy
+        name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda m: id(m) in override_ids)
+        self._policy: Callable = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
+
+    @property
+    def policy(self) -> Callable:
+        return self._policy
