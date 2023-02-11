@@ -193,11 +193,10 @@ class StrategyAdapter:
         # certain lr_scheduler variables (including type-dependent ones like ``min_lrs`` and ``lr_lambdas``)
         for lrs_cfg in trainer.lr_scheduler_configs:
             lrs_cfg.scheduler._last_lr = [group["lr"] for group in lrs_cfg.scheduler.optimizer.param_groups]
-            assert lrs_cfg.opt_idx is not None
             if isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
-                lrs_cfg.scheduler.min_lrs = lrs_cfg.scheduler.min_lrs[orig_num_pgs[lrs_cfg.opt_idx] :]
+                lrs_cfg.scheduler.min_lrs = lrs_cfg.scheduler.min_lrs[orig_num_pgs[0] :]
             elif hasattr(lrs_cfg.scheduler, "lr_lambdas"):
-                lrs_cfg.scheduler.lr_lambdas = lrs_cfg.scheduler.lr_lambdas[orig_num_pgs[lrs_cfg.opt_idx] :]
+                lrs_cfg.scheduler.lr_lambdas = lrs_cfg.scheduler.lr_lambdas[orig_num_pgs[0] :]
         p0_override_msg = self.fts_handle.PHASE_0_DIVERGENCE_MSG + (
             "Since `enforce_phase0_params` is currently set to `True` (the default), FinetuningScheduler has"
             " reconfigured the optimizer to optimize the parameters (and only those parameters) scheduled to be"

@@ -304,6 +304,12 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             assert self.pl_module.trainer.early_stopping_callback is not None
             self.pl_module.trainer.early_stopping_callback.final_phase = True  # type: ignore[attr-defined]
         assert self._fts_state._ft_sync_objects is not None
+        if self._fts_state._resume_fit_from_ckpt:
+            pass
+            # ready_epoch = self.pl_module.trainer.fit_loop.epoch_progress.current.ready
+            # self.pl_module.trainer.fit_loop.epoch_progress.processed = ready_epoch
+            # self.pl_module.trainer.fit_loop.epoch_progress.increment_processed()
+            # self.pl_module.trainer.fit_loop.epoch_progress.increment_completed()
         FinetuningScheduler.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
         rank_zero_info(f"Multi-phase fine-tuned training continuing at level {self.curr_depth}.")
         if self.depth_remaining == 0:
@@ -418,7 +424,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         checkpoint_connector.restore_precision_plugin_state()
 
         # checkpoint_connector.restore_training_state() would restore loops here
-        # self.restore_loops()
+        # checkpoint_connector.restore_loops()
 
         assert self.pl_module.trainer.state.fn is not None
         if self.pl_module.trainer.state.fn == TrainerFn.FITTING:

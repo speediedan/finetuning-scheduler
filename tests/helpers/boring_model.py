@@ -12,11 +12,16 @@
 # Initially based on https://bit.ly/3oQ8Vqf
 import re
 from functools import partial
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from warnings import WarningMessage
 
 import torch
+from lightning_fabric.utilities.types import _TORCH_LRSCHEDULER
 from pytorch_lightning import LightningDataModule, LightningModule
+from pytorch_lightning.core.optimizer import LightningOptimizer
+from pytorch_lightning.utilities.types import STEP_OUTPUT
+from torch import Tensor
+from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Dataset, IterableDataset, Subset
 
@@ -127,51 +132,58 @@ class BoringModel(LightningModule):
         or:
 
         model = BaseTestModel()
-        model.training_epoch_end = None
+        model.training_step_end = None  # disable hook
         """
         super().__init__()
         self.layer = torch.nn.Linear(32, 2)
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         return self.layer(x)
 
-    def loss(self, batch, prediction):
+    def loss(self, preds: Tensor, labels: Optional[Tensor] = None) -> Tensor:
+        if labels is None:
+            labels = torch.ones_like(preds)
         # An arbitrary loss to have a loss that updates the model weights during `Trainer.fit` calls
-        return torch.nn.functional.mse_loss(prediction, torch.ones_like(prediction))
+        return torch.nn.functional.mse_loss(preds, labels)
 
-    def step(self, x):
-        x = self(x)
-        out = torch.nn.functional.mse_loss(x, torch.ones_like(x))
-        return out
-
-    def training_step(self, batch, batch_idx):
+    def step(self, batch: Tensor) -> Tensor:
         output = self(batch)
-        loss = self.loss(batch, output)
-        return {"loss": loss}
+        return self.loss(output)
 
-    def training_step_end(self, training_step_outputs):
-        return training_step_outputs
+    def training_step(self, batch: Tensor, batch_idx: int) -> STEP_OUTPUT:
+        return {"loss": self.step(batch)}
 
-    def training_epoch_end(self, outputs) -> None:
-        torch.stack([x["loss"] for x in outputs]).mean()
+    # def training_step(self, batch, batch_idx):
+    #     output = self(batch)
+    #     loss = self.loss(batch, output)
+    #     return {"loss": loss}
 
-    def validation_step(self, batch, batch_idx):
-        output = self(batch)
-        loss = self.loss(batch, output)
-        return {"x": loss}
+    def training_step_end(self, training_step_output: STEP_OUTPUT) -> STEP_OUTPUT:
+        return training_step_output
 
-    def validation_epoch_end(self, outputs) -> None:
-        torch.stack([x["x"] for x in outputs]).mean()
+    def validation_step(self, batch: Tensor, batch_idx: int) -> Optional[STEP_OUTPUT]:
+        return {"x": self.step(batch)}
 
-    def test_step(self, batch, batch_idx):
-        output = self(batch)
-        loss = self.loss(batch, output)
-        return {"y": loss}
+    # def validation_step(self, batch, batch_idx):
+    #     output = self(batch)
+    #     loss = self.loss(batch, output)
+    #     return {"x": loss}
 
-    def test_epoch_end(self, outputs) -> None:
-        torch.stack([x["y"] for x in outputs]).mean()
+    # def on_validation_epoch_end(self, outputs) -> None:
+    #     torch.stack([x["x"] for x in outputs]).mean()
 
-    def configure_optimizers(self):
+    # def test_step(self, batch, batch_idx):
+    #     output = self(batch)
+    #     loss = self.loss(batch, output)
+    #     return {"y": loss}
+
+    def test_step(self, batch: Tensor, batch_idx: int) -> Optional[STEP_OUTPUT]:
+        return {"y": self.step(batch)}
+
+    # def test_epoch_end(self, outputs) -> None:
+    #     torch.stack([x["y"] for x in outputs]).mean()
+
+    def configure_optimizers(self) -> Tuple[List[torch.optim.Optimizer], List[_TORCH_LRSCHEDULER]]:
         optimizer = torch.optim.SGD(self.layer.parameters(), lr=0.1)
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
         return [optimizer], [lr_scheduler]
@@ -228,10 +240,19 @@ class ManualOptimBoringModel(BoringModel):
         super().__init__()
         self.automatic_optimization = False
 
-    def training_step(self, batch, batch_idx):
+    # def training_step(self, batch, batch_idx):
+    #     opt = self.optimizers()
+    #     output = self(batch)
+    #     loss = self.loss(batch, output)
+    #     opt.zero_grad()
+    #     self.manual_backward(loss)
+    #     opt.step()
+    #     return loss
+
+    def training_step(self, batch: Tensor, batch_idx: int) -> STEP_OUTPUT:
         opt = self.optimizers()
-        output = self(batch)
-        loss = self.loss(batch, output)
+        assert isinstance(opt, (Optimizer, LightningOptimizer))
+        loss = self.step(batch)
         opt.zero_grad()
         self.manual_backward(loss)
         opt.step()

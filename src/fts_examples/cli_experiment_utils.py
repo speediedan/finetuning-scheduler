@@ -112,6 +112,7 @@ def get_env_info():
         "cmake_version": collect_env.get_cmake_version(run_lambda),
         "caching_allocator_config": collect_env.get_cachingallocator_config(),
         "is_xnnpack_available": collect_env.is_xnnpack_available(),
+        "cpu_info": collect_env.get_cpu_info(run_lambda),
     }
     if _TORCH_GREATER_EQUAL_1_13:
         # get_cuda_module_loading_config() initializes CUDA which we want to avoid so we bypass this inspection

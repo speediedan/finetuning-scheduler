@@ -347,6 +347,8 @@ class RteBoolqModule(pl.LightningModule):
                 "default".
         """
         super().__init__()
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
         if task_name not in TASK_NUM_LABELS.keys():
             rank_zero_warn(f"Invalid task_name {task_name!r}. Proceeding with the default task: {DEFAULT_TASK!r}")
             task_name = DEFAULT_TASK
@@ -375,13 +377,15 @@ class RteBoolqModule(pl.LightningModule):
     def forward(self, **inputs):
         return self.model(**inputs)
 
-    def training_step(self, batch, batch_idx):
-        outputs = self(**batch)
-        loss = outputs[0]
-        self.log("train_loss", loss)
+    def training_step(self, batch, batch_idx: int):
+        loss = self(**batch)[0]
+        self.training_step_outputs.append(loss)
+        self.log("train_loss", loss, prog_bar=True)
         return loss
 
-    def training_epoch_end(self, outputs: List[Any]) -> None:
+    def on_train_epoch_end(self):
+        if self.training_step_outputs:
+            self.training_step_outputs.clear()
         if self.finetuningscheduler_callback:
             self.log("finetuning_schedule_depth", float(self.finetuningscheduler_callback.curr_depth))
 
@@ -393,9 +397,13 @@ class RteBoolqModule(pl.LightningModule):
         elif self.num_labels == 1:
             preds = logits.squeeze()
         labels = batch["labels"]
+        self.validation_step_outputs.append(val_loss)
         self.log("val_loss", val_loss, prog_bar=True)
         metric_dict = self.metric.compute(predictions=preds, references=labels)
         self.log_dict(metric_dict, prog_bar=True)
+
+    def on_validation_epoch_end(self):
+        self.validation_step_outputs.clear()
 
     def _init_param_groups(self) -> List[Dict]:
         """Initialize the parameter groups. Used to ensure weight_decay is not applied to our specified bias

@@ -891,7 +891,6 @@ class ScheduleParsingMixin(ABC):
         if "pl_lrs_cfg" in new_lr_scheduler.keys():
             new_lr_scheduler["pl_lrs_cfg"] = self._update_pl_lrs(new_lr_scheduler["pl_lrs_cfg"], lrs_class=lrs_class)
         new_lrs_config = LRSchedulerConfig(
-            opt_idx=0,
             scheduler=lrs_class(
                 optimizer=optimizer, **lr_scheduler_init.get("init_args", {})
             ),  # type: ignore[arg-type]

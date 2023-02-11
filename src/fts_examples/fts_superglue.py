@@ -41,6 +41,8 @@ import torch
 from packaging.version import Version
 from pytorch_lightning.cli import LightningCLI
 from pytorch_lightning.utilities import rank_zero_warn
+from pytorch_lightning.utilities.types import STEP_OUTPUT
+from torch import Tensor
 from torch.utils.data import DataLoader
 
 import finetuning_scheduler as fts
@@ -216,6 +218,8 @@ class RteBoolqModule(pl.LightningModule):
                 reproducibility. Defaults to ``True``.
         """
         super().__init__()
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
         if task_name not in TASK_NUM_LABELS.keys():
             rank_zero_warn(f"Invalid task_name {task_name!r}. Proceeding with the default task: {DEFAULT_TASK!r}")
             task_name = DEFAULT_TASK
@@ -246,9 +250,9 @@ class RteBoolqModule(pl.LightningModule):
     def forward(self, **inputs):
         return self.model(**inputs)
 
-    def training_step(self, batch, batch_idx):
-        outputs = self(**batch)
-        loss = outputs[0]
+    def training_step(self, batch: Tensor, batch_idx: int) -> STEP_OUTPUT:
+        loss = self(**batch)[0]
+        self.training_step_outputs.append(loss)
         self.log("train_loss", loss, sync_dist=True)
         return loss
 
@@ -259,7 +263,11 @@ class RteBoolqModule(pl.LightningModule):
                 step=self.global_step,
             )
 
-    def validation_step(self, batch, batch_idx, dataloader_idx=0):
+    def on_train_epoch_end(self):
+        if self.training_step_outputs:
+            self.training_step_outputs.clear()
+
+    def validation_step(self, batch: Tensor, batch_idx: int, dataloader_idx=0) -> Optional[STEP_OUTPUT]:
         outputs = self(**batch)
         val_loss, logits = outputs[:2]
         if self.num_labels >= 1:
@@ -267,10 +275,15 @@ class RteBoolqModule(pl.LightningModule):
         elif self.num_labels == 1:
             preds = logits.squeeze()
         labels = batch["labels"]
+        self.validation_step_outputs.append(val_loss)
         self.log("val_loss", val_loss, prog_bar=True, sync_dist=True)
         metric_dict = self.metric.compute(predictions=preds, references=labels)
         self.log_dict(metric_dict, prog_bar=True, sync_dist=True)
 
+    def on_validation_epoch_end(self):
+        self.validation_step_outputs.clear()
+
+    # TODO: remove this function for 2.0 example version once `enforce_p0_params` is leveraged in optim config
     def _init_param_groups(self) -> List[Dict]:
         """Initialize the parameter groups. Used to ensure weight_decay is not applied to our specified bias
         parameters when we initialize the optimizer.

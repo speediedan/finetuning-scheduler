@@ -145,19 +145,39 @@ class FinetuningSchedulerBoringModel(BoringModel):
     ):
         super().__init__()
         self.layer = nn.Sequential(nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 2))
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
+        self.test_step_outputs = []
         self.diverge_on_epoch = diverge_on_epoch
         self.no_decay = no_decay
         self.weight_decay = weight_decay
         self.init_lr_key = init_lr_key
         self.p0_params = p0_params
 
+    def training_step(self, batch, batch_idx: int):
+        loss = self.step(batch)
+        self.training_step_outputs.append(loss)
+        return {"loss": loss}
+
+    def on_train_epoch_end(self):
+        if self.training_step_outputs:
+            epoch_average = torch.stack(self.training_step_outputs).mean()
+            self.log("training_epoch_average", epoch_average)
+            self.training_step_outputs.clear()
+
     def validation_step(self, batch, batch_idx):
         output = self(batch)
         loss = self.val_loss(batch, output)
+        self.validation_step_outputs.append(loss)
         # we would normally use sync_dist for epoch-only logging in a distributed context but leaving it `False` here
         # to test FTS transition behavior when the test model is used in a distributed context
         self.log("val_loss", loss, prog_bar=False)
         return {"x": loss}
+
+    def on_validation_epoch_end(self):
+        epoch_average = torch.stack(self.validation_step_outputs).mean()
+        self.log("validation_epoch_average", epoch_average)
+        self.validation_step_outputs.clear()
 
     def val_loss(self, batch, prediction):
         # Make arbitrary val_loss the inverse of train_loss so val_loss diverges when desired
@@ -279,6 +299,7 @@ class FitStartOnlyFTS(TestFinetuningScheduler):
 
 class MultiOptFTSBoringModel(FinetuningSchedulerBoringModel):
     def configure_optimizers(self):
+        self.automatic_optimization = False
         parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
         optimizer0 = torch.optim.SGD(parameters, lr=1e-3)
         optimizer1 = torch.optim.SGD(parameters, lr=1e-3)
@@ -1869,7 +1890,7 @@ def test_early_stopping_on_non_finite_monitor(tmpdir, stop_value):
     expected_stop_epoch = 2
 
     class CurrentModel(FinetuningSchedulerBoringModel):
-        def validation_epoch_end(self, outputs):
+        def on_validation_epoch_end(self):
             val_loss = losses[self.current_epoch]
             self.log("val_loss", val_loss, sync_dist=True)
 
@@ -1896,7 +1917,7 @@ def test_early_stopping_on_non_finite_monitor(tmpdir, stop_value):
 )
 def test_early_stopping_thresholds(tmpdir, stopping_threshold, divergence_theshold, losses, expected_epoch):
     class CurrentModel(FinetuningSchedulerBoringModel):
-        def validation_epoch_end(self, outputs):
+        def on_validation_epoch_end(self):
             val_loss = losses[self.current_epoch]
             self.log("abc", val_loss, sync_dist=True)
 
