@@ -11,13 +11,13 @@
 # limitations under the License.
 # initially based on https://bit.ly/3pdAf1G
 
-ARG CUDA_VERSION=11.7.1
+ARG CUDA_VERSION=11.8.0
 ARG OS_VER=ubuntu20.04
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
 ARG PYTHON_VERSION=3.10
-ARG PYTORCH_VERSION=1.13.1
+ARG PYTORCH_VERSION=2.0.0
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
 
@@ -53,10 +53,11 @@ RUN apt-get update -qq --fix-missing  && \
         python${PYTHON_VERSION} \
         python${PYTHON_VERSION}-distutils \
         python${PYTHON_VERSION}-dev \
+        python3-pip \
     && \
     update-alternatives --install /usr/bin/python${PYTHON_VERSION%%.*} python${PYTHON_VERSION%%.*} /usr/bin/python${PYTHON_VERSION} 1 && \
     update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1 && \
-# Cleaning
+    # Cleaning
     apt-get autoremove -y && \
     apt-get clean && \
     rm -rf /root/.cache && \
@@ -68,11 +69,17 @@ COPY ./requirements/ ./requirements/
 ENV PYTHONPATH=/usr/lib/python${PYTHON_VERSION}/site-packages
 
 RUN \
-    wget https://bootstrap.pypa.io/get-pip.py --progress=bar:force:noscroll --no-check-certificate && \
+    wget https://bootstrap.pypa.io/get-pip.py --progress=bar:force:noscroll --no-check-certificate | python${PYTHON_VERSION} && \
     python${PYTHON_VERSION} get-pip.py && \
     rm get-pip.py && \
+    python${PYTHON_VERSION} -m pip install --upgrade pip  && \
     # Disable cache
     pip config set global.cache-dir false && \
+    pip install virtualenv && \
+    mkdir /tmp/venvs && \
+    python -m virtualenv -p python3.10 /tmp/venvs/fts_dev && \
+    chmod -R 777 /tmp/venvs/fts_dev && \
+    . /tmp/venvs/fts_dev/bin/activate && \
     # set particular PyTorch version by default
     if [[ "${CUST_BUILD}" -eq 0 ]]; then \
         python ./requirements/pl_adjust_versions.py requirements/base.txt ${PYTORCH_VERSION}; \
@@ -81,7 +88,8 @@ RUN \
     else \
         # or target a specific cuda build of latest stable packages
         # pip install torch==1.10.2+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
-        pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu117; \
+        # pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu118; \
+        pip install --pre torch torchvision -f https://download.pytorch.org/whl/nightly/cu118/torch_nightly.html; \
     fi && \
     # Install all requirements
     pip install -r requirements/devel.txt --no-cache-dir && \
@@ -90,11 +98,13 @@ RUN \
     rm -rf requirements.* requirements/
 
 RUN \
+    . /tmp/venvs/fts_dev/bin/activate && \
     CUDA_VERSION_MAJOR=$(python -c "import torch; print(torch.version.cuda.split('.')[0])") && \
     py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.10'.split('.')))")
 
 RUN \
     # Show what we have
+    . /tmp/venvs/fts_dev/bin/activate && \
     pip --version && \
     pip list && \
     python -c "import sys; ver = sys.version_info ; assert f'{ver.major}.{ver.minor}' == '$PYTHON_VERSION', ver" && \

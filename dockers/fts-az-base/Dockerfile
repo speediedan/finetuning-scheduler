@@ -11,17 +11,17 @@
 # limitations under the License.
 
 ARG PYTHON_VERSION=3.10
-ARG PYTORCH_VERSION=1.13.1
-ARG LIGHTNING_VERSION=1.9
+ARG PYTORCH_VERSION=2.0.0
+ARG LIGHTNING_VERSION=2.0
 ARG CUST_BASE
 
 FROM speediedan/finetuning-scheduler:base-${CUST_BASE}py${PYTHON_VERSION}-pt${PYTORCH_VERSION}-pl${LIGHTNING_VERSION}
 
 LABEL maintainer="Dan Dale <https://github.com/speediedan>"
 
-RUN \
-    pip install -U pip && \
-    ln -s /usr/local/bin/pip /usr/bin/pip
+# RUN \
+#     pip install -U pip && \
+#     ln -s /usr/local/bin/pip /usr/bin/pip
 
 RUN useradd -c 'azpl_init user' -d /home/azpl_init -m -k /etc/skel -s /bin/bash -ou 0 -g 0 azpl_init
 

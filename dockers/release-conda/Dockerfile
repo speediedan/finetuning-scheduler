@@ -10,13 +10,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG CUDA_VERSION=11.7
+ARG CUDA_VERSION=11.8
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04
 
-ARG CUDATOOLKIT_VERSION=11.7
+ARG CUDATOOLKIT_VERSION=11.8
 ARG PYTHON_VERSION=3.10
-ARG PYTORCH_VERSION=1.13.1
+ARG PYTORCH_VERSION=2.0.0
 ARG CONDA_VERSION=4.13.0
 
 SHELL ["/bin/bash", "-c"]
