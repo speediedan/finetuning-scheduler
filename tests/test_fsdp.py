@@ -194,16 +194,23 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
         )
         return torch.nn.functional.mse_loss(prediction, val_func)
 
-    def on_train_batch_end(self, outputs, batch, batch_idx) -> None:
+    def validation_step(self, batch, batch_idx):
+        output = self(batch)
+        loss = self.val_loss(batch, output)
+        self.validation_step_outputs.append(loss)
+        self.log("val_loss", loss, prog_bar=False, sync_dist=True)
+        return {"x": loss}
+
+    def on_train_batch_end(self, *_) -> None:
         self._assert_layer_fsdp_instance()
 
-    def on_test_batch_end(self, outputs, batch, batch_idx, dataloader_idx) -> None:
+    def on_test_batch_end(self, *_) -> None:
         self._assert_layer_fsdp_instance()
 
-    def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx) -> None:
+    def on_validation_batch_end(self, *_) -> None:
         self._assert_layer_fsdp_instance()
 
-    def on_predict_batch_end(self, outputs, batch, batch_idx, dataloader_idx) -> None:
+    def on_predict_batch_end(self, *_) -> None:
         self._assert_layer_fsdp_instance()
 
     def _assert_layer_fsdp_instance(self) -> None:
@@ -213,7 +220,7 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
             assert isinstance(self.layer, torch.nn.Sequential)
         if self.precision_key == "auto_16":
             assert isinstance(self.trainer.strategy.precision_plugin, FSDPMixedPrecisionPlugin)
-            precision = torch.float16 if self.trainer.precision == "16" else torch.bfloat16
+            precision = torch.float16 if self.trainer.precision == "16-mixed" else torch.bfloat16
         # ensure our ignored module is not wrapped
         for i in self.fsdp_mask["unwrapped_mods"]:
             assert not isinstance(self.layer[i], FullyShardedDataParallel)
@@ -558,7 +565,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         ("unmatched_awp_overrides", base_model, warn_cust_awp, True, 0, wrap_5_7, awp_5_9, *nones(3)),
         ("cust_awp_prec", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
         pytest.param(
-            "cust_awp_prec_pt1x", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4), marks=RunIf(max_torch="1.13.1")
+            "cust_awp_prec_pt1x", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4), marks=RunIf(max_torch="2.0.0")
         ),
         ("enforceP0_cust_awp_prec", enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
         ("batch_norm_auto_prec", BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(4)),
@@ -688,7 +695,7 @@ def map_component_cfgs(model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precis
     model_cfg = model_cfg or {}
     fts_cfg = fts_cfg or {}
     strategy_cfg = strategy_cfg or {"cpu_offload": True}
-    precision_opts = {"precision": 16} if use_precision else {}
+    precision_opts = {"precision": "16-mixed"} if use_precision else {}
     return model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts
 
 

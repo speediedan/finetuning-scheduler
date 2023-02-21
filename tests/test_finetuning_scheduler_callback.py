@@ -161,8 +161,8 @@ class FinetuningSchedulerBoringModel(BoringModel):
 
     def on_train_epoch_end(self):
         if self.training_step_outputs:
-            epoch_average = torch.stack(self.training_step_outputs).mean()
-            self.log("training_epoch_average", epoch_average)
+            # epoch_average = torch.stack(self.training_step_outputs).mean()
+            # self.log("training_loss_epoch_avg", epoch_average)
             self.training_step_outputs.clear()
 
     def validation_step(self, batch, batch_idx):
@@ -175,8 +175,8 @@ class FinetuningSchedulerBoringModel(BoringModel):
         return {"x": loss}
 
     def on_validation_epoch_end(self):
-        epoch_average = torch.stack(self.validation_step_outputs).mean()
-        self.log("validation_epoch_average", epoch_average)
+        # epoch_average = torch.stack(self.validation_step_outputs).mean()
+        # self.log("val_loss_epoch_avg", epoch_average)
         self.validation_step_outputs.clear()
 
     def val_loss(self, batch, prediction):
@@ -1937,21 +1937,6 @@ def test_early_stopping_thresholds(tmpdir, stopping_threshold, divergence_thesho
     )
     trainer.fit(model)
     assert trainer.current_epoch - 1 == expected_epoch, "early_stopping failed"
-
-
-@RunIf(standalone=True, min_cuda_gpus=2)
-def test_fts_multi_dp(tmpdir):
-    """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'dp'
-    distributed context."""
-    seed_everything(42)
-    model = FinetuningSchedulerBoringModel()
-    callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="dp", devices=2)
-    finetuningscheduler_callback = get_fts(trainer)
-    trainer.fit(model)
-    assert finetuningscheduler_callback.depth_remaining == 0
-    assert finetuningscheduler_callback.curr_depth == 3
-    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
 @RunIf(standalone=True, min_cuda_gpus=2)

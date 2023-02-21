@@ -1395,6 +1395,20 @@ class ScheduleImplMixin(ABC):
             for o, a in zip(objs, attrs):
                 setattr(o, a, agg)
 
+    def _maybe_sync_loops(self) -> None:
+        """Synchronize total and current progress loops for the restart of a multi-phase training session."""
+        assert self.pl_module._trainer is not None
+        fit_loop = self.pl_module._trainer.fit_loop
+        if fit_loop.epoch_loop.restarting:  # if ``True``, we haven't completed resetting state
+            # since we're restoring from a checkpoint saved prior to processed and completed incrementing
+            fit_loop.epoch_progress.increment_processed()
+            fit_loop.epoch_progress.increment_completed()
+            # ensure current and total are synchronized for the continuation of our multi-phase fine-tuning session
+            fit_loop.epoch_progress.current = copy(fit_loop.epoch_progress.total)
+            # restarting outside of epoch end is not supported so the assumption here is to start with a fresh epoch
+            fit_loop.epoch_loop.restarting = False
+            fit_loop.epoch_loop.val_loop._restarting = False
+
     def _inspect_fts_opt_state(self) -> Tuple:
         """Distills relevant initialized optimizer state for validation prior to fit start.
 

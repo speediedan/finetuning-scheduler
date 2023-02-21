@@ -302,7 +302,6 @@ configurations.
         ``fsdp``, ``fsdp_cpu_offload``
       * :external+pl:class:`~pytorch_lightning.strategies.ddp_spawn.DDPSpawnStrategy`: ``ddp_spawn``, ``ddp_fork``,
         ``ddp_notebook``
-      * :external+pl:class:`~pytorch_lightning.strategies.dp.DataParallelStrategy`: ``dp``
 
 .. _supported_lr_schedulers:
 

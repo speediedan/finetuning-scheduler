@@ -258,7 +258,6 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
     @staticmethod
     def _supported_strategy_types() -> Sequence[str]:
         return (
-            "dp",
             "ddp",
             "ddp_find_unused_parameters_false",
             "ddp_spawn",
@@ -305,11 +304,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             self.pl_module.trainer.early_stopping_callback.final_phase = True  # type: ignore[attr-defined]
         assert self._fts_state._ft_sync_objects is not None
         if self._fts_state._resume_fit_from_ckpt:
-            pass
-            # ready_epoch = self.pl_module.trainer.fit_loop.epoch_progress.current.ready
-            # self.pl_module.trainer.fit_loop.epoch_progress.processed = ready_epoch
-            # self.pl_module.trainer.fit_loop.epoch_progress.increment_processed()
-            # self.pl_module.trainer.fit_loop.epoch_progress.increment_completed()
+            # ensure multi-phase training session loops are synchronized for a fresh epoch restart
+            self._maybe_sync_loops()
         FinetuningScheduler.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
         rank_zero_info(f"Multi-phase fine-tuned training continuing at level {self.curr_depth}.")
         if self.depth_remaining == 0:
