@@ -12,7 +12,6 @@
 # limitations under the License.
 # Initially based on https://bit.ly/3L7HOQK
 
-import glob
 import os
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -140,36 +139,20 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     assistant = _load_py_module(name="assistant.py", location=_PATH_ROOT / ".actions")
-
-    local_pkgs = [
-        os.path.basename(p)
-        for p in glob.glob(os.path.join(_INSTALL_PATHS["source"], "*"))
-        if os.path.isdir(p) and not p.endswith(".egg-info")
-    ]
-    print(f"Local package candidates: {local_pkgs}")
-    is_source_install = len(local_pkgs) > 1
-    print(f"Installing from source: {is_source_install}")
-    if is_source_install:
-        if _PACKAGE_NAME is not None and _PACKAGE_NAME not in _PACKAGE_MODES:
-            raise ValueError(f"Unexpected package name: {_PACKAGE_NAME}. Possible choices are: {list(_PACKAGE_MODES)}")
-        use_standalone = _PACKAGE_NAME is not None and _PACKAGE_NAME == "pytorch"
-        if use_standalone:
-            # install standalone
-            mapping = _PACKAGE_MAPPING.copy()
-            assistant.use_standalone_pl(mapping, _INSTALL_PATHS.values())
-            lightning_dep = "pytorch_lightning"
-        else:
-            lightning_dep = "lightning"
-    else:
-        assert len(local_pkgs) > 0
-        # PL as a package is distributed together with Fabric, so in such case there are more than one candidate
-        lightning_dep = "pytorch_lightning" if "pytorch_lightning" in local_pkgs else local_pkgs[0]
+    use_standalone = _PACKAGE_NAME is not None and _PACKAGE_NAME == "pytorch"
+    if _PACKAGE_NAME is not None and _PACKAGE_NAME not in _PACKAGE_MODES:
+        raise ValueError(f"Unexpected package name: {_PACKAGE_NAME}. Possible choices are: {list(_PACKAGE_MODES)}")
     install_msg = "Installing finetuning-scheduler to depend upon"
-    if lightning_dep == "pytorch_lightning":
+    if use_standalone:
+        # install standalone
+        mapping = _PACKAGE_MAPPING.copy()
+        assistant.use_standalone_pl(mapping, _INSTALL_PATHS.values())
+        lightning_dep = "pytorch_lightning"
         install_msg += " the standalone version of Lightning: pytorch-lightning."
     else:
+        lightning_dep = "lightning"
         install_msg += " the default Lightning unified package: lightning."
     print(install_msg)
-    setup_args = _setup_args(lightning_dep == "pytorch_lightning")
+    setup_args = _setup_args(use_standalone)
     setuptools.setup(**setup_args)
     print("Finished setup configuration.")
