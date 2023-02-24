@@ -106,6 +106,17 @@ def copy_replace_imports(
             fo.writelines(lines)
 
 
+def use_standalone_pl(mapping, path_src, path_tests, path_require, path_dockers) -> None:
+    for in_place_path in [path_src, path_tests, path_require, path_dockers]:
+        for _, _ in mapping.items():
+            copy_replace_imports(
+                source_dir=str(in_place_path),
+                source_imports=mapping.keys(),
+                target_imports=mapping.values(),
+                target_dir=str(in_place_path),
+            )
+
+
 # def create_mirror_package(source_dir: str, package_mapping: Dict[str, str]) -> None:
 #     # replace imports and copy the code in-place
 #     mapping = package_mapping.copy()

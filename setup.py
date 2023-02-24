@@ -22,6 +22,7 @@ import setuptools
 import setuptools.command.egg_info
 
 _PACKAGE_NAME = os.environ.get("PACKAGE_NAME")
+_PACKAGE_MODES = ("pytorch", "lightning")
 _PACKAGE_MAPPING = {
     "lightning.pytorch": "pytorch_lightning",
     "lightning.fabric": "lightning_fabric",
@@ -141,26 +142,17 @@ if __name__ == "__main__":
         if os.path.isdir(p) and not p.endswith(".egg-info")
     ]
     print(f"Local package candidates: {local_pkgs}")
-    # is_source_install = len(local_pkgs) > 2
-    is_source_install = len(local_pkgs) > 1  # testing this... TODO: remove
+    is_source_install = len(local_pkgs) > 1
     print(f"Installing from source: {is_source_install}")
     if is_source_install:
-        if _PACKAGE_NAME is not None and _PACKAGE_NAME not in _PACKAGE_MAPPING:
-            raise ValueError(
-                f"Unexpected package name: {_PACKAGE_NAME}. Possible choices are: {list(_PACKAGE_MAPPING)}"
-            )
-        use_standalone = _PACKAGE_MAPPING.get(_PACKAGE_NAME, "lightning") == "pytorch"
+        if _PACKAGE_NAME is not None and _PACKAGE_NAME not in _PACKAGE_MODES:
+            raise ValueError(f"Unexpected package name: {_PACKAGE_NAME}. Possible choices are: {list(_PACKAGE_MODES)}")
+        use_standalone = _PACKAGE_NAME is not None and _PACKAGE_NAME == "pytorch"
         if use_standalone:
             # install standalone
             mapping = _PACKAGE_MAPPING.copy()
-            for in_place_path in [_PATH_SRC, _PATH_TESTS, _PATH_REQUIRE, _PATH_DOCKERS]:
-                for new, previous in mapping.items():
-                    assistant.copy_replace_imports(
-                        source_dir=str(in_place_path),
-                        source_imports=mapping.keys(),
-                        target_imports=mapping.values(),
-                        target_dir=str(in_place_path),
-                    )
+            assistant.use_standalone_pl(mapping, _PATH_SRC, _PATH_TESTS, _PATH_REQUIRE, _PATH_DOCKERS)
+            lightning_dep = "pytorch_lightning"
         else:
             lightning_dep = "lightning"
     else:
@@ -169,13 +161,10 @@ if __name__ == "__main__":
         lightning_dep = "pytorch_lightning" if "pytorch_lightning" in local_pkgs else local_pkgs[0]
     install_msg = "Installing finetuning-scheduler to depend upon"
     if lightning_dep == "pytorch_lightning":
-        install_msg += " the standalone version of Lightning: pytorch_lightning."
+        install_msg += " the standalone version of Lightning: pytorch-lightning."
     else:
         install_msg += " the default Lightning unified package: lightning."
     print(install_msg)
-    # going to install with `setuptools.setup`
-    is_main_pkg = lightning_dep == "lightning"
-    print(f"Installing as the main package: {is_main_pkg}")
     setup_args = _setup_args(lightning_dep == "pytorch_lightning")
     setuptools.setup(**setup_args)
     print("Finished setup configuration.")
