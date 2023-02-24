@@ -15,6 +15,7 @@
 import glob
 import os
 from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict
 
@@ -28,16 +29,17 @@ _PACKAGE_MAPPING = {
     "lightning.fabric": "lightning_fabric",
 }
 
-_PATH_ROOT = os.path.dirname(__file__)
-_PATH_REQUIRE = os.path.join(_PATH_ROOT, "requirements")
-_PATH_DOCKERS = os.path.join(_PATH_ROOT, "dockers")
-_PATH_SRC = os.path.join(_PATH_ROOT, "src")
-_PATH_TESTS = os.path.join(_PATH_ROOT, "tests")
-_CORE_FTS_LOC = os.path.join(_PATH_SRC, "finetuning_scheduler")
+_PATH_ROOT = Path(os.path.abspath(os.path.dirname(__file__)))
+_INSTALL_PATHS = {}
+for p, d in zip(["source", "tests", "require"], ["src", "tests", "requirements"]):
+    _INSTALL_PATHS[p] = _PATH_ROOT / d
+
+_CORE_FTS_LOC = _INSTALL_PATHS["source"] / "finetuning_scheduler"
 
 
 def _load_py_module(name: str, location: str) -> ModuleType:
-    location = os.path.join(location, name)
+    # location = os.path.join(location, name)
+    location = location / name
     spec = spec_from_file_location(name, location)
     assert spec, f"Failed to load module {name} from {location}"
     py = module_from_spec(spec)
@@ -51,11 +53,11 @@ setup_tools = _load_py_module(name="setup_tools.py", location=_CORE_FTS_LOC)
 
 def _prepare_extras() -> Dict[str, Any]:
     extras = {
-        "examples": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="examples.txt"),
-        "extra": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="extra.txt"),
-        "test": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="test.txt"),
-        "ipynb": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="ipynb.txt"),
-        "cli": setup_tools._load_requirements(path_dir=_PATH_REQUIRE, file_name="cli.txt"),
+        "examples": setup_tools._load_requirements(path_dir=_INSTALL_PATHS["require"], file_name="examples.txt"),
+        "extra": setup_tools._load_requirements(path_dir=_INSTALL_PATHS["require"], file_name="extra.txt"),
+        "test": setup_tools._load_requirements(path_dir=_INSTALL_PATHS["require"], file_name="test.txt"),
+        "ipynb": setup_tools._load_requirements(path_dir=_INSTALL_PATHS["require"], file_name="ipynb.txt"),
+        "cli": setup_tools._load_requirements(path_dir=_INSTALL_PATHS["require"], file_name="cli.txt"),
     }
     for ex in ["extra", "examples"]:
         extras[ex].extend(extras["cli"])
@@ -127,18 +129,21 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
     base_reqs = "standalone_base.txt" if standalone else "base.txt"
     # install_requires = setup_tools._load_requirements(_PATH_REQUIRE, file_name=base_reqs, standalone=standalone)
     install_requires = setup_tools._load_requirements(
-        _PATH_REQUIRE, file_name=base_reqs, standalone=standalone, pl_commit="2bd54e460296b343f87480be4048e36b01ea5168"
+        _INSTALL_PATHS["require"],
+        file_name=base_reqs,
+        standalone=standalone,
+        pl_commit="2bd54e460296b343f87480be4048e36b01ea5168",
     )
     base_setup["install_requires"] = install_requires
     return base_setup
 
 
 if __name__ == "__main__":
-    assistant = _load_py_module(name="assistant.py", location=os.path.join(_PATH_ROOT, ".actions"))
+    assistant = _load_py_module(name="assistant.py", location=_PATH_ROOT / ".actions")
 
     local_pkgs = [
         os.path.basename(p)
-        for p in glob.glob(os.path.join(_PATH_SRC, "*"))
+        for p in glob.glob(os.path.join(_INSTALL_PATHS["source"], "*"))
         if os.path.isdir(p) and not p.endswith(".egg-info")
     ]
     print(f"Local package candidates: {local_pkgs}")
@@ -151,7 +156,7 @@ if __name__ == "__main__":
         if use_standalone:
             # install standalone
             mapping = _PACKAGE_MAPPING.copy()
-            assistant.use_standalone_pl(mapping, _PATH_SRC, _PATH_TESTS, _PATH_REQUIRE, _PATH_DOCKERS)
+            assistant.use_standalone_pl(mapping, _INSTALL_PATHS.values())
             lightning_dep = "pytorch_lightning"
         else:
             lightning_dep = "lightning"

@@ -3,6 +3,7 @@ import datetime
 import os
 import re
 import shutil
+from collections.abc import ValuesView
 from os.path import dirname, isfile
 from pprint import pprint
 from typing import List, Optional, Sequence, Tuple
@@ -106,8 +107,8 @@ def copy_replace_imports(
             fo.writelines(lines)
 
 
-def use_standalone_pl(mapping, path_src, path_tests, path_require, path_dockers) -> None:
-    for in_place_path in [path_src, path_tests, path_require, path_dockers]:
+def use_standalone_pl(mapping, src_dirs: ValuesView) -> None:
+    for in_place_path in src_dirs:
         for _, _ in mapping.items():
             copy_replace_imports(
                 source_dir=str(in_place_path),
