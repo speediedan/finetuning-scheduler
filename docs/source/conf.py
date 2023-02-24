@@ -17,8 +17,8 @@ import shutil
 import sys
 from importlib.util import module_from_spec, spec_from_file_location
 
+import lightning.pytorch  # noqa: F401 workaround for TypeError on sphinx import
 import pt_lightning_sphinx_theme
-import pytorch_lightning  # noqa: F401 workaround for TypeError on sphinx import
 
 PATH_HERE = os.path.abspath(os.path.dirname(__file__))
 PATH_ROOT = os.path.join(PATH_HERE, "..", "..")
@@ -339,13 +339,13 @@ import sys
 from typing import Optional
 
 import torch
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 from torch import nn
 from torch.utils.data import IterableDataset, DataLoader, Dataset
-from pytorch_lightning import LightningDataModule, LightningModule, Trainer, seed_everything
-from pytorch_lightning.callbacks import Callback
-from pytorch_lightning.cli import _JSONARGPARSE_SIGNATURES_AVAILABLE as _JSONARGPARSE_AVAILABLE
-from pytorch_lightning.utilities import (
+from lightning.pytorch import LightningDataModule, LightningModule, Trainer, seed_everything
+from lightning.pytorch.callbacks import Callback
+from lightning.pytorch.cli import _JSONARGPARSE_SIGNATURES_AVAILABLE as _JSONARGPARSE_AVAILABLE
+from lightning.pytorch.utilities import (
     _TORCHVISION_AVAILABLE,
 )
 """

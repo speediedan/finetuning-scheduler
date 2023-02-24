@@ -33,6 +33,6 @@ trainer:
   strategy: ddp_find_unused_parameters_false
   precision: 16-mixed
   logger:
-    class_path: pytorch_lightning.loggers.TensorBoardLogger
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
       save_dir: lightning_logs

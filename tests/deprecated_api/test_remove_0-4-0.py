@@ -12,7 +12,7 @@
 # Initially based on https://bit.ly/35NIc6J
 """Test deprecated functionality which will be removed in v0.4.0."""
 # import pytest
-# from pytorch_lightning import Trainer
+# from lightning.pytorch import Trainer
 
 
 # @pytest.mark.parametrize("fn_prefix", ["validated", "tested", "predicted"])

@@ -51,10 +51,10 @@ __all__ = [
 #     _logger.addHandler(logging.StreamHandler())
 #     _logger.propagate = False
 
-# from pytorch_lightning.callbacks import Callback
-# from pytorch_lightning.core import LightningDataModule, LightningModule
-# from pytorch_lightning.trainer import Trainer
-# from pytorch_lightning.utilities.seed import seed_everything
+# from lightning.pytorch.callbacks import Callback
+# from lightning.pytorch.core import LightningDataModule, LightningModule
+# from lightning.pytorch.trainer import Trainer
+# from lightning.pytorch.utilities.seed import seed_everything
 
 # __all__ = ["Trainer", "LightningDataModule", "LightningModule", "Callback", "seed_everything"]
 

@@ -20,7 +20,11 @@ _TH = os.path.join(_PROJECT_ROOT, "tests/helpers")
 
 
 def _load_requirements(
-    path_dir: str, file_name: str = "base.txt", comment_char: str = "#", pl_commit: Optional[str] = None
+    path_dir: str,
+    file_name: str = "base.txt",
+    standalone: bool = False,
+    comment_char: str = "#",
+    pl_commit: Optional[str] = None,
 ) -> List[str]:
     """Load requirements from a file.
 
@@ -32,7 +36,13 @@ def _load_requirements(
     >>> _load_requirements(_TH, file_name="req.txt", pl_commit='ok')  # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
     direct dependency req 'git+https://github.com/t/test.git@test' has been pruned from the provided requirements
     direct dependency req 'http://github.com/user/repo/tarball/master' has been pruned from the provided requirements
-    attempting dev setup with specific pytorch lightning commit: ok
+    attempting dev setup with specific lightning commit: ok
+    ['ok', 'lightning @ git+https://github.com/Lightning-AI/lightning.git@ok#egg=lightning']
+
+    >>> _load_requirements(_TH, file_name="req.txt", standalone=True, pl_commit='ok')  # doctest: +NORMALIZE_WHITESPACE
+    direct dependency req 'git+https://github.com/t/test.git@test' has been pruned from the provided requirements
+    direct dependency req 'http://github.com/user/repo/tarball/master' has been pruned from the provided requirements
+    attempting dev setup with specific lightning commit: ok
     ['ok', 'pytorch-lightning @ git+https://github.com/Lightning-AI/pytorch-lightning.git@ok#egg=pytorch-lightning']
     """
     with open(os.path.join(path_dir, file_name)) as file:
@@ -49,9 +59,10 @@ def _load_requirements(
         if ln:  # if requirement is not empty
             reqs.append(ln)
     if pl_commit:
-        print(f"attempting dev setup with specific pytorch lightning commit: {pl_commit}")
-        pldev_base = "pytorch-lightning @ git+https://github.com/Lightning-AI/pytorch-lightning.git@"
-        pldev_egg = "#egg=pytorch-lightning"
+        repo_name = "pytorch-lightning" if standalone else "lightning"
+        print(f"attempting dev setup with specific lightning commit: {pl_commit}")
+        pldev_base = f"{repo_name} @ git+https://github.com/Lightning-AI/{repo_name}.git@"
+        pldev_egg = f"#egg={repo_name}"
         pldev_setup_req = pldev_base + pl_commit + pldev_egg
         reqs.append(pldev_setup_req)
     return reqs

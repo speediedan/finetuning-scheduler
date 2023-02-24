@@ -36,12 +36,12 @@ import warnings
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 import torch
+from lightning.pytorch.cli import LightningCLI
+from lightning.pytorch.utilities import rank_zero_warn
+from lightning.pytorch.utilities.types import STEP_OUTPUT
 from packaging.version import Version
-from pytorch_lightning.cli import LightningCLI
-from pytorch_lightning.utilities import rank_zero_warn
-from pytorch_lightning.utilities.types import STEP_OUTPUT
 from torch import Tensor
 from torch.utils.data import DataLoader
 
@@ -171,7 +171,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
 
 
 class RteBoolqModule(pl.LightningModule):
-    """A :class:`~pytorch_lightning.core.module.LightningModule` that can be used to fine-tune a foundation model
+    """A :class:`~lightning.pytorch.core.module.LightningModule` that can be used to fine-tune a foundation model
     on either the RTE or BoolQ `SuperGLUE <https://super.gluebenchmark.com/>`_ tasks using Hugging Face
     implementations of a given model and the `SuperGLUE Hugging Face dataset.
 
@@ -189,10 +189,10 @@ class RteBoolqModule(pl.LightningModule):
         experiment_tag: str = "default",
         log_env_details: bool = True,
     ):
-        """In this example, this :class:`~pytorch_lightning.core.module.LightningModule` is initialized by composing
+        """In this example, this :class:`~lightning.pytorch.core.module.LightningModule` is initialized by composing
         the ./config/fts_defaults.yaml default configuration with various scheduled fine-tuning yaml configurations
-        via the :class:`~pytorch_lightning.cli.LightningCLI` but it can be used like any other
-        :class:`~pytorch_lightning.core.module.LightningModule` as well.
+        via the :class:`~lightning.pytorch.cli.LightningCLI` but it can be used like any other
+        :class:`~lightning.pytorch.core.module.LightningModule` as well.
 
         Args:
             model_name_or_path (str): Path to pretrained model or identifier `from <https://huggingface.co/models>`_
@@ -329,8 +329,8 @@ class RteBoolqModule(pl.LightningModule):
 
 
 class CustLightningCLI(LightningCLI):
-    """Customize the :class:`~pytorch_lightning.cli.LightningCLI` to ensure the
-    :class:`~pytorch_lighting.core.LightningDataModule` and :class:`~pytorch_lightning.core.module.LightningModule`
+    """Customize the :class:`~lightning.pytorch.cli.LightningCLI` to ensure the
+    :class:`~pytorch_lighting.core.LightningDataModule` and :class:`~lightning.pytorch.core.module.LightningModule`
     use the same Hugging Face model, SuperGLUE task and custom logging tag."""
 
     def before_instantiate_classes(self) -> None:

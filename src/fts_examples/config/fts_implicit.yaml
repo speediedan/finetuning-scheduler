@@ -14,7 +14,7 @@ trainer:
       verbose: false
       mode: min
   logger:
-    class_path: pytorch_lightning.loggers.TensorBoardLogger
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
       save_dir: lightning_logs
       name: fts_implicit

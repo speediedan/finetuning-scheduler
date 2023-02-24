@@ -17,10 +17,10 @@ from typing import Optional
 
 import pytest
 import torch
-from lightning_fabric.accelerators.cuda import num_cuda_devices
+from lightning.fabric.accelerators.cuda import num_cuda_devices
+from lightning.pytorch.strategies.deepspeed import _DEEPSPEED_AVAILABLE
 from packaging.version import Version
 from pkg_resources import get_distribution
-from pytorch_lightning.strategies.deepspeed import _DEEPSPEED_AVAILABLE
 
 EXTENDED_VER_PAT = re.compile(r"([0-9]+\.){2}[0-9]+")
 

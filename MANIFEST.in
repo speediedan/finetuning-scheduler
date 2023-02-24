@@ -8,6 +8,7 @@ exclude src/fts_examples/test_examples.py
 include *.md
 # Include the license file
 include LICENSE
+include .actions/assistant.py
 # Include the citation info
 include *.cff
 # Include marker file for PEP 561

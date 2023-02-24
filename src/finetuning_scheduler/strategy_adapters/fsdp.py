@@ -29,14 +29,14 @@ from pprint import pformat
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
 
 import torch
-from lightning_fabric.strategies.fsdp import _setup_activation_checkpointing
-from lightning_fabric.utilities import rank_zero_info, rank_zero_warn
-from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13, _TORCH_GREATER_EQUAL_2_0
-from pytorch_lightning.strategies.strategy import Strategy
-from pytorch_lightning.trainer.connectors.checkpoint_connector import CheckpointConnector
-from pytorch_lightning.utilities.exceptions import MisconfigurationException
-from pytorch_lightning.utilities.model_helpers import is_overridden
-from pytorch_lightning.utilities.rank_zero import rank_zero_debug
+from lightning.fabric.strategies.fsdp import _setup_activation_checkpointing
+from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
+from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13, _TORCH_GREATER_EQUAL_2_0
+from lightning.pytorch.strategies.strategy import Strategy
+from lightning.pytorch.trainer.connectors.checkpoint_connector import CheckpointConnector
+from lightning.pytorch.utilities.exceptions import MisconfigurationException
+from lightning.pytorch.utilities.model_helpers import is_overridden
+from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
@@ -61,11 +61,11 @@ class FSDPStrategyAdapter(StrategyAdapter):
     A :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that extends
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` (FTS) to support flexible, multi-phase, scheduled fine-tuning
     with the Fully Sharded Data Parallel (FSDP) strategy
-    (:external+pl:class:`~pytorch_lightning.strategies.fsdp.FSDPStrategy`).
+    (:external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`).
 
-    As with standard FSDP usage, FSDP wrapping of a :external+pl:class:`~pytorch_lightning.core.module.LightningModule`
+    As with standard FSDP usage, FSDP wrapping of a :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
     can be performed either by providing an ``auto_wrap_policy`` or (for maximal control) by overriding the
-    ``configure_sharded_model`` method of :external+pl:class:`~pytorch_lightning.core.module.LightningModule` and
+    ``configure_sharded_model`` method of :external+pl:class:`~lightning.pytorch.core.module.LightningModule` and
     manually wrapping the module.
 
     In order to support multi-phase scheduled fine-tuning with FSDP, FTS's key precondition is that the defined
@@ -95,7 +95,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     .. note::
 
        The ``no_decay`` attribute that FTS supports on
-       :external+pl:class:`~pytorch_lightning.core.module.LightningModule` with the base
+       :external+pl:class:`~lightning.pytorch.core.module.LightningModule` with the base
        :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is not currently supported in the context of
        FSDP fine-tuning.
 
@@ -108,7 +108,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
        :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides` is often the most expedient
        approach to auto-wrapping in alignment with a fine-tuning schedule. As always, if needed, one can override
        ``configure_sharded_model`` and manually wrap a given
-       :external+pl:class:`~pytorch_lightning.core.module.LightningModule` to align with a desired fine-tuning schedule.
+       :external+pl:class:`~lightning.pytorch.core.module.LightningModule` to align with a desired fine-tuning schedule.
     """
 
     _fsdp_flat_to_unflat_mapping: Dict
@@ -116,7 +116,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     _ft_schedule_module_map: Dict
     _unscheduled_params: List
     _use_orig_params: bool
-    RANK_ZERO_LOG_FQN = "pytorch_lightning.utilities.rank_zero"
+    RANK_ZERO_LOG_FQN = "lightning.pytorch.utilities.rank_zero"
 
     def __init__(self, awp_overrides: Optional[List] = None, *args: Any, **kwargs: Any) -> None:
         """The only user-facing configuration for
@@ -124,14 +124,14 @@ class FSDPStrategyAdapter(StrategyAdapter):
         :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides`, an optional list of
         module names that should be wrapped in separate FSDP instances, complementing the modules that would be
         individually wrapped by ``auto_wrap_policy`` provided in the
-        :external+pl:class:`~pytorch_lightning.strategies.fsdp.FSDPStrategy` strategy
+        :external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy` strategy
         configuration.
 
         Args:
             awp_overrides (Optional[List]): A list of module names to wrap in separate FSDP instances (i.e.,
                 ``auto_wrap_policy`` overrides). Only applicable when complementing/overriding an ``auto_wrap_policy``
                 provided in the
-                :external+pl:class:`~pytorch_lightning.strategies.fsdp.FSDPStrategy`
+                :external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`
                 strategy configuration. Override lists will be ignored when manually wrapping modules via a
                 ``configure_sharded_model`` method. If the named modules cannot be found, an exception will be thrown.
                 Defaults to None.
@@ -166,7 +166,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         1. Disable Lightning's restoration of the optimizer to allow us to implement special handling
         2. Prune ``no_decay`` specification since it is not currently supported in the context of FSDP fine-tuning
         3. Validate the :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides` configuration
-        4. Configure FTS wrapping of the provided :external+pl:class:`~pytorch_lightning.core.module.LightningModule`
+        4. Configure FTS wrapping of the provided :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
            to either use the provided ``LightningModule.configure_sharded_model`` method (if present) or a provided
            ``auto_wrap_policy``.
         """
@@ -196,7 +196,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def on_before_fts_fit_start(self) -> None:
         """In this hook executed immediately before the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
         :meth:`~finetuning_scheduler.fts.FinetuningScheduler.on_fit_start` hook begins, we ensure the provided
-        fine-tuning schedule and FSDP wrapped :external+pl:class:`~pytorch_lightning.core.module.LightningModule` are
+        fine-tuning schedule and FSDP wrapped :external+pl:class:`~lightning.pytorch.core.module.LightningModule` are
         appropriately aligned and valid. If the fine-tuning schedule and wrapped module are detected to be incompatible,
         detailed feedback is provided to the user (which is why multiple checks are aggregated before returning any
         alignment exceptions).
@@ -329,7 +329,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def _prune_nodecay(self) -> None:
         """If the ``no_decay`` attribute is present on the provided.
 
-        :external+pl:class:`~pytorch_lightning.core.module.LightningModule` s remove it (with a warning) because it is
+        :external+pl:class:`~lightning.pytorch.core.module.LightningModule` s remove it (with a warning) because it is
         not currently supported in the context of FSDP fine-tuning.
         """
         if self.pl_module.no_decay:

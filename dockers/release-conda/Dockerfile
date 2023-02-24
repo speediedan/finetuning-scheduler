@@ -80,6 +80,6 @@ RUN echo "conda activate ${CONDA_ENV}" >> ~/.bashrc
 RUN pip --version && \
     conda info && \
     pip list && \
-    python -c "import pytorch_lightning as pl; print(pl.__version__)" && \
+    python -c "import lightning as pl; print(pl.__version__)" && \
     python -c "import finetuning_scheduler as fts; print(fts.__version__)"
 ENTRYPOINT ["./conda_entrypoint.sh"]

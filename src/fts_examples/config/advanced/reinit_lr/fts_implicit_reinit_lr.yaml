@@ -12,7 +12,7 @@ model:
       name: Implicit_Reinit_LR_Scheduler
 trainer:
   callbacks:
-  - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
   - class_path: finetuning_scheduler.FinetuningScheduler
     init_args:
       # note, we're not going to see great performance due to the shallow depth, just demonstrating the lr scheduler
@@ -42,7 +42,7 @@ trainer:
       verbose: false
       mode: min
   logger:
-    class_path: pytorch_lightning.loggers.TensorBoardLogger
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
       save_dir: lightning_logs
       name: fts_implicit_reinit_lr

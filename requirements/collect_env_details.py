@@ -24,7 +24,7 @@ import torch
 import tqdm
 
 sys.path += [os.path.abspath(".."), os.path.abspath(".")]
-import pytorch_lightning  # noqa: E402
+import lightning.pytorch  # noqa: E402
 
 import finetuning_scheduler  # noqa: E402
 
@@ -55,7 +55,7 @@ def info_packages():
         "numpy": numpy.__version__,
         "pyTorch_version": torch.__version__,
         "pyTorch_debug": torch.version.debug,
-        "pytorch-lightning": pytorch_lightning.__version__,
+        "pytorch-lightning": lightning.pytorch.__version__,
         "finetuning-scheduler": finetuning_scheduler.__version__,
         "tqdm": tqdm.__version__,
     }

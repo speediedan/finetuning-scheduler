@@ -1,6 +1,6 @@
 .. testsetup:: *
 
-    from pytorch_lightning.trainer.trainer import Trainer
+    from lightning.pytorch.trainer.trainer import Trainer
     from finetuning_scheduler.fts import FinetuningScheduler
 
 .. _finetuning_scheduler:
@@ -64,7 +64,7 @@ and :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks with
 
 .. code-block:: python
 
-    from pytorch_lightning import Trainer
+    from lightning.pytorch import Trainer
     from finetuning_scheduler import FinetuningScheduler
 
     trainer = Trainer(callbacks=[FinetuningScheduler()])
@@ -98,7 +98,7 @@ either integers or convertible to integers via ``int()``.
 
 .. code-block:: python
 
-    from pytorch_lightning import Trainer
+    from lightning.pytorch import Trainer
     from finetuning_scheduler import FinetuningScheduler
 
     trainer = Trainer(callbacks=[FinetuningScheduler(gen_ft_sched_only=True)])
@@ -161,7 +161,7 @@ either integers or convertible to integers via ``int()``.
 
 .. code-block:: python
 
-    from pytorch_lightning import Trainer
+    from lightning.pytorch import Trainer
     from finetuning_scheduler import FinetuningScheduler
 
     trainer = Trainer(callbacks=[FinetuningScheduler(ft_schedule="/path/to/my/schedule/my_schedule.yaml")])
@@ -247,7 +247,7 @@ special metadata.
 
 .. code-block:: python
 
-    from pytorch_lightning import Trainer
+    from lightning.pytorch import Trainer
     from finetuning_scheduler import FinetuningScheduler
 
     trainer = Trainer(callbacks=[FinetuningScheduler()])

@@ -19,9 +19,9 @@ from pathlib import Path
 
 import pytest
 import torch.distributed
-from lightning_fabric.plugins.environments.lightning import find_free_network_port
-from lightning_fabric.utilities.imports import _IS_WINDOWS
-from pytorch_lightning.trainer.connectors.signal_connector import SignalConnector
+from lightning.fabric.plugins.environments.lightning import find_free_network_port
+from lightning.fabric.utilities.imports import _IS_WINDOWS
+from lightning.pytorch.trainer.connectors.signal_connector import SignalConnector
 
 from tests import _PATH_DATASETS
 
@@ -34,7 +34,7 @@ def datadir():
 @pytest.fixture(scope="function", autouse=True)
 def preserve_global_rank_variable():
     """Ensures that the rank_zero_only.rank global variable gets reset in each test."""
-    from lightning_fabric.utilities import rank_zero_only
+    from lightning.fabric.utilities import rank_zero_only
 
     rank = getattr(rank_zero_only, "rank", None)
     yield
@@ -117,7 +117,7 @@ def caplog(caplog):
     """
     import logging
 
-    lightning_logger = logging.getLogger("pytorch_lightning")
+    lightning_logger = logging.getLogger("lightning.pytorch")
     propagate = lightning_logger.propagate
     lightning_logger.propagate = True
     yield caplog

@@ -25,7 +25,7 @@ trainer:
       verbose: false
       mode: min
   logger:
-    class_path: pytorch_lightning.loggers.TensorBoardLogger
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
       save_dir: lightning_logs
       name: fts_fsdp_awp_overrides_offload_profile
@@ -48,7 +48,7 @@ trainer:
       record_shapes: true
       row_limit: 50
   strategy:
-    class_path: pytorch_lightning.strategies.FSDPStrategy
+    class_path: lightning.pytorch.strategies.FSDPStrategy
     init_args:
       cpu_offload: true
       activation_checkpointing:

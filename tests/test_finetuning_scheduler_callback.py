@@ -22,12 +22,12 @@ import pytest
 import torch
 import torch.nn.functional as F
 import yaml
-from lightning_fabric.utilities.cloud_io import get_filesystem
-from pytorch_lightning import LightningModule, seed_everything, Trainer
-from pytorch_lightning.callbacks import Callback, EarlyStopping, LearningRateFinder, LearningRateMonitor
-from pytorch_lightning.strategies import StrategyRegistry
-from pytorch_lightning.strategies.single_device import SingleDeviceStrategy
-from pytorch_lightning.utilities.exceptions import MisconfigurationException
+from lightning.fabric.utilities.cloud_io import get_filesystem
+from lightning.pytorch import LightningModule, seed_everything, Trainer
+from lightning.pytorch.callbacks import Callback, EarlyStopping, LearningRateFinder, LearningRateMonitor
+from lightning.pytorch.strategies import StrategyRegistry
+from lightning.pytorch.strategies.single_device import SingleDeviceStrategy
+from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from torch import nn
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.multiprocessing import ProcessRaisedException

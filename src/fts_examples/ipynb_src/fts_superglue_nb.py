@@ -51,7 +51,7 @@
 # </div>
 #
 # ```python
-# from pytorch_lightning import Trainer
+# from lightning.pytorch import Trainer
 # from finetuning_scheduler import FinetuningScheduler
 # trainer = Trainer(callbacks=[FinetuningScheduler()])
 # ```
@@ -72,7 +72,7 @@
 #    ``LightningModule`` subclass with the suffix ``_ft_schedule.yaml``.
 #
 # ```python
-#     from pytorch_lightning import Trainer
+#     from lightning.pytorch import Trainer
 #     from finetuning_scheduler import FinetuningScheduler
 #     trainer = Trainer(callbacks=[FinetuningScheduler(gen_ft_sched_only=True)])
 # ```
@@ -85,7 +85,7 @@
 #    [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) to commence scheduled training:
 #
 # ```python
-# from pytorch_lightning import Trainer
+# from lightning.pytorch import Trainer
 # from finetuning_scheduler import FinetuningScheduler
 #
 # trainer = Trainer(callbacks=[FinetuningScheduler(ft_schedule="/path/to/my/schedule/my_schedule.yaml")])
@@ -123,7 +123,7 @@
 #
 #
 # ```python
-# from pytorch_lightning import Trainer
+# from lightning.pytorch import Trainer
 # from finetuning_scheduler import FinetuningScheduler
 # trainer = Trainer(callbacks=[FinetuningScheduler()])
 # trainer.ckpt_path="some/path/to/my_checkpoint.ckpt"
@@ -177,13 +177,13 @@ from packaging.version import Version
 import sentencepiece as sp  # noqa: F401 # isort: split
 import datasets
 import evaluate
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 import torch
 from datasets import logging as datasets_logging
-from lightning_fabric.accelerators.cuda import is_cuda_available
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-from pytorch_lightning.loggers.tensorboard import TensorBoardLogger
-from pytorch_lightning.utilities import rank_zero_warn
+from lightning.fabric.accelerators.cuda import is_cuda_available
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
+from lightning.pytorch.utilities import rank_zero_warn
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer

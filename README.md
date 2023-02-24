@@ -90,7 +90,7 @@ python -m pip install -e ".[all]" -r requirements/docs.txt
 ### Step 1: Import the FinetuningScheduler callback and start fine-tuning!
 
 ```python
-from pytorch_lightning import Trainer
+from lightning.pytorch import Trainer
 from finetuning_scheduler import FinetuningScheduler
 
 trainer = Trainer(callbacks=[FinetuningScheduler()])

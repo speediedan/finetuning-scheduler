@@ -18,11 +18,11 @@ from unittest import mock
 
 import pytest
 import torch
-from lightning_fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13, _TORCH_GREATER_EQUAL_2_0
-from pytorch_lightning import seed_everything, Trainer
-from pytorch_lightning.plugins.precision.fsdp import FSDPMixedPrecisionPlugin
-from pytorch_lightning.strategies import FSDPStrategy
-from pytorch_lightning.utilities.exceptions import MisconfigurationException
+from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13, _TORCH_GREATER_EQUAL_2_0
+from lightning.pytorch import seed_everything, Trainer
+from lightning.pytorch.plugins.precision.fsdp import FSDPMixedPrecisionPlugin
+from lightning.pytorch.strategies import FSDPStrategy
+from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from torch.utils.data import DataLoader
 
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping

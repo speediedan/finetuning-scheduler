@@ -16,10 +16,10 @@ from typing import List, Optional, Tuple
 from warnings import WarningMessage
 
 import torch
-from lightning_fabric.utilities.types import _TORCH_LRSCHEDULER
-from pytorch_lightning import LightningDataModule, LightningModule
-from pytorch_lightning.core.optimizer import LightningOptimizer
-from pytorch_lightning.utilities.types import STEP_OUTPUT
+from lightning.fabric.utilities.types import _TORCH_LRSCHEDULER
+from lightning.pytorch import LightningDataModule, LightningModule
+from lightning.pytorch.core.optimizer import LightningOptimizer
+from lightning.pytorch.utilities.types import STEP_OUTPUT
 from torch import Tensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
