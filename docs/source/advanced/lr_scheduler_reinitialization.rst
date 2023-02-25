@@ -128,7 +128,7 @@ session with, usually via the ``configure_optimizer`` method of
       :emphasize-lines: 9-13
 
         model:
-          class_path: fts_examples.fts_superglue.RteBoolqModule
+          class_path: fts_examples.stable.fts_superglue.RteBoolqModule
           init_args:
             lr_scheduler_init:
               class_path: torch.optim.lr_scheduler.LinearLR
@@ -218,7 +218,7 @@ could use:
   :emphasize-lines: 14-23
 
     model:
-      class_path: fts_examples.fts_superglue.RteBoolqModule
+      class_path: fts_examples.stable.fts_superglue.RteBoolqModule
       init_args:
         lr_scheduler_init:
           class_path: torch.optim.lr_scheduler.StepLR
@@ -256,7 +256,7 @@ we'll proceed to those next.
 Advanced Usage Examples: Explicit and Implicit Mode LR Scheduler Reinitialization
 *********************************************************************************
 Demonstration LR scheduler reinitialization configurations for both explicit and implicit fine-tuning scheduling contexts
-are available under ``./fts_examples/config/advanced/reinit_lr``.
+are available under ``./fts_examples/stable/config/advanced/reinit_lr``.
 
 The LR scheduler reinitialization examples use the same code and have the same dependencies as the basic
 :ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples except PyTorch >= ``1.10`` is
@@ -267,7 +267,7 @@ The two different demo schedule configurations are composed with shared defaults
 
 .. code-block:: bash
 
-    cd ./fts_examples/
+    cd ./fts_examples/stable
     # Demo LR scheduler reinitialization with an explicitly defined fine-tuning schedule:
     python fts_superglue.py fit --config config/advanced/reinit_lr/fts_explicit_reinit_lr.yaml
 
@@ -299,7 +299,7 @@ defaults defined in ``./config/fts_defaults.yaml``):
   :linenos:
 
     model:
-      class_path: fts_examples.fts_superglue.RteBoolqModule
+      class_path: fts_examples.stable.fts_superglue.RteBoolqModule
       init_args:
         optimizer_init:
           class_path: torch.optim.AdamW

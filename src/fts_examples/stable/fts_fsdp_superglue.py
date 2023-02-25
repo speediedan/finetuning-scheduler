@@ -22,8 +22,8 @@ from lightning.pytorch.utilities.imports import _KINETO_AVAILABLE
 from torch.profiler.profiler import ProfilerActivity
 
 from fts_examples import _HF_AVAILABLE
-from fts_examples.cli_experiment_utils import instantiate_class
-from fts_examples.fts_superglue import RteBoolqModule
+from fts_examples.stable.cli_experiment_utils import instantiate_class
+from fts_examples.stable.fts_superglue import RteBoolqModule
 
 if _HF_AVAILABLE:
     from transformers.models.deberta_v2.modeling_deberta_v2 import DebertaV2Embeddings, DebertaV2Encoder, DebertaV2Layer

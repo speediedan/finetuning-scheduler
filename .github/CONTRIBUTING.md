@@ -186,7 +186,7 @@ This is useful if you do not test against all required dependency versions.
 You can then run:
 
 ```bash
-python -m pytest src/finetuning_scheduler src/fts_examples tests -v
+python -m pytest src/finetuning_scheduler src/fts_examples/stable tests -v
 ```
 
 ### Pull Request

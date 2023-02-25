@@ -1,5 +1,5 @@
 model:
-  class_path: fts_examples.fts_fsdp_superglue.RteBoolqModuleFSDP
+  class_path: fts_examples.stable.fts_fsdp_superglue.RteBoolqModuleFSDP
 trainer:
   limit_train_batches: 7
   max_epochs: 4
@@ -27,7 +27,7 @@ trainer:
       save_dir: lightning_logs
       name: fts_ddp_fsdp_baseline_profile
   profiler:
-    class_path: fts_examples.fts_fsdp_superglue.ExtendedPyTorchProfiler
+    class_path: fts_examples.stable.fts_fsdp_superglue.ExtendedPyTorchProfiler
     init_args:
       filename: fts_fsdp_awp_text_profile
       max_name_column_width: 100

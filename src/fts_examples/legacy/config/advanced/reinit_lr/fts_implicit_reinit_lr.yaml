@@ -1,5 +1,5 @@
 model:
-  class_path: fts_examples.fts_superglue.RteBoolqModule
+  class_path: fts_examples.legacy.fts_superglue.RteBoolqModule
   init_args:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.StepLR

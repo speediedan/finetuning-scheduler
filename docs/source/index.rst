@@ -355,7 +355,7 @@ A demonstration of the scheduled fine-tuning callback
 `RTE <https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte>`_ and
 `BoolQ <https://github.com/google-research-datasets/boolean-questions>`_ tasks of the
 `SuperGLUE <https://super.gluebenchmark.com/>`_ benchmark and the :doc:`LightningCLI<cli/lightning_cli>`
-is available under ``./fts_examples/``.
+is available under ``./fts_examples/stable``.
 
 Since this CLI-based example requires a few additional packages (e.g. ``transformers``, ``sentencepiece``), you
 should install them using the ``[examples]`` extra:

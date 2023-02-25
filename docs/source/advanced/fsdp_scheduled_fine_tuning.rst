@@ -27,7 +27,7 @@ Example: Multi-Phase Scheduled Fine-Tuning with FSDP
 ****************************************************
 
 Demonstration FTS FSDP training/profiling configurations and a DDP baseline for comparison are available under
-``./fts_examples/config/advanced/fsdp``.
+``./fts_examples/stable/config/advanced/fsdp``.
 
 This FTS FSDP training example has the same dependencies as the basic
 :ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples except PyTorch >= ``1.13`` is
@@ -48,7 +48,7 @@ The demo schedule configurations are composed with the basic FTS example's share
 
 .. code-block:: bash
 
-    cd ./fts_examples/
+    cd ./fts_examples/stable
 
     # Profiled demo of FSDP scheduled fine-tuning using the ``awp_overrides`` option:
     python fts_superglue.py fit --config config/advanced/fsdp/fts_fsdp_awp_overrides_profile.yaml
@@ -103,7 +103,7 @@ We start by defining a simple fine-tuning schedule that we would like to ensure 
     #- model.deberta.embeddings.LayerNorm.weight
     #- model.deberta.embeddings.word_embeddings.weight
 
-In this example (policy defined in ``./fts_examples/fts_fsdp_superglue.py``), we modify the base
+In this example (policy defined in ``./fts_examples/stable/fts_fsdp_superglue.py``), we modify the base
 ``transformer_auto_wrap_policy`` to define the ``auto_wrap_policy`` for our DeBERTa-v3 module:
 
 .. code-block:: python
@@ -152,7 +152,7 @@ configuration option to FTS like so:
   :linenos:
   :emphasize-lines: 3, 7, 8
 
-  # in ./fts_examples/config/advanced/fsdp/fts_fsdp_awp_overrides_profile.yaml
+  # in ./fts_examples/stable/config/advanced/fsdp/fts_fsdp_awp_overrides_profile.yaml
   ...
     - class_path: finetuning_scheduler.FinetuningScheduler
     init_args:
@@ -169,7 +169,7 @@ Finally, we configure the FSDP training strategy as desired per usual, for insta
   :linenos:
   :emphasize-lines: 6-9
 
-  # in ./fts_examples/config/advanced/fsdp/fts_fsdp_awp_overrides_profile.yaml
+  # in ./fts_examples/stable/config/advanced/fsdp/fts_fsdp_awp_overrides_profile.yaml
     ...
     strategy:
       class_path: pytorch_lightning.strategies.FSDPStrategy
@@ -177,7 +177,7 @@ Finally, we configure the FSDP training strategy as desired per usual, for insta
         cpu_offload: false
         activation_checkpointing:
         - transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Layer
-        auto_wrap_policy: fts_examples.fts_fsdp_superglue.deberta_awp
+        auto_wrap_policy: fts_examples.stable.fts_fsdp_superglue.deberta_awp
 
 That's all there is to it! We've successfully defined our fine-tuning schedule and FSDP wrapped our model in a manner
 that supports FSDP multi-phase scheduled fine-tuning.

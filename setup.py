@@ -82,9 +82,9 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
         packages=setuptools.find_namespace_packages(where="src"),
         package_dir={"": "src"},
         package_data={
-            "fts_examples.config": ["*.yaml"],
-            "fts_examples.config.advanced.fsdp": ["*.yaml"],
-            "fts_examples.config.advanced.reinit_lr": ["*.yaml"],
+            "fts_examples.stable.config": ["*.yaml"],
+            "fts_examples.stable.config.advanced.fsdp": ["*.yaml"],
+            "fts_examples.stable.config.advanced.reinit_lr": ["*.yaml"],
             "fts_examples.legacy.config": ["*.yaml"],
             "fts_examples.legacy.config.advanced.fsdp": ["*.yaml"],
             "fts_examples.legacy.config.advanced.reinit_lr": ["*.yaml"],

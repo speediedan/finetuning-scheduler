@@ -1,6 +1,6 @@
 seed_everything: 42
 data:
-  class_path: fts_examples.fts_superglue.RteBoolqDataModule
+  class_path: fts_examples.legacy.fts_superglue.RteBoolqDataModule
   init_args:
     model_name_or_path: microsoft/deberta-v3-base
     task_name: rte
@@ -9,7 +9,7 @@ data:
     train_batch_size: 16
     eval_batch_size: 16
 model:
-  class_path: fts_examples.fts_superglue.RteBoolqModule
+  class_path: fts_examples.legacy.fts_superglue.RteBoolqModule
   init_args:
     optimizer_init:
       class_path: torch.optim.AdamW

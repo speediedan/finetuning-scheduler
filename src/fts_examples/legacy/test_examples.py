@@ -56,7 +56,7 @@ ADV_EXPECTED_WARNS = EXPECTED_WARNS + ["Found an `init_pg_lrs` key"]
     ids=["nofts_baseline", "fts_explicit", "fts_implicit"],
 )
 def test_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
-    from fts_examples.fts_superglue import cli_main
+    from fts_examples.legacy.fts_superglue import cli_main
 
     example_script = os.path.join(os.path.dirname(__file__), "fts_superglue.py")
     config_loc = [os.path.join(os.path.dirname(__file__), "config", config_file)]
@@ -81,7 +81,7 @@ def test_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
     ids=["fts_explicit_reinit_lr", "fts_implicit_reinit_lr"],
 )
 def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
-    from fts_examples.fts_superglue import cli_main
+    from fts_examples.legacy.fts_superglue import cli_main
 
     example_script = os.path.join(os.path.dirname(__file__), "fts_superglue.py")
     config_loc = [os.path.join(os.path.dirname(__file__), "config/advanced/reinit_lr", config_file)]

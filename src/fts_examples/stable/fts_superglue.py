@@ -47,7 +47,7 @@ from torch.utils.data import DataLoader
 
 import finetuning_scheduler as fts
 from fts_examples import _HF_AVAILABLE, _SP_AVAILABLE
-from fts_examples.cli_experiment_utils import collect_env_info, instantiate_class
+from fts_examples.stable.cli_experiment_utils import collect_env_info, instantiate_class
 
 if _HF_AVAILABLE:
     import datasets
@@ -319,7 +319,7 @@ class RteBoolqModule(pl.LightningModule):
         if Version(torch.__version__) == Version("1.12.0") or torch.__version__.startswith("1.12.0"):
             # we need to use a patched version of AdamW to fix https://github.com/pytorch/pytorch/issues/80809
             # and allow examples to succeed with torch 1.12.0 (this torch bug is fixed in 1.12.1)
-            self.hparams.optimizer_init["class_path"] = "fts_examples.patched_adamw.AdamW"
+            self.hparams.optimizer_init["class_path"] = "fts_examples.stable.patched_adamw.AdamW"
         optimizer = instantiate_class(args=self._init_param_groups(), init=self.hparams.optimizer_init)
         scheduler = {
             "scheduler": instantiate_class(args=optimizer, init=self.hparams.lr_scheduler_init),
