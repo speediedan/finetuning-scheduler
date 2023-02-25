@@ -1,0 +1,19 @@
+0:
+  params:
+  - model.classifier.*
+  max_transition_epoch: 1
+1:
+  params:
+  - model.pooler.dense.*
+  - model.deberta.encoder.layer.11.(output|attention|intermediate).*
+  max_transition_epoch: 2
+2:
+  params:
+  - model.deberta.encoder.layer.([0-9]|10).(output|attention|intermediate).*
+  - model.deberta.encoder.LayerNorm.bias
+  - model.deberta.encoder.LayerNorm.weight
+  - model.deberta.encoder.rel_embeddings.weight
+  # excluding these parameters from the schedule to enhance the debugging demonstration
+  #- model.deberta.embeddings.LayerNorm.bias
+  #- model.deberta.embeddings.LayerNorm.weight
+  #- model.deberta.embeddings.word_embeddings.weight
