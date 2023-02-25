@@ -36,7 +36,7 @@ required.
 .. note::
 
     This version of :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` supports stable PyTorch
-    releases >= 1.13. Support for PyTorch 2.0 is expected upon its release.
+    releases >= 1.13.
 
 .. note::
 

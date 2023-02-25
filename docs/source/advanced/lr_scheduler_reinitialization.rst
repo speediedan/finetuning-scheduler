@@ -58,7 +58,7 @@ Any arguments you would like to pass to initialize the specified lr scheduler wi
             gamma: 0.7
     ...
 
-Optionally, one can include arguments to pass to PyTorch Lightning's lr scheduler configuration
+Optionally, one can include arguments to pass to Lightning's lr scheduler configuration
 (:class:`~pytorch_lightning.utilities.types.LRSchedulerConfig`) in the ``pl_lrs_cfg`` dictionary.
 
 .. code-block:: yaml

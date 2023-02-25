@@ -1,10 +1,10 @@
 # Contributing
 
-Welcome to the community! Fine-Tuning Scheduler extends the most advanced DL research platform on the planet (PyTorch Lightning) and strives to support the latest, best practices and integrations that the amazing PyTorch team and other research organizations roll out!
+Welcome to the community! Fine-Tuning Scheduler extends the most advanced DL research platform on the planet (Lightning) and strives to support the latest, best practices and integrations that the amazing PyTorch team and other research organizations roll out!
 
-As Fine-Tuning Scheduler is an extension of PyTorch Lightning, the remainder of the contribution guidelines conform to (and many are drawn from) the PyTorch Lightning [contribution documentation](https://pytorch-lightning.readthedocs.io/en/latest/generated/CONTRIBUTING.html).
+As Fine-Tuning Scheduler is an extension of Lightning, the remainder of the contribution guidelines conform to (and many are drawn from) the Lightning [contribution documentation](https://pytorch-lightning.readthedocs.io/en/latest/generated/CONTRIBUTING.html).
 
-A giant thank you to the [PyTorch Lightning team](https://pytorch-lightning.readthedocs.io/en/latest/governance.html) for their tireless effort building the immensely useful PyTorch Lightning project and their thoughtful feedback on and review of this extension.
+A giant thank you to the [Lightning team](https://pytorch-lightning.readthedocs.io/en/latest/governance.html) for their tireless effort building the immensely useful Lightning project and their thoughtful feedback on and review of this extension.
 
 ## Main Core Value: One less thing to remember
 

@@ -22,8 +22,9 @@ from lightning.pytorch.utilities.imports import _KINETO_AVAILABLE
 from torch.profiler.profiler import ProfilerActivity
 
 from fts_examples import _HF_AVAILABLE
-from fts_examples.stable.cli_experiment_utils import instantiate_class
-from fts_examples.stable.fts_superglue import RteBoolqModule
+
+# from fts_examples.stable.cli_experiment_utils import instantiate_class
+# from fts_examples.stable.fts_superglue import RteBoolqModule
 
 if _HF_AVAILABLE:
     from transformers.models.deberta_v2.modeling_deberta_v2 import DebertaV2Embeddings, DebertaV2Encoder, DebertaV2Layer
@@ -70,17 +71,17 @@ def degenerate_deberta_awp(
         return isinstance(module, tuple(transformer_layer_cls))
 
 
-class RteBoolqModuleFSDP(RteBoolqModule):
-    # we override `configure_optimizers` because use of the `no_decay` lightning module attribute is not currently
-    # supported with FTS FSDP strategy adapter
-    def configure_optimizers(self):
-        parameters = filter(lambda x: x.requires_grad, self.model.parameters())
-        optimizer = instantiate_class(args=parameters, init=self.hparams.optimizer_init)
-        scheduler = {
-            "scheduler": instantiate_class(args=optimizer, init=self.hparams.lr_scheduler_init),
-            **self.hparams.pl_lrs_cfg,
-        }
-        return [optimizer], [scheduler]
+# class RteBoolqModuleFSDP(RteBoolqModule):
+#     # we override `configure_optimizers` because use of the `no_decay` lightning module attribute is not currently
+#     # supported with FTS FSDP strategy adapter
+#     def configure_optimizers(self):
+#         # parameters = filter(lambda x: x.requires_grad, self.model.parameters())
+#         optimizer = instantiate_class(args=parameters, init=self.hparams.optimizer_init)
+#         scheduler = {
+#             "scheduler": instantiate_class(args=optimizer, init=self.hparams.lr_scheduler_init),
+#             **self.hparams.pl_lrs_cfg,
+#         }
+#         return [optimizer], [scheduler]
 
 
 class ExtendedPyTorchProfiler(PyTorchProfiler):

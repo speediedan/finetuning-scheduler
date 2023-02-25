@@ -113,9 +113,9 @@ ______________________________________________________________________
 
 ## Continuous Integration
 
-Fine-Tuning Scheduler is rigorously tested across multiple CPUs, GPUs and against major Python and PyTorch versions. Each Fine-Tuning Scheduler minor release (major.minor.patch) is paired with a PyTorch Lightning minor release (e.g. Fine-Tuning Scheduler 0.4 depends upon PyTorch Lightning 1.9).
+Fine-Tuning Scheduler is rigorously tested across multiple CPUs, GPUs and against major Python and PyTorch versions. Each Fine-Tuning Scheduler minor release (major.minor.patch) is paired with a Lightning minor release (e.g. Fine-Tuning Scheduler 0.4 depends upon Lightning 1.9).
 
-To ensure maximum stability, the latest PyTorch Lightning patch release fully tested with Fine-Tuning Scheduler is set as a maximum dependency in Fine-Tuning Scheduler's requirements.txt (e.g. \<= 1.7.1). If you'd like to test a specific PyTorch Lightning patch version greater than that currently in Fine-Tuning Scheduler's requirements.txt, it will likely work but you should install Fine-Tuning Scheduler from source and update the requirements.txt as desired.
+To ensure maximum stability, the latest Lightning patch release fully tested with Fine-Tuning Scheduler is set as a maximum dependency in Fine-Tuning Scheduler's requirements.txt (e.g. \<= 1.7.1). If you'd like to test a specific Lightning patch version greater than that currently in Fine-Tuning Scheduler's requirements.txt, it will likely work but you should install Fine-Tuning Scheduler from source and update the requirements.txt as desired.
 
 <details>
   <summary>Current build statuses for Fine-Tuning Scheduler </summary>
@@ -133,9 +133,9 @@ To ensure maximum stability, the latest PyTorch Lightning patch release fully te
 
 ## Community
 
-Fine-Tuning Scheduler is developed and maintained by the community in close communication with the [Lightning team](https://pytorch-lightning.readthedocs.io/en/latest/governance.html). Thanks to everyone in the community for their tireless effort building and improving the immensely useful core PyTorch Lightning project.
+Fine-Tuning Scheduler is developed and maintained by the community in close communication with the [Lightning team](https://pytorch-lightning.readthedocs.io/en/latest/governance.html). Thanks to everyone in the community for their tireless effort building and improving the immensely useful core Lightning project.
 
-PR's welcome! Please see the [contributing guidelines](https://finetuning-scheduler.readthedocs.io/en/latest/generated/CONTRIBUTING.html) (which are essentially the same as PyTorch Lightning's).
+PR's welcome! Please see the [contributing guidelines](https://finetuning-scheduler.readthedocs.io/en/latest/generated/CONTRIBUTING.html) (which are essentially the same as Lightning's).
 
 ______________________________________________________________________
 

@@ -13,7 +13,7 @@
 #
 # Setup is straightforward, just install from PyPI! Since this notebook-based example requires a few additional packages (e.g.
 # ``transformers``, ``sentencepiece``), we installed the ``finetuning-scheduler`` package with the ``[examples]`` extra above.
-# Once the ``finetuning-scheduler`` package is installed, the [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) callback is available for use with PyTorch Lightning.
+# Once the ``finetuning-scheduler`` package is installed, the [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) callback (FTS) is available for use with Lightning.
 # For additional installation options, please see the Fine-Tuning Scheduler [README](https://github.com/speediedan/finetuning-scheduler/blob/main/README.md).
 #
 #
@@ -140,8 +140,8 @@
 # trainer.fit(...)
 # ```
 #
-# Note that similar to the behavior of [ModelCheckpoint](https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.callbacks.ModelCheckpoint.html), (specifically [this PR](https://github.com/Lightning-AI/lightning/pull/12045)),
-# when resuming training with a different [FTSCheckpoint](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts_supporters.html#finetuning_scheduler.fts_supporters.FTSCheckpoint) ``dirpath`` from the provided
+# Note that similar to the behavior of [ModelCheckpoint](https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.callbacks.ModelCheckpoint.html), when resuming training with a
+# different [FTSCheckpoint](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts_supporters.html#finetuning_scheduler.fts_supporters.FTSCheckpoint) ``dirpath`` from the provided
 # checkpoint, the new training session's checkpoint state will be re-initialized at the resumption depth with the provided checkpoint being set as the best checkpoint.
 
 # %% [markdown]
@@ -170,9 +170,7 @@
 import os
 import warnings
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-
-from packaging.version import Version
+from typing import Any, Dict, Optional
 
 import sentencepiece as sp  # noqa: F401 # isort: split
 import datasets
@@ -184,20 +182,15 @@ from lightning.fabric.accelerators.cuda import is_cuda_available
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
 from lightning.pytorch.utilities import rank_zero_warn
+from torch.optim.adamw import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer
 from transformers import logging as transformers_logging
 from transformers.tokenization_utils_base import BatchEncoding
 
-if Version(torch.__version__) == Version("1.12.0") or torch.__version__.startswith("1.12.0"):
-    # we need to use a patched version of AdamW to fix https://github.com/pytorch/pytorch/issues/80809
-    # and allow examples to succeed with torch 1.12.0 (this torch bug is fixed in 1.12.1)
-    from fts_examples.legacy.patched_adamw import AdamW
-else:
-    from torch.optim.adamw import AdamW
 # %%
-# Import the `FinetuningScheduler` PyTorch Lightning extension module we want to use. This will import all necessary callbacks.
+# Import the `FinetuningScheduler` Lightning extension module we want to use. This will import all necessary callbacks.
 import finetuning_scheduler as fts
 
 # set notebook-level variables
@@ -404,39 +397,12 @@ class RteBoolqModule(pl.LightningModule):
     def on_validation_epoch_end(self):
         self.validation_step_outputs.clear()
 
-    def _init_param_groups(self) -> List[Dict]:
-        """Initialize the parameter groups. Used to ensure weight_decay is not applied to our specified bias
-        parameters when we initialize the optimizer.
-
-        Returns:
-            List[Dict]: A list of parameter group dictionaries.
-        """
-        return [
-            {
-                "params": [
-                    p
-                    for n, p in self.model.named_parameters()
-                    if not any(nd in n for nd in self.no_decay) and p.requires_grad
-                ],
-                "weight_decay": self.hparams.optimizer_init["weight_decay"],
-            },
-            {
-                "params": [
-                    p
-                    for n, p in self.model.named_parameters()
-                    if any(nd in n for nd in self.no_decay) and p.requires_grad
-                ],
-                "weight_decay": 0.0,
-            },
-        ]
-
     def configure_optimizers(self):
-        # the phase 0 parameters will have been set to require gradients during setup
-        # you can initialize the optimizer with a simple requires.grad filter as is often done,
-        # but in this case we pass a list of parameter groups to ensure weight_decay is
-        # not applied to the bias parameter (for completeness, in this case it won't make much
-        # performance difference)
-        optimizer = AdamW(params=self._init_param_groups(), **self.hparams.optimizer_init)
+        # With FTS >= 2.0, ``FinetuningScheduler`` simplifies initial optimizer configuration by ensuring the optimizer
+        # configured here will optimize the parameters (and only those parameters) scheduled to be optimized in phase 0
+        # of the current fine-tuning schedule. This auto-configuration can be disabled if desired by setting
+        # ``enforce_phase0_params`` to ``False``.
+        optimizer = AdamW(params=self.model.parameters(), **self.hparams.optimizer_init)
         scheduler = {
             "scheduler": CosineAnnealingWarmRestarts(optimizer, **self.hparams.lr_scheduler_init),
             "interval": "epoch",
@@ -601,7 +567,7 @@ train()
 #
 # We'll need to update our callbacks list, using the core PL ``EarlyStopping`` and ``ModelCheckpoint`` callbacks for the
 # ``nofts_baseline`` (which operate identically to their FTS analogs apart from the recursive training support).
-# For both core PyTorch Lightning and user-registered callbacks, we can define our callbacks using a dictionary as we do
+# For both core Lightning and user-registered callbacks, we can define our callbacks using a dictionary as we do
 # with the LightningCLI. This allows us to avoid managing imports and support more complex configuration separated from
 # code.
 #
@@ -645,8 +611,7 @@ for scenario_name, scenario_callbacks in scenario_callbacks.items():
 # [![fts_explicit_accuracy](fts_explicit_accuracy.png){height="315px" width="492px"}](https://tensorboard.dev/experiment/n7U8XhrzRbmvVzC4SQSpWw/#scalars&_smoothingWeight=0&runSelectionState=eyJmdHNfZXhwbGljaXQiOnRydWUsIm5vZnRzX2Jhc2VsaW5lIjpmYWxzZSwiZnRzX2ltcGxpY2l0IjpmYWxzZX0%3D)
 # [![nofts_baseline](nofts_baseline_accuracy.png){height="316px" width="505px"}](https://tensorboard.dev/experiment/n7U8XhrzRbmvVzC4SQSpWw/#scalars&_smoothingWeight=0&runSelectionState=eyJmdHNfZXhwbGljaXQiOmZhbHNlLCJub2Z0c19iYXNlbGluZSI6dHJ1ZSwiZnRzX2ltcGxpY2l0IjpmYWxzZX0%3D)
 #
-# Note there could be around ~1% variation in performance from the tensorboard summaries generated by this notebook
-# which used DP and 1 GPU.
+# Note that given execution context differences, there could be a modest variation in performance from the tensorboard summaries generated by this notebook.
 #
 # [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) expands the space of possible fine-tuning schedules and the composition of more sophisticated schedules can
 # yield marginal fine-tuning performance gains. That stated, it should be emphasized the primary utility of [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) is to grant

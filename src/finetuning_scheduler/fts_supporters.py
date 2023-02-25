@@ -148,7 +148,7 @@ class CallbackResolverMixin(ABC):
         callback.
 
         Args:
-            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            trainer (pl.Trainer): The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object.
             reconnect (bool, optional): Whether to check for an updated target callback object even if one is already
                 resolved. Predominantly useful in the context of testing. Defaults to False.
 
@@ -177,13 +177,13 @@ class CallbackResolverMixin(ABC):
 
 class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
     r"""
-    Extends/specializes :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` to facilitate
+    Extends/specializes :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` to facilitate
     multi-phase scheduled fine-tuning.
 
     Adds :attr:`es_phase_complete`, :attr:`final_phase` and :attr:`finetuningscheduler_callback` attributes and modifies
     ``EarlyStopping._evaluate_stopping_criteria`` to enable multi-phase behavior. Usage of
     :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` is identical to
-    :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` except the former will evaluate the
+    :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` except the former will evaluate the
     specified early stopping criteria at every scheduled phase.
     :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` will automatically be
     used if a :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is detected
@@ -192,7 +192,7 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
     .. note::
 
        For detailed usage information,
-       see :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`.
+       see :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`.
 
     .. note::
 
@@ -219,7 +219,7 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
                 being synchronized (via ``sync_dist`` being set to ``True`` when logging).
             check_on_train_epoch_end (bool): Whether to run early stopping check at the end of the training epoch. If
                 this is ``False``, then the check runs at the end of the validation. Defaults to ``None`` similar to
-                :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` but is set to
+                :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` but is set to
                 ``False`` during setup unless overridden.
         """
         super().__init__(*args, **kwargs)
@@ -242,9 +242,9 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         over all distributed training processes.
 
         Args:
-            trainer: The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
-            pl_module  (:external+pl:class:`~lightning.pytorch.core.module.LightningModule`): The
-                :external+pl:class:`~lightning.pytorch.core.module.LightningModule` object
+            trainer: The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
+            pl_module  (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The
+                :external+pl:class:`~pytorch_lightning.core.module.LightningModule` object
         """
         if trainer.state.fn == TrainerFn.FITTING:
             self.reduce_transition_decisions = self._check_sync_dist(trainer)
@@ -255,7 +255,7 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         callback need to be reduced over all distributed training processes.
 
         Args:
-            trainer: The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            trainer: The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
 
         Returns:
             bool: Whether to reduce transition decisions for this callback over all training processes
@@ -344,18 +344,18 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
 
 class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
     r"""
-    Extends/specializes :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` to facilitate
+    Extends/specializes :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint` to facilitate
     multi-phase scheduled fine-tuning. Overrides the
     ``state_dict`` and ``load_state_dict`` hooks to maintain additional state (:attr:`current_ckpt_depth`,
     :attr:`best_ckpt_depth`, :attr:`finetuningscheduler_callback`). Usage of
     :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is identical to
-    :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` and
+    :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint` and
     :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` will automatically be used if a
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is detected.
 
     .. note::
         For detailed usage information, see
-        :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`.
+        :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`.
 
     .. note::
 
@@ -381,7 +381,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
                 callback being used.
             save_on_train_epoch_end (Optional[bool]): Whether to run checkpointing at the end of the training epoch.
                 If this is ``False``, then the check runs at the end of the validation. Defaults to ``None`` similar to
-                :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` but is set to
+                :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint` but is set to
                 ``False`` during setup unless overridden.
         """
         super().__init__(*args, **kwargs)
@@ -393,7 +393,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         """Verify a valid callback configuration is present before beginning training.
 
         Args:
-            trainer: The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            trainer: The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
 
         Raises:
             MisconfigurationException:
@@ -428,7 +428,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         super().setup(trainer, pl_module, stage)
 
     def state_dict(self) -> Dict[str, Any]:
-        """Overrides. :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`'s
+        """Overrides. :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`'s
         ``state_dict`` method to maintain multi-phase training depth state.
 
         Returns:
@@ -455,7 +455,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         }
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        """Overrides :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`'s
+        """Overrides :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`'s
         ``load_state_dict`` method to load multi-phase training depth state.
 
         Args:
@@ -758,7 +758,7 @@ class ScheduleParsingMixin(ABC):
             self._rewrite_schedule(err_msg=err_msg)
 
     def _validate_epoch_transitions(self) -> None:
-        """If not composing :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` and
+        """If not composing :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping` and
         epoch-driven stopping criteria (the default behavior) but instead specifying exclusively epoch-driven
         transitions ( :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is
         ``True``), ensure the specified schedule specifies transitions for every phase.
@@ -873,7 +873,7 @@ class ScheduleParsingMixin(ABC):
 
         Args:
             new_lr_scheduler (Dict): A dictionary defining the new lr scheduler configuration to be initialized.
-            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            trainer (pl.Trainer): The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object.
             optimizer (:external+torch:class:`~torch.optim.Optimizer`): The
                 :external+torch:class:`~torch.optim.Optimizer` around which the new lr scheduler will be wrapped.
         """
@@ -1172,7 +1172,7 @@ class ScheduleImplMixin(ABC):
 
         Returns:
             os.PathLike: The path to the generated schedule, by default ``Trainer.log_dir`` and named after the
-            :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass in use with the suffix
+            :external+pl:class:`~pytorch_lightning.core.module.LightningModule` subclass in use with the suffix
             ``_ft_schedule.yaml``)
         """
         dump_path = pathlib.Path(dump_loc)
@@ -1195,7 +1195,7 @@ class ScheduleImplMixin(ABC):
             dump_loc: The directory to which the generated schedule (.yaml) should be written
         Returns:
             os.PathLike: The path to the generated schedule, by default ``Trainer.log_dir`` and named after the
-            :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass in use with the suffix
+            :external+pl:class:`~pytorch_lightning.core.module.LightningModule` subclass in use with the suffix
             ``_ft_schedule.yaml``)
         """
         # Note: This initial default fine-tuning schedule generation approach is intentionally simple/naive but is
@@ -1526,7 +1526,7 @@ class CallbackDepMixin(ABC):
         and scheduled fine-tuning capabilities.
 
         Args:
-            trainer (pl.Trainer):  The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object to
+            trainer (pl.Trainer):  The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object to
                 inspect the callbacks of
 
         Returns:
@@ -1543,7 +1543,7 @@ class CallbackDepMixin(ABC):
         """Validate multiple instances of a given user-provided callback dependency parent are not present.
 
         Args:
-            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object to
+            trainer (pl.Trainer): The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object to
                 inspect the callbacks of
 
         Raises:
@@ -1588,10 +1588,10 @@ class CallbackDepMixin(ABC):
         and configuring them if necessary.
 
         Args:
-            trainer (:external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
-                :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
-            pl_module (:external+pl:class:`~lightning.pytorch.core.module.LightningModule`): The
-                :external+pl:class:`~lightning.pytorch.core.module.LightningModule` object
+            trainer (:external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`): The
+                :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object
+            pl_module (:external+pl:class:`~pytorch_lightning.core.module.LightningModule`): The
+                :external+pl:class:`~pytorch_lightning.core.module.LightningModule` object
             stage: The ``RunningStage.{SANITY_CHECKING,TRAINING,VALIDATING}``. Defaults to None.
         """
         trainer.callbacks, added_es_fts, added_ckpt_fts = self._configure_callback_deps(trainer)
@@ -1603,13 +1603,13 @@ class CallbackDepMixin(ABC):
             trainer.early_stopping_callback.setup(trainer, pl_module, stage)  # type: ignore[union-attr]
 
     def _configure_callback_deps(self, trainer: "pl.Trainer") -> Tuple[List[Callback], bool, bool]:
-        """Ensures FTSCheckpoint and :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`
+        """Ensures FTSCheckpoint and :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`
         callbacks are present and configured, removing any.
 
-        :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`s if present.
+        :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`s if present.
 
         Args:
-            trainer: The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object that may have its
+            trainer: The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object that may have its
                 callbacks list altered.
 
         Returns:

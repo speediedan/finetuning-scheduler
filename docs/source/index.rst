@@ -10,7 +10,7 @@ Introduction to the Fine-Tuning Scheduler
 
 The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback accelerates and enhances
 foundation model experimentation with flexible fine-tuning schedules. Training with the
-:class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is simple and confers a host of benefits:
+:class:`~finetuning_scheduler.fts.FinetuningScheduler` (FTS) callback is simple and confers a host of benefits:
 
 * it dramatically increases fine-tuning flexibility
 * expedites and facilitates exploration of model tuning dynamics
@@ -172,20 +172,11 @@ either integers or convertible to integers via ``int()``.
     as directed in the explicitly specified or implicitly generated schedule. Prior to beginning the first phase of
     training (phase ``0``), FinetuningScheduler will inspect the optimizer to determine if the user has manually
     initialized the optimizer with parameters that are non-trainable or otherwise altered the parameter trainability
-    states from that expected of the configured phase ``0``.
-
-    When manually configuring the optimizer initially, one should normally ensure non-trainable parameters are filtered
-    out to (among other reasons) avoid triggering a parameter collision error in pytorch during a future training phase,
-    e.g.:
-
-    .. code-block:: python
-      :linenos:
-      :emphasize-lines: 2, 3
-
-        def configure_optimizers(self):
-            parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
-            optimizer = torch.optim.SGD(parameters, lr=1e-3, weight_decay=self.weight_decay)
-            ...
+    states from that expected of the configured phase ``0``. By default (starting with FinetuningScheduler ``2.0``), FTS
+    ensures the optimizer configured in ``configure_optimizers`` will optimize the parameters (and only those
+    parameters) scheduled to be optimized in phase ``0`` of the current fine-tuning schedule. This auto-configuration
+    can be disabled if desired by setting
+    :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.enforce_phase0_params` to ``False``.
 
 EarlyStopping and Epoch-Driven Phase Transition Criteria
 ********************************************************
@@ -274,8 +265,7 @@ sessions.
         trainer.fit(...)
 
     Note that similar to the behavior of
-    :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`,
-    (`specifically this PR <https://github.com/Lightning-AI/lightning/pull/12045>`_), when resuming training
+    :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`, when resuming training
     with a different :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` ``dirpath`` from the provided
     checkpoint, the new training session's checkpoint state will be re-initialized at the resumption depth with the
     provided checkpoint being set as the best checkpoint.

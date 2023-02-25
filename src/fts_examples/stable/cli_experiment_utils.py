@@ -1,3 +1,4 @@
+import operator
 import os
 import sys
 from collections import namedtuple
@@ -6,8 +7,23 @@ from typing import Any, Dict, Optional, Tuple, Union
 import torch
 from lightning.fabric.accelerators.cuda import is_cuda_available
 from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13
+from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
+from lightning_utilities.core.imports import compare_version
 from torch.utils import collect_env
+
+_TORCH_GREATER_EQUAL_1_12_1 = compare_version("torch", operator.ge, "1.12.1")
+
+
+class CustLightningCLI(LightningCLI):
+    """Customize the :class:`~pytorch_lightning.cli.LightningCLI` to ensure the
+    :class:`~pytorch_lighting.core.LightningDataModule` and :class:`~pytorch_lightning.core.module.LightningModule`
+    use the same Hugging Face model, SuperGLUE task and custom logging tag."""
+
+    def add_arguments_to_parser(self, parser):
+        parser.link_arguments("trainer.logger.init_args.name", "model.init_args.experiment_tag")
+        parser.link_arguments("data.init_args.model_name_or_path", "model.init_args.model_name_or_path")
+        parser.link_arguments("data.init_args.task_name", "model.init_args.task_name")
 
 
 def instantiate_class(init: Dict[str, Any], args: Optional[Union[Any, Tuple[Any, ...]]] = None) -> Any:

@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """A demonstration of the scheduled fine-tuning callback
-:ref:`FinetuningScheduler<advanced/finetuning_scheduler:Fine-Tuning Scheduler>` using the
+:ref:`FinetuningScheduler<advanced/finetuning_scheduler:Fine-Tuning Scheduler>` (FTS) using the
 `RTE <https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte>`_ and
 `BoolQ <https://github.com/google-research-datasets/boolean-questions>`_ tasks of the
 `SuperGLUE <https://super.gluebenchmark.com/>`_ benchmark and the :ref:`LightningCLI<common/lightning_cli:LightningCLI>`
@@ -34,20 +34,23 @@ adjust the configuration files referenced below as desired for other configurati
 import os
 import warnings
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import lightning.pytorch as pl
 import torch
-from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.utilities import rank_zero_warn
 from lightning.pytorch.utilities.types import STEP_OUTPUT
-from packaging.version import Version
 from torch import Tensor
 from torch.utils.data import DataLoader
 
 import finetuning_scheduler as fts
 from fts_examples import _HF_AVAILABLE, _SP_AVAILABLE
-from fts_examples.stable.cli_experiment_utils import collect_env_info, instantiate_class
+from fts_examples.stable.cli_experiment_utils import (
+    _TORCH_GREATER_EQUAL_1_12_1,
+    collect_env_info,
+    CustLightningCLI,
+    instantiate_class,
+)
 
 if _HF_AVAILABLE:
     import datasets
@@ -57,9 +60,9 @@ if _HF_AVAILABLE:
     from transformers import logging as transformers_logging
     from transformers.tokenization_utils_base import BatchEncoding
 
+
 TASK_NUM_LABELS = {"boolq": 2, "rte": 2}
 DEFAULT_TASK = "rte"
-
 
 transformers_logging.set_verbosity_error()
 # ignore warnings related tokenizers_parallelism/DataLoader parallelism tradeoff and
@@ -171,7 +174,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
 
 
 class RteBoolqModule(pl.LightningModule):
-    """A :class:`~lightning.pytorch.core.module.LightningModule` that can be used to fine-tune a foundation model
+    """A :class:`~pytorch_lightning.core.module.LightningModule` that can be used to fine-tune a foundation model
     on either the RTE or BoolQ `SuperGLUE <https://super.gluebenchmark.com/>`_ tasks using Hugging Face
     implementations of a given model and the `SuperGLUE Hugging Face dataset.
 
@@ -189,10 +192,10 @@ class RteBoolqModule(pl.LightningModule):
         experiment_tag: str = "default",
         log_env_details: bool = True,
     ):
-        """In this example, this :class:`~lightning.pytorch.core.module.LightningModule` is initialized by composing
+        """In this example, this :class:`~pytorch_lightning.core.module.LightningModule` is initialized by composing
         the ./config/fts_defaults.yaml default configuration with various scheduled fine-tuning yaml configurations
-        via the :class:`~lightning.pytorch.cli.LightningCLI` but it can be used like any other
-        :class:`~lightning.pytorch.core.module.LightningModule` as well.
+        via the :class:`~pytorch_lightning.cli.LightningCLI` but it can be used like any other
+        :class:`~pytorch_lightning.core.module.LightningModule` as well.
 
         Args:
             model_name_or_path (str): Path to pretrained model or identifier `from <https://huggingface.co/models>`_
@@ -283,44 +286,12 @@ class RteBoolqModule(pl.LightningModule):
     def on_validation_epoch_end(self):
         self.validation_step_outputs.clear()
 
-    # TODO: remove this function for 2.0 example version once `enforce_p0_params` is leveraged in optim config
-    def _init_param_groups(self) -> List[Dict]:
-        """Initialize the parameter groups. Used to ensure weight_decay is not applied to our specified bias
-        parameters when we initialize the optimizer.
-
-        Returns:
-            List[Dict]: A list of parameter group dictionaries.
-        """
-        return [
-            {
-                "params": [
-                    p
-                    for n, p in self.model.named_parameters()
-                    if not any(nd in n for nd in self.no_decay) and p.requires_grad
-                ],
-                "weight_decay": self.hparams.optimizer_init["init_args"]["weight_decay"],
-            },
-            {
-                "params": [
-                    p
-                    for n, p in self.model.named_parameters()
-                    if any(nd in n for nd in self.no_decay) and p.requires_grad
-                ],
-                "weight_decay": 0.0,
-            },
-        ]
-
     def configure_optimizers(self):
-        # the phase 0 parameters will have been set to require gradients during setup
-        # you can initialize the optimizer with a simple requires.grad filter as is often done,
-        # but in this case we pass a list of parameter groups to ensure weight_decay is
-        # not applied to the bias parameter (for completeness, in this case it won't make much
-        # performance difference)
-        if Version(torch.__version__) == Version("1.12.0") or torch.__version__.startswith("1.12.0"):
-            # we need to use a patched version of AdamW to fix https://github.com/pytorch/pytorch/issues/80809
-            # and allow examples to succeed with torch 1.12.0 (this torch bug is fixed in 1.12.1)
-            self.hparams.optimizer_init["class_path"] = "fts_examples.stable.patched_adamw.AdamW"
-        optimizer = instantiate_class(args=self._init_param_groups(), init=self.hparams.optimizer_init)
+        # With FTS >= 2.0, ``FinetuningScheduler`` simplifies initial optimizer configuration by ensuring the optimizer
+        # configured here will optimize the parameters (and only those parameters) scheduled to be optimized in phase 0
+        # of the current fine-tuning schedule. This auto-configuration can be disabled if desired by setting
+        # ``enforce_phase0_params`` to ``False``.
+        optimizer = instantiate_class(args=self.model.parameters(), init=self.hparams.optimizer_init)
         scheduler = {
             "scheduler": instantiate_class(args=optimizer, init=self.hparams.lr_scheduler_init),
             **self.hparams.pl_lrs_cfg,
@@ -328,31 +299,15 @@ class RteBoolqModule(pl.LightningModule):
         return [optimizer], [scheduler]
 
 
-class CustLightningCLI(LightningCLI):
-    """Customize the :class:`~lightning.pytorch.cli.LightningCLI` to ensure the
-    :class:`~pytorch_lighting.core.LightningDataModule` and :class:`~lightning.pytorch.core.module.LightningModule`
-    use the same Hugging Face model, SuperGLUE task and custom logging tag."""
-
-    def before_instantiate_classes(self) -> None:
-        # fix needed for pl 1.6.0 (patched w/ https://github.com/Lightning-AI/lightning/pull/12609)
-        deprecated_keys = ["agg_key_funcs", "agg_default_func"]
-        target_namespace = self.config.fit.trainer.logger.init_args
-        for k in deprecated_keys:
-            if k in target_namespace.__dict__:
-                delattr(target_namespace, k)
-
-    def add_arguments_to_parser(self, parser):
-        parser.link_arguments("trainer.logger.init_args.name", "model.init_args.experiment_tag")
-        parser.link_arguments("data.init_args.model_name_or_path", "model.init_args.model_name_or_path")
-        parser.link_arguments("data.init_args.task_name", "model.init_args.task_name")
-
-
 def cli_main() -> None:
+    if not _TORCH_GREATER_EQUAL_1_12_1:
+        print("Running the fts_superglue example requires PyTorch >= ``1.12.1``")
     if not _HF_AVAILABLE:  # pragma: no cover
         print("Running the fts_superglue example requires the `transformers` and `datasets` packages from Hugging Face")
-        return
     if not _SP_AVAILABLE:
         print("Note using the default model in this fts_superglue example requires the `sentencepiece` package.")
+    if not all([_TORCH_GREATER_EQUAL_1_12_1, _HF_AVAILABLE, _SP_AVAILABLE]):
+        return
     # every configuration of this example depends upon a shared set of defaults.
     default_config_file = os.path.join(os.path.dirname(__file__), "config", "fts_defaults.yaml")
     _ = CustLightningCLI(

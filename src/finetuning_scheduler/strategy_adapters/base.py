@@ -33,7 +33,7 @@ class StrategyAdapter:
     r"""Base class for all strategy adapters. Implements the default
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` hooks. Can be subclassed to extend
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` support for a complex or custom
-    :external+pl:class:`~lightning.pytorch.strategies.Strategy` via an associated
+    :external+pl:class:`~pytorch_lightning.strategies.Strategy` via an associated
     :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`.
 
     .. warning::
@@ -70,20 +70,20 @@ class StrategyAdapter:
 
     @property
     def pl_module(self) -> LightningModule:
-        """Convenient access to the :external+pl:class:`~lightning.pytorch.core.module.LightningModule` being fine-
+        """Convenient access to the :external+pl:class:`~pytorch_lightning.core.module.LightningModule` being fine-
         tuned.
 
         Returns:
-            LightningModule: The user's :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
+            LightningModule: The user's :external+pl:class:`~pytorch_lightning.core.module.LightningModule`
         """
         return self.fts_handle.pl_module
 
     @property
     def pls_handle(self) -> Strategy:
-        """Convenient access to the current :external+pl:class:`~lightning.pytorch.strategies.Strategy` in use.
+        """Convenient access to the current :external+pl:class:`~pytorch_lightning.strategies.Strategy` in use.
 
         Returns:
-            Strategy: The :external+pl:class:`~lightning.pytorch.strategies.Strategy` in use.
+            Strategy: The :external+pl:class:`~pytorch_lightning.strategies.Strategy` in use.
         """
         assert self.pl_module._trainer is not None
         return self.pl_module._trainer.strategy
@@ -114,14 +114,14 @@ class StrategyAdapter:
 
     def fts_optim_transform(self, orig_pl: List, inspect_only: bool = False) -> List:
         """A method that can be overridden by a :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` if
-        a :external+pl:class:`~lightning.pytorch.strategies.Strategy` performs parameter transformations that cause
+        a :external+pl:class:`~pytorch_lightning.strategies.Strategy` performs parameter transformations that cause
         the current :external+torch:class:`~torch.optim.Optimizer`'s view of parameter names to diverge from the
         original parameter names. By default, no transformation of schedule parameter names is required for
         optimizer operations.
 
         Args:
             orig_pl (List): The original parameter name list before a given
-                :external+pl:class:`~lightning.pytorch.strategies.Strategy`'s transformation of them.
+                :external+pl:class:`~pytorch_lightning.strategies.Strategy`'s transformation of them.
             inspect_only (bool): Whether to use the specified transform in read-only (i.e. ``inspect_only``) mode,
                 avoiding any persistent state transformation that may accompany normal usage. Typically useful for state
                 inspection and validation contexts.
@@ -129,7 +129,7 @@ class StrategyAdapter:
         Returns:
             List: A transformed parameter name list that matches the current
                 :external+torch:class:`~torch.optim.Optimizer`'s view of them after a given
-                :external+pl:class:`~lightning.pytorch.strategies.Strategy`'s transformation of the original parameter
+                :external+pl:class:`~pytorch_lightning.strategies.Strategy`'s transformation of the original parameter
                 names.
         """
         return orig_pl
@@ -138,19 +138,19 @@ class StrategyAdapter:
         """Effectively the reverse transformation of
         :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.fts_optim_transform`. Can be overridden by a
         :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` if a
-        :external+pl:class:`~lightning.pytorch.strategies.Strategy` performs parameter transformations that cause the
+        :external+pl:class:`~pytorch_lightning.strategies.Strategy` performs parameter transformations that cause the
         original user view of parameter names to diverge from the current
         :external+torch:class:`~torch.optim.Optimizer`'s view. By default, no transformation of
         :external+torch:class:`~torch.optim.Optimizer` parameter names is required.
 
         Args:
             param_names (List): A parameter name list from the current :external+torch:class:`~torch.optim.Optimizer`'s
-                view of them after a :external+pl:class:`~lightning.pytorch.strategies.Strategy`'s transformation of the
+                view of them after a :external+pl:class:`~pytorch_lightning.strategies.Strategy`'s transformation of the
                 original parameter names.
 
         Returns:
             List: The original parameter name list before a given
-                :external+pl:class:`~lightning.pytorch.strategies.Strategy`'s transformation.
+                :external+pl:class:`~pytorch_lightning.strategies.Strategy`'s transformation.
         """
         return param_names
 
@@ -160,7 +160,7 @@ class StrategyAdapter:
         of the specified fine-tuning schedule.
 
         Args:
-            trainer (Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            trainer (Trainer): The :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer` object.
 
         Returns:
             List: A list of the number of parameter groups pruned for each optimizer (since only a single optimizer is

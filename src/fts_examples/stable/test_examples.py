@@ -37,7 +37,7 @@ EXPECTED_WARNS = [
     "distutils Version classes are deprecated",
 ]
 MIN_VERSION_WARNS = "1.10"
-MAX_VERSION_WARNS = "1.13"
+MAX_VERSION_WARNS = "2.0"
 # torch version-specific warns will go here
 EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [], MAX_VERSION_WARNS: []}
 torch_version = get_distribution("torch").version
