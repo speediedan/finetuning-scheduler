@@ -78,7 +78,7 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     callbacks = [FinetuningScheduler(gen_ft_sched_only=True), FTSCheckpoint(monitor="val_loss")]
     model = FinetuningSchedulerBoringModel()
     tmpdir = tmpdir_factory.getbasetemp()
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     unmod_schedule_file = Path(trainer.log_dir) / f"{model.__class__.__name__}_ft_schedule.yaml"
     with pytest.raises(SystemExit):
         trainer.fit(model)
@@ -630,7 +630,11 @@ def test_fsdp_multi_gpus(
     if exception_expected:
         gen_exceptions(trainer, model, model_cfg_key, exception_expected)
     else:
-        trainer.fit(model)
+        if model_cfg_key in ("cust_awp_noprec_use_orig", "cust_awp_nop_ignore_p_no_ofld_uo"):
+            with mock.patch("lightning.pytorch.strategies.fsdp._optimizer_has_flat_params", lambda x: True):
+                trainer.fit(model)
+        else:
+            trainer.fit(model)
         default_fts_sanity_chk(trainer)
     if trainer.is_global_zero:
         check_fts_fsdp_warns(warns_expected, recwarn)

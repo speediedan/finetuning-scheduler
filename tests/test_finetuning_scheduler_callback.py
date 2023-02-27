@@ -354,7 +354,7 @@ def ckpt_set(tmpdir_factory) -> Dict:
         FTSCheckpoint(monitor="val_loss", verbose=True, save_top_k=3),
     ]
     model = FinetuningSchedulerBoringModel()
-    trainer = Trainer(default_root_dir=tmpdir_factory.getbasetemp(), callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir_factory.getbasetemp(), callbacks=callbacks, devices=1)
     trainer.fit(model)
     return {"best": trainer.checkpoint_callback.best_model_path, "kth": trainer.checkpoint_callback.kth_best_model_path}
 
@@ -367,7 +367,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     callbacks = [FinetuningScheduler(gen_ft_sched_only=True)]
     model = FinetuningSchedulerBoringModel()
     tmpdir = tmpdir_factory.getbasetemp()
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     # unmod_schedule_file = tmpdir / "lightning_logs" / "version_0" / f"{model.__class__.__name__}_ft_schedule.yaml"]
     unmod_schedule_file = Path(trainer.log_dir) / f"{model.__class__.__name__}_ft_schedule.yaml"
     with pytest.raises(SystemExit):
@@ -739,7 +739,7 @@ def test_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expe
     """Validate the default fine-tuning schedule generation."""
     seed_everything(42)
     callbacks = [FinetuningScheduler(gen_ft_sched_only=True)]
-    trainer_opts = {"default_root_dir": tmpdir, "callbacks": callbacks}
+    trainer_opts = {"default_root_dir": tmpdir, "callbacks": callbacks, "devices": 1}
     if dist_mode:
         trainer_opts["strategy"] = "ddp"
         trainer_opts["accelerator"] = "auto"
@@ -783,7 +783,7 @@ def test_finetuningscheduling_explicit_implicit(tmpdir, boring_ft_schedule, expl
         FinetuningScheduler(ft_schedule=ft_schedule, max_depth=max_depth),
     ]
     model = FinetuningSchedulerBoringModel()
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     trainer.fit(model)
     finetuningscheduler_callback = get_fts(trainer)
     expected_state = EXPECTED_EXPIMP_RESULTS[(explicit_mode, max_depth)]
@@ -871,7 +871,7 @@ def test_finetuningscheduling_enforce_p0(tmpdir, init_lr_key, p0_params):
         FTSEarlyStopping(monitor="val_loss", patience=1),
         LearningRateMonitor(),
     ]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     trainer.fit(model)
     finetuningscheduler_callback = get_fts(trainer)
     callbacks_dict = {type(c): i for i, c in enumerate(finetuningscheduler_callback.pl_module.trainer.callbacks)}
@@ -907,7 +907,7 @@ def test_finetuningscheduling_decay(tmpdir, boring_ft_schedule, explicit_mode: b
         FinetuningScheduler(ft_schedule=ft_schedule, max_depth=-1),
     ]
     model = FinetuningSchedulerBoringModel(no_decay=no_decay)
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     finetuningscheduler_callback = get_fts(trainer)
     trainer.fit(model)
     expected_state = EXPECTED_DECAY_RESULTS[(explicit_mode, nodecay_mode)]
@@ -984,7 +984,7 @@ def test_fts_callback_resume(
 
     seed_everything(42)
     model = FinetuningSchedulerBoringModel()
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=resume_callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=resume_callbacks, devices=1)
     finetuningscheduler_callback = get_fts(trainer)
     trainer.ckpt_path = ckpt_set[ckpt]
     trainer.fit(model)
@@ -1041,7 +1041,7 @@ def test_finetuningscheduling_nolrs_intrafit(tmpdir):
         FTSEarlyStopping(monitor="val_loss", patience=1),
         LearningRateMonitor(),
     ]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     trainer.fit(model)
     finetuningscheduler_callback = get_fts(trainer)
     callbacks_dict = {type(c): i for i, c in enumerate(finetuningscheduler_callback.pl_module.trainer.callbacks)}
@@ -1074,7 +1074,7 @@ def test_finetuningscheduling_intrafit(tmpdir, restore_best: bool):
         FTSEarlyStopping(monitor="val_loss", patience=1),
         LearningRateMonitor(),
     ]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     trainer.fit(model)
     finetuningscheduler_callback = get_fts(trainer)
     callbacks_dict = {type(c): i for i, c in enumerate(finetuningscheduler_callback.pl_module.trainer.callbacks)}
@@ -1162,7 +1162,7 @@ def test_finetuningscheduling_reinitlr(tmpdir, boring_ft_schedule, explicit_mode
         ),
         FTSEarlyStopping(monitor="val_loss", patience=1),
     ]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     trainer.fit(model)
     finetuningscheduler_callback = get_fts(trainer)
     assert finetuningscheduler_callback.depth_remaining == 0
@@ -1249,7 +1249,7 @@ def test_finetuningscheduling_reinitlr_lambda(
         ),
         FTSEarlyStopping(monitor="val_loss", patience=1),
     ]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     trainer.fit(model)
     finetuningscheduler_callback = get_fts(trainer)
     assert finetuningscheduler_callback.depth_remaining == 0
@@ -1341,7 +1341,7 @@ def test_finetuningscheduling_reinitlr_rlrop(
         ),
         FTSEarlyStopping(monitor="val_loss", patience=es_patience),
     ]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, max_epochs=max_epochs)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1, max_epochs=max_epochs)
     trainer.fit(model)
     finetuningscheduler_callback = get_fts(trainer)
     assert finetuningscheduler_callback.depth_remaining == 0
@@ -1401,7 +1401,7 @@ def test_finetuningscheduler_callback_warns(
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` warnings that require a
     :class:`~pytorch_lighting.trainer.Trainer` to be defined are properly issued"""
     model = FinetuningSchedulerBoringModel()
-    dist_args = {"strategy": dist_mode, "accelerator": "cpu", "devices": "auto"} if dist_mode else {}
+    dist_args = {"strategy": dist_mode, "accelerator": "cpu", "devices": "auto"} if dist_mode else {"devices": 1}
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, **dist_args)
     trainer.fit(model)
     unmatched = unmatched_warns(rec_warns=recwarn.list, expected_warns=expected)
@@ -1498,7 +1498,7 @@ def test_finetuningscheduling_misconfiguration(tmpdir, callbacks: List[Callback]
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly
     raised."""
     model = FinetuningSchedulerBoringModel()
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     with pytest.raises(MisconfigurationException, match=expected):
         trainer.fit(model)
         fts = callbacks[0]
@@ -1526,7 +1526,7 @@ def test_fts_init_lrs_misconfiguration(tmpdir, callbacks: List[Callback], cust_m
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` initial lr scheduler misconfiguration exceptions
     and warnings are properly raised."""
     model = FTSCustLRModel(**cust_mod_args)
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     if callbacks[0].allow_untested:
         with pytest.raises(SystemExit):
             with pytest.warns(Warning, match=expected):
@@ -1596,7 +1596,7 @@ def test_finetuningscheduling_invalid_schedules(tmpdir, invalid_schedules, sched
         fts_args = {"ft_schedule": invalid_schedules[schedule_key]}
     callbacks = [FinetuningScheduler(**fts_args)]
     model = FinetuningSchedulerBoringModel()
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     if schedule_key in ("lr_phase0", "extra_plrs_key", "num_pg_w", "ext_opt_key", "non_integer"):
         with pytest.warns(Warning, match=expected[0]):
             trainer.fit(model)
@@ -1649,14 +1649,14 @@ MOCK_STRATEGY_MAPPING = {
 
 
 @pytest.mark.parametrize(
-    "strategy, devices, strategy_conf, results_key",
+    "strategy, devices, accelerator, strategy_conf, results_key",
     [
-        pytest.param("test_strategy", None, "stgy_allow_untest", "allow_untest"),
-        pytest.param("ddp", None, "stgy_disallow_untest", "disallow_untest"),
-        pytest.param("test_strategy", None, "cust_stgy_adapter_found", "cust_stgy_adapter_found"),
-        pytest.param("test_strategy", None, "cust_stgy_adapter_not_found", "cust_stgy_adapter_not_found"),
-        pytest.param("test_strategy", None, "cust_stgy_adapter_not_importable", "cust_stgy_adapter_not_importable"),
-        pytest.param("deepspeed_stage_2", 1, None, "disallow_untest", marks=RunIf(deepspeed=True, min_cuda_gpus=1)),
+        pytest.param("test_strategy", 1, "auto", "stgy_allow_untest", "allow_untest"),
+        pytest.param("ddp", 1, "auto", "stgy_disallow_untest", "disallow_untest"),
+        pytest.param("test_strategy", 1, "cpu", "cust_stgy_adapter_found", "cust_stgy_adapter_found"),
+        pytest.param("test_strategy", 1, "cpu", "cust_stgy_adapter_not_found", "cust_stgy_adapter_not_found"),
+        pytest.param("test_strategy", 1, "cpu", "cust_stgy_adapter_not_importable", "cust_stgy_adapter_not_importable"),
+        pytest.param("deepspeed_s2", 1, "auto", None, "disallow_untest", marks=RunIf(deepspeed=True, min_cuda_gpus=1)),
     ],
     ids=[
         "allow_untested_stgy",
@@ -1664,16 +1664,18 @@ MOCK_STRATEGY_MAPPING = {
         "csa_found",
         "csa_not_found",
         "csa_not_importable",
-        "deepspeed_stage_2",
+        "deepspeed_s2",
     ],
 )
-def test_finetuningscheduling_distributed_compat(tmpdir, strategy, devices, strategy_conf, results_key):
+def test_finetuningscheduling_distributed_compat(tmpdir, strategy, devices, accelerator, strategy_conf, results_key):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly raised
     for currently unsupported strategies."""
     expected_warn, raise_cond = EXPECTED_MOCK_STRATEGY_RESULTS[results_key]
     callbacks = [TestFinetuningScheduler(mock_strategy=strategy_conf)]
     model = FinetuningSchedulerBoringModel()
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy=strategy, devices=devices)
+    trainer = Trainer(
+        default_root_dir=tmpdir, callbacks=callbacks, accelerator=accelerator, strategy=strategy, devices=devices
+    )
     with pytest.raises(**raise_cond):
         if expected_warn:
             with pytest.warns(UserWarning, match=expected_warn):
@@ -1704,7 +1706,7 @@ def test_fts_optimizer_compat(
     monkeypatch.setenv("MKL_THREADING_LAYER", "GNU")
     seed_everything(42)
     model = test_model
-    dist_args = {"strategy": dist_mode, "accelerator": "gpu", "devices": "2"} if dist_mode else {}
+    dist_args = {"strategy": dist_mode, "accelerator": "gpu", "devices": "2"} if dist_mode else {"devices": 1}
     callbacks = [FinetuningScheduler()]
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, **dist_args)
     with pytest.raises(excepts, match=expected):
@@ -1760,7 +1762,7 @@ def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, enforce_
     seed_everything(42)
     model = DupParamInitBoringModel() if param_cfg_key != "bn_freeze" else BNInitBoringModel()
     callbacks = [FitStartOnlyFTS(enforce_phase0_params=enforce_p0)]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
     with pytest.raises(SystemExit):
         if not warn_expected:
             trainer.fit(model)
@@ -1856,7 +1858,7 @@ def test_finetuningscheduling_epoch_trans_only(tmpdir, boring_ft_schedule, epoch
         FinetuningScheduler(ft_schedule=ft_schedule, epoch_transitions_only=True),
         FTSEarlyStopping(monitor="val_loss", patience=1),  # including an extraneous earlystopping callback to test warn
     ]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, max_epochs=6)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1, max_epochs=6)
     finetuningscheduler_callback = get_fts(trainer)
     if epoch_only_cfg:
         # we're testing an epoch_transitions_only schedule that should trigger the specified warning
@@ -1898,6 +1900,7 @@ def test_early_stopping_on_non_finite_monitor(tmpdir, stop_value):
     trainer = Trainer(
         default_root_dir=tmpdir,
         callbacks=callbacks,
+        devices=1,
         limit_train_batches=0.2,
         limit_val_batches=0.2,
         max_epochs=10,
@@ -1931,6 +1934,7 @@ def test_early_stopping_thresholds(tmpdir, stopping_threshold, divergence_thesho
     trainer = Trainer(
         default_root_dir=tmpdir,
         callbacks=callbacks,
+        devices=1,
         limit_train_batches=0.2,
         limit_val_batches=0.2,
         max_epochs=20,
