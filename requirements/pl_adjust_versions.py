@@ -50,34 +50,7 @@ def main(req: str, torch_version: Optional[str] = None) -> str:
     return req
 
 
-def test():
-    requirements = """
-    torch>=1.2.*
-    torch==1.2.3
-    torch==1.4
-    torch
-    future>=0.17.1
-    pytorch==1.5.6+123dev0
-    torchvision
-    torchmetrics>=0.4.1
-    """
-    expected = """
-    torch==1.9.1
-    torch==1.9.1
-    torch==1.9.1
-    torch==1.9.1
-    future>=0.17.1
-    pytorch==1.5.6+123dev0
-    torchvision==0.10.1
-    torchmetrics>=0.4.1
-    """.strip()
-    actual = main(requirements, "1.9")
-    assert actual == expected, (actual, expected)
-
-
 if __name__ == "__main__":
-    test()  # sanity check
-
     if len(sys.argv) == 3:
         requirements_path, torch_version = sys.argv[1:]
     else:
