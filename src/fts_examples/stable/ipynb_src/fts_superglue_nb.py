@@ -34,7 +34,7 @@
 # criteria (a multi-phase extension of ``EarlyStopping`` packaged with FinetuningScheduler), user-specified epoch transitions or a composition of the two (the default mode).
 # A [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) training session completes when the
 # final phase of the schedule has its stopping criteria met. See
-# the [early stopping documentation](https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.callbacks.EarlyStopping.html) for more details on that callback's configuration.
+# the [early stopping documentation](https://pytorch-lightning.readthedocs.io/en/stable/api/lightning.pytorch.callbacks.EarlyStopping.html) for more details on that callback's configuration.
 #
 # ![FinetuningScheduler explicit loss animation](fts_explicit_loss_anim.gif){height="272px" width="376px"}
 
@@ -140,7 +140,7 @@
 # trainer.fit(...)
 # ```
 #
-# Note that similar to the behavior of [ModelCheckpoint](https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.callbacks.ModelCheckpoint.html), when resuming training with a
+# Note that similar to the behavior of [ModelCheckpoint](https://pytorch-lightning.readthedocs.io/en/stable/api/lightning.pytorch.callbacks.ModelCheckpoint.html), when resuming training with a
 # different [FTSCheckpoint](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts_supporters.html#finetuning_scheduler.fts_supporters.FTSCheckpoint) ``dirpath`` from the provided
 # checkpoint, the new training session's checkpoint state will be re-initialized at the resumption depth with the provided checkpoint being set as the best checkpoint.
 

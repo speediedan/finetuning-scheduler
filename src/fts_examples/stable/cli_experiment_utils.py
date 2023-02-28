@@ -16,8 +16,8 @@ _TORCH_GREATER_EQUAL_1_12_1 = compare_version("torch", operator.ge, "1.12.1")
 
 
 class CustLightningCLI(LightningCLI):
-    """Customize the :class:`~pytorch_lightning.cli.LightningCLI` to ensure the
-    :class:`~pytorch_lighting.core.LightningDataModule` and :class:`~pytorch_lightning.core.module.LightningModule`
+    """Customize the :class:`~lightning.pytorch.cli.LightningCLI` to ensure the
+    :class:`~pytorch_lighting.core.LightningDataModule` and :class:`~lightning.pytorch.core.module.LightningModule`
     use the same Hugging Face model, SuperGLUE task and custom logging tag."""
 
     def add_arguments_to_parser(self, parser):

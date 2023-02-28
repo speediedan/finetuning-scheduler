@@ -59,7 +59,7 @@ Any arguments you would like to pass to initialize the specified lr scheduler wi
     ...
 
 Optionally, one can include arguments to pass to Lightning's lr scheduler configuration
-(:class:`~pytorch_lightning.utilities.types.LRSchedulerConfig`) in the ``pl_lrs_cfg`` dictionary.
+(:class:`~lightning.pytorch.utilities.types.LRSchedulerConfig`) in the ``pl_lrs_cfg`` dictionary.
 
 .. code-block:: yaml
   :linenos:
@@ -113,7 +113,7 @@ sanity-checked prior to training initiation.
 Note that specifying LR scheduler reinitialization configurations is only supported for phases >= ``1``. This is because
 for fine-tuning phase ``0``, the LR scheduler configuration will be the scheduler that you initiate your training
 session with, usually via the ``configure_optimizer`` method of
-:external+pl:class:`~pytorch_lightning.core.module.LightningModule`.
+:external+pl:class:`~lightning.pytorch.core.module.LightningModule`.
 
 .. tip::
 
@@ -210,7 +210,7 @@ phase transitions. In implicit mode, the lr scheduler reconfiguration should be 
 :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_lr_cfg` parameter of
 :class:`~finetuning_scheduler.fts.FinetuningScheduler`.
 
-For example, configuring this dictionary via the :external+pl:class:`~pytorch_lightning.cli.LightningCLI`, one
+For example, configuring this dictionary via the :external+pl:class:`~lightning.pytorch.cli.LightningCLI`, one
 could use:
 
 .. code-block:: yaml
@@ -242,7 +242,7 @@ could use:
                 name: Implicit_Reinit_LR_Scheduler
 
 Note that an initial lr scheduler configuration should also still be provided per usual (again, typically via the
-``configure_optimizer`` method of :external+pl:class:`~pytorch_lightning.core.module.LightningModule`) and the initial
+``configure_optimizer`` method of :external+pl:class:`~lightning.pytorch.core.module.LightningModule`) and the initial
 lr scheduler configuration can differ in lr scheduler type and configuration from the configuration specified in
 :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_lr_cfg` applied at each phase transition. Because the
 same schedule is applied at each phase transition, the ``init_pg_lrs`` list is not supported in an implicit fine-tuning
@@ -286,8 +286,8 @@ training phases:
    = ``1.0e-05``)
 
 Phase ``0`` in :yellow-highlight:`yellow` (passed to our
-:external+pl:class:`~pytorch_lightning.core.module.LightningModule` via the ``model``
-definition in our :external+pl:class:`~pytorch_lightning.cli.LightningCLI` configuration) uses a
+:external+pl:class:`~lightning.pytorch.core.module.LightningModule` via the ``model``
+definition in our :external+pl:class:`~lightning.pytorch.cli.LightningCLI` configuration) uses a
 :external+torch:class:`~torch.optim.lr_scheduler.LinearLR` scheduler (defined in
 ``./config/advanced/reinit_lr/fts_explicit_reinit_lr.yaml``) with the initial lr defined via the shared initial optimizer
 configuration (defined in ``./config/fts_defaults.yaml``).

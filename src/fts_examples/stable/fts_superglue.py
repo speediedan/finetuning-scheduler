@@ -174,7 +174,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
 
 
 class RteBoolqModule(pl.LightningModule):
-    """A :class:`~pytorch_lightning.core.module.LightningModule` that can be used to fine-tune a foundation model
+    """A :class:`~lightning.pytorch.core.module.LightningModule` that can be used to fine-tune a foundation model
     on either the RTE or BoolQ `SuperGLUE <https://super.gluebenchmark.com/>`_ tasks using Hugging Face
     implementations of a given model and the `SuperGLUE Hugging Face dataset.
 
@@ -192,10 +192,10 @@ class RteBoolqModule(pl.LightningModule):
         experiment_tag: str = "default",
         log_env_details: bool = True,
     ):
-        """In this example, this :class:`~pytorch_lightning.core.module.LightningModule` is initialized by composing
+        """In this example, this :class:`~lightning.pytorch.core.module.LightningModule` is initialized by composing
         the ./config/fts_defaults.yaml default configuration with various scheduled fine-tuning yaml configurations
-        via the :class:`~pytorch_lightning.cli.LightningCLI` but it can be used like any other
-        :class:`~pytorch_lightning.core.module.LightningModule` as well.
+        via the :class:`~lightning.pytorch.cli.LightningCLI` but it can be used like any other
+        :class:`~lightning.pytorch.core.module.LightningModule` as well.
 
         Args:
             model_name_or_path (str): Path to pretrained model or identifier `from <https://huggingface.co/models>`_

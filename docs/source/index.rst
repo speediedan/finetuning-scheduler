@@ -47,7 +47,7 @@ tasks during transfer learning [#]_ [#]_ [#]_ .
 of models via a fine-tuning schedule that is either implicitly generated (the default) or explicitly provided by the user
 (more computationally efficient). fine-tuning phase transitions are driven by
 :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria (a multi-phase
-extension of :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`),
+extension of :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`),
 user-specified epoch transitions or a composition of the two (the default mode). A
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` training session completes when the
 final phase of the schedule has its stopping criteria met. See
@@ -93,7 +93,7 @@ and executed in ascending order. In addition to being zero-indexed, fine-tuning 
 either integers or convertible to integers via ``int()``.
 
 1. First, generate the default schedule to ``Trainer.log_dir``. It will be named after your
-   :external+pl:class:`~pytorch_lightning.core.module.LightningModule` subclass with the suffix
+   :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass with the suffix
    ``_ft_schedule.yaml``.
 
 .. code-block:: python
@@ -232,7 +232,7 @@ Resumption of scheduled fine-tuning training is identical to the continuation of
 have been saved by a :class:`~finetuning_scheduler.fts.FinetuningScheduler` session.
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` uses
 :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` (an extension of
-:external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`) to maintain schedule state with
+:external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`) to maintain schedule state with
 special metadata.
 
 
@@ -265,7 +265,7 @@ sessions.
         trainer.fit(...)
 
     Note that similar to the behavior of
-    :external+pl:class:`~pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint`, when resuming training
+    :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`, when resuming training
     with a different :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` ``dirpath`` from the provided
     checkpoint, the new training session's checkpoint state will be re-initialized at the resumption depth with the
     provided checkpoint being set as the best checkpoint.
@@ -287,11 +287,10 @@ configurations.
    .. hlist::
       :columns: 2
 
-      * :external+pl:class:`~pytorch_lightning.strategies.ddp.DDPStrategy`:``ddp``, ``ddp_find_unused_parameters_false``
-      * :external+pl:class:`~pytorch_lightning.strategies.fsdp.FSDPStrategy`:
+      * :external+pl:class:`~lightning.pytorch.strategies.ddp.DDPStrategy`:``ddp``, ``ddp_find_unused_parameters_false``
+      * :external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`:
         ``fsdp``, ``fsdp_cpu_offload``
-      * :external+pl:class:`~pytorch_lightning.strategies.ddp_spawn.DDPSpawnStrategy`: ``ddp_spawn``, ``ddp_fork``,
-        ``ddp_notebook``
+      * Spawn-based strategies: ``ddp_spawn``, ``ddp_fork``, ``ddp_notebook``
 
 .. _supported_lr_schedulers:
 
@@ -465,9 +464,9 @@ Footnotes
  tune? adapting pretrained representations to diverse tasks. arXiv preprint arXiv:1903.05987.
 
 .. seealso::
-    - :external+pl:class:`~pytorch_lightning.trainer.trainer.Trainer`
-    - :external+pl:class:`~pytorch_lightning.callbacks.early_stopping.EarlyStopping`
-    - :external+pl:class:`~pytorch_lightning.callbacks.finetuning.BaseFinetuning`
+    - :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`
+    - :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`
+    - :external+pl:class:`~lightning.pytorch.callbacks.finetuning.BaseFinetuning`
 
 .. |tensorboard_summ| raw:: html
 
