@@ -6,4 +6,4 @@ twine==3.2
 mypy>=0.920
 flake8>=3.9.2
 pre-commit>=1.0
-protobuf<=3.20.1 # strict  # to continue to allow support for python 3.7 with PyTorch 1.10
+protobuf<=3.20.1 # strict

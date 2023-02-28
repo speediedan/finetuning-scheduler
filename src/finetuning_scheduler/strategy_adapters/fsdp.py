@@ -692,31 +692,33 @@ class FSDPStrategyAdapter(StrategyAdapter):
     fts_optim_inspect = partialmethod(fts_optim_transform, inspect_only=True)
 
 
-class NameDrivenPolicy(_FSDPPolicy):
-    """An auto-wrapping policy extension that applies module name-based override directives on top of a given base
-    ``auto_wrap_policy``.
+if _TORCH_GREATER_EQUAL_2_0:
 
-    The composition of module name-based wrapping directives with a given ``auto_wrap_policy`` is
-    achieved here by:
-        1. Generating an object id-based module name mapping lambda and passing it to the standard
-            ``lambda_auto_wrap_policy``.
-        2. Composing the user's provided ``auto_wrap_policy`` with the above name-based policy using the standard
-            ``_or_policy``.
-    """
+    class NameDrivenPolicy(_FSDPPolicy):
+        """An auto-wrapping policy extension that applies module name-based override directives on top of a given
+        base ``auto_wrap_policy``.
 
-    def __init__(self, auto_wrap_policy_handle: Union[Callable, _FSDPPolicy], override_ids: List):
-        """Compose the provided ``auto_wrap_policy`` with any provided override directives.
-
-        Args:
-            auto_wrap_policy_handle (Union[Callable, _FSDPPolicy]): The user's base ``auto_wrap_policy``.
-            override_ids (List): Object ids of the desired modules to wrap even if the provided ``auto_wrap_policy``
-                otherwise would not dictate so.
+        The composition of module name-based wrapping directives with a given ``auto_wrap_policy`` is
+        achieved here by:
+            1. Generating an object id-based module name mapping lambda and passing it to the standard
+                ``lambda_auto_wrap_policy``.
+            2. Composing the user's provided ``auto_wrap_policy`` with the above name-based policy using the standard
+                ``_or_policy``.
         """
-        if isinstance(auto_wrap_policy_handle, _FSDPPolicy):
-            auto_wrap_policy_handle = auto_wrap_policy_handle.policy
-        name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda m: id(m) in override_ids)
-        self._policy: Callable = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
 
-    @property
-    def policy(self) -> Callable:
-        return self._policy
+        def __init__(self, auto_wrap_policy_handle: Union[Callable, _FSDPPolicy], override_ids: List):
+            """Compose the provided ``auto_wrap_policy`` with any provided override directives.
+
+            Args:
+                auto_wrap_policy_handle (Union[Callable, _FSDPPolicy]): The user's base ``auto_wrap_policy``.
+                override_ids (List): Object ids of the desired modules to wrap even if the provided ``auto_wrap_policy``
+                    otherwise would not dictate so.
+            """
+            if isinstance(auto_wrap_policy_handle, _FSDPPolicy):
+                auto_wrap_policy_handle = auto_wrap_policy_handle.policy
+            name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda m: id(m) in override_ids)
+            self._policy: Callable = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
+
+        @property
+        def policy(self) -> Callable:
+            return self._policy

@@ -8,11 +8,11 @@ from os.path import dirname, isfile
 from pprint import pprint
 from typing import List, Optional, Sequence, Tuple
 
-REQUIREMENT_FILES = (
+REQUIREMENT_FILES = [
     "requirements/base.txt",
     "requirements/extra.txt",
     "requirements/examples.txt",
-)
+]
 
 
 def _retrieve_files(directory: str, *ext: str) -> List[str]:
@@ -118,22 +118,6 @@ def use_standalone_pl(mapping, src_dirs: ValuesView) -> None:
             )
 
 
-# def create_mirror_package(source_dir: str, package_mapping: Dict[str, str]) -> None:
-#     # replace imports and copy the code in-place
-#     mapping = package_mapping.copy()
-#     mapping.pop("lightning", None)  # pop this key to avoid replacing `lightning` to `lightning.lightning`
-
-#     mapping = {f"lightning.{sp}": sl for sp, sl in mapping.items()}
-#     for pkg_from, pkg_to in mapping.items():
-#         copy_replace_imports(
-#             source_dir=os.path.join(source_dir, pkg_from.replace(".", os.sep)),
-#             source_imports=mapping.keys(),
-#             target_imports=mapping.values(),
-#             target_dir=os.path.join(source_dir, pkg_to.replace(".", os.sep)),
-#             lightning_by=pkg_from,
-#         )
-
-
 class AssistantCLI:
 
     _PATH_ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
@@ -145,25 +129,6 @@ class AssistantCLI:
             req_files = [req_files]
         for req in req_files:
             AssistantCLI._prune_packages(req, packages)
-
-    # @staticmethod
-    # def _prune_packages(req_file: str, packages: Sequence[str]) -> None:
-    #     """Remove some packages from given requirement files."""
-    #     path = Path(req_file)
-    #     assert path.exists()
-    #     text = path.read_text()
-    #     lines = text.splitlines()
-    #     final = []
-    #     for line in lines:
-    #         ln_ = line.strip()
-    #         if not ln_ or ln_.startswith("#"):
-    #             final.append(line)
-    #             continue
-    #         req = list(parse_requirements(ln_))[0]
-    #         if req.name not in packages:
-    #             final.append(line)
-    #     print(final)
-    #     path.write_text("\n".join(final) + "\n")
 
     @staticmethod
     def _prune_packages(req_file: str, packages: Sequence[str]) -> None:
@@ -184,11 +149,6 @@ class AssistantCLI:
     def _replace_min(fname: str) -> None:
         req = open(fname, encoding="utf-8").read().replace(">=", "==")
         open(fname, "w", encoding="utf-8").write(req)
-
-    # @staticmethod
-    # def _replace_min(fname: str) -> None:
-    #     req = open(fname).read().replace(">=", "==")
-    #     open(fname, "w").write(req)
 
     @staticmethod
     def replace_oldest_ver(requirement_fnames: Sequence[str] = REQUIREMENT_FILES) -> None:

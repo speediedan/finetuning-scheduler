@@ -36,7 +36,10 @@ from tests.test_finetuning_scheduler_callback import (
     TestFinetuningScheduler,
 )
 
-if _TORCH_GREATER_EQUAL_1_13:
+_distributed_available = torch.distributed.is_available()
+_min_fsdp_available = _TORCH_GREATER_EQUAL_1_13 and _distributed_available
+
+if _min_fsdp_available:
     from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
         apply_activation_checkpointing,
         checkpoint_wrapper,
@@ -44,6 +47,13 @@ if _TORCH_GREATER_EQUAL_1_13:
     )
     from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload, FullyShardedDataParallel
     from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy, wrap
+else:
+    FullyShardedDataParallel = None  # type: ignore[misc,assignment]
+    MixedPrecision = None  # type: ignore[misc,assignment]
+    BackwardPrefetch = None  # type: ignore[misc,assignment]
+    CPUOffload = None  # type: ignore[misc,assignment]
+    size_based_auto_wrap_policy = object
+    wrap = object
 
 if _TORCH_GREATER_EQUAL_2_0:
     from torch.distributed.fsdp.wrap import _FSDPPolicy
@@ -559,7 +569,16 @@ EXPECTED_FSDP_FTS_RESULTS = {
         ("non_disjoint_phase_fsdp_params", base_model, warn_cust_awp, False, 0, wrap_5, *nones(4)),
         ("non_disjoint_phase_mods", cust_model, None, False, 1, unwrap_7, *nones(4)),
         ("non_disjoint_excluded_ft_params", cust_model, None, False, 5, unwrap_0_1_7, *nones(4)),
-        ("already_fsdp_wrapped", wrapped_model, cust_awp, False, 0, unwrap_7, *nones(4)),
+        pytest.param(
+            "already_fsdp_wrapped",
+            wrapped_model,
+            cust_awp,
+            False,
+            0,
+            unwrap_7,
+            *nones(4),
+            marks=RunIf(min_torch="2.0.0"),
+        ),
         ("no_fsdp_params_p0", cust_model, None, False, 0, unwrap_5_7, *nones(4)),
         ("warn_unsupp_nodecay", nodecay_model, cust_awp, False, 0, unwrap_7, *nones(4)),
         ("unmatched_awp_overrides", base_model, warn_cust_awp, True, 0, wrap_5_7, awp_5_9, *nones(3)),
@@ -568,7 +587,9 @@ EXPECTED_FSDP_FTS_RESULTS = {
             "cust_awp_prec_pt1x", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4), marks=RunIf(max_torch="2.0.0")
         ),
         ("enforceP0_cust_awp_prec", enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
-        ("batch_norm_auto_prec", BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(4)),
+        pytest.param(
+            "batch_norm_auto_prec", BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(4), marks=RunIf(min_torch="2.0.0")
+        ),
         ("shared_params_auto_prec", shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(3)),
         ("override_csm_adam_noprec", csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, None),
         ("cust_awp_overrides_prec", base_model, cust_awp, True, 0, wrap_all_mp, awp_7, *nones(3)),

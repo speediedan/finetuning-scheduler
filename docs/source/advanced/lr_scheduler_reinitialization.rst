@@ -259,9 +259,7 @@ Demonstration LR scheduler reinitialization configurations for both explicit and
 are available under ``./fts_examples/stable/config/advanced/reinit_lr``.
 
 The LR scheduler reinitialization examples use the same code and have the same dependencies as the basic
-:ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples except PyTorch >= ``1.10`` is
-required for the explicit mode example (only because :external+torch:class:`~torch.optim.lr_scheduler.LinearLR` was
-introduced in ``1.10`` and is used in the demo).
+:ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples.
 
 The two different demo schedule configurations are composed with shared defaults (``./config/fts_defaults.yaml``).
 
