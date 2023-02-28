@@ -69,10 +69,10 @@ jobs:
 
     steps:
 
-    - bash: |
-        mkdir /tmp/venvs
-        python -m virtualenv -p python3.10 /tmp/venvs/fts_dev
-      displayName: 'Create virtual environment'
+    # - bash: |
+    #     mkdir /tmp/venvs
+    #     python -m virtualenv -p python3.10 /tmp/venvs/fts_dev
+    #   displayName: 'Create virtual environment'
 
     - bash: |
         . /tmp/venvs/fts_dev/bin/activate
