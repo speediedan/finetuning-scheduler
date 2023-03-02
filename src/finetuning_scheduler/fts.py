@@ -28,7 +28,6 @@ from lightning.fabric.utilities.distributed import ReduceOp
 from lightning.pytorch.callbacks import BaseFinetuning
 from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.trainer.states import TrainerFn
-from lightning.pytorch.utilities.compile import from_compiled
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug, rank_zero_warn
 from torch.optim.optimizer import Optimizer
@@ -309,8 +308,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             self._maybe_sync_loops()
         FinetuningScheduler.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
         if self.pl_module._compiler_ctx and self.pl_module._compiler_ctx.get("compiler", None) == "dynamo":
+            # reset currently required as `AOTAutograd`` is getting confused by `requires_grad` alteration
             torch._dynamo.reset()
-            self.strategy_adapter.pls_handle._lightning_module = from_compiled(torch.compile(self.pl_module))
         rank_zero_info(f"Multi-phase fine-tuned training continuing at level {self.curr_depth}.")
         if self.depth_remaining == 0:
             max_epochs_msg = f"`max_epochs` ({self.pl_module.trainer.fit_loop.max_epochs}) is reached."

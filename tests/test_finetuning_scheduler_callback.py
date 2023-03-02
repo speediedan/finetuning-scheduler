@@ -28,7 +28,7 @@ from lightning.pytorch.callbacks import Callback, EarlyStopping, LearningRateFin
 from lightning.pytorch.strategies import StrategyRegistry
 from lightning.pytorch.strategies.single_device import SingleDeviceStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
-from torch import nn
+from torch import nn, Tensor
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.multiprocessing import ProcessRaisedException
 from torch.utils.data import DataLoader, Dataset
@@ -355,8 +355,36 @@ class NonDynamicLossBoringModel(FinetuningSchedulerBoringModel):
         self.validation_step_outputs.append(loss)
         # we would normally use sync_dist for epoch-only logging in a distributed context but leaving it `False` here
         # to test FTS transition behavior when the test model is used in a distributed context
+        # temporarily disable logging loss until resolution upstream compile issue
         # self.log("val_loss", loss, prog_bar=False)
         return {"x": loss}
+
+
+class ExplicitLossFTSCheckpoint(FTSCheckpoint):
+    def _monitor_candidates(self, trainer: Trainer) -> Dict[str, Tensor]:
+        # monitor_candidates = deepcopy(trainer.callback_metrics)
+        # set loss to improve by a little bit every epoch
+        monitor_candidates = {"val_loss": torch.tensor((trainer.max_epochs - trainer.current_epoch) * 0.99)}
+        # cast to int if necessary because `self.log("epoch", 123)` will convert it to float. if it's not a tensor
+        # or does not exist we overwrite it as it's likely an error
+        epoch = monitor_candidates.get("epoch")
+        monitor_candidates["epoch"] = epoch.int() if isinstance(epoch, Tensor) else torch.tensor(trainer.current_epoch)
+        step = monitor_candidates.get("step")
+        monitor_candidates["step"] = step.int() if isinstance(step, Tensor) else torch.tensor(trainer.global_step)
+        return monitor_candidates
+
+
+class NonDynamicPhase0EnforceModel(NonDynamicLossBoringModel):
+    def configure_optimizers(self):
+        # if self.p0_params:
+        #     for n, p in self.named_parameters():
+        #         p.requires_grad = True if n in self.p0_params else False
+        #     parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
+        #     optimizer = torch.optim.SGD(parameters, lr=1e-3, weight_decay=self.weight_decay)
+        # else:
+        optimizer = torch.optim.SGD(self.parameters(), lr=1e-3, weight_decay=self.weight_decay)
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
+        return [optimizer], [lr_scheduler]
 
 
 @pytest.fixture(scope="function")
@@ -875,8 +903,7 @@ ENFORCE_P0_LR_STATE = {
     ids=["step_lr", "rlrop", "lr_lambdas"],
 )
 def test_finetuningscheduling_enforce_p0(tmpdir, init_lr_key, p0_params):
-    """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
-    both restore_best modes."""
+    """Inspect the scheduled fine-tuning training path to ensure thawing schedule phase 0 is enforced."""
     seed_everything(42)
     model = EnforcePhase0CfgOptimBoringModel(no_decay=["bias"], init_lr_key=init_lr_key, p0_params=p0_params)
     init_lr_key = init_lr_key or "step_lr"
@@ -895,6 +922,47 @@ def test_finetuningscheduling_enforce_p0(tmpdir, init_lr_key, p0_params):
     assert finetuningscheduler_callback.curr_depth == 2
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
     assert callbacks_dict[TestFinetuningScheduler] < callbacks_dict[LearningRateMonitor] < callbacks_dict[FTSCheckpoint]
+
+
+EXPECTED_DYNAMO_P0_INTRAFIT_STATE = {
+    0: (0, 2, 0, 0, 0, 0, 4, 2, 0, 0),
+    1: (0, 2, 1, 0, 0, 1, 4, 2, 0, 0),
+    2: (0, 2, 2, 0, 0, 1, 4, 2, 0, 0),
+    3: (1, 1, 3, 0, 0, 1, 6, 4, 0, 0),
+    4: (2, 0, 4, 1, 1, 1, 8, 6, 1, 1),
+    5: (2, 0, 5, 2, 2, 1, 8, 6, 2, 2),
+}
+
+
+@RunIf(min_torch="2.0.0")
+def test_finetuningscheduling_dynamo_enforce_p0(tmpdir, boring_ft_schedule):
+    """Inspect the scheduled fine-tuning training path in the context of dynamo to ensure thawing schedule phase 0
+    is enforced."""
+    seed_everything(42)
+    model = NonDynamicPhase0EnforceModel(no_decay=["bias"])
+    compiled_model = torch.compile(model)
+    callbacks = [
+        TestFinetuningScheduler(
+            expected_state=EXPECTED_DYNAMO_P0_INTRAFIT_STATE,
+            ft_schedule=boring_ft_schedule[2],
+            epoch_transitions_only=True,
+        ),
+        # to test until https://github.com/Lightning-AI/lightning/issues/16822 resolved
+        ExplicitLossFTSCheckpoint(monitor="val_loss", verbose=True),
+        LearningRateMonitor(),
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1, max_epochs=6)
+    trainer.fit(compiled_model)
+    finetuningscheduler_callback = get_fts(trainer)
+    callbacks_dict = {type(c): i for i, c in enumerate(finetuningscheduler_callback.pl_module.trainer.callbacks)}
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == 2
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+    assert (
+        callbacks_dict[TestFinetuningScheduler]
+        < callbacks_dict[LearningRateMonitor]
+        < callbacks_dict[ExplicitLossFTSCheckpoint]
+    )
 
 
 EXPECTED_DECAY_RESULTS = {
@@ -1026,6 +1094,41 @@ def test_fts_callback_resume(
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
+DYNAMO_EXPECTED_WARNS = [
+    "Final phase max_transition_epoch",
+    # using different callbacks for now to avoid creating another fixture with limited utility
+    "Be aware that when using `ckpt_path`, callbacks used",
+    "Your compiler for AOTAutograd is returning",  # out of initial scope
+]
+
+
+@RunIf(min_torch="2.0.0")
+def test_fts_dynamo_resume(tmpdir, ckpt_set, boring_ft_schedule, recwarn):
+    """Validate scheduled fine-tuning resumption functions as expected with a default dynamo configuration."""
+    resume_warns = EXPECTED_WARNS + DYNAMO_EXPECTED_WARNS + [EXPECTED_DIRPATH]
+    dirpath = Path(ckpt_set["best"]).parent
+    callbacks = [
+        FinetuningScheduler(ft_schedule=boring_ft_schedule[2], epoch_transitions_only=True, logging_level=DEBUG),
+        # to test until https://github.com/Lightning-AI/lightning/issues/16822 resolved
+        ExplicitLossFTSCheckpoint(monitor="val_loss", dirpath=dirpath, save_top_k=3, verbose=True),
+        LearningRateMonitor(),
+    ]
+    seed_everything(42)
+    model = NonDynamicLossBoringModel()
+    compiled_model = torch.compile(model)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1, max_epochs=7)
+    finetuningscheduler_callback = get_fts(trainer)
+    trainer.ckpt_path = ckpt_set["best"]
+    trainer.fit(compiled_model)
+    assert trainer.checkpoint_callback.best_ckpt_depth == 2
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == 2
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+    # ensure no unexpected warnings detected
+    unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=resume_warns)
+    assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
+
+
 EXPECTED_NOLRS_INTRAFIT_STATE = {
     0: (0, 3, 0, 0, 0, 0, 2, 1, 0, 0),
     1: (0, 3, 1, 0, 0, 1, 2, 1, 0, 0),
@@ -1111,10 +1214,10 @@ EXPECTED_DYNAMO_INTRAFIT_STATE = {
 
 
 @RunIf(min_torch="2.0.0")
-@pytest.mark.parametrize("restore_best", [False], ids=["norestorebest"])
+@pytest.mark.parametrize("restore_best", [True, False], ids=["default", "norestorebest"])
 def test_finetuningscheduling_dynamo_intrafit(tmpdir, boring_ft_schedule, restore_best: bool):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
-    both restore_best modes."""
+    both restore_best modes and dynamo compilation."""
     seed_everything(42)
     model = NonDynamicLossBoringModel()
     compiled_model = torch.compile(model)
@@ -1127,7 +1230,8 @@ def test_finetuningscheduling_dynamo_intrafit(tmpdir, boring_ft_schedule, restor
             ft_schedule=ft_schedule,
             epoch_transitions_only=True,
         ),
-        FTSCheckpoint(monitor=None),  # to test until https://github.com/Lightning-AI/lightning/issues/16822 resolved
+        # to test until https://github.com/Lightning-AI/lightning/issues/16822 resolved
+        ExplicitLossFTSCheckpoint(monitor="val_loss", verbose=True),
         LearningRateMonitor(),
     ]
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1, max_epochs=6)
@@ -1138,7 +1242,11 @@ def test_finetuningscheduling_dynamo_intrafit(tmpdir, boring_ft_schedule, restor
     assert finetuningscheduler_callback.depth_remaining == 0
     assert finetuningscheduler_callback.curr_depth == 2
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
-    assert callbacks_dict[TestFinetuningScheduler] < callbacks_dict[LearningRateMonitor] < callbacks_dict[FTSCheckpoint]
+    assert (
+        callbacks_dict[TestFinetuningScheduler]
+        < callbacks_dict[LearningRateMonitor]
+        < callbacks_dict[ExplicitLossFTSCheckpoint]
+    )
 
 
 IMP_REINIT_LR_CFG = {
@@ -2012,6 +2120,26 @@ def test_fts_multi_ddp(tmpdir):
     trainer.fit(model)
     assert finetuningscheduler_callback.depth_remaining == 0
     assert finetuningscheduler_callback.curr_depth == 3
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+
+
+@RunIf(standalone=True, min_cuda_gpus=2, min_torch="2.0.0")
+def test_fts_multi_ddp_dynamo(tmpdir, boring_ft_schedule):
+    """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp'
+    distributed context with default dynamo usage."""
+    seed_everything(42)
+    model = NonDynamicLossBoringModel()
+    compiled_model = torch.compile(model)
+    callbacks = [
+        FinetuningScheduler(ft_schedule=boring_ft_schedule[2], epoch_transitions_only=True, logging_level=DEBUG),
+        # to test until https://github.com/Lightning-AI/lightning/issues/16822 resolved
+        ExplicitLossFTSCheckpoint(monitor="val_loss", verbose=True),
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp", devices=2, max_epochs=5)
+    finetuningscheduler_callback = get_fts(trainer)
+    trainer.fit(compiled_model)
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == 2
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 

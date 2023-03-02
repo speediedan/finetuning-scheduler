@@ -31,6 +31,7 @@ from tests.helpers.boring_model import RandomDataset, unexpected_warns, unmatche
 from tests.helpers.runif import RunIf
 from tests.test_finetuning_scheduler_callback import (
     EXPECTED_WARNS,
+    ExplicitLossFTSCheckpoint,
     FinetuningSchedulerBoringModel,
     get_fts,
     TestFinetuningScheduler,
@@ -73,7 +74,10 @@ additional_fsdp_warns = [
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
-
+FSDP_DYNAMO_EXPECTED_WARNS = [
+    "Final phase max_transition_epoch",
+    "Your compiler for AOTAutograd is returning",  # out of initial scope
+]
 
 ##########################
 # FTS FSDP Test Fixtures #
@@ -125,6 +129,9 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     fsdp_adam_gen_sched_dict[1]["max_transition_epoch"] = 4
     fsdp_ext_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_ext_gen_sched_dict[0]["params"] = ["layer.(5|[7-8]).*"]
+    fsdp_epoch_only_sched = deepcopy(fsdp_gen_sched_dict)
+    fsdp_epoch_only_sched[1]["max_transition_epoch"] = 2
+    fsdp_epoch_only_sched[2]["max_transition_epoch"] = 3
     return (
         fsdp_gen_sched_dict,
         fsdp_nondis_mod_sched_dict,
@@ -133,6 +140,7 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
         fsdp_adam_gen_sched_dict,
         fsdp_nondis_mod_ex_sched_dict,
         fsdp_ext_gen_sched_dict,
+        fsdp_epoch_only_sched,
     )
 
 
@@ -246,6 +254,26 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
                     assert self.layer[i].mixed_precision.param_dtype == precision
                     assert self.layer[i].mixed_precision.reduce_dtype == precision
                     assert self.layer[i].mixed_precision.buffer_dtype == precision
+
+
+class NonDynamicLossBaseFSDPModel(FTSBaseFSDPModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def val_loss(self, batch, prediction):
+        # Make val_loss non-dynamic for dynamo testing
+        val_func = torch.ones_like(prediction)
+        return torch.nn.functional.mse_loss(prediction, val_func)
+
+    def validation_step(self, batch, batch_idx):
+        output = self(batch)
+        loss = self.val_loss(batch, output)
+        self.validation_step_outputs.append(loss)
+        # we would normally use sync_dist for epoch-only logging in a distributed context but leaving it `False` here
+        # to test FTS transition behavior when the test model is used in a distributed context
+        # temporarily disable logging loss until resolution upstream compile issue
+        # self.log("val_loss", loss, prog_bar=False)
+        return {"x": loss}
 
 
 class FTSCsmFSDPModel(FTSBaseFSDPModel):
@@ -391,6 +419,7 @@ class FSDPTestFinetuningScheduler(TestFinetuningScheduler):
 
 # model aliases
 base_model = FTSBaseFSDPModel
+nond_loss_model = NonDynamicLossBaseFSDPModel
 cust_model = FTSCsmFSDPModel
 wrapped_model = AlreadyWrappedFSDPModel
 nodecay_model = FTSNoDecayFSDPModel
@@ -403,6 +432,7 @@ enforceP0_model = FTSEnforceP0FSDPModel
 # model configuration aliases
 fp16_cfg = {"precision_key": "auto_16"}
 unwrap_7 = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}}
+unwrap_7_dyn = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "use_dynamo": True}
 unwrap_4_7 = {"fsdp_mask": {"wrapped_mods": [0, 1, 2, 3, 5], "unwrapped_mods": [4, 7]}}
 unwrap_5_7 = {"fsdp_mask": {"wrapped_mods": list(range(5)), "unwrapped_mods": [5, 7]}}
 unwrap_0_1_7 = {"fsdp_mask": {"wrapped_mods": [2, 3, 4, 5], "unwrapped_mods": [0, 1, 7]}}
@@ -478,10 +508,19 @@ test_use_orig = {"use_orig_params": True}
 
 # trainer configuration alias
 max_epoch_5 = {"max_epochs": 5}
+max_epoch_4 = {"max_epochs": 4}
+
+# fts config alias
+epoch_t_only = {
+    "epoch_transitions_only": True,
+    "test_es": "disable",
+    "test_ckpt": ExplicitLossFTSCheckpoint(monitor="val_loss", verbose=True),
+}
 
 # expected training path aliases
 path_default = {0: (2, 4), 1: (6, 12), 2: (7, 14)}
 path_default_orig = {0: (4, 4), 1: (12, 12), 2: (14, 14)}
+path_default_orig_eo_dyn = {0: (4, 4), 1: (12, 12), 2: (14, 14), 3: (14, 14)}
 path_ignore_p_uo = {0: (4, 4), 1: (12, 12), 2: (14, 14)}
 path_8_14 = {0: (2, 4), 1: (7, 12), 2: (8, 14)}
 path_8_16 = {0: (4, 8), 1: (7, 14), 2: (8, 16)}
@@ -498,6 +537,7 @@ def nones(num_n) -> Tuple:
 EXPECTED_FSDP_FTS_RESULTS = {
     "cust_awp_noprec": (path_default, *nones(2)),
     "cust_awp_noprec_use_orig": (path_default_orig, *nones(2)),
+    "cust_awp_noprec_dynamo_use_orig": (path_default_orig_eo_dyn, *nones(2)),
     "cust_awp_mwp_parity": (path_default, *nones(2)),
     "override_csm_noprec": (path_default, *nones(2)),
     # TODO: once PyTorch deprecates ``ignored_modules``, check for that deprecation warning in this test
@@ -525,7 +565,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
 }
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False, min_torch="1.13")
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, model_cfg, strategy_adapter_cfg, fts_cfg,\
           trainer_cfg, strategy_cfg",
@@ -539,6 +579,19 @@ EXPECTED_FSDP_FTS_RESULTS = {
             0,
             unwrap_7,
             *nones(3),
+            test_use_orig,
+            marks=RunIf(min_torch="2.0"),
+        ),
+        pytest.param(
+            "cust_awp_noprec_dynamo_use_orig",
+            nond_loss_model,
+            cust_awp,
+            False,
+            7,
+            unwrap_7_dyn,
+            None,
+            epoch_t_only,
+            max_epoch_4,
             test_use_orig,
             marks=RunIf(min_torch="2.0"),
         ),
@@ -599,6 +652,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
     ids=[
         "cust_awp_noprec",
         "cust_awp_noprec_use_orig",
+        "cust_awp_noprec_dynamo_use_orig",
         "cust_awp_mwp_parity",
         "override_csm_noprec",
         "cust_awp_nop_ignore_m_no_ofld",
@@ -641,6 +695,7 @@ def test_fsdp_multi_gpus(
     cfg = init_test_cfg(model_cfg_key, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precision)
     fts_state, warns_expected, exception_expected, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts = cfg
     seed_everything(42)
+    use_dynamo = True if model_cfg.pop("use_dynamo", None) else False
     model = model_cls(**model_cfg)
     strategy_cfg = load_ignore_directives(strategy_cfg, model)
     ft_sched = fsdp_ft_schedules[ft_sched_idx]
@@ -648,17 +703,22 @@ def test_fsdp_multi_gpus(
     callbacks = callbacks_cfg(FSDPTestFinetuningScheduler, ft_sched, test_cfg, {"patience": 2}, {"save_top_k": 3})
     strategy = FSDPStrategy(auto_wrap_policy=auto_wrap_policy, **strategy_cfg)
     trainer = configure_trainer(tmpdir, strategy, callbacks, {**trainer_cfg, **precision_opts})
+    configured_model = torch.compile(model) if use_dynamo else model
     if exception_expected:
-        gen_exceptions(trainer, model, model_cfg_key, exception_expected)
+        gen_exceptions(trainer, configured_model, model_cfg_key, exception_expected)
     else:
-        if model_cfg_key in ("cust_awp_noprec_use_orig", "cust_awp_nop_ignore_p_no_ofld_uo"):
+        if model_cfg_key in (
+            "cust_awp_noprec_use_orig",
+            "cust_awp_nop_ignore_p_no_ofld_uo",
+            "cust_awp_noprec_dynamo_use_orig",
+        ):
             with mock.patch("lightning.pytorch.strategies.fsdp._optimizer_has_flat_params", lambda x: True):
-                trainer.fit(model)
+                trainer.fit(configured_model)
         else:
-            trainer.fit(model)
+            trainer.fit(configured_model)
         default_fts_sanity_chk(trainer)
     if trainer.is_global_zero:
-        check_fts_fsdp_warns(warns_expected, recwarn)
+        check_fts_fsdp_warns(warns_expected, recwarn, use_dynamo)
 
 
 @RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
@@ -740,9 +800,22 @@ def callbacks_cfg(fts_cls, ft_sched, non_def_fts_cfg, fts_es_cfg, fts_ckpt_cfg):
     default_dep_cfg = {"monitor": "val_loss", "verbose": True}
     fts_es_cfg = {**fts_es_cfg, **default_dep_cfg}
     fts_ckpt_cfg = {**fts_ckpt_cfg, **default_dep_cfg}
+    override_fts_cb = {
+        "test_es": {"override_inst": None, "default_cls": FTSEarlyStopping, "default_cfg": fts_es_cfg},
+        "test_ckpt": {"override_inst": None, "default_cls": FTSCheckpoint, "default_cfg": fts_ckpt_cfg},
+    }
+    for test_k in ["test_es", "test_ckpt"]:
+        if non_def_fts_cfg.get(test_k):
+            override_fts_cb[test_k]["override_inst"] = non_def_fts_cfg.pop(test_k)
     default_fts_cfg = {"ft_schedule": ft_sched}
     fts_cfg = {**non_def_fts_cfg, **default_fts_cfg}
-    callbacks = [fts_cls(**fts_cfg), FTSEarlyStopping(**fts_es_cfg), FTSCheckpoint(**fts_ckpt_cfg)]
+    callbacks = [fts_cls(**fts_cfg)]
+    for test_k in ["test_es", "test_ckpt"]:
+        if override_fts_cb[test_k]["override_inst"]:
+            if isinstance(override_fts_cb[test_k]["override_inst"], (FTSEarlyStopping, FTSCheckpoint)):
+                callbacks.append(override_fts_cb[test_k]["override_inst"])
+        else:
+            callbacks.append(override_fts_cb[test_k]["default_cls"](**override_fts_cb[test_k]["default_cfg"]))
     return callbacks
 
 
@@ -753,8 +826,10 @@ def configure_trainer(tmpdir, strategy, callbacks, extra_trainer_cfg):
     return trainer
 
 
-def check_fts_fsdp_warns(warns_expected, recwarn):
+def check_fts_fsdp_warns(warns_expected, recwarn, use_dynamo=False):
     fsdp_warns = FSDP_BASE_WARNS
+    if use_dynamo:
+        fsdp_warns.extend(FSDP_DYNAMO_EXPECTED_WARNS)
     if warns_expected:
         unmatched = unmatched_warns(rec_warns=recwarn.list, expected_warns=warns_expected)
         assert not unmatched
