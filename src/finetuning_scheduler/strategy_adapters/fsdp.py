@@ -89,11 +89,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
     .. note::
 
-       This version of :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` supports stable PyTorch
-       releases >= 1.13. Support for PyTorch 2.0 is expected upon its release.
-
-    .. note::
-
        The ``no_decay`` attribute that FTS supports on
        :external+pl:class:`~lightning.pytorch.core.module.LightningModule` with the base
        :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is not currently supported in the context of

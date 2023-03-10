@@ -30,13 +30,13 @@ Demonstration FTS FSDP training/profiling configurations and a DDP baseline for 
 ``./fts_examples/stable/config/advanced/fsdp``.
 
 This FTS FSDP training example has the same dependencies as the basic
-:ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples except PyTorch >= ``1.13`` is
+:ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples except PyTorch >= ``2.0`` is
 required.
 
 .. note::
 
     This version of :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` supports stable PyTorch
-    releases >= 1.13.
+    releases >= 2.0.
 
 .. note::
 
@@ -73,8 +73,7 @@ that should be wrapped in separate FSDP instances, complementing the modules tha
 :external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy` strategy
 configuration.
 
-Starting with a provided ``auto_wrap_policy`` (e.g. in this example, ``transformer_auto_wrap_policy``) and providing
-module name-based complements/overrides as needed using
+Starting with a defined ``auto_wrap_policy`` and providing module name-based complements/overrides as needed using
 :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides` is often the most expedient approach
 to auto-wrapping models in alignment with a fine-tuning schedule.
 
@@ -103,29 +102,23 @@ We start by defining a simple fine-tuning schedule that we would like to ensure 
     #- model.deberta.embeddings.LayerNorm.weight
     #- model.deberta.embeddings.word_embeddings.weight
 
-In this example (policy defined in ``./fts_examples/stable/fts_fsdp_superglue.py``), we modify the base
-``transformer_auto_wrap_policy`` to define the ``auto_wrap_policy`` for our DeBERTa-v3 module:
+We define the ``auto_wrap_policy`` for our DeBERTa-v3 module as follows:
 
-.. code-block:: python
+.. code-block:: yaml
   :linenos:
-  :emphasize-lines: 2, 14
+  :emphasize-lines: 5-11
 
-    # we use a non-partial formulation here for expository benefit
-    deberta_transformer_layer_cls = {DebertaV2Layer, DebertaV2Embeddings, DebertaV2Encoder}
-
-
-    def deberta_awp(
-        module: torch.nn.Module,
-        recurse: bool,
-        unwrapped_params: int,
-        transformer_layer_cls: Set[Type[torch.nn.Module]] = deberta_transformer_layer_cls,
-    ) -> bool:
-        if recurse:
-            # always recurse
-            return True
-        else:
-            # if not recursing, decide whether we should wrap for the leaf node or remainder
-            return isinstance(module, tuple(transformer_layer_cls))
+  strategy:
+    class_path: lightning.pytorch.strategies.FSDPStrategy
+    init_args:
+      # other FSDP args as desired ...
+      auto_wrap_policy:
+        class_path: torch.distributed.fsdp.wrap.ModuleWrapPolicy
+        init_args:
+          module_classes: !!set
+            ? transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Layer
+            ? transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Embeddings
+            ? transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Encoder
 
 
 We'll inspect the rationale for this policy below, but first, notice we have not referenced our ``classifier`` and
@@ -163,11 +156,11 @@ configuration option to FTS like so:
   ...
 
 Finally, we configure the FSDP training strategy as desired per usual, for instance, specifying
-``activation_checkpointing`` and ``cpu_offload`` configurations in addition the ``auto_wrap_policy`` we defined:
+``activation_checkpointing`` and ``cpu_offload`` configurations in addition the ``auto_wrap_policy`` we defined above:
 
 .. code-block:: yaml
   :linenos:
-  :emphasize-lines: 6-9
+  :emphasize-lines: 6-8
 
   # in ./fts_examples/stable/config/advanced/fsdp/fts_fsdp_awp_overrides_profile.yaml
     ...
@@ -177,7 +170,13 @@ Finally, we configure the FSDP training strategy as desired per usual, for insta
         cpu_offload: false
         activation_checkpointing:
         - transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Layer
-        auto_wrap_policy: fts_examples.stable.fts_fsdp_superglue.deberta_awp
+        auto_wrap_policy:
+          class_path: torch.distributed.fsdp.wrap.ModuleWrapPolicy
+          init_args:
+            module_classes: !!set
+              ? transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Layer
+              ? transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Embeddings
+              ? transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Encoder
 
 That's all there is to it! We've successfully defined our fine-tuning schedule and FSDP wrapped our model in a manner
 that supports FSDP multi-phase scheduled fine-tuning.
@@ -186,10 +185,10 @@ that supports FSDP multi-phase scheduled fine-tuning.
 Additional FSDP Wrapping and Debugging Guidance
 ***********************************************
 
-In order to support multi-phase scheduled fine-tuning with FSDP, FTS's key precondition is that the defined
-fine-tuning schedule phases have disjoint sets of FSDP-flattened parameters (a ``FlatParameter`` is created when
-wrapping a set of modules in a FSDP instance/unit). This constraint is derived from the fact that the
-``requires_grad`` attribute currently must be the same for all parameters flattened into the same ``FlatParameter``.
+In order to support multi-phase scheduled fine-tuning with FSDP, FTS's key precondition is that the defined fine-tuning
+schedule phases have disjoint sets of FSDP-flattened parameters (a ``FlatParameter`` is created when wrapping a set of
+modules in a FSDP instance/unit). This constraint is derived from the fact that the ``requires_grad`` attribute
+currently (as of PyTorch ``2.0.0``) must be the same for all parameters flattened into the same ``FlatParameter``. [#]_
 
 FTS will attempt to validate that the module is wrapped in a manner that aligns with the defined fine-tuning
 schedule phases prior to the start of training and provide detailed feedback for the user if a misalignment is
@@ -249,3 +248,11 @@ As always, if needed, one can alternatively override ``configure_sharded_model``
   If you want to extend FTS to use a custom, currently unsupported strategy or override current FTS behavior with a
   given training strategy, subclassing :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is a way to do
   so.
+
+Footnotes
+*********
+
+.. [#] Once `this PyTorch FSDP feature <https://github.com/pytorch/pytorch/issues/91167>`_ is implemented, PyTorch
+  should allow ``FlatParameter`` s constructed in ``use_orig_params`` mode to contain original params with non-uniform
+  ``requires_grad``. Depending upon the implementation of that feature, some of the aforementioned constraints on FSDP
+  fine-tuning schedules may be relaxed.
