@@ -33,7 +33,7 @@ from lightning.fabric.strategies.fsdp import _setup_activation_checkpointing
 from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
 from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13, _TORCH_GREATER_EQUAL_2_0
 from lightning.pytorch.strategies.strategy import Strategy
-from lightning.pytorch.trainer.connectors.checkpoint_connector import CheckpointConnector
+from lightning.pytorch.trainer.connectors.checkpoint_connector import _CheckpointConnector
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.model_helpers import is_overridden
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
@@ -226,13 +226,13 @@ class FSDPStrategyAdapter(StrategyAdapter):
         # Restore the optimizer states from the pre-loaded checkpoint.
         self.load_optimizer_state_dict(checkpoint_connector)
 
-    def load_optimizer_state_dict(self, checkpoint_connector: CheckpointConnector) -> None:
+    def load_optimizer_state_dict(self, checkpoint_connector: _CheckpointConnector) -> None:
         """Override the default ``load_optimizer_state_dict`` method so that we can allow FSDP to manage the
         movement of restored optimizer states to the relevant devices.
 
         Args:
-            checkpoint_connector (CheckpointConnector): The ``CheckpointConnector`` associated with the current training
-                session.
+            checkpoint_connector (_CheckpointConnector): The ``_CheckpointConnector`` associated with the current
+                training session.
         """
         optimizer_states = checkpoint_connector._loaded_checkpoint["optimizer_states"]
         for optimizer, opt_state in zip(self.pls_handle.optimizers, optimizer_states):

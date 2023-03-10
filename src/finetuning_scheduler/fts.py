@@ -407,7 +407,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.pl_module.trainer._checkpoint_connector.restore_datamodule()
         self.pl_module.trainer._checkpoint_connector.restore_model()
         # we need to override checkpoint_connector.restore_training_state() to bypass loop restoration
-        # if additional customizations are required, may make sense to subclass CheckpointConnector at some point
+        # if additional customizations are required, may make sense to subclass _CheckpointConnector at some point
         self._restore_training_state()
         self.pl_module.trainer._checkpoint_connector.resume_end()
 

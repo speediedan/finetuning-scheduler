@@ -21,7 +21,7 @@ import pytest
 import torch.distributed
 from lightning.fabric.plugins.environments.lightning import find_free_network_port
 from lightning.fabric.utilities.imports import _IS_WINDOWS
-from lightning.pytorch.trainer.connectors.signal_connector import SignalConnector
+from lightning.pytorch.trainer.connectors.signal_connector import _SignalConnector
 
 from tests import _PATH_DATASETS
 
@@ -84,7 +84,7 @@ def restore_signal_handlers():
 
     This is a safety net for tests that don't run Trainer's teardown.
     """
-    valid_signals = SignalConnector._valid_signals()
+    valid_signals = _SignalConnector._valid_signals()
     if not _IS_WINDOWS:
         # SIGKILL and SIGSTOP are not allowed to be modified by the user
         valid_signals -= {signal.SIGKILL, signal.SIGSTOP}
