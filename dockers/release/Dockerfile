@@ -23,12 +23,12 @@ WORKDIR /home/finetuning-scheduler
 COPY ./tests ./tests
 COPY ./requirements ./requirements
 COPY ./src ./src
+COPY ./.actions ./.actions
 COPY ./requirements.txt ./setup.py ./pyproject.toml ./README.md ./
 
 # install dependencies
 RUN \
     pip install -U pip && \
-    ln -s /usr/local/bin/pip /usr/bin/pip && \
     pip install ".[all]" --no-cache-dir && \
     rm -rf requirements.* requirements/
 

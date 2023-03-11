@@ -64,18 +64,23 @@ pip install finetuning-scheduler['examples']
 pip install finetuning-scheduler['all']
 ```
 
-#### *Source Installation*
+#### *Source Installation Examples*
 
-#### To install from source (editable) using a custom version of pytorch-lightning (includes docs as well)
-
-#### **Note**: minimum supported pytorch-lightning release is 1.6.0
+#### To install from (editable) source (includes docs as well):
 
 ```bash
-# update the url below with the desired release #, e.g. for finetuning-scheduler release 0.1.2:
-git clone https://github.com/speediedan/finetuning-scheduler.git@release/0.1.2
+git clone https://github.com/speediedan/finetuning-scheduler.git
 cd finetuning-scheduler
-# PACKAGE_NAME variable currently required to specify pytorch-lightning dev package dep (as of lightning 1.8.0)
+python -m pip install -e ".[all]" -r requirements/docs.txt
+```
+
+#### Install a specific FTS version from source using the standalone `pytorch-lighting` package:
+
+```bash
+export FTS_VERSION=2.0.0
 export PACKAGE_NAME=pytorch
+git clone -b v${FTS_VERSION} https://github.com/speediedan/finetuning-scheduler
+cd finetuning-scheduler
 python -m pip install -e ".[all]" -r requirements/docs.txt
 ```
 
@@ -100,6 +105,23 @@ Get started by following [the Fine-Tuning Scheduler introduction](https://finetu
 
 ______________________________________________________________________
 
+### Installation Using the Standalone `pytorch-lightning` Package
+
+*applicable to versions >= `2.0.0`*
+
+Now that the core Lightning package is `lightning` rather than `pytorch-lightning`, Fine-Tuning Scheduler (FTS) by default depends upon the `lightning` package rather than the standalone `pytorch-lightning`. If you would like to continue to use FTS with the standalone `pytorch-lightning` package instead, you can still do so as follows:
+
+Install a given FTS release (for example v2.0.0) using standalone `pytorch-lightning`:
+
+```bash
+export FTS_VERSION=2.0.0
+export PACKAGE_NAME=pytorch
+wget https://github.com/speediedan/finetuning-scheduler/releases/download/v${FTS_VERSION}/finetuning-scheduler-${FTS_VERSION}.tar.gz
+pip install finetuning-scheduler-${FTS_VERSION}.tar.gz
+```
+
+______________________________________________________________________
+
 ## Examples
 
 ### Scheduled Fine-Tuning For SuperGLUE
@@ -113,14 +135,14 @@ ______________________________________________________________________
 
 ## Continuous Integration
 
-Fine-Tuning Scheduler is rigorously tested across multiple CPUs, GPUs and against major Python and PyTorch versions. Each Fine-Tuning Scheduler minor release (major.minor.patch) is paired with a Lightning minor release (e.g. Fine-Tuning Scheduler 0.4 depends upon Lightning 1.9).
+Fine-Tuning Scheduler is rigorously tested across multiple CPUs, GPUs and against major Python and PyTorch versions. Each Fine-Tuning Scheduler minor release (major.minor.patch) is paired with a Lightning minor release (e.g. Fine-Tuning Scheduler 2.0 depends upon Lightning 2.0).
 
 To ensure maximum stability, the latest Lightning patch release fully tested with Fine-Tuning Scheduler is set as a maximum dependency in Fine-Tuning Scheduler's requirements.txt (e.g. \<= 1.7.1). If you'd like to test a specific Lightning patch version greater than that currently in Fine-Tuning Scheduler's requirements.txt, it will likely work but you should install Fine-Tuning Scheduler from source and update the requirements.txt as desired.
 
 <details>
   <summary>Current build statuses for Fine-Tuning Scheduler </summary>
 
-| System / (PyTorch/Python ver) |                                                                                                         1.11/3.7                                                                                                         |                                                                                                             1.13.1/3.7, 1.13.1/3.10                                                                                                              |
+| System / (PyTorch/Python ver) |                                                                                                         1.11/3.8                                                                                                         |                                                                                                              2.0.0/3.8, 2.0.0/3.10                                                                                                               |
 | :---------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
 |      Linux \[GPUs\*\*\]       |                                                                                                            -                                                                                                             | [![Build Status](https://dev.azure.com//speediedan/finetuning-scheduler/_apis/build/status/Multi-GPU%20&%20Example%20Tests?branchName=main)](https://dev.azure.com/speediedan/finetuning-scheduler/_build/latest?definitionId=1&branchName=main) |
 |     Linux (Ubuntu 20.04)      | [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml) |             [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml)             |

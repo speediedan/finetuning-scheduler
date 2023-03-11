@@ -10,6 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+## NB: This image is no longer actively maintained and kept here only as a reference for users.
+
 ARG CUDA_VERSION=11.8
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04
@@ -59,6 +61,7 @@ WORKDIR /home/finetuning-scheduler
 COPY ./tests ./tests
 COPY ./requirements ./requirements
 COPY ./src ./src
+COPY ./.actions ./.actions
 COPY ./requirements.txt ./setup.py ./pyproject.toml ./README.md ./
 
 ENV PATH=/root/miniconda3/envs/${CONDA_ENV}/bin:$PATH \
