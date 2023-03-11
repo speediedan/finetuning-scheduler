@@ -78,7 +78,6 @@ RUN \
     pip install virtualenv && \
     mkdir /tmp/venvs && \
     python -m virtualenv -p python3.10 /tmp/venvs/fts_dev && \
-    chmod -R 777 /tmp/venvs/fts_dev && \
     . /tmp/venvs/fts_dev/bin/activate && \
     # set particular PyTorch version by default
     if [[ "${CUST_BUILD}" -eq 0 ]]; then \
@@ -96,6 +95,7 @@ RUN \
     pip install -r requirements/devel.txt --no-cache-dir && \
     # Update six to avoid unnecessary warnings associated with 3.10: https://github.com/benjaminp/six/pull/343
     pip install -U six --no-cache-dir && \
+    chmod -R 777 /tmp/venvs/fts_dev && \
     rm -rf requirements.* requirements/
 
 RUN \
