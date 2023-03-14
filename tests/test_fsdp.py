@@ -256,7 +256,7 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
                     assert self.layer[i].mixed_precision.buffer_dtype == precision
 
 
-class NonDynamicLossBaseFSDPModel(FTSBaseFSDPModel):
+class NonDynamicLossAdamFSDPModel(FTSBaseFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -274,6 +274,12 @@ class NonDynamicLossBaseFSDPModel(FTSBaseFSDPModel):
         # temporarily disable logging loss until resolution upstream compile issue
         # self.log("val_loss", loss, prog_bar=False)
         return {"x": loss}
+
+    def configure_optimizers(self):
+        parameters = filter(lambda x: x.requires_grad, self.parameters())
+        optimizer = torch.optim.AdamW(parameters, weight_decay=1.0e-05, eps=1.0e-07, lr=1.0e-05)
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
+        return [optimizer], [lr_scheduler]
 
 
 class FTSCsmFSDPModel(FTSBaseFSDPModel):
@@ -419,7 +425,7 @@ class FSDPTestFinetuningScheduler(TestFinetuningScheduler):
 
 # model aliases
 base_model = FTSBaseFSDPModel
-nond_loss_model = NonDynamicLossBaseFSDPModel
+nond_loss_adam_model = NonDynamicLossAdamFSDPModel
 cust_model = FTSCsmFSDPModel
 wrapped_model = AlreadyWrappedFSDPModel
 nodecay_model = FTSNoDecayFSDPModel
@@ -584,7 +590,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         ),
         pytest.param(
             "cust_awp_noprec_dynamo_use_orig",
-            nond_loss_model,
+            nond_loss_adam_model,
             cust_awp,
             False,
             7,

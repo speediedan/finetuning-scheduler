@@ -343,8 +343,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             thaw_layers = {depth: self.ft_schedule[depth]}.items()
         for i, orig_next_tl in thaw_layers:
             next_tl = deepcopy(orig_next_tl)
-            next_tl["params"] = self.strategy_adapter.fts_optim_transform(next_tl["params"])
             if i <= depth:
+                next_tl["params"] = self.strategy_adapter.fts_optim_transform(next_tl["params"])
                 _, self._fts_state._curr_thawed_params = self.strategy_adapter.exec_ft_phase(
                     self.pl_module, thaw_pl=next_tl["params"]
                 )

@@ -230,8 +230,14 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 training session.
         """
         optimizer_states = checkpoint_connector._loaded_checkpoint["optimizer_states"]
-        for optimizer, opt_state in zip(self.pls_handle.optimizers, optimizer_states):
-            optimizer.load_state_dict(opt_state)
+        if not self._use_orig_params:
+            for optimizer, opt_state in zip(self.pls_handle.optimizers, optimizer_states):
+                optimizer.load_state_dict(opt_state)
+        else:
+            rank_zero_debug(
+                "Since FSDP has been configured with `use_orig_params` set to `True`, "
+                "restoring model parameters but bypassing restoration of optimizer state."
+            )
 
     def fts_optim_transform(self, orig_pl: List, inspect_only: bool = False) -> List:
         """Because FSDP performs parameter transformations that cause the current.
@@ -286,7 +292,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         use_orig_flat_params_mods = set()
         for m in self.pl_module.modules():
             is_fsdp_managed = getattr(m, "_is_fsdp_managed_module", False)
-            if is_fsdp_managed and m._fsdp_use_orig_params and hasattr(m, FLAT_PARAM):
+            if is_fsdp_managed and m._fsdp_use_orig_params and getattr(m, FLAT_PARAM, None) is not None:
                 use_orig_flat_params_mods.add(m)
         flat_params_to_thaw = set()
         for m in use_orig_flat_params_mods:
