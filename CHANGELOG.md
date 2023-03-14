@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 
+## [0.4.1] - 2023-03-14
+
+### Added
+
+- Support for ``pytorch-lightning`` 1.9.4 (which may be the final Lightning 1.x release as PyTorch 2.0 will be released tomorrow)
+
 ## [0.4.0] - 2023-01-25
 
 ### Added
