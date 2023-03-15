@@ -7,7 +7,7 @@
 ______________________________________________________________________
 
 <p align="center">
-  <a href="https://finetuning-scheduler.readthedocs.io/en/latest/">Docs</a> •
+  <a href="https://finetuning-scheduler.readthedocs.io/en/stable/">Docs</a> •
   <a href="#Setup">Setup</a> •
   <a href="#examples">Examples</a> •
   <a href="#community">Community</a>
@@ -16,7 +16,7 @@ ______________________________________________________________________
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/finetuning-scheduler)](https://pypi.org/project/finetuning-scheduler/)
 [![PyPI Status](https://badge.fury.io/py/finetuning-scheduler.svg)](https://badge.fury.io/py/finetuning-scheduler)\
 [![codecov](https://codecov.io/gh/speediedan/finetuning-scheduler/branch/main/graph/badge.svg?flag=gpu)](https://codecov.io/gh/speediedan/finetuning-scheduler)
-[![ReadTheDocs](https://readthedocs.org/projects/finetuning-scheduler/badge/?version=latest)](https://finetuning-scheduler.readthedocs.io/en/latest/)
+[![ReadTheDocs](https://readthedocs.org/projects/finetuning-scheduler/badge/?version=latest)](https://finetuning-scheduler.readthedocs.io/en/stable/)
 [![DOI](https://zenodo.org/badge/455666112.svg)](https://zenodo.org/badge/latestdoi/455666112)
 [![license](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/speediedan/finetuning-scheduler/blob/master/LICENSE)
 
@@ -26,7 +26,7 @@ ______________________________________________________________________
 
 <img width="300px" src="docs/source/_static/images/fts/fts_explicit_loss_anim.gif" alt="FinetuningScheduler explicit loss animation" align="right"/>
 
-[FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/latest/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) is simple to use yet powerful, offering a number of features that facilitate model research and exploration:
+[FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) is simple to use yet powerful, offering a number of features that facilitate model research and exploration:
 
 - easy specification of flexible fine-tuning schedules with explicit or regex-based parameter selection
   - implicit schedules for initial/naive model exploration
@@ -101,7 +101,7 @@ from finetuning_scheduler import FinetuningScheduler
 trainer = Trainer(callbacks=[FinetuningScheduler()])
 ```
 
-Get started by following [the Fine-Tuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/latest/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/latest/index.html#example-scheduled-fine-tuning-for-superglue) or by following the [notebook-based](https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html) Fine-Tuning Scheduler tutorial.
+Get started by following [the Fine-Tuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/stable/index.html#example-scheduled-fine-tuning-for-superglue) or by following the [notebook-based](https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html) Fine-Tuning Scheduler tutorial.
 
 ______________________________________________________________________
 
@@ -126,10 +126,10 @@ ______________________________________________________________________
 
 ### Scheduled Fine-Tuning For SuperGLUE
 
-- [Notebook-based Tutorial](https://pytorch-lightning.readthedocs.io/en/latest/notebooks/lightning_examples/finetuning-scheduler.html)
-- [CLI-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/latest/#example-scheduled-fine-tuning-for-superglue)
-- [FSDP Scheduled Fine-Tuning](https://finetuning-scheduler.readthedocs.io/en/latest/advanced/fsdp_scheduled_fine_tuning.html)
-- [LR Scheduler Reinitialization](https://finetuning-scheduler.readthedocs.io/en/latest/advanced/lr_scheduler_reinitialization.html) (advanced)
+- [Notebook-based Tutorial](https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html)
+- [CLI-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/stable/#example-scheduled-fine-tuning-for-superglue)
+- [FSDP Scheduled Fine-Tuning](https://finetuning-scheduler.readthedocs.io/en/stable/advanced/fsdp_scheduled_fine_tuning.html)
+- [LR Scheduler Reinitialization](https://finetuning-scheduler.readthedocs.io/en/stable/advanced/lr_scheduler_reinitialization.html) (advanced)
 
 ______________________________________________________________________
 
@@ -155,9 +155,9 @@ To ensure maximum stability, the latest Lightning patch release fully tested wit
 
 ## Community
 
-Fine-Tuning Scheduler is developed and maintained by the community in close communication with the [Lightning team](https://pytorch-lightning.readthedocs.io/en/latest/governance.html). Thanks to everyone in the community for their tireless effort building and improving the immensely useful core Lightning project.
+Fine-Tuning Scheduler is developed and maintained by the community in close communication with the [Lightning team](https://pytorch-lightning.readthedocs.io/en/stable/governance.html). Thanks to everyone in the community for their tireless effort building and improving the immensely useful core Lightning project.
 
-PR's welcome! Please see the [contributing guidelines](https://finetuning-scheduler.readthedocs.io/en/latest/generated/CONTRIBUTING.html) (which are essentially the same as Lightning's).
+PR's welcome! Please see the [contributing guidelines](https://finetuning-scheduler.readthedocs.io/en/stable/generated/CONTRIBUTING.html) (which are essentially the same as Lightning's).
 
 ______________________________________________________________________
 
