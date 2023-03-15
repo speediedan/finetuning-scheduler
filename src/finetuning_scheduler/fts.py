@@ -260,6 +260,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         return (
             "ddp",
             "ddp_find_unused_parameters_false",
+            "ddp_find_unused_parameters_true",
             "ddp_spawn",
             "ddp_fork",
             "ddp_notebook",

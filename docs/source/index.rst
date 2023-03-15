@@ -282,15 +282,16 @@ configurations.
 
 .. note::
 
-   Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the following strategies:
+   Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the following distributed strategies:
 
    .. hlist::
       :columns: 2
 
-      * :external+pl:class:`~lightning.pytorch.strategies.ddp.DDPStrategy`:``ddp``, ``ddp_find_unused_parameters_false``
+      * :external+pl:class:`~lightning.pytorch.strategies.ddp.DDPStrategy`:``ddp``,
+        ``ddp_find_unused_parameters_false``, ``ddp_find_unused_parameters_true``, ``ddp_spawn``, ``ddp_fork``,
+        ``ddp_notebook``
       * :external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`:
         ``fsdp``, ``fsdp_cpu_offload``
-      * Spawn-based strategies: ``ddp_spawn``, ``ddp_fork``, ``ddp_notebook``
 
 .. _supported_lr_schedulers:
 
