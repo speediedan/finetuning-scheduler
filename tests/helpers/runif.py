@@ -45,6 +45,7 @@ class RunIf:
         min_python: Optional[str] = None,
         bf16_cuda: bool = False,
         skip_windows: bool = False,
+        skip_mac_os: bool = False,
         standalone: bool = False,
         deepspeed: bool = False,
         slow: bool = False,
@@ -59,6 +60,7 @@ class RunIf:
             min_python: Require that Python is greater or equal than this version.
             bf16_cuda: Require that CUDA device supports bf16.
             skip_windows: Skip for Windows platform.
+            skip_mac_os: Skip Mac OS platform.
             standalone: Mark the test as standalone, our CI will run it in a separate process.
                 This requires that the ``PL_RUN_STANDALONE_TESTS=1`` environment variable is set.
             deepspeed: Require that microsoft/DeepSpeed is installed.
@@ -110,6 +112,10 @@ class RunIf:
         if skip_windows:
             conditions.append(sys.platform == "win32")
             reasons.append("unimplemented on Windows")
+
+        if skip_mac_os:
+            conditions.append(sys.platform == "darwin")
+            reasons.append("unimplemented or temporarily bypassing these tests for MacOS")
 
         if standalone:
             env_flag = os.getenv("PL_RUN_STANDALONE_TESTS", "0")
