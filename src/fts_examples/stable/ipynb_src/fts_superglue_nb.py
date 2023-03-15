@@ -149,9 +149,8 @@
 #
 # **Note:** Currently, [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) supports the following strategy types:
 #
-# - ``ddp`` (and alias ``ddp_find_unused_parameters_false``)
+# - ``ddp`` (and aliases ``ddp_find_unused_parameters_false``, ``ddp_find_unused_parameters_true``, ``ddp_spawn``, ``ddp_fork``, ``ddp_notebook``)
 # - ``fsdp`` (and alias ``fsdp_cpu_offload``)
-# - ``ddp_spawn`` (and aliases ``ddp_fork``, ``ddp_notebook``)
 #
 # Custom or officially unsupported strategies can be used by setting [FinetuningScheduler.allow_untested](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html?highlight=allow_untested#finetuning_scheduler.fts.FinetuningScheduler.params.allow_untested) to ``True``.
 # Note that most currently unsupported strategies are so because they require varying degrees of modification to be compatible. For example, ``deepspeed`` will require a ``StrategyAdapter`` to be written (similar to the one for ``FSDP``, ``FSDPStrategyAdapter``) before support can be added (PRs welcome!),
