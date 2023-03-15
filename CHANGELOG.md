@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 
+## [2.0.0] - 2023-03-15
+
+### Added
+
+- Support for PyTorch and PyTorch Lightning 2.0.0!
+- New ``enforce_phase0_params`` feature.  FTS ensures the optimizer configured in ``configure_optimizers`` will optimize the parameters (and only those parameters) scheduled to be optimized in phase ``0`` of the current fine-tuning schedule. ([#9](https://github.com/speediedan/finetuning-scheduler/pull/9))
+- Support for ``torch.compile``
+- Support for numerous new FSDP options including preview support for some FSDP options coming soon to Lightning (e.g. ``use_orig_params``)
+- When using FTS with FSDP, support the use of ``_FSDPPolicy`` ``auto_wrap_policy`` wrappers (new in PyTorch 2.0.0)
+- Extensive testing for FSDP in many newly supported 2.x contexts (including 1.x FSDP compatibility multi-gpu tests)
+- Support for strategies that do not have a canonical `strategy_name` but use `_strategy_flag`
+
+### Changed
+
+- Now that the core Lightning package is `lightning` rather than `pytorch-lightning`, Fine-Tuning Scheduler (FTS) by default depends upon the `lightning` package rather than the standalone `pytorch-lightning`. If you would like to continue to use FTS with the standalone `pytorch-lightning` package instead, you can still do so (see [README](https://github.com/speediedan/finetuning-scheduler/blob/main/README.md)).
+- Fine-Tuning Scheduler (FTS) major version numbers will align with the rest of the PyTorch ecosystem (e.g. FTS 2.x supports PyTorch and Lightning >= 2.0)
+- Switched to use ``ruff`` instead of ``flake8`` for linting
+- Replaced `fsdp_optim_view` with either `fsdp_optim_transform` or `fsdp_optim_inspect` depending on usage context because the transformation is now not always read-only
+- Moved Lightning 1.x examples to `legacy` subfolder and created new FTS/Lightning 2.x examples in `stable` subfolder
+
+
+### Removed
+
+- Removed ``training_epoch_end`` and ``validation_epoch_end`` in accord with Lightning
+- Removed `DP` strategy support in accord with Lightning
+- Removed support for Python `3.7` and PyTorch `1.10` in accord with Lightning
+
+### Fixed
+
+- Adapted loop synchronization during training resume to upstream Lightning changes
+
+## [0.4.1] - 2023-03-14
+
+### Added
+
+- Support for ``pytorch-lightning`` 1.9.4 (which may be the final Lightning 1.x release as PyTorch 2.0 will be released tomorrow)
+
 ## [0.4.0] - 2023-01-25
 
 ### Added
