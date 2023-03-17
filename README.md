@@ -95,10 +95,10 @@ python -m pip install -e ".[all]" -r requirements/docs.txt
 ### Step 1: Import the FinetuningScheduler callback and start fine-tuning!
 
 ```python
-from lightning.pytorch import Trainer
+import lightning as L
 from finetuning_scheduler import FinetuningScheduler
 
-trainer = Trainer(callbacks=[FinetuningScheduler()])
+trainer = L.Trainer(callbacks=[FinetuningScheduler()])
 ```
 
 Get started by following [the Fine-Tuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/stable/index.html#example-scheduled-fine-tuning-for-superglue) or by following the [notebook-based](https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html) Fine-Tuning Scheduler tutorial.

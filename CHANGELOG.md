@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 
+## [2.0.1] - 2023-XX-XX
+
+### Added
+
+### Changed
+
+### Fixed
+
 ## [2.0.0] - 2023-03-15
 
 ### Added
@@ -19,7 +27,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
-- Now that the core Lightning package is `lightning` rather than `pytorch-lightning`, Fine-Tuning Scheduler (FTS) by default depends upon the `lightning` package rather than the standalone `pytorch-lightning`. If you would like to continue to use FTS with the standalone `pytorch-lightning` package instead, you can still do so (see [README](https://github.com/speediedan/finetuning-scheduler/blob/main/README.md)).
+- Now that the core Lightning package is `lightning` rather than `pytorch-lightning`, Fine-Tuning Scheduler (FTS) by default depends upon the `lightning` package rather than the standalone `pytorch-lightning`. If you would like to continue to use FTS with the standalone `pytorch-lightning` package instead, you can still do so (see [README](https://github.com/speediedan/finetuning-scheduler/blob/main/README.md)). Resolves ([#8](https://github.com/speediedan/finetuning-scheduler/issues/8)).
 - Fine-Tuning Scheduler (FTS) major version numbers will align with the rest of the PyTorch ecosystem (e.g. FTS 2.x supports PyTorch and Lightning >= 2.0)
 - Switched to use ``ruff`` instead of ``flake8`` for linting
 - Replaced `fsdp_optim_view` with either `fsdp_optim_transform` or `fsdp_optim_inspect` depending on usage context because the transformation is now not always read-only

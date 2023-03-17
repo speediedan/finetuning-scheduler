@@ -72,9 +72,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
 
     Example::
 
-        from lightning.pytorch import Trainer
+        import lightning as L
         from lightning.pytorch.callbacks import FinetuningScheduler
-        trainer = Trainer(callbacks=[FinetuningScheduler()])
+        trainer = L.Trainer(callbacks=[FinetuningScheduler()])
 
     .. note::
 
