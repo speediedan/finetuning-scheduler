@@ -51,13 +51,13 @@
 # </div>
 #
 # ```python
-# from lightning.pytorch import Trainer
+# import lightning as L
 # from finetuning_scheduler import FinetuningScheduler
-# trainer = Trainer(callbacks=[FinetuningScheduler()])
+# trainer = L.Trainer(callbacks=[FinetuningScheduler()])
 # ```
 
 # %% [markdown]
-# ## The Default Fine-Tuning schedule
+# ## The Default Fine-Tuning Schedule
 #
 # Schedule definition is facilitated via the [gen_ft_schedule](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts_supporters.html#finetuning_scheduler.fts_supporters.ScheduleImplMixin.gen_ft_schedule) method which dumps a default fine-tuning schedule (by default using a naive, 2-parameters per level heuristic) which can be adjusted as
 # desired by the user and/or subsequently passed to the callback. Using the default/implicitly generated schedule will likely be less computationally efficient than a user-defined fine-tuning schedule but is useful for exploring a model's fine-tuning behavior and can serve as a good baseline for subsequent explicit schedule refinement.
@@ -72,9 +72,9 @@
 #    ``LightningModule`` subclass with the suffix ``_ft_schedule.yaml``.
 #
 # ```python
-#     from lightning.pytorch import Trainer
+#     import lightning as L
 #     from finetuning_scheduler import FinetuningScheduler
-#     trainer = Trainer(callbacks=[FinetuningScheduler(gen_ft_sched_only=True)])
+#     trainer = L.Trainer(callbacks=[FinetuningScheduler(gen_ft_sched_only=True)])
 # ```
 #
 # 2. Alter the schedule as desired.
@@ -85,10 +85,10 @@
 #    [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) to commence scheduled training:
 #
 # ```python
-# from lightning.pytorch import Trainer
+# import lightning as L
 # from finetuning_scheduler import FinetuningScheduler
 #
-# trainer = Trainer(callbacks=[FinetuningScheduler(ft_schedule="/path/to/my/schedule/my_schedule.yaml")])
+# trainer = L.Trainer(callbacks=[FinetuningScheduler(ft_schedule="/path/to/my/schedule/my_schedule.yaml")])
 # ```
 
 # %% [markdown]
@@ -123,9 +123,9 @@
 #
 #
 # ```python
-# from lightning.pytorch import Trainer
+# import lightning as L
 # from finetuning_scheduler import FinetuningScheduler
-# trainer = Trainer(callbacks=[FinetuningScheduler()])
+# trainer = L.Trainer(callbacks=[FinetuningScheduler()])
 # trainer.ckpt_path="some/path/to/my_checkpoint.ckpt"
 # trainer.fit(...)
 # ```
@@ -135,7 +135,7 @@
 # By default ([FinetuningScheduler.restore_best](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html?highlight=restore_best#finetuning_scheduler.fts.FinetuningScheduler.params.restore_best) is ``True``), [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) will attempt to restore the best available checkpoint before fine-tuning depth transitions.
 #
 # ```python
-# trainer = Trainer(callbacks=[FinetuningScheduler()])
+# trainer = L.Trainer(callbacks=[FinetuningScheduler()])
 # trainer.ckpt_path="some/path/to/my_kth_best_checkpoint.ckpt"
 # trainer.fit(...)
 # ```
@@ -147,13 +147,13 @@
 # %% [markdown]
 # <div class="alert alert-warning">
 #
-# **Note:** Currently, [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) supports the following strategy types:
+# **Note:** Currently, [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) supports the following distributed strategy types:
 #
 # - ``ddp`` (and aliases ``ddp_find_unused_parameters_false``, ``ddp_find_unused_parameters_true``, ``ddp_spawn``, ``ddp_fork``, ``ddp_notebook``)
 # - ``fsdp`` (and alias ``fsdp_cpu_offload``)
 #
 # Custom or officially unsupported strategies can be used by setting [FinetuningScheduler.allow_untested](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html?highlight=allow_untested#finetuning_scheduler.fts.FinetuningScheduler.params.allow_untested) to ``True``.
-# Note that most currently unsupported strategies are so because they require varying degrees of modification to be compatible. For example, ``deepspeed`` will require a ``StrategyAdapter`` to be written (similar to the one for ``FSDP``, ``FSDPStrategyAdapter``) before support can be added (PRs welcome!),
+# Note that most currently unsupported strategies are so because they require varying degrees of modification to be compatible. For example, ``deepspeed`` will require a [StrategyAdapter](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.strategy_adapters.html#finetuning_scheduler.strategy_adapters.StrategyAdapter) to be written (similar to the one for ``FSDP``, [FSDPStrategyAdapter](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.strategy_adapters.html#finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter)) before support can be added (PRs welcome!),
 # while ``tpu_spawn`` would require an override of the current broadcast method to include python objects.
 # </div>
 
@@ -174,10 +174,9 @@ from typing import Any, Dict, Optional
 import sentencepiece as sp  # noqa: F401 # isort: split
 import datasets
 import evaluate
-import lightning.pytorch as pl
+import lightning as L
 import torch
 from datasets import logging as datasets_logging
-from lightning.fabric.accelerators.cuda import is_cuda_available
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
 from lightning.pytorch.utilities import rank_zero_warn
@@ -190,7 +189,7 @@ from transformers.tokenization_utils_base import BatchEncoding
 
 # %%
 # Import the `FinetuningScheduler` Lightning extension module we want to use. This will import all necessary callbacks.
-import finetuning_scheduler as fts
+import finetuning_scheduler as fts  # isort: split
 
 # set notebook-level variables
 TASK_NUM_LABELS = {"boolq": 2, "rte": 2}
@@ -202,16 +201,16 @@ for hflogger in [transformers_logging, datasets_logging]:
 # ignore warnings related tokenizers_parallelism/DataLoader parallelism trade-off and
 # expected logging behavior
 for warnf in [
-    ".*does not have many workers.*",
-    ".*The number of training samples.*",
-    ".*converting to a fast.*",
-    ".*number of training batches.*",
+    r".*does not have many workers.*",
+    r".*The number of training samples.*",
+    r".*converting to a fast.*",
+    r".*number of training batches.*",
 ]:
     warnings.filterwarnings("ignore", warnf)
 
 
 # %%
-class RteBoolqDataModule(pl.LightningDataModule):
+class RteBoolqDataModule(L.LightningDataModule):
     """A ``LightningDataModule`` designed for both the RTE or BoolQ SuperGLUE Hugging Face datasets."""
 
     TASK_TEXT_FIELD_MAP = {"rte": ("premise", "hypothesis"), "boolq": ("question", "passage")}
@@ -242,8 +241,8 @@ class RteBoolqDataModule(pl.LightningDataModule):
             model_name_or_path (str):
                 Can be either:
                     - A string, the ``model id`` of a pretrained model hosted inside a model repo on huggingface.co.
-                        Valid model ids can be located at the root-level, like ``bert-base-uncased``, or namespaced under
-                        a user or organization name, like ``dbmdz/bert-base-german-cased``.
+                        Valid model ids can be located at the root-level, like ``bert-base-uncased``, or namespaced
+                        under a user or organization name, like ``dbmdz/bert-base-german-cased``.
                     - A path to a ``directory`` containing model weights saved using
                         :meth:`~transformers.PreTrainedModel.save_pretrained`, e.g., ``./my_model_directory/``.
             task_name (str, optional): Name of the SuperGLUE task to execute. This module supports 'rte' or 'boolq'.
@@ -252,7 +251,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
             train_batch_size (int, optional): Training batch size. Defaults to 16.
             eval_batch_size (int, optional): Batch size to use for validation and testing splits. Defaults to 16.
             tokenizers_parallelism (bool, optional): Whether to use parallelism in the tokenizer. Defaults to True.
-            \**dataloader_kwargs: Arguments passed when initializing the dataloader
+            \**dataloader_kwargs: Arguments passed when initializing the dataloader.
         """
         super().__init__()
         task_name = task_name if task_name in TASK_NUM_LABELS.keys() else DEFAULT_TASK
@@ -300,7 +299,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
             example_batch ([type]): The set of examples to convert to token space.
 
         Returns:
-            ``BatchEncoding``: A batch of encoded examples (note default tokenizer batch_size=1000)
+            ``BatchEncoding``: A batch of encoded examples (note default tokenizer batch_size=1000).
         """
         text_pairs = list(zip(example_batch[self.text_fields[0]], example_batch[self.text_fields[1]]))
         # Tokenize the text/text pairs
@@ -313,7 +312,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
 
 
 # %%
-class RteBoolqModule(pl.LightningModule):
+class RteBoolqModule(L.LightningModule):
     """A ``LightningModule`` that can be used to fine-tune a foundation model on either the RTE or BoolQ SuperGLUE
     tasks using Hugging Face implementations of a given model and the `SuperGLUE Hugging Face dataset."""
 
@@ -328,9 +327,9 @@ class RteBoolqModule(pl.LightningModule):
     ):
         """
         Args:
-            model_name_or_path (str): Path to pretrained model or identifier from https://huggingface.co/models
+            model_name_or_path (str): Path to pretrained model or identifier from https://huggingface.co/models.
             optimizer_init (Dict[str, Any]): The desired optimizer configuration.
-            lr_scheduler_init (Dict[str, Any]): The desired learning rate scheduler config
+            lr_scheduler_init (Dict[str, Any]): The desired learning rate scheduler config.
             model_cfg (Optional[Dict[str, Any]], optional): Defines overrides of the default model config. Defaults to
                 ``None``.
             task_name (str, optional): The SuperGLUE task to execute, one of ``'rte'``, ``'boolq'``. Defaults to "rte".
@@ -338,8 +337,6 @@ class RteBoolqModule(pl.LightningModule):
                 "default".
         """
         super().__init__()
-        self.training_step_outputs = []
-        self.validation_step_outputs = []
         if task_name not in TASK_NUM_LABELS.keys():
             rank_zero_warn(f"Invalid task_name {task_name!r}. Proceeding with the default task: {DEFAULT_TASK!r}")
             task_name = DEFAULT_TASK
@@ -370,13 +367,10 @@ class RteBoolqModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx: int):
         loss = self(**batch)[0]
-        self.training_step_outputs.append(loss)
         self.log("train_loss", loss, prog_bar=True)
         return loss
 
     def on_train_epoch_end(self):
-        if self.training_step_outputs:
-            self.training_step_outputs.clear()
         if self.finetuningscheduler_callback:
             self.log("finetuning_schedule_depth", float(self.finetuningscheduler_callback.curr_depth))
 
@@ -388,13 +382,9 @@ class RteBoolqModule(pl.LightningModule):
         elif self.num_labels == 1:
             preds = logits.squeeze()
         labels = batch["labels"]
-        self.validation_step_outputs.append(val_loss)
         self.log("val_loss", val_loss, prog_bar=True)
         metric_dict = self.metric.compute(predictions=preds, references=labels)
         self.log_dict(metric_dict, prog_bar=True)
-
-    def on_validation_epoch_end(self):
-        self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         # With FTS >= 2.0, ``FinetuningScheduler`` simplifies initial optimizer configuration by ensuring the optimizer
@@ -456,7 +446,7 @@ with open(ft_schedule_name, "w") as f:
 
 # %%
 datasets.logging.disable_progress_bar()
-pl.seed_everything(42)
+L.seed_everything(42)
 dm = RteBoolqDataModule(model_name_or_path="microsoft/deberta-v3-base", tokenizers_parallelism=True)
 
 # %% [markdown]
@@ -541,13 +531,13 @@ enable_progress_bar = False
 
 
 def train() -> None:
-    trainer = pl.Trainer(
+    trainer = L.Trainer(
         enable_progress_bar=enable_progress_bar,
         max_epochs=1,
         limit_train_batches=2,
         precision="16-mixed",
         accelerator="auto",
-        devices=1 if is_cuda_available() else None,
+        devices=1,
         callbacks=callbacks,
         logger=logger,
     )

@@ -64,10 +64,10 @@ and :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks with
 
 .. code-block:: python
 
-    from lightning.pytorch import Trainer
+    import lightning as L
     from finetuning_scheduler import FinetuningScheduler
 
-    trainer = Trainer(callbacks=[FinetuningScheduler()])
+    trainer = L.Trainer(callbacks=[FinetuningScheduler()])
 
 
 .. _default schedule:
@@ -98,10 +98,10 @@ either integers or convertible to integers via ``int()``.
 
 .. code-block:: python
 
-    from lightning.pytorch import Trainer
+    import lightning as L
     from finetuning_scheduler import FinetuningScheduler
 
-    trainer = Trainer(callbacks=[FinetuningScheduler(gen_ft_sched_only=True)])
+    trainer = L.Trainer(callbacks=[FinetuningScheduler(gen_ft_sched_only=True)])
 
 
 2. Alter the schedule as desired.
@@ -161,10 +161,10 @@ either integers or convertible to integers via ``int()``.
 
 .. code-block:: python
 
-    from lightning.pytorch import Trainer
+    import lightning as L
     from finetuning_scheduler import FinetuningScheduler
 
-    trainer = Trainer(callbacks=[FinetuningScheduler(ft_schedule="/path/to/my/schedule/my_schedule.yaml")])
+    trainer = L.Trainer(callbacks=[FinetuningScheduler(ft_schedule="/path/to/my/schedule/my_schedule.yaml")])
 
 .. note::
 
@@ -238,10 +238,10 @@ special metadata.
 
 .. code-block:: python
 
-    from lightning.pytorch import Trainer
+    import lightning as L
     from finetuning_scheduler import FinetuningScheduler
 
-    trainer = Trainer(callbacks=[FinetuningScheduler()])
+    trainer = L.Trainer(callbacks=[FinetuningScheduler()])
     trainer.ckpt_path = "some/path/to/my_checkpoint.ckpt"
     trainer.fit(...)
 

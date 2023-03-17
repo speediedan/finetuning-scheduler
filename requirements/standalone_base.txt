@@ -1,4 +1,4 @@
-pytorch-lightning>=2.0.0,<2.0.1
+#pytorch-lightning>=2.0.0,<2.0.1
 # the below is uncommented when master is targeting a specific pl dev master commit
-# git+https://github.com/Lightning-AI/pytorch-lightning.git@01834c8529a7b92705f4c9323051237ccf054e7c#egg=pytorch-lightning
+git+https://github.com/Lightning-AI/pytorch-lightning.git@1156eb74aef23fa1a43069d20e652ba5a9dfd77e#egg=pytorch-lightning
 torch>=1.11.0

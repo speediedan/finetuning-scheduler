@@ -35,5 +35,5 @@ RUN \
 RUN python --version && \
     pip --version && \
     pip list && \
-    python -c "import lightning as pl; print(pl.__version__)" && \
+    python -c "import lightning as L; print(L.__version__)" && \
     python -c "import finetuning_scheduler as fts; print(fts.__version__)"
