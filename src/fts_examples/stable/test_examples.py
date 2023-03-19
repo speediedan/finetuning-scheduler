@@ -11,8 +11,10 @@
 # limitations under the License.
 import os.path
 import subprocess
+from unittest import mock
 
 import pytest
+from lightning.pytorch.callbacks import ModelCheckpoint
 from packaging.version import Version
 from pkg_resources import get_distribution
 
@@ -67,7 +69,8 @@ def test_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
         "--trainer.devices=1",
     ]
     monkeypatch.setattr("sys.argv", [example_script, "fit", "--config"] + config_loc + cli_args)
-    cli_main()
+    with mock.patch.object(ModelCheckpoint, "_save_checkpoint"):  # do not save checkpoints for example tests
+        cli_main()
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=EXPECTED_WARNS)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
@@ -92,7 +95,8 @@ def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_fi
         "--trainer.devices=1",
     ]
     monkeypatch.setattr("sys.argv", [example_script, "fit", "--config"] + config_loc + cli_args)
-    cli_main()
+    with mock.patch.object(ModelCheckpoint, "_save_checkpoint"):  # do not save checkpoints for example tests
+        cli_main()
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=ADV_EXPECTED_WARNS)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)

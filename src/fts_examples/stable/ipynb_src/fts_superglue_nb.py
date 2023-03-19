@@ -510,8 +510,8 @@ model = RteBoolqModule(**lightning_module_kwargs, experiment_tag="fts_explicit")
 # configurations for the implicit and nofts_baseline scenarios (except the  config for the
 # FinetuningScheduler callback itself of course in the case of nofts_baseline)
 earlystopping_kwargs = {"monitor": "val_loss", "min_delta": 0.001, "patience": 2}
-checkpoint_kwargs = {"monitor": "val_loss", "save_top_k": 1}
-fts_kwargs = {"max_depth": 1}
+checkpoint_kwargs = {"monitor": "val_loss", "save_top_k": 0}  # avoid saving checkpoints for example test
+fts_kwargs = {"max_depth": 1, "restore_best": False}  # ensure FTS allows not saving checkpoints for example test
 callbacks = [
     fts.FinetuningScheduler(ft_schedule=ft_schedule_name, **fts_kwargs),
     fts.FTSEarlyStopping(**earlystopping_kwargs),
