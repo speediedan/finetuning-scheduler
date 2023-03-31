@@ -240,10 +240,9 @@ class FSDPStrategyAdapter(StrategyAdapter):
             )
 
     def fts_optim_transform(self, orig_pl: List, inspect_only: bool = False) -> List:
-        """Because FSDP performs parameter transformations that cause the current.
-
-        :external+torch:class:`~torch.optim.Optimizer`'s view of parameter names to diverge from the original parameter
-        names, this parameter transformation is required for optimizer operations.
+        """Because FSDP performs parameter transformations that cause the current optimizer's view of parameter
+        names to diverge from the original parameter names, this parameter transformation is required for optimizer
+        operations.
 
         Args:
             orig_pl (List): The original parameter name list before FSDP's transformation of them.
@@ -252,9 +251,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 inspection and validation contexts.
 
         Returns:
-            List: A transformed parameter name list that matches the current
-            :external+torch:class:`~torch.optim.Optimizer`'s view of them after FSDP's transformation of the original
-            parameter names.
+            List: A transformed parameter name list that matches the current optimizer's view of them after FSDP's
+                transformation of the original parameter names.
         """
         return self.fsdp_param_transform(orig_pl, inspect_only)
 
@@ -270,9 +268,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 inspection and validation contexts.
 
         Returns:
-            List: A transformed parameter name list that matches the current
-            :external+torch:class:`~torch.optim.Optimizer`'s view of them after FSDP's transformation of the original
-            parameter names.
+            List: A transformed parameter name list that matches the current optimizer's view of them after FSDP's
+                transformation of the original parameter names.
         """
         flat_next_tl = {self._fsdp_unflat_to_flat_mapping[p] for p in orig_thaw_pl}
         if self._use_orig_params and not inspect_only:
@@ -315,8 +312,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
         :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_transform`.
 
         Args:
-            param_names (List): A parameter name list from the current :external+torch:class:`~torch.optim.Optimizer`'s
-                view of them after FSDP's transformation of the original parameter names.
+            param_names (List): A parameter name list from the current optimizer's view of them after FSDP's
+                transformation of the original parameter names.
 
         Returns:
             List: The original parameter name list before a given FSDP's transformation.

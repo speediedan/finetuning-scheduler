@@ -34,6 +34,7 @@ from tests.test_finetuning_scheduler_callback import (
     ExplicitLossFTSCheckpoint,
     FinetuningSchedulerBoringModel,
     get_fts,
+    nones,
     TestFinetuningScheduler,
 )
 
@@ -110,6 +111,46 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     fsdp_gen_sched_dict[0]["max_transition_epoch"] = 1
     fsdp_gen_sched_dict[1]["params"] = ["layer.[1-4].*"]
     fsdp_gen_sched_dict[1]["max_transition_epoch"] = 2
+    fsdp_reinit_optim_sched_dict = deepcopy(fsdp_gen_sched_dict)
+    fsdp_reinitlr_sched_dict = deepcopy(fsdp_gen_sched_dict)
+    fsdp_reinit_optim_sched_dict[1]["new_optimizer"] = {
+        "optimizer_init": {
+            "class_path": "torch.optim.Adam",
+            "init_args": {"lr": 2.1e-04},
+        },
+    }
+    fsdp_reinit_optim_sched_dict[2]["new_optimizer"] = {
+        "optimizer_init": {
+            "class_path": "torch.optim.SGD",
+            "init_args": {"lr": 2.0e-03, "momentum": 0.9, "weight_decay": 2.0e-06},
+        }
+    }
+    fsdp_reinitlr_sched_dict[1]["new_lr_scheduler"] = {
+        "lr_scheduler_init": {
+            "class_path": "torch.optim.lr_scheduler.StepLR",
+            "init_args": {"step_size": 1, "gamma": 0.7, "verbose": True},
+        },
+        "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
+    }
+    fsdp_reinitlr_sched_dict[2]["lr"] = 3.0e-06
+    fsdp_reinitlr_sched_dict[2]["new_lr_scheduler"] = {
+        "lr_scheduler_init": {
+            "class_path": "torch.optim.lr_scheduler.CosineAnnealingWarmRestarts",
+            "init_args": {"T_0": 1, "T_mult": 2, "eta_min": 1.0e-07},
+        },
+        "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
+        "init_pg_lrs": [1.0e-06, 2.0e-06],
+    }
+    fsdp_reinitlr_optim_sched_dict = deepcopy(fsdp_reinitlr_sched_dict)
+    fsdp_reinitlr_optim_sched_dict[1]["new_optimizer"] = deepcopy(fsdp_reinit_optim_sched_dict[1]["new_optimizer"])
+    fsdp_reinitlr_optim_sched_dict[2]["new_optimizer"] = deepcopy(fsdp_reinit_optim_sched_dict[2]["new_optimizer"])
+    fsdp_reinitlr_optim_sched_dict[2]["new_lr_scheduler"] = {
+        "lr_scheduler_init": {
+            "class_path": "torch.optim.lr_scheduler.StepLR",
+            "init_args": {"step_size": 1, "gamma": 0.2, "verbose": True},
+        },
+        "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
+    }
     fsdp_bn_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_bn_gen_sched_dict[0]["params"] = ["layer.(8|[4-6]).*"]
     fsdp_bn_gen_sched_dict[1]["params"] = ["layer.[1-3].*"]
@@ -141,6 +182,7 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
         fsdp_nondis_mod_ex_sched_dict,
         fsdp_ext_gen_sched_dict,
         fsdp_epoch_only_sched,
+        fsdp_reinitlr_optim_sched_dict,
     )
 
 
@@ -411,6 +453,7 @@ class FSDPTestFinetuningScheduler(TestFinetuningScheduler):
 
     def restore_best_ckpt(self) -> None:
         super(TestFinetuningScheduler, self).restore_best_ckpt()
+        self.restored_best_cnt += 1
 
     def on_train_epoch_start(self, trainer, pl_module):
         super(TestFinetuningScheduler, self).on_train_epoch_start(trainer, pl_module)
@@ -419,8 +462,23 @@ class FSDPTestFinetuningScheduler(TestFinetuningScheduler):
             len(self._fts_state._curr_thawed_params),
             len(self.strategy_adapter.logical_param_translation(self._fts_state._curr_thawed_params)),
         )
-        if self.expected_state:
-            assert current_state == self.expected_state[state_key]
+        lrs_state = tuple(round(pg["lr"], 9) for pg in trainer.optimizers[0].param_groups)
+        self.inspect_or_assert(current_state, lrs_state, state_key)
+
+
+class FSDPOptInspectFTS(FSDPTestFinetuningScheduler):
+    def on_train_epoch_start(self, trainer, pl_module):
+        super(TestFinetuningScheduler, self).on_train_epoch_start(trainer, pl_module)
+        state_key = trainer.current_epoch
+        current_state = (
+            len(self._fts_state._curr_thawed_params),
+            len(self.strategy_adapter.logical_param_translation(self._fts_state._curr_thawed_params)),
+            trainer.optimizers[0].__class__.__name__,
+            trainer.fit_loop.epoch_loop.automatic_optimization.optim_progress.optimizer_steps,
+            trainer.optimizers[0].defaults["lr"],
+        )
+        lrs_state = tuple(round(pg["lr"], 9) for pg in trainer.optimizers[0].param_groups)
+        self.inspect_or_assert(current_state, lrs_state, state_key)
 
 
 # model aliases
@@ -516,12 +574,13 @@ test_use_orig = {"use_orig_params": True}
 max_epoch_5 = {"max_epochs": 5}
 max_epoch_4 = {"max_epochs": 4}
 
-# fts config alias
+# fts config aliases
 epoch_t_only = {
     "epoch_transitions_only": True,
     "test_es": "disable",
     "test_ckpt": ExplicitLossFTSCheckpoint(monitor="val_loss", verbose=True),
 }
+opt_inspect = {"test_fts": FSDPOptInspectFTS}
 
 # expected training path aliases
 path_default = {0: (2, 4), 1: (6, 12), 2: (7, 14)}
@@ -533,41 +592,40 @@ path_8_16 = {0: (4, 8), 1: (7, 14), 2: (8, 16)}
 path_5_10 = {0: (2, 4), 1: (3, 6), 2: (5, 10)}
 path_ext_7_14 = {0: (2, 4), 1: (2, 4), 2: (6, 12), 3: (6, 12), 4: (7, 14)}
 path_ext_8_16 = {0: (3, 6), 1: (7, 14), 2: (8, 16)}
-
-
-# to help dedup config
-def nones(num_n) -> Tuple:
-    return (None,) * num_n
+path_optimlr_reinit = {0: (2, 4, "SGD", 0, 0.1), 1: (6, 12, "Adam", 32, 0.00021), 2: (7, 14, "SGD", 64, 0.002)}
+lrs_path_default = {0: (0.1,), 1: (0.07, 1e-06), 2: (0.049, 7e-07, 1e-05)}
+lrs_path_optimlr_reinit = {0: (0.1,), 1: (0.07, 1e-06), 2: (0.002, 1e-06, 3e-06)}
 
 
 EXPECTED_FSDP_FTS_RESULTS = {
-    "cust_awp_noprec": (path_default, *nones(2)),
-    "cust_awp_noprec_use_orig": (path_default_orig, *nones(2)),
-    "cust_awp_noprec_dynamo_use_orig": (path_default_orig_eo_dyn, *nones(2)),
-    "cust_awp_mwp_parity": (path_default, *nones(2)),
-    "override_csm_noprec": (path_default, *nones(2)),
+    "cust_awp_noprec": (path_default, *nones(3)),
+    "cust_awp_noprec_use_orig": (path_default_orig, *nones(3)),
+    "cust_awp_noprec_dynamo_use_orig": (path_default_orig_eo_dyn, *nones(3)),
+    "cust_awp_mwp_reinitlr_optim": (path_optimlr_reinit, ("Incompatible check",), None, lrs_path_optimlr_reinit),
+    "cust_awp_mwp_parity": (path_default, *nones(3)),
+    "override_csm_noprec": (path_default, *nones(3)),
     # TODO: once PyTorch deprecates ``ignored_modules``, check for that deprecation warning in this test
-    "cust_awp_nop_ignore_m_no_ofld": (path_8_14, *nones(2)),
-    "cust_awp_nop_ignore_p_no_ofld_uo": (path_ignore_p_uo, *nones(2)),
-    "unsupp_torch_version": ({}, None, "is supported from PyTorch"),
-    "non_disjoint_phase_fsdp_params": ({}, None, "do not have disjoint FSDP-flattened parameter"),
-    "non_disjoint_phase_mods": ({}, None, "not have disjoint"),
-    "non_disjoint_excluded_ft_params": ({}, None, "parameters not included in"),
-    "already_fsdp_wrapped": ({}, None, "already wrapped by FSDP"),
-    "no_fsdp_params_p0": ({}, None, "one or more FSDP"),
-    "warn_unsupp_nodecay": ({}, "will now be unset", None),
-    "unmatched_awp_overrides": ({}, None, "did not match any named modules"),
-    "cust_awp_prec": (path_default, *nones(2)),
-    "cust_awp_prec_pt1x": (path_default, *nones(2)),
-    "enforceP0_cust_awp_prec": (path_default, *nones(2)),
+    "cust_awp_nop_ignore_m_no_ofld": (path_8_14, *nones(3)),
+    "cust_awp_nop_ignore_p_no_ofld_uo": (path_ignore_p_uo, *nones(3)),
+    "unsupp_torch_version": ({}, None, "is supported from PyTorch", None),
+    "non_disjoint_phase_fsdp_params": ({}, None, "do not have disjoint FSDP-flattened parameter", None),
+    "non_disjoint_phase_mods": ({}, None, "not have disjoint", None),
+    "non_disjoint_excluded_ft_params": ({}, None, "parameters not included in", None),
+    "already_fsdp_wrapped": ({}, None, "already wrapped by FSDP", None),
+    "no_fsdp_params_p0": ({}, None, "one or more FSDP", None),
+    "warn_unsupp_nodecay": ({}, "will now be unset", *nones(2)),
+    "unmatched_awp_overrides": ({}, None, "did not match any named modules", None),
+    "cust_awp_prec": (path_default, *nones(3)),
+    "cust_awp_prec_pt1x": (path_default, *nones(3)),
+    "enforceP0_cust_awp_prec": (path_default, *nones(3)),
     # "batch_norm_auto_prec": (path_8_16, "Both mixed precision", None),  # _dynamo/allowed_functions.py suppresses
-    "batch_norm_auto_prec": (path_8_16, None, None),
-    "shared_params_auto_prec": (path_5_10, ("Pruning explicitly specified",), None),
-    "override_csm_adam_noprec": (path_ext_7_14, *nones(2)),
-    "cust_awp_overrides_prec": (path_default, *nones(2)),
-    "cust_awp_overrides_prec_ext": (path_ext_8_16, *nones(2)),
-    "warn_ignore_awp_override": ({}, "will be unset and not applied", None),
-    "cust_noprec_resume": (path_default, *nones(2)),
+    "batch_norm_auto_prec": (path_8_16, *nones(3)),
+    "shared_params_auto_prec": (path_5_10, ("Pruning explicitly specified",), *nones(2)),
+    "override_csm_adam_noprec": (path_ext_7_14, *nones(3)),
+    "cust_awp_overrides_prec": (path_default, *nones(3)),
+    "cust_awp_overrides_prec_ext": (path_ext_8_16, *nones(3)),
+    "warn_ignore_awp_override": ({}, "will be unset and not applied", *nones(2)),
+    "cust_noprec_resume": (path_default, *nones(3)),
 }
 
 
@@ -599,6 +657,18 @@ EXPECTED_FSDP_FTS_RESULTS = {
             epoch_t_only,
             max_epoch_4,
             test_use_orig,
+            marks=RunIf(min_torch="2.0"),
+        ),
+        pytest.param(
+            "cust_awp_mwp_reinitlr_optim",
+            base_model,
+            awp_mwp_parity,
+            True,
+            8,
+            unwrap_7_mp,
+            None,
+            opt_inspect,
+            *nones(2),
             marks=RunIf(min_torch="2.0"),
         ),
         pytest.param(
@@ -659,6 +729,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "cust_awp_noprec",
         "cust_awp_noprec_use_orig",
         "cust_awp_noprec_dynamo_use_orig",
+        "cust_awp_mwp_reinitlr_optim",
         "cust_awp_mwp_parity",
         "override_csm_noprec",
         "cust_awp_nop_ignore_m_no_ofld",
@@ -699,14 +770,24 @@ def test_fsdp_multi_gpus(
 ):
     """Conservative (end-to-end) set of tests for FTS support of FSDP."""
     cfg = init_test_cfg(model_cfg_key, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precision)
-    fts_state, warns_expected, exception_expected, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts = cfg
+    (
+        fts_state,
+        lrs_state,
+        warns_expected,
+        exception_expected,
+        model_cfg,
+        fts_cfg,
+        trainer_cfg,
+        strategy_cfg,
+        precision_opts,
+    ) = cfg
     seed_everything(42)
     use_dynamo = True if model_cfg.pop("use_dynamo", None) else False
     model = model_cls(**model_cfg)
     strategy_cfg = load_ignore_directives(strategy_cfg, model)
     ft_sched = fsdp_ft_schedules[ft_sched_idx]
-    test_cfg = init_fts_cfg(fts_state, strategy_adapter_cfg, fts_cfg)
-    callbacks = callbacks_cfg(FSDPTestFinetuningScheduler, ft_sched, test_cfg, {"patience": 2}, {"save_top_k": 3})
+    test_cfg, fts_cls = init_fts_cfg(fts_state, lrs_state, strategy_adapter_cfg, fts_cfg, tmpdir)
+    callbacks = callbacks_cfg(fts_cls, ft_sched, test_cfg, {"patience": 2}, {"save_top_k": 3})
     strategy = FSDPStrategy(auto_wrap_policy=auto_wrap_policy, **strategy_cfg)
     trainer = configure_trainer(tmpdir, strategy, callbacks, {**trainer_cfg, **precision_opts})
     configured_model = torch.compile(model) if use_dynamo else model
@@ -767,18 +848,35 @@ def gen_exceptions(trainer, model, model_cfg_key, exception_expected):
             trainer.fit(model)
 
 
-def init_fts_cfg(fts_state, strategy_adapter_cfg, fts_cfg):
-    def_fts_cfg = {"logging_level": DEBUG, "expected_state": fts_state, "strategy_adapter_cfg": strategy_adapter_cfg}
+def init_fts_cfg(fts_state, lrs_state, strategy_adapter_cfg, fts_cfg, tmpdir):
+    def_fts_cfg = {
+        "logging_level": DEBUG,
+        "expected_state": fts_state,
+        "lrs_state": lrs_state,
+        "strategy_adapter_cfg": strategy_adapter_cfg,
+        # "state_log_dir": tmpdir
+    }
+    fts_cls = fts_cfg.pop("test_fts") if fts_cfg and fts_cfg.get("test_fts") else FSDPTestFinetuningScheduler
     test_cfg = {**fts_cfg, **def_fts_cfg}
-    return test_cfg
+    return test_cfg, fts_cls
 
 
 def init_test_cfg(model_cfg_key, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precision):
     expected_state = EXPECTED_FSDP_FTS_RESULTS[model_cfg_key]
-    fts_state, warns_expected, exception_expected = expected_state
+    fts_state, warns_expected, exception_expected, lrs_state = expected_state
     init_cfg = model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precision
     model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts = map_component_cfgs(*init_cfg)
-    return fts_state, warns_expected, exception_expected, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts
+    return (
+        fts_state,
+        lrs_state,
+        warns_expected,
+        exception_expected,
+        model_cfg,
+        fts_cfg,
+        trainer_cfg,
+        strategy_cfg,
+        precision_opts,
+    )
 
 
 def map_component_cfgs(model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precision):

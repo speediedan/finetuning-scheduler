@@ -22,6 +22,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 import yaml
+from lightning.fabric.utilities import rank_zero_only
 from lightning.fabric.utilities.cloud_io import get_filesystem
 from lightning.pytorch import LightningModule, seed_everything, Trainer
 from lightning.pytorch.callbacks import Callback, EarlyStopping, LearningRateFinder, LearningRateMonitor
@@ -44,6 +45,10 @@ fts_resolver = CallbackResolverMixin()
 def get_fts(trainer: "Trainer") -> Callback:
     fts_resolver.connect_callback(trainer, reconnect=True)
     return fts_resolver.finetuningscheduler_callback
+
+
+def nones(num_n) -> Tuple:  # to help dedup config
+    return (None,) * num_n
 
 
 class AverageDataset(Dataset):
@@ -232,6 +237,7 @@ class TestFinetuningScheduler(FinetuningScheduler):
         expected_state: Optional[Dict] = None,
         lrs_state: Optional[Dict] = None,
         mock_strategy: Optional[str] = None,
+        state_log_dir: Optional[str] = None,  # used to generate results from test config changes (w/o state assertions)
         *args,
         **kwargs,
     ):
@@ -239,8 +245,11 @@ class TestFinetuningScheduler(FinetuningScheduler):
         self.expected_state = expected_state
         self.lrs_state = lrs_state
         self.mock_strategy = mock_strategy
+        self.state_log_dir = state_log_dir
         self.best_ckpt_test_weight = None
         self.restored_best_cnt = 0
+        self.dev_expected_states = {}
+        self.dev_lrs_states = {}
 
     def setup(self, trainer, pl_module, stage: Optional[str] = None) -> None:
         if self.mock_strategy:
@@ -281,20 +290,103 @@ class TestFinetuningScheduler(FinetuningScheduler):
             trainer.checkpoint_callback.best_ckpt_depth,
         )
         lrs_state = tuple(round(pg["lr"], 9) for pg in trainer.optimizers[0].param_groups)
-        if self.expected_state:
-            assert current_state == self.expected_state[state_key]
-        if self.lrs_state:
-            assert lrs_state == self.lrs_state[state_key]
+        self.inspect_or_assert(current_state, lrs_state, state_key)
+
+    def on_train_end(self, trainer, pl_module) -> None:
+        if self.state_log_dir:
+            self.log_dev_state()
+
+    def inspect_or_assert(self, current_state, lrs_state, state_key) -> None:
+        if not self.state_log_dir:
+            if self.expected_state:
+                # if the number of trainable params mod our world size is 0, the state should be the same on all ranks
+                assert current_state == self.expected_state[state_key]
+            if self.lrs_state:
+                assert lrs_state == self.lrs_state[state_key]
+        else:
+            self.dev_expected_states[state_key] = current_state
+            self.dev_lrs_states[state_key] = lrs_state
         if self.restore_best:
             assert self.restored_best_cnt == self.curr_depth
         else:
             assert self.restored_best_cnt == 0
+
+    @rank_zero_only
+    def log_dev_state(self) -> None:
+        dump_path = Path(self.state_log_dir)
+        state_log = dump_path / "dev_state_log.yaml"
+        fs = get_filesystem(state_log)
+        with fs.open(state_log, "w", newline="") as fp:
+            for dev_d in [self.dev_expected_states, self.dev_lrs_states]:
+                fp.write(os.linesep)
+                for k, v in dev_d.items():  # control formatting precisely to allow copy/paste expected output
+                    fp.write(f"{' ' * 8}{k}: {v},{os.linesep}")
 
 
 class FitStartOnlyFTS(TestFinetuningScheduler):
     def on_fit_start(self, trainer, pl_module) -> None:
         super().on_fit_start(trainer, pl_module)
         raise SystemExit()
+
+
+class OptInspectFTS(TestFinetuningScheduler):
+    def on_train_epoch_start(self, trainer, pl_module):
+        super(TestFinetuningScheduler, self).on_train_epoch_start(trainer, pl_module)
+        state_key = trainer.current_epoch
+        current_state = (
+            self.curr_depth,
+            self.depth_remaining,
+            self._fts_state._ft_epoch,
+            self._fts_state._fts_ckpt_metadata["current_ckpt_depth"],
+            self._fts_state._fts_ckpt_metadata["best_ckpt_depth"],
+            len(self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"]),
+            len(self._fts_state._curr_thawed_params),
+            len(self._internal_optimizer_metadata[0]),
+            trainer.checkpoint_callback.current_ckpt_depth,
+            trainer.checkpoint_callback.best_ckpt_depth,
+            len(trainer.optimizers[0].param_groups),
+            tuple(len(pg["params"]) for pg in trainer.optimizers[0].param_groups),
+            trainer.optimizers[0].__class__.__name__,
+            trainer.fit_loop.epoch_loop.automatic_optimization.optim_progress.optimizer_steps,
+            trainer.optimizers[0].defaults["lr"],
+        )
+        lrs_state = tuple(round(pg["lr"], 9) for pg in trainer.optimizers[0].param_groups)
+        self.inspect_or_assert(current_state, lrs_state, state_key)
+
+    def on_train_end(self, trainer, pl_module) -> None:
+        assert self._fts_state._ft_sync_objects is not None
+        self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
+        assert self.depth_remaining == 0
+        assert self.curr_depth == 3
+        assert self.curr_depth == self.max_depth
+        if self.state_log_dir:
+            self.log_dev_state()
+
+
+class ZeroOptInspectFTS(OptInspectFTS):
+    def on_train_epoch_start(self, trainer, pl_module):
+        super(TestFinetuningScheduler, self).on_train_epoch_start(trainer, pl_module)
+        state_key = trainer.current_epoch
+        partition_cache = getattr(trainer.optimizers[0], "_partition_parameters_cache", None)
+        current_state = (
+            self.curr_depth,
+            self.depth_remaining,
+            self._fts_state._ft_epoch,
+            self._fts_state._fts_ckpt_metadata["current_ckpt_depth"],
+            self._fts_state._fts_ckpt_metadata["best_ckpt_depth"],
+            len(self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"]),
+            len(self._fts_state._curr_thawed_params),
+            len(self._internal_optimizer_metadata[0]),
+            trainer.checkpoint_callback.current_ckpt_depth,
+            trainer.checkpoint_callback.best_ckpt_depth,
+            len(trainer.optimizers[0].param_groups),
+            tuple(len(pg["params"]) for pg in trainer.optimizers[0].param_groups),
+            len(trainer.optimizers[0]._all_params),
+            tuple(tuple(len(pg["params"]) for pg in pgs) for _, pgs in enumerate(partition_cache)),
+            tuple(len(pg["params"]) for pg in trainer.optimizers[0].optim.param_groups),
+        )
+        lrs_state = tuple(round(pg["lr"], 9) for pg in trainer.optimizers[0].param_groups)
+        self.inspect_or_assert(current_state, lrs_state, state_key)
 
 
 class MultiOptFTSBoringModel(FinetuningSchedulerBoringModel):
@@ -330,14 +422,15 @@ class EnforcePhase0CfgOptimBoringModel(FinetuningSchedulerBoringModel):
 
 
 class FTSZeroRedundancyOptimizerModel(FinetuningSchedulerBoringModel):
-    def __init__(self, test_overlap: Optional[bool] = False, *args, **kwargs):
+    def __init__(self, test_overlap: Optional[bool] = False, enf_p0: Optional[bool] = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.test_overlap = test_overlap
+        self.enf_p0 = enf_p0
 
     def configure_optimizers(self):
-        parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
+        params = list(filter(lambda x: x.requires_grad, self.parameters())) if not self.enf_p0 else self.parameters()
         optimizer = ZeroRedundancyOptimizer(
-            parameters, optimizer_class=torch.optim.Adam, lr=0.1, overlap_with_ddp=self.test_overlap
+            params, optimizer_class=torch.optim.AdamW, lr=0.1, overlap_with_ddp=self.test_overlap
         )
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
         return [optimizer], [lr_scheduler]
@@ -395,7 +488,7 @@ def ckpt_set(tmpdir_factory) -> Dict:
     callbacks = [
         FinetuningScheduler(max_depth=1),
         FTSEarlyStopping(monitor="val_loss", patience=1, min_delta=0.001),
-        FTSCheckpoint(monitor="val_loss", verbose=True, save_top_k=3),
+        FTSCheckpoint(monitor="val_loss", verbose=True, save_top_k=2),
     ]
     model = FinetuningSchedulerBoringModel()
     trainer = Trainer(default_root_dir=tmpdir_factory.getbasetemp(), callbacks=callbacks, devices=1)
@@ -417,6 +510,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     with pytest.raises(SystemExit):
         trainer.fit(model)
     mod_sched_dict = get_fts(trainer).load_yaml_schedule(unmod_schedule_file)
+    reinit_optim_sched_dict = deepcopy(mod_sched_dict)
     reinitlr_sched_dict = deepcopy(mod_sched_dict)
     lambdalr_sched_dict = deepcopy(mod_sched_dict)
     rlrop_sched_dict = deepcopy(mod_sched_dict)
@@ -429,6 +523,18 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     epoch_only_sched = deepcopy(mod_sched_dict)
     epoch_only_sched[1]["max_transition_epoch"] = 2
     epoch_only_sched[2]["max_transition_epoch"] = 2
+    reinit_optim_sched_dict[1]["new_optimizer"] = {
+        "optimizer_init": {
+            "class_path": "torch.optim.Adam",
+            "init_args": {"lr": 2.1e-04},
+        },
+    }
+    reinit_optim_sched_dict[2]["new_optimizer"] = {
+        "optimizer_init": {
+            "class_path": "torch.optim.SGD",
+            "init_args": {"lr": 2.0e-03, "momentum": 0.9, "weight_decay": 2.0e-06},
+        }
+    }
     reinitlr_sched_dict[1]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
             "class_path": "torch.optim.lr_scheduler.StepLR",
@@ -444,6 +550,34 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         },
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
         "init_pg_lrs": [1.0e-06, 2.0e-06],
+    }
+    reinitlr_optim_sched_dict = deepcopy(reinitlr_sched_dict)
+    reinitlr_optim_sched_dict[1]["new_optimizer"] = deepcopy(reinit_optim_sched_dict[1]["new_optimizer"])
+    reinitlr_optim_sched_dict[2]["new_optimizer"] = deepcopy(reinit_optim_sched_dict[2]["new_optimizer"])
+    reinitlr_optim_sched_dict[2]["new_lr_scheduler"] = {
+        "lr_scheduler_init": {
+            "class_path": "torch.optim.lr_scheduler.StepLR",
+            "init_args": {"step_size": 1, "gamma": 0.2, "verbose": True},
+        },
+        "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
+    }
+    reinitlr_optim_lambdalr_sched = deepcopy(reinitlr_optim_sched_dict)
+    reinitlr_optim_lambdalr_sched[1]["new_lr_scheduler"] = {
+        "lr_scheduler_init": {
+            "class_path": "tests.helpers.boring_model.LinearWarmupLR",
+            "init_args": {"num_warmup_steps": 100, "num_training_steps": 1000},
+        },
+        "pl_lrs_cfg": {"interval": "step", "frequency": 1, "name": "Custom_Reinit_LR"},
+    }
+    del reinitlr_optim_lambdalr_sched[2]["new_lr_scheduler"]
+    reinitlr_optim_rlrop_sched = deepcopy(reinitlr_optim_lambdalr_sched)
+    reinitlr_optim_rlrop_sched[1]["new_lr_scheduler"] = {
+        "lr_scheduler_init": {
+            "class_path": "torch.optim.lr_scheduler.ReduceLROnPlateau",
+            "init_args": {"patience": 1, "min_lr": [2.0e-07, 1.0e-07]},
+        },
+        "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "monitor": "val_loss", "name": "Custom_Reinit_LR"},
+        "init_pg_lrs": [1.5e-06],
     }
     lambdalr_sched_dict[1]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
@@ -488,6 +622,10 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         reinitlr_sched_dict,
         lambdalr_sched_dict,
         rlrop_sched_dict,
+        reinit_optim_sched_dict,
+        reinitlr_optim_sched_dict,
+        reinitlr_optim_lambdalr_sched,
+        reinitlr_optim_rlrop_sched,
     )
 
 
@@ -623,6 +761,17 @@ def invalid_schedules(tmpdir_factory) -> Dict:
         step_size: 1
         whoops: 0
 """
+    unsupported_optim_reinit = """
+1:
+  params:
+  - layer.1.bias
+  - layer.1.weight
+  new_optimizer:
+    optimizer_init:
+      class_path: torch.distributed.optim.ZeroRedundancyOptimizer
+      init_args:
+        optimizer_class: torch.optim.AdamW
+"""
     extra_plrs_key = """
 1:
   params:
@@ -712,6 +861,7 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     invalid_sched["nonfl_lr_init"] = valid_sched_start + nonfloat_init_pg_lrs
     invalid_sched["imp_lrs_fail"] = valid_sched_start + lrs_import_fail
     invalid_sched["lrs_init_fail"] = valid_sched_start + lrs_init_fail
+    invalid_sched["unsupported_optim_reinit"] = valid_sched_start + unsupported_optim_reinit
     invalid_sched["extra_plrs_key"] = valid_sched_start + extra_plrs_key
     invalid_sched["rlrop_missing_mon"] = valid_sched_start + rlrop_missing_mon
     invalid_sched["num_pg_w"] = valid_sched_start + num_pg_match
@@ -872,8 +1022,8 @@ ENFORCE_P0_LR_STATE = {
         2: (0.00049, 0.00049),
         3: (0.000343, 0.000343),
         4: (0.0002401, 0.0002401),
-        5: (0.0002401, 0.0002401, 1e-05, 1e-05),
-        6: (0.0002401, 0.0002401, 1e-05, 1e-05, 1e-05, 1e-05),
+        5: (0.00016807, 0.00016807, 1e-05, 1e-05),
+        6: (0.000117649, 0.000117649, 7e-06, 7e-06, 1e-05, 1e-05),
     },
     "rlrop": {
         0: (0.001, 0.001),
@@ -886,13 +1036,13 @@ ENFORCE_P0_LR_STATE = {
     },
     # note we are testing before the initial lambda lr execution in epoch 0
     "lr_lambdas": {
-        0: (0.001, 0.001),
+        0: (0.0, 0.0),
         1: (0.000213333, 0.000213333),
         2: (0.000426667, 0.000426667),
         3: (0.00064, 0.00064),
         4: (0.000853333, 0.000853333),
-        5: (0.000853333, 0.000853333, 1e-05, 1e-05),
-        6: (0.000853333, 0.000853333, 1e-05, 1e-05, 1e-05, 1e-05),
+        5: (0.000971429, 0.000971429, 1e-05, 1e-05),
+        6: (0.00088, 0.00088, 8.8e-06, 8.8e-06, 1e-05, 1e-05),
     },
 }
 
@@ -909,7 +1059,10 @@ def test_finetuningscheduling_enforce_p0(tmpdir, init_lr_key, p0_params):
     init_lr_key = init_lr_key or "step_lr"
     callbacks = [
         TestFinetuningScheduler(
-            expected_state=ENFORCE_P0_INTRAFIT_STATE["default"], lrs_state=ENFORCE_P0_LR_STATE[init_lr_key], max_depth=2
+            expected_state=ENFORCE_P0_INTRAFIT_STATE["default"],
+            lrs_state=ENFORCE_P0_LR_STATE[init_lr_key],
+            max_depth=2,
+            # state_log_dir=tmpdir,
         ),
         FTSEarlyStopping(monitor="val_loss", patience=1),
         LearningRateMonitor(),
@@ -1249,6 +1402,222 @@ def test_finetuningscheduling_dynamo_intrafit(tmpdir, boring_ft_schedule, restor
     )
 
 
+IMP_REINIT_OPTIM_CFG = {"optimizer_init": {"class_path": "torch.optim.Adam", "init_args": {"lr": 2.2e-04}}}
+
+
+IMP_REINIT_LR_OPTIM_CFG = {
+    "lr_scheduler_init": {
+        "class_path": "torch.optim.lr_scheduler.StepLR",
+        "init_args": {"step_size": 1, "gamma": 0.5, "verbose": True},
+    },
+    "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
+}
+
+COMMON_LR_INIT_PATH = {
+    0: (0.001,),
+    1: (0.0007,),
+    2: (0.00049,),
+    3: (0.000343,),
+}
+COMMON_OPTIM_INIT_PATH = {
+    0: (0, 3, 0, 0, 0, 0, 2, 1, 0, 0, 1, (2,), "SGD", 0, 0.001),
+    1: (0, 3, 1, 0, 0, 1, 2, 1, 0, 0, 1, (2,), "SGD", 64, 0.001),
+    2: (0, 3, 2, 0, 0, 1, 2, 1, 0, 0, 1, (2,), "SGD", 128, 0.001),
+    3: (0, 3, 3, 0, 0, 1, 2, 1, 0, 0, 1, (2,), "SGD", 192, 0.001),
+}
+
+EXPECTED_REINIT_OPTIM_LR_STATE = {
+    (False, False): {
+        **COMMON_LR_INIT_PATH,
+        4: (0.0002401, 1e-05),
+        5: (0.00012005, 5e-06),
+        6: (0.00022, 1e-05, 1e-05),
+        7: (0.00011, 5e-06, 5e-06),
+        8: (0.00022, 1e-05, 1e-05, 1e-05),
+        9: (0.00011, 5e-06, 5e-06, 5e-06),
+    },
+    (True, False): {
+        **COMMON_LR_INIT_PATH,
+        4: (0.0002401, 1e-05),
+        5: (0.00016807, 7e-06),
+        6: (0.002, 1e-05, 3e-06),
+        7: (0.0004, 2e-06, 6e-07),
+        8: (8e-05, 4e-07, 1.2e-07, 1e-05),
+        9: (1.6e-05, 8e-08, 2.4e-08, 2e-06),
+    },
+    (True, True): {
+        **COMMON_LR_INIT_PATH,
+        4: (0.0002401, 1e-05),
+        5: (0.00016807, 7e-06),
+        6: (0.000117649, 4.9e-06, 1e-05),
+        7: (8.2354e-05, 3.43e-06, 7e-06),
+        8: (5.7648e-05, 2.401e-06, 4.9e-06, 1e-05),
+        9: (4.0354e-05, 1.681e-06, 3.43e-06, 7e-06),
+    },
+    (False, True): {
+        **COMMON_LR_INIT_PATH,
+        4: (0.0002401, 1e-05),
+        5: (0.00016807, 7e-06),
+        6: (0.000117649, 4.9e-06, 1e-05),
+        7: (8.2354e-05, 3.43e-06, 7e-06),
+        8: (5.7648e-05, 2.401e-06, 4.9e-06, 1e-05),
+        9: (4.0354e-05, 1.681e-06, 3.43e-06, 7e-06),
+    },
+}
+
+EXPECTED_REINIT_OPTIM_STATE = {
+    (False, False): {
+        **COMMON_OPTIM_INIT_PATH,
+        4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 256, 0.00022),
+        5: (1, 2, 5, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 320, 0.00022),
+        6: (2, 1, 6, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "Adam", 384, 0.00022),
+        7: (2, 1, 7, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "Adam", 448, 0.00022),
+        8: (3, 0, 8, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "Adam", 512, 0.00022),
+        9: (3, 0, 9, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "Adam", 576, 0.00022),
+    },
+    (True, False): {
+        **COMMON_OPTIM_INIT_PATH,
+        4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 256, 0.00021),
+        5: (1, 2, 5, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 320, 0.00021),
+        6: (2, 1, 6, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "SGD", 384, 0.002),
+        7: (2, 1, 7, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "SGD", 448, 0.002),
+        8: (3, 0, 8, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 512, 0.002),
+        9: (3, 0, 9, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 576, 0.002),
+    },
+    (True, True): {
+        **COMMON_OPTIM_INIT_PATH,
+        4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 256, 0.00021),
+        5: (1, 2, 5, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 320, 0.00021),
+        6: (2, 1, 6, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "SGD", 384, 0.002),
+        7: (2, 1, 7, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "SGD", 448, 0.002),
+        8: (3, 0, 8, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 512, 0.002),
+        9: (3, 0, 9, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 576, 0.002),
+    },
+    (False, True): {
+        **COMMON_OPTIM_INIT_PATH,
+        4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 256, 0.00022),
+        5: (1, 2, 5, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 320, 0.00022),
+        6: (2, 1, 6, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "Adam", 384, 0.00022),
+        7: (2, 1, 7, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "Adam", 448, 0.00022),
+        8: (3, 0, 8, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "Adam", 512, 0.00022),
+        9: (3, 0, 9, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "Adam", 576, 0.00022),
+    },
+}
+
+
+@pytest.mark.parametrize("reinit_optim_only", [True, False], ids=["reinit_optim", "reinit_optim_and_lrs"])
+@pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
+def test_finetuningscheduling_reinit_optim(tmpdir, boring_ft_schedule, explicit_mode: bool, reinit_optim_only: bool):
+    """Inspect optimizer state within the training process to ensure it is taking the expected path in both
+    explicit and implict fine-tuning modes."""
+    seed_everything(42)
+    reinit_optim_cfg, reinit_lr_cfg = None, None
+    if explicit_mode:
+        ft_schedule = boring_ft_schedule[6] if reinit_optim_only else boring_ft_schedule[7]
+    else:  # implicit mode tests
+        reinit_optim_cfg = IMP_REINIT_OPTIM_CFG
+        if not reinit_optim_only:
+            reinit_lr_cfg = IMP_REINIT_LR_OPTIM_CFG
+        ft_schedule = None
+
+    model = FinetuningSchedulerBoringModel(diverge_on_epoch=1)
+    callbacks = [
+        OptInspectFTS(
+            expected_state=EXPECTED_REINIT_OPTIM_STATE[(explicit_mode, reinit_optim_only)],
+            lrs_state=EXPECTED_REINIT_OPTIM_LR_STATE[(explicit_mode, reinit_optim_only)],
+            reinit_optim_cfg=reinit_optim_cfg,
+            reinit_lr_cfg=reinit_lr_cfg,
+            ft_schedule=ft_schedule,
+            logging_level=DEBUG,
+            # state_log_dir=tmpdir,
+        ),
+        FTSEarlyStopping(monitor="val_loss", patience=2),
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
+    trainer.fit(model)
+    finetuningscheduler_callback = get_fts(trainer)
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == 3
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+
+
+EXPECTED_REINIT_OPTIM_SPEC_STATE = {
+    "reinit_optim_only_lambdalr": {
+        **COMMON_OPTIM_INIT_PATH,
+        4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 256, 0.00021),
+        5: (1, 2, 5, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 320, 0.00021),
+        6: (2, 1, 6, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "SGD", 384, 0.002),
+        7: (2, 1, 7, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "SGD", 448, 0.002),
+        8: (3, 0, 8, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 512, 0.002),
+        9: (3, 0, 9, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 576, 0.002),
+    },
+    "reinit_optim_only_rlrop": {
+        **COMMON_OPTIM_INIT_PATH,
+        4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 256, 0.00021),
+        5: (1, 2, 5, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 320, 0.00021),
+        6: (2, 1, 6, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "SGD", 384, 0.002),
+        7: (2, 1, 7, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "SGD", 448, 0.002),
+        8: (3, 0, 8, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 512, 0.002),
+        9: (3, 0, 9, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 576, 0.002),
+    },
+}
+
+
+EXPECTED_REINIT_OPTIM_LR_SPEC_STATE = {
+    "reinit_optim_only_lambdalr": {
+        **COMMON_LR_INIT_PATH,
+        4: (0.0, 0.0),  # our lambdalr at step 0, base_lr set in new lr init=0.0002401 (restored next lr set by StepLR)
+        5: (0.000153664, 6.4e-06),  # after 64 steps out of 100 warmup, 0.64 the way to 0.0002401
+        6: (0.00023263, 9.689e-06, 3e-06),  # after 128 steps, lambda lr returns 0.9688... of the base 0.0002401
+        7: (0.000215556, 8.978e-06, 2.693e-06),  # after 192 steps, lambda lr returns 0.8977... of the base 0.0002401
+        8: (0.000198483, 8.267e-06, 2.48e-06, 1e-05),  # after 256 steps proper lambda lr
+        9: (0.000181409, 7.556e-06, 2.267e-06, 7.556e-06),  # after 320 steps proper lambda lr
+    },
+    "reinit_optim_only_rlrop": {
+        **COMMON_LR_INIT_PATH,
+        4: (1.5e-06, 1e-05),
+        5: (1.5e-06, 1e-05),
+        6: (1.5e-06, 1e-05, 3e-06),
+        7: (2e-07, 1e-06, 3e-07),  # did not improve so lr reduced
+        8: (2e-07, 1e-06, 3e-07, 1e-05),
+        9: (2e-07, 1e-06, 3e-07, 1e-05),  # DID improve from best so lr is not reduced
+    },
+}
+
+
+@pytest.mark.parametrize(
+    "reinit_optim_lr_key, ft_sched_idx",
+    [
+        ("reinit_optim_only_lambdalr", 8),
+        ("reinit_optim_only_rlrop", 9),
+    ],
+    ids=["reinit_optim_only_lambdalr", "reinit_optim_only_rlrop"],
+)
+def test_finetuningscheduling_reinit_optim_special_lr(tmpdir, boring_ft_schedule, reinit_optim_lr_key, ft_sched_idx):
+    """Inspect optimizer state within the training process to ensure it is taking the expected path in both
+    explicit and implict fine-tuning modes."""
+    seed_everything(42)
+    ft_schedule = boring_ft_schedule[ft_sched_idx]
+
+    model = FinetuningSchedulerBoringModel(diverge_on_epoch=1)
+    callbacks = [
+        OptInspectFTS(
+            expected_state=EXPECTED_REINIT_OPTIM_SPEC_STATE[reinit_optim_lr_key],
+            lrs_state=EXPECTED_REINIT_OPTIM_LR_SPEC_STATE[reinit_optim_lr_key],
+            ft_schedule=ft_schedule,
+            logging_level=DEBUG,
+            # state_log_dir=tmpdir,
+        ),
+        FTSEarlyStopping(monitor="val_loss", patience=2),
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
+    trainer.fit(model)
+    finetuningscheduler_callback = get_fts(trainer)
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == 3
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+
+
 IMP_REINIT_LR_CFG = {
     "lr_scheduler_init": {
         "class_path": "torch.optim.lr_scheduler.StepLR",
@@ -1259,27 +1628,7 @@ IMP_REINIT_LR_CFG = {
 
 
 EXPECTED_LR_STATE = {
-    (False, False): {
-        "max_depth": 3,
-        0: (0.001,),
-        1: (0.0007,),
-        2: (0.00049,),
-        3: (0.000343,),
-        4: (0.0002401,),
-        5: (0.0002401, 1e-05),
-        6: (0.0002401, 1e-05, 1e-05),
-        7: (0.0002401, 1e-05, 1e-05, 1e-05),
-    },
-    (True, False): {
-        "max_depth": 2,
-        0: (0.001,),
-        1: (0.0007,),
-        2: (0.00049,),
-        3: (0.000343, 1e-06),
-        4: (0.0002401, 7e-07),
-        5: (0.0002401, 7e-07, 1e-05),
-    },
-    (True, True): {
+    (True): {
         "max_depth": 3,
         0: (0.001,),
         1: (0.0007,),
@@ -1290,7 +1639,7 @@ EXPECTED_LR_STATE = {
         6: (1e-06, 2e-06, 3e-06),
         7: (1e-06, 2e-06, 3e-06, 1e-05),
     },
-    (False, True): {
+    (False): {
         "max_depth": 3,
         0: (0.001,),
         1: (0.0007,),
@@ -1304,26 +1653,24 @@ EXPECTED_LR_STATE = {
 }
 
 
-@pytest.mark.parametrize("reinit_lr", [True, False], ids=["reinit_lr", "default"])
 @pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
-def test_finetuningscheduling_reinitlr(tmpdir, boring_ft_schedule, explicit_mode: bool, reinit_lr: bool):
+def test_finetuningscheduling_reinitlr(tmpdir, boring_ft_schedule, explicit_mode: bool):
     """Inspect learning rate scheduler state within the training process to ensure it is taking the expected path
     in both explicit and implict fine-tuning modes."""
     seed_everything(42)
-    reinit_lr_cfg = None
+    reinit_lr_cfg, ft_schedule = None, None
     if explicit_mode:
-        ft_schedule = boring_ft_schedule[3] if reinit_lr else boring_ft_schedule[1]
+        ft_schedule = boring_ft_schedule[3]
     else:
-        if reinit_lr:
-            reinit_lr_cfg = IMP_REINIT_LR_CFG
-        ft_schedule = None
+        reinit_lr_cfg = IMP_REINIT_LR_CFG
 
     model = FinetuningSchedulerBoringModel()
     callbacks = [
         TestFinetuningScheduler(
-            lrs_state=EXPECTED_LR_STATE[(explicit_mode, reinit_lr)],
+            lrs_state=EXPECTED_LR_STATE[(explicit_mode)],
             reinit_lr_cfg=reinit_lr_cfg,
             ft_schedule=ft_schedule,
+            # state_log_dir=tmpdir,
         ),
         FTSEarlyStopping(monitor="val_loss", patience=1),
     ]
@@ -1331,7 +1678,7 @@ def test_finetuningscheduling_reinitlr(tmpdir, boring_ft_schedule, explicit_mode
     trainer.fit(model)
     finetuningscheduler_callback = get_fts(trainer)
     assert finetuningscheduler_callback.depth_remaining == 0
-    assert finetuningscheduler_callback.curr_depth == EXPECTED_LR_STATE[(explicit_mode, reinit_lr)]["max_depth"]
+    assert finetuningscheduler_callback.curr_depth == EXPECTED_LR_STATE[(explicit_mode)]["max_depth"]
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
@@ -1354,7 +1701,7 @@ EXPECTED_LAMBDALR_STATE = {
         4: (0.0002401,),
         5: (0.0, 0.0),
         6: (0.0, 0.0, 0.0),
-        7: (0.0, 0.0, 0.0, 0.0),
+        7: (6.4e-07, 1.28e-06, 1.229e-06, 6.4e-06),
     },
     (True, False): {
         "max_depth": 3,
@@ -1365,7 +1712,7 @@ EXPECTED_LAMBDALR_STATE = {
         4: (0.0002401,),
         5: (0.0, 0.0),
         6: (0.0, 0.0, 0.0),
-        7: (0.0, 0.0, 0.0, 1e-05),
+        7: (6.4e-07, 1.28e-06, 1.92e-06, 1e-05),
     },
     (False, False): {
         "max_depth": 3,
@@ -1384,8 +1731,8 @@ EXPECTED_LAMBDALR_STATE = {
 @pytest.mark.parametrize(
     "explicit_mode, lam_mode, w_expected",
     [
-        (True, True, ("incompatible checkpoint detected",)),
-        (True, False, ("incompatible checkpoint detected", "this phase has lr_lambdas")),
+        (True, True, ("Incompatible checkpoint detected",)),
+        (True, False, ("Incompatible checkpoint detected", "this phase has lr_lambdas")),
         (False, False, None),
     ],
     ids=["explicit_extend_lams", "explicit_nonew_lams", "imp_lamlr"],
@@ -1411,6 +1758,7 @@ def test_finetuningscheduling_reinitlr_lambda(
             reinit_lr_cfg=reinit_lr_cfg,
             ft_schedule=ft_schedule,
             apply_lambdas_new_pgs=lam_mode,
+            # state_log_dir=tmpdir,
         ),
         FTSEarlyStopping(monitor="val_loss", patience=1),
     ]
@@ -1455,14 +1803,14 @@ EXPECTED_RLROP_STATE = {
         4: (0.001,),
         5: (0.001,),
         6: (0.0001,),
-        7: (0.001, 1e-05),
-        8: (0.001, 1e-05),
-        9: (0.001, 1e-05),
-        10: (0.0001, 1e-06),
-        11: (0.001, 1e-05, 1e-05),
-        12: (0.001, 1e-05, 1e-05),
-        13: (0.001, 1e-05, 1e-05),
-        14: (0.0001, 1e-06, 1e-06),
+        7: (0.0001, 1e-05),
+        8: (0.0001, 1e-05),
+        9: (0.0001, 1e-05),
+        10: (1e-05, 1e-06),
+        11: (1e-05, 1e-05, 1e-05),
+        12: (1e-05, 1e-05, 1e-05),
+        13: (1e-05, 1e-05, 1e-05),
+        14: (1e-06, 1e-06, 1e-06),
     },
 }
 
@@ -1503,6 +1851,7 @@ def test_finetuningscheduling_reinitlr_rlrop(
             reinit_lr_cfg=reinit_lr_cfg,
             ft_schedule=ft_schedule,
             max_depth=2,
+            # state_log_dir=tmpdir,
         ),
         FTSEarlyStopping(monitor="val_loss", patience=es_patience),
     ]
@@ -1713,11 +2062,12 @@ def test_fts_init_lrs_misconfiguration(tmpdir, callbacks: List[Callback], cust_m
         ("invalid_plrs", ("key in lr scheduler dict must be", None)),
         ("missing_lrs_init", ("configuration to reinitialize with requires", None)),
         ("no_cpath", ("`lr_scheduler_init` requires at least a  `class_", None)),
-        ("newlr_in0", ("specified a `new_lr_scheduler` for the initial", None)),
+        ("newlr_in0", ("reinitialization directive for the initial", None)),
         ("nonfl_lr_init", ("Not all of the lrs specified", None)),
-        ("imp_lrs_fail", ("Could not import specified LR scheduler", None)),
+        ("imp_lrs_fail", ("Could not import specified reinitialization", None)),
         ("lrs_init_fail", ("Could not configure the specified LR scheduler", None)),
         ("cflict_reinit", ("Specifying both `ft_schedule` and `reinit_lr_cfg` is an invalid", None)),
+        ("unsupported_optim_reinit", ("context of optimizer reinitialization", None)),
         ("valid_nonint", (None, None)),
         ("extra_plrs_key", ("Found unsupported keys in the lr scheduler dict", None)),
         ("rlrop_missing_mon", ("must include a monitor", None)),
@@ -1742,6 +2092,7 @@ def test_fts_init_lrs_misconfiguration(tmpdir, callbacks: List[Callback], cust_m
         "imp_lrs_fail",
         "lrs_init_fail",
         "cflict_reinit",
+        "unsupported_optim_reinit",
         "valid_nonint",
         "extra_plrs_key",
         "rlrop_missing_mon",
@@ -1953,52 +2304,26 @@ EXPECTED_OPTIMIZER_STATE = {
 }
 
 
-class OptInspectFTS(TestFinetuningScheduler):
-    def on_train_epoch_start(self, trainer, pl_module):
-        super(TestFinetuningScheduler, self).on_train_epoch_start(trainer, pl_module)
-        state_key = trainer.current_epoch
-        partition_cache = trainer.optimizers[0]._partition_parameters_cache
-        current_state = (
-            self.curr_depth,
-            self.depth_remaining,
-            self._fts_state._ft_epoch,
-            self._fts_state._fts_ckpt_metadata["current_ckpt_depth"],
-            self._fts_state._fts_ckpt_metadata["best_ckpt_depth"],
-            len(self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"]),
-            len(self._fts_state._curr_thawed_params),
-            len(self._internal_optimizer_metadata[0]),
-            trainer.checkpoint_callback.current_ckpt_depth,
-            trainer.checkpoint_callback.best_ckpt_depth,
-            len(trainer.optimizers[0].param_groups),
-            tuple(len(pg["params"]) for pg in trainer.optimizers[0].param_groups),
-            len(trainer.optimizers[0]._all_params),
-            tuple(tuple(len(pg["params"]) for pg in pgs) for _, pgs in enumerate(partition_cache)),
-            tuple(len(pg["params"]) for pg in trainer.optimizers[0].optim.param_groups),
-        )
-        if self.expected_state:
-            # given the number of trainable params mod our world size is 0, the state should be the same on all ranks
-            assert current_state == self.expected_state[state_key]
-
-    def on_train_end(self, trainer, pl_module) -> None:
-        super(TestFinetuningScheduler, self).on_train_end(trainer, pl_module)
-        assert self._fts_state._ft_sync_objects is not None
-        self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
-        assert self.depth_remaining == 0
-        assert self.curr_depth == 3
-        assert self.curr_depth == self.max_depth
-
-
 @RunIf(min_cuda_gpus=2, skip_windows=True)
-@pytest.mark.parametrize("strategy", (pytest.param("ddp", marks=RunIf(standalone=True)), "ddp_spawn"))
-def test_fts_zero_opt_support(monkeypatch, tmpdir, strategy):
+@pytest.mark.parametrize(
+    "strategy, enf_p0",
+    [
+        pytest.param("ddp", None, marks=RunIf(standalone=True)),
+        ("ddp_spawn", None),
+        ("ddp_spawn", True),
+    ],
+    ids=["ddp_noenfp0", "spawn_noenfp0", "spawn_enfp0"],
+)
+def test_fts_zero_opt_support(monkeypatch, tmpdir, strategy, enf_p0):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
     both restore_best modes."""
     monkeypatch.setenv("MKL_THREADING_LAYER", "GNU")
     seed_everything(42)
-
-    model = FTSZeroRedundancyOptimizerModel()
+    model = FTSZeroRedundancyOptimizerModel(enf_p0=enf_p0)
     callbacks = [
-        OptInspectFTS(expected_state=EXPECTED_OPTIMIZER_STATE),
+        ZeroOptInspectFTS(
+            expected_state=EXPECTED_OPTIMIZER_STATE,
+        ),
         FTSEarlyStopping(monitor="val_loss", patience=1),
     ]
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, accelerator="gpu", devices=2, strategy=strategy)

@@ -73,6 +73,10 @@ exclude = ['tests/.*']
 # module = []
 # ignore_errors = "True"
 
+[tool.coverage.run]
+source = ["src/finetuning_scheduler"]
+concurrency = ["multiprocessing"]
+
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",

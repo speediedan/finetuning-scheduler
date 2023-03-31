@@ -15,9 +15,10 @@ trainer:
   - class_path: lightning.pytorch.callbacks.LearningRateMonitor
   - class_path: finetuning_scheduler.FinetuningScheduler
     init_args:
-      ft_schedule: ./config/advanced/reinit_lr/explicit_reinit_lr.yaml
+      ft_schedule: ./config/advanced/reinit_lr/explicit_reinit_optim_lr.yaml
       max_depth: 2
       restore_best: false  # disable restore_best for lr pattern clarity
+      logging_level: 10  # enable DEBUG logging to trace all reinitializations
   - class_path: finetuning_scheduler.FTSCheckpoint
     init_args:
       save_top_k: 1
@@ -34,4 +35,4 @@ trainer:
     class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
       save_dir: lightning_logs
-      name: fts_explicit_reinit_lr
+      name: fts_explicit_reinit_optim_lr
