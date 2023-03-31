@@ -761,6 +761,17 @@ def invalid_schedules(tmpdir_factory) -> Dict:
         step_size: 1
         whoops: 0
 """
+    optim_init_fail = """
+1:
+  params:
+  - layer.1.bias
+  - layer.1.weight
+  new_optimizer:
+    optimizer_init:
+      class_path: torch.optim.Adam
+      init_args:
+        whoops: 0
+"""
     unsupported_optim_reinit = """
 1:
   params:
@@ -861,6 +872,7 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     invalid_sched["nonfl_lr_init"] = valid_sched_start + nonfloat_init_pg_lrs
     invalid_sched["imp_lrs_fail"] = valid_sched_start + lrs_import_fail
     invalid_sched["lrs_init_fail"] = valid_sched_start + lrs_init_fail
+    invalid_sched["optim_init_fail"] = valid_sched_start + optim_init_fail
     invalid_sched["unsupported_optim_reinit"] = valid_sched_start + unsupported_optim_reinit
     invalid_sched["extra_plrs_key"] = valid_sched_start + extra_plrs_key
     invalid_sched["rlrop_missing_mon"] = valid_sched_start + rlrop_missing_mon
@@ -1541,6 +1553,52 @@ def test_finetuningscheduling_reinit_optim(tmpdir, boring_ft_schedule, explicit_
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
+EXPECTED_REINIT_OPTIM_LR_NODECAY_STATE = {
+    **COMMON_LR_INIT_PATH,
+    4: (0.0002401, 0.00021, 1e-05, 1e-05),
+    5: (0.00016807, 0.000147, 7e-06, 7e-06),
+    6: (0.002, 0.002, 1e-05, 1e-05, 3e-06, 3e-06),
+    7: (0.0004, 0.0004, 2e-06, 2e-06, 6e-07, 6e-07),
+    8: (8e-05, 8e-05, 4e-07, 4e-07, 1.2e-07, 1e-05, 1e-05),
+    9: (1.6e-05, 1.6e-05, 8e-08, 8e-08, 2.4e-08, 2e-06, 2e-06),
+}
+
+EXPECTED_REINIT_OPTIM_NODECAY_STATE = {
+    **COMMON_OPTIM_INIT_PATH,
+    4: (1, 2, 4, 0, 0, 1, 4, 4, 0, 0, 4, (1, 1, 1, 1), "Adam", 256, 0.00021),
+    5: (1, 2, 5, 0, 0, 1, 4, 4, 0, 0, 4, (1, 1, 1, 1), "Adam", 320, 0.00021),
+    6: (2, 1, 6, 0, 0, 1, 6, 6, 0, 0, 6, (1, 1, 1, 1, 1, 1), "SGD", 384, 0.002),
+    7: (2, 1, 7, 0, 0, 1, 6, 6, 0, 0, 6, (1, 1, 1, 1, 1, 1), "SGD", 448, 0.002),
+    8: (3, 0, 8, 0, 0, 1, 8, 7, 0, 0, 7, (2, 1, 1, 1, 1, 1, 1), "SGD", 512, 0.002),
+    9: (3, 0, 9, 0, 0, 1, 8, 7, 0, 0, 7, (2, 1, 1, 1, 1, 1, 1), "SGD", 576, 0.002),
+}
+
+
+def test_finetuningscheduling_reinit_optimlr_nodecay(tmpdir, boring_ft_schedule):
+    """Inspect optimizer state within the training process to ensure it is taking the expected path in both
+    explicit and implict fine-tuning modes."""
+    seed_everything(42)
+    no_decay = ["bias"]
+    ft_schedule = boring_ft_schedule[7]
+    model = FinetuningSchedulerBoringModel(diverge_on_epoch=1, no_decay=no_decay)
+    callbacks = [
+        OptInspectFTS(
+            expected_state=EXPECTED_REINIT_OPTIM_NODECAY_STATE,
+            lrs_state=EXPECTED_REINIT_OPTIM_LR_NODECAY_STATE,
+            ft_schedule=ft_schedule,
+            logging_level=DEBUG,
+            # state_log_dir=tmpdir,
+        ),
+        FTSEarlyStopping(monitor="val_loss", patience=2),
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
+    trainer.fit(model)
+    finetuningscheduler_callback = get_fts(trainer)
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == 3
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+
+
 EXPECTED_REINIT_OPTIM_SPEC_STATE = {
     "reinit_optim_only_lambdalr": {
         **COMMON_OPTIM_INIT_PATH,
@@ -2066,6 +2124,7 @@ def test_fts_init_lrs_misconfiguration(tmpdir, callbacks: List[Callback], cust_m
         ("nonfl_lr_init", ("Not all of the lrs specified", None)),
         ("imp_lrs_fail", ("Could not import specified reinitialization", None)),
         ("lrs_init_fail", ("Could not configure the specified LR scheduler", None)),
+        ("optim_init_fail", ("Could not configure the specified optimizer", None)),
         ("cflict_reinit", ("Specifying both `ft_schedule` and `reinit_lr_cfg` is an invalid", None)),
         ("unsupported_optim_reinit", ("context of optimizer reinitialization", None)),
         ("valid_nonint", (None, None)),
@@ -2091,6 +2150,7 @@ def test_fts_init_lrs_misconfiguration(tmpdir, callbacks: List[Callback], cust_m
         "nonfl_lr_init",
         "imp_lrs_fail",
         "lrs_init_fail",
+        "optim_init_fail",
         "cflict_reinit",
         "unsupported_optim_reinit",
         "valid_nonint",
@@ -2310,9 +2370,9 @@ EXPECTED_OPTIMIZER_STATE = {
     [
         pytest.param("ddp", None, marks=RunIf(standalone=True)),
         ("ddp_spawn", None),
-        ("ddp_spawn", True),
+        pytest.param("ddp", True, marks=RunIf(standalone=True)),
     ],
-    ids=["ddp_noenfp0", "spawn_noenfp0", "spawn_enfp0"],
+    ids=["ddp_noenfp0", "spawn_noenfp0", "ddp_enfp0"],
 )
 def test_fts_zero_opt_support(monkeypatch, tmpdir, strategy, enf_p0):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
