@@ -25,7 +25,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import KeysView
-from copy import copy
+from copy import copy, deepcopy
 from dataclasses import dataclass, field, fields
 from functools import reduce
 from pprint import pformat
@@ -37,7 +37,6 @@ import yaml
 from lightning.fabric.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
 from lightning.fabric.utilities.cloud_io import get_filesystem
 from lightning.fabric.utilities.distributed import _distributed_available
-from lightning.fabric.utilities.types import _TORCH_LRSCHEDULER, ReduceLROnPlateau
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
@@ -49,10 +48,11 @@ from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 from lightning.pytorch.utilities.types import LRSchedulerConfig
 from torch import Tensor
+from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.nn import Module
-from torch.optim.optimizer import Optimizer
 
 from finetuning_scheduler.strategy_adapters.fsdp import FSDPStrategyAdapter, StrategyAdapter
+from finetuning_scheduler.types import FTSLRSchedulerType, FTSLRSchedulerTypeTuple, ParamGroupAddable
 
 log = logging.getLogger(__name__)
 
@@ -87,23 +87,6 @@ class FTSState:
             "best_ckpt_depth": self._best_ckpt_depth,
             "best_ckpt_pgs": {},
         }
-
-
-# todo: improve FTSLRSchedulerType naming/typing once corresponding changes made upstream in pytorch-lightning
-supported_lrs = [
-    "LambdaLR",
-    "MultiplicativeLR",
-    "StepLR",
-    "MultiStepLR",
-    "ExponentialLR",
-    "CosineAnnealingLR",
-    "ReduceLROnPlateau",
-    "CosineAnnealingWarmRestarts",
-    "ConstantLR",
-    "LinearLR",
-]
-FTSLRSchedulerTypeTuple = tuple(getattr(torch.optim.lr_scheduler, lr_class) for lr_class in supported_lrs)
-FTSLRSchedulerType = Union[Type[_TORCH_LRSCHEDULER], Type[ReduceLROnPlateau]]
 
 
 class CallbackResolverMixin(ABC):
@@ -510,9 +493,13 @@ class UniqueKeyLoader(yaml.SafeLoader):
 class ScheduleParsingMixin(ABC):
     """Functionality for parsing and validating fine-tuning schedules."""
 
+    SANITY_CHK_ITERABLE = (torch.nn.Parameter(torch.empty(1)),)
+    VALID_REINIT_ATTR = ("reinit_lr_cfg", "reinit_optim_cfg")
+    VALID_REINIT_KEYS = ("new_lr_scheduler", "new_optimizer")
     # proper initialization of these variables should be done in the child class
     pl_module: pl.LightningModule
     ft_schedule: Optional[Union[str, dict]]
+    reinit_optim_cfg: Optional[Dict]
     reinit_lr_cfg: Optional[Dict]
 
     def _validate_ft_sched(self) -> Tuple[int, int]:
@@ -526,7 +513,7 @@ class ScheduleParsingMixin(ABC):
         max_epoch_wm = -1
         max_phase = 0
         self._validate_schedule_keys()
-        self._validate_lr_scheduler_cfg()
+        self._validate_reinit_cfg()
         named_params = dict(self.pl_module.named_parameters()).keys()
         model_shared_params = find_shared_parameters(self.pl_module)
         msp_ref = tuple((model_shared_params, set(itertools.chain(*model_shared_params))))
@@ -599,6 +586,48 @@ class ScheduleParsingMixin(ABC):
                     f' but is "{pl_lrs_cfg["interval"]}"'
                 )
 
+    def _common_reinit_key_validation(self, target_sched: Dict, target_key: str, depth: Optional[int] = None) -> None:
+        """Key validation common to all reinitialzation configuration dictionaries.
+
+        Args:
+            target_sched (Dict): The provided reinitialization configuration for either an implicit mode fine-tuning
+                schedule or for a given explicity mode fine-tuning phase.
+            target_key (str): The expected reinitialization key for the current parsing context.
+            depth (Optional[int], optional): If parsing an explicit schedule, the current phase. Defaults to None.
+
+        Raises:
+            MisconfigurationException: If a valid reinitialization key is missing in the reinitialization configuration.
+            MisconfigurationException: If the configuration provided in valid reinitialization key but did not specify
+                a `class_path` for the class to be instantiated.
+        """
+        if target_key not in target_sched.keys():
+            phase_specific_msg = "" if not depth else f"for phase {depth}"
+            key_specific_msg = "a lr scheduler" if target_key == "lr_scheduler_init" else "an optimizer"
+            raise MisconfigurationException(
+                f"Specifying {key_specific_msg} configuration to reinitialize with requires a valid configuration "
+                f"dictionary be provided via a `{target_key}` key but no such key was found " + phase_specific_msg + "."
+            )
+        if not target_sched[target_key].get("class_path"):
+            phase_specific_msg = "the specified config." if not depth else f"the specified phase ({depth})."
+            raise MisconfigurationException(
+                f"Specifying `{target_key}` requires at least a  `class_path` to be specified but this is not the case "
+                "for " + phase_specific_msg
+            )
+
+    def _optimizer_reinit_key_validation(self, target_sched: Dict, depth: Optional[int] = None) -> None:
+        """Validate the keys in a given lr reinitialization configuration.
+
+        Args:
+            target_sched (Dict): The provided optimizer reinitialization configuration for either an implicit mode
+                fine-tuning schedule (passed via `reinit_optim_cfg`) or for a given explicity mode fine-tuning phase
+                (passed via `new_optimizer` for a given phase)
+            depth (Optional[int], optional): If parsing an explicit schedule, the current phase. Defaults to None.
+        """
+        self._common_reinit_key_validation(target_sched, "optimizer_init", depth)
+        optimizer_init = target_sched.get("optimizer_init")
+        assert optimizer_init
+        self._optimizer_sanity_chk(optimizer_init)
+
     def _lr_scheduler_reinit_key_validation(self, target_sched: Dict, depth: Optional[int] = None) -> None:
         """Validate the keys in a given lr reinitialization configuration.
 
@@ -611,11 +640,8 @@ class ScheduleParsingMixin(ABC):
         Raises:
             MisconfigurationException: If an `init_pg_lrs` key is provided in implicit mode training
                 (via `reinit_lr_cfg`).
-            MisconfigurationException: If an `lr_scheduler_init` key is missing in the lr scheduler reinitialization
-                configuration.
-            MisconfigurationException: If the configuration provided in `lr_scheduler_init` does not specify a
-                `class_path` for the lr scheduler to be instantiated.
         """
+        self._common_reinit_key_validation(target_sched, "lr_scheduler_init", depth)
         implicit_chk = bool(self.reinit_lr_cfg)
         if "init_pg_lrs" in target_sched.keys() and implicit_chk:
             raise MisconfigurationException(
@@ -623,24 +649,9 @@ class ScheduleParsingMixin(ABC):
                 "implicit mode training) is not a valid configuration since the same lr scheduler configuration "
                 "is intended to be reinitialized at every fine-tuning phase with implicit mode fine-tuning."
             )
-        # validate lr_scheduler_init config
-        if "lr_scheduler_init" not in target_sched.keys():
-            phase_specific_msg = "" if not depth else f"for phase {depth}"
-            raise MisconfigurationException(
-                "Specifying a lr scheduler configuration to reinitialize with requires a valid lr scheduler "
-                "configuration dictionary be provided via a `lr_scheduler_init` key but no such key was found "
-                + phase_specific_msg
-                + "."
-            )
         # if we're passing pl lr scheduler configuration, validate the keys
         if "pl_lrs_cfg" in target_sched.keys():
             self._pl_lrs_validation(pl_lrs_cfg=target_sched["pl_lrs_cfg"])
-        if not target_sched["lr_scheduler_init"].get("class_path"):
-            phase_specific_msg = "the specified lr schedule config." if not depth else f"the specified phase ({depth})."
-            raise MisconfigurationException(
-                "Specifying an `lr_scheduler_init` requires at least a  `class_path` to be specified "
-                "but this is not the case for " + phase_specific_msg
-            )
         if "init_pg_lrs" in target_sched.keys():
             warn_msg = (
                 "Found an `init_pg_lrs` key in the specified lr scheduler reinitialization config. Remember to "
@@ -655,41 +666,50 @@ class ScheduleParsingMixin(ABC):
         assert lr_scheduler_init
         self._lr_scheduler_sanity_chk(lr_scheduler_init, implicit_chk)
 
-    def _lr_scheduler_init_validation(self, lr_reinit_phases: Dict) -> None:
-        """Trigger lr scheduler reinitialization configuration validation for all provided configurations. This
-        will be a single configuration for implicit mode fine-tuning or n configurations for explicit mode.
+    def _reinit_validation(self, reinit_cfg: Dict) -> None:
+        """Trigger reinitialization configuration validation for all provided configurations. This will be a single
+        configuration for implicit mode fine-tuning or n configurations for explicit mode.
 
         Args:
-            lr_reinit_phases (Dict): Dictionary of lr scheduler reinitialization configurations to parse/validate
+            reinit_cfg (Dict): An lr scheduler and/or optimizer reinitialization configuration to parse/validate
         """
-        if self.reinit_lr_cfg:
-            self._lr_scheduler_reinit_key_validation(lr_reinit_phases)
-        else:
-            for k, lr_cfg in lr_reinit_phases.items():
-                self._lr_scheduler_reinit_key_validation(lr_cfg, k)
+        reinit_validation_funcs = (self._lr_scheduler_reinit_key_validation, self._optimizer_reinit_key_validation)
+        for (rk, rp), rattr, rfunc in zip(
+            reinit_cfg.items(), ScheduleParsingMixin.VALID_REINIT_ATTR, reinit_validation_funcs
+        ):
+            if getattr(self, rattr):
+                rfunc(reinit_cfg[rk])
+            else:
+                for k, r_cfg in rp.items():
+                    rfunc(r_cfg, k)
 
-    def _validate_lr_scheduler_cfg(self) -> None:
-        """Orchestrate lr scheduler reinitialization configuration validation.
+    def _validate_reinit_cfg(self) -> None:
+        """Orchestrate optimizer and lr reinitialization configuration validation.
 
         Raises:
-            MisconfigurationException: If a `new_lr_scheduler` configuration is passed to the initial training phase.
+            MisconfigurationException: If a `new_optimizer` or `new_lr_scheduler` configuration is passed to the initial
+                training phase.
         """
         assert isinstance(self.ft_schedule, Dict)
-        lr_reinit_phases = self.reinit_lr_cfg or {
-            k: self.ft_schedule[k].get("new_lr_scheduler")
-            for k in self.ft_schedule.keys()
-            if self.ft_schedule[k].get("new_lr_scheduler")
-        }
-        if not lr_reinit_phases:
-            return  # no further validation needed since there is no lr scheduler reinitialization configuration
+        reinit_cfg = {}
+        for reinit_k, attr in zip(ScheduleParsingMixin.VALID_REINIT_KEYS, ScheduleParsingMixin.VALID_REINIT_ATTR):
+            reinit_cfg[reinit_k] = getattr(self, attr) or {
+                k: self.ft_schedule[k].get(reinit_k)
+                for k in self.ft_schedule.keys()
+                if self.ft_schedule[k].get(reinit_k)
+            }
+        if not any(reinit_cfg.values()):
+            return  # no further validation needed since there is no reinitialization configuration
+        self._has_reinit_schedule = True  # schedules that reinitialize require special handling in some contexts
         assert self.pl_module.trainer is not None
         assert self.pl_module.trainer.log_dir is not None
-        if 0 in lr_reinit_phases.keys():
-            raise MisconfigurationException(
-                "You have specified a `new_lr_scheduler` for the initial training phase which is an invalid "
-                "configuration. The initial lr_scheduler configuration should be passed to your LightningModule."
-            )
-        self._lr_scheduler_init_validation(lr_reinit_phases)
+        for rk, rp in reinit_cfg.items():
+            if isinstance(rp, dict) and 0 in rp.keys():
+                raise MisconfigurationException(
+                    f"You have specified a `{rk}` reinitialization directive for the initial training phase which is an"
+                    "invalid configuration. The initial configuration should be passed to your LightningModule."
+                )
+        self._reinit_validation(reinit_cfg)
 
     def _convert_phase_keys(self) -> None:
         """Ensures phase keys are integers, converting them to integers if possible and raising an error otherwise.
@@ -867,18 +887,90 @@ class ScheduleParsingMixin(ABC):
                 f"multiple phases: {', '.join(dup_params)}"
             )
 
-    def reinit_lr_scheduler(self, new_lr_scheduler: Dict, trainer: pl.Trainer, optimizer: Optimizer) -> None:
+    def _reinit_phase0_pgs(self, thawed_pl: List) -> List:
+        """Reconstruct the parameter groups associated with phase 0 of the schedule.
+
+        Args:
+            thawed_pl (List): A list of parameter names from which to construct the initial parameter groups.
+
+        Returns:
+            List: A list of one or two new parameter groups (contingent on the module's use of ``no_decay``)
+        """
+        no_decay = getattr(self.pl_module, "no_decay", None)
+        if no_decay:
+            pgs = [
+                {
+                    "params": [
+                        p
+                        for n, p in self.pl_module.named_parameters()
+                        if not any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
+                    ]
+                },
+                {
+                    "params": [
+                        p
+                        for n, p in self.pl_module.named_parameters()
+                        if any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
+                    ],
+                    "weight_decay": 0.0,
+                },
+            ]
+        else:
+            pgs = [{"params": [p for n, p in self.pl_module.named_parameters() if n in thawed_pl and p.requires_grad]}]
+        return pgs
+
+    def _save_pre_reinit_lr_state(self, trainer: pl.Trainer) -> Tuple[Dict, List]:
+        """Capture the existing lr state for all parameter groups associated with previous depths to enable
+        restoration during the next phase transition.
+
+        Args:
+            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+
+        Returns:
+            Tuple[Dict, List]: The lr state to restore from the current lr scheduler and the most recent `lr`s for
+                parameter groups associated with the current phases's optimizer.
+        """
+        curr_lr_state = {}
+        if trainer.lr_scheduler_configs:
+            curr_lr_state = deepcopy(trainer.lr_scheduler_configs[0].scheduler.state_dict())
+        prev_optimizer_lrs = copy([group["lr"] for group in trainer.strategy.optimizers[0].param_groups])
+        return curr_lr_state, prev_optimizer_lrs
+
+    def reinit_optimizer(self, new_optimizer: Dict, trainer: pl.Trainer, init_params: List) -> ParamGroupAddable:
+        """Reinitialize the optimizer, using a validated optimizer reinitialization configuration.
+
+        Args:
+            new_optimizer (Dict): A dictionary defining the new optimizer configuration to be initialized.
+            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            init_params (List): The list of parameter names with which to initialize the new optimizer.
+
+        Returns:
+            ParamGroupAddable: A handle for the newly reinitialized optimizer.
+        """
+        optimizer_init = new_optimizer["optimizer_init"]
+        prev_optim_repr = repr(trainer.strategy.optimizers[0])
+        optimizer_class = self._import_reinit_class(optimizer_init, reinit_target="optimizer")
+        reinit_pgs = self._reinit_phase0_pgs(thawed_pl=init_params)
+        new_optimizer_handle = optimizer_class(reinit_pgs, **optimizer_init.get("init_args", {}))
+        trainer.strategy.optimizers = [new_optimizer_handle]
+        if trainer.lr_scheduler_configs:
+            trainer.lr_scheduler_configs[0].scheduler.optimizer = new_optimizer_handle
+        self._maybe_trace_reinit("optimizer", prev_optim_repr, repr(trainer.strategy.optimizers[0]))
+        return new_optimizer_handle
+
+    def reinit_lr_scheduler(self, new_lr_scheduler: Dict, trainer: pl.Trainer, optimizer: ParamGroupAddable) -> None:
         """Reinitialize the learning rate scheduler, using a validated learning rate scheduler configuration and
         wrapping the existing optimizer.
 
         Args:
             new_lr_scheduler (Dict): A dictionary defining the new lr scheduler configuration to be initialized.
             trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
-            optimizer (:external+torch:class:`~torch.optim.Optimizer`): The
-                :external+torch:class:`~torch.optim.Optimizer` around which the new lr scheduler will be wrapped.
+            optimizer (:class:`~finetuning_scheduler.types.ParamGroupAddable`): A supported optimizer instance around
+                which the new lr scheduler will be wrapped.
         """
         lr_scheduler_init = new_lr_scheduler["lr_scheduler_init"]
-        lrs_class = self._import_lr_scheduler(lr_scheduler_init)
+        prev_lrs_repr = repr(trainer.lr_scheduler_configs[0])
+        lrs_class = self._import_reinit_class(lr_scheduler_init, reinit_target="lr_scheduler")
         # unless overridden by user directive, reset optimizer pg lrs to initial before wrapping in new scheduler
         curr_optimizer_lrs = [group.get("initial_lr", group["lr"]) for group in optimizer.param_groups]
         reset_init_pg_lrs = True if new_lr_scheduler.get("init_pg_lrs", None) else False
@@ -897,6 +989,21 @@ class ScheduleParsingMixin(ABC):
             **new_lr_scheduler.get("pl_lrs_cfg", {}),
         )
         trainer.strategy.lr_scheduler_configs = [new_lrs_config]
+        self._maybe_trace_reinit("lr scheduler", prev_lrs_repr, repr(trainer.lr_scheduler_configs[0]))
+
+    def _maybe_trace_reinit(self, target_type: str, prev_repr: str, new_repr: str) -> None:
+        """Trace valid optimizer and lr scheduler transitions (including intermediate restorations).
+
+        Args:
+            target_type (str): The type of object being reinitialized.
+            prev_repr (str): A representation of the state of the target object before reinitialization.
+            new_repr (str): A representation of the state of the target object after reinitialization.
+        """
+        reinit_msg = f"Fine-Tuning Scheduler has reinitialized the {target_type} as directed:{os.linesep}"
+        rank_zero_debug(
+            reinit_msg + f"Previous {target_type} state:`{prev_repr}`{os.linesep}"
+            f"New {target_type} state: `{new_repr}`{os.linesep}"
+        )
 
     @staticmethod
     def _parse_reint_pg_lrs(depth: int, init_pg_lrs: List) -> None:
@@ -946,32 +1053,57 @@ class ScheduleParsingMixin(ABC):
                 )
                 rank_zero_warn(warn_msg)
 
-    def _import_lr_scheduler(self, lr_scheduler_init: Dict) -> FTSLRSchedulerType:
-        """Import the lr scheduler specified in the provided `lr_scheduler_init` configuration.
+    def _is_supported_reinit_optimizer(self, optim_class: Union[Any, ParamGroupAddable]) -> None:
+        """Evaulate whether the provided optimizer is currently supported in the context of optimizer
+        reinitialization.
 
         Args:
-            lr_scheduler_init (Dict): The user-provided lr scheduler reinitialization configuration.
+            optim_class (ParamGroupAddable): The optimizer class to be inspected for support.
 
         Raises:
-            MisconfigurationException: If the specified LR scheduler cannot be imported successfully.
-
-        Returns:
-            FTSLRSchedulerType: The lr scheduler class to be instantiated.
+            MisconfigurationException: If the provided optimizer class is known to be currently unsupported in the
+                context of optimizer reinitialization.
         """
-        try:
-            class_module, class_name = lr_scheduler_init["class_path"].rsplit(".", 1)
-            module = __import__(class_module, fromlist=[class_name])
-            lrs_class = getattr(module, class_name)
-            self._is_supported_lr(lrs_class)
-        except (ImportError, AttributeError) as err:
+        if issubclass(optim_class, ZeroRedundancyOptimizer):
             error_msg = (
-                f"Could not import specified LR scheduler class using class_path ({lr_scheduler_init['class_path']}) "
-                f"Recieved the following error while importing: {err}. Please validate specified `class_path` before "
-                "resubmitting."
+                f"The provided optimizer ({optim_class}) is not currently supported by FinetuningScheduler in the"
+                " context of optimizer reinitialization. Please use a currently supported torch optimizer (or subclass"
+                " thereof) from those provided in `torch.optim`: https://pytorch.org/docs/stable/optim.html#algorithms."
             )
             rank_zero_warn(error_msg)
             raise MisconfigurationException(error_msg)
-        return lrs_class
+
+    def _import_reinit_class(
+        self, reinit_cfg: Dict, reinit_target: str
+    ) -> Union[FTSLRSchedulerType, ParamGroupAddable]:
+        """Import the reinitialization class (lr scheduler or optimizer) specified in the provided reinitialization
+        configuration.
+
+        Args:
+            reinit_cfg (Dict): The user-provided reinitialization configuration.
+            reinit_target (str): The reinitialization target, currently "optimizer" or "lr_scheduler".
+
+        Raises:
+            MisconfigurationException: If the specified class cannot be imported successfully.
+
+        Returns:
+            Union[FTSLRSchedulerType, ParamGroupAddable]: The class to reinitialize.
+        """
+        try:
+            class_module, class_name = reinit_cfg["class_path"].rsplit(".", 1)
+            module = __import__(class_module, fromlist=[class_name])
+            reinit_class = getattr(module, class_name)
+            if reinit_target == "lr_scheduler":
+                self._is_supported_lr(reinit_class)
+        except (ImportError, AttributeError) as err:
+            error_msg = (
+                "Could not import specified reinitialization configuration class using class_path "
+                f"({reinit_cfg['class_path']}). Recieved the following error while importing: {err}. Please validate "
+                "specified `class_path` before resubmitting."
+            )
+            rank_zero_warn(error_msg)
+            raise MisconfigurationException(error_msg)
+        return reinit_class
 
     @staticmethod
     def _import_strategy_adapter(strategy_key: str, adapter_map: Dict[str, str]) -> Type[StrategyAdapter]:
@@ -1008,6 +1140,34 @@ class ScheduleParsingMixin(ABC):
             raise MisconfigurationException(error_msg)
         return custom_strategy_adapter_cls
 
+    def _optimizer_sanity_chk(self, optimizer_init: Dict) -> None:
+        """Before beginning execution of defined fine-tuning schedule, perform a sanity check of the specified
+        optimizer reinitialization configuration. To the extent reasonable (i.e. without simulating the entire
+        training path), if the provided optimizer reinitialization configuration is expected to fail, it is user-
+        friendly to provide this feedback to the user before training begins.
+
+        Args:
+            optimizer_init (Dict): The user-provided optimizer reinitialization configuration.
+
+        Raises:
+            MisconfigurationException: If a valid and supported scheduler cannot be instantiated with the specified
+                init args.
+        """
+        optimizer_class = self._import_reinit_class(optimizer_init, reinit_target="optimizer")
+        self._is_supported_reinit_optimizer(optimizer_class)
+        test_optimizer_init = copy(optimizer_init.get("init_args", {}))
+        try:
+            test_optimizer = optimizer_class(ScheduleParsingMixin.SANITY_CHK_ITERABLE, **test_optimizer_init)
+        except Exception as err:
+            error_msg = (
+                "Could not configure the specified optimizer class using the `init_args` "
+                f"({optimizer_init['init_args']}). Recieved the following error while sanity checking schedule "
+                f"phases: {err}. Please validate specified `init_args` before resubmitting."
+            )
+            rank_zero_warn(error_msg)
+            raise MisconfigurationException(error_msg)
+        assert isinstance(test_optimizer, ParamGroupAddable)
+
     def _lr_scheduler_sanity_chk(self, lr_scheduler_init: Dict, is_implicit_mode: bool = False) -> None:
         """Before beginning execution of defined fine-tuning schedule, perform a sanity check of the specified lr
         scheduler reinitialization configuration. To the extent reasonable (i.e. without simulating the entire
@@ -1021,7 +1181,7 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: If a valid and supported scheduler cannot be instantiated with the specified
                 init args.
         """
-        lrs_class = self._import_lr_scheduler(lr_scheduler_init)
+        lrs_class = self._import_reinit_class(lr_scheduler_init, reinit_target="lr_scheduler")
         if lr_scheduler_init.get("init_args") and "optimizer" in lr_scheduler_init.get("init_args", {}).keys():
             warn_msg = (
                 f"Found an `optimizer` key in the provided `lr_scheduler_init`: {lr_scheduler_init['init_args']} "
@@ -1064,6 +1224,7 @@ class ScheduleImplMixin(ABC):
     # proper initialization of these variables should be done in the child class
     pl_module: pl.LightningModule
     ft_schedule: Optional[Union[str, dict]]
+    reinit_optim_cfg: Optional[Dict]
     reinit_lr_cfg: Optional[Dict]
     max_depth: int
     _fts_state: FTSState
@@ -1276,9 +1437,45 @@ class ScheduleImplMixin(ABC):
                 )
 
     @staticmethod
+    def _repartition_sharded_optim(optimizer: ParamGroupAddable) -> None:
+        """Repartition and reset a sharded optimizer state.
+
+        Args:
+            optimizer (ParamGroupAddable): The target optimizer to repartition.
+        """
+        # For optimizers that shard their states like (e.g. ZeroRedundancyOptimizer), one use case for this method is
+        # to clear local optimizer partition caches and repartition to support restoring across multiple depths
+        partition_params = (
+            optimizer._partition_parameters
+            if callable(optimizer._partition_parameters)
+            else optimizer.partition_parameters
+        )
+        optimizer._clear_cache()
+        optimizer.optim.param_groups = partition_params()[optimizer.rank]
+        optimizer._sync_param_groups(optimizer.optim.param_groups, optimizer.param_groups)
+
+    def _restore_latest_lr_state(self, curr_lr_state: Dict, prev_optimizer_lrs: List) -> None:
+        """Adapt the existing lr state for all parameter groups associated with previous depths (new groups for the
+        current phase should use the schedule or new optimizer defaults).
+
+        Args:
+            curr_lr_state (Dict): The lr state to restore from the current lr scheduler (captured prior to mutation
+            associated with adding groups to the new optimizer)
+            prev_optimizer_lrs (List): The most recent `lr`s for parameter groups associated with the previous optimizer
+        """
+        trainer = self.pl_module.trainer
+        if trainer.lr_scheduler_configs:  # type: ignore[union-attr]
+            for lrs_cfg in trainer.lr_scheduler_configs:  # type: ignore[union-attr]
+                lrs_cfg.scheduler.load_state_dict(curr_lr_state)
+        for _, data in enumerate(zip(trainer.strategy.optimizers[0].param_groups, prev_optimizer_lrs)):
+            param_group, lr = data
+            param_group["lr"] = lr
+        rank_zero_debug("Current LR state restored for previous depth parameter groups.")
+
+    @staticmethod
     def add_optimizer_groups(
         module: Module,
-        optimizer: Optimizer,
+        optimizer: ParamGroupAddable,
         thawed_pl: List,
         no_decay: Optional[list] = None,
         lr: Optional[float] = None,
@@ -1290,8 +1487,8 @@ class ScheduleImplMixin(ABC):
         Args:
             module (:class:`~torch.nn.Module`): The :class:`~torch.nn.Module` from which the target optimizer parameters
                 will be read.
-            optimizer (:external+torch:class:`~torch.optim.Optimizer`): The
-                :external+torch:class:`~torch.optim.Optimizer` to which parameter groups will be configured and added.
+            optimizer (:class:`~finetuning_scheduler.types.ParamGroupAddable`): The supported optimizer instance to
+                which parameter groups will be configured and added.
             thawed_pl: The list of thawed/unfrozen parameters that should be added to the new parameter group(s)
             no_decay: A list of parameters that should always have weight_decay set to 0. e.g.:
                 ["bias", "LayerNorm.weight"]. Defaults to ``None``.
@@ -1327,7 +1524,7 @@ class ScheduleImplMixin(ABC):
 
     @staticmethod
     def _add_groups(
-        no_decay: Optional[list], optimizer: Optimizer, module: Module, thawed_pl: List, phase_lr: float
+        no_decay: Optional[list], optimizer: ParamGroupAddable, module: Module, thawed_pl: List, phase_lr: float
     ) -> int:
         """The actual addition of optimizer groups is done here, separated from ``add_optimizer_groups`` to
         accommodate corner cases where FTS is being used without an lr scheduler configuration.
@@ -1335,8 +1532,8 @@ class ScheduleImplMixin(ABC):
         Args:
             no_decay: A list of parameters that should always have weight_decay set to 0. e.g.:
                 ["bias", "LayerNorm.weight"]. Defaults to ``None``.
-            optimizer (:external+torch:class:`~torch.optim.Optimizer`): The
-                :external+torch:class:`~torch.optim.Optimizer` to which parameter groups will be configured and added.
+            optimizer (:class:`~finetuning_scheduler.types.ParamGroupAddable`): The supported optimizer instance to
+                which parameter groups will be configured and added.
             module (:class:`~torch.nn.Module`): The :class:`~torch.nn.Module` from which the target optimizer parameters
                 will be read.
             thawed_pl: The list of thawed/unfrozen parameters that should be added to the new parameter group(s)
@@ -1469,7 +1666,7 @@ class ScheduleImplMixin(ABC):
         appropriate.
 
         Args:
-            optimizer (Optimizer): The optimizer initialized.
+            optimizer (ParamGroupAddable): The optimizer initialized.
             ft_schedule (Dict): The fine-tuning schedule to be inspected vis-a-vis the optimizer state.
         """
         no_grad_cnt, init_ft_cnt, total_ft_cnt, param_diff_summary = self._inspect_fts_opt_state()

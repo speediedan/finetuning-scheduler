@@ -283,7 +283,6 @@ class RteBoolqModule(pl.LightningModule):
     def on_validation_epoch_end(self):
         self.validation_step_outputs.clear()
 
-    # TODO: remove this function for 2.0 example version once `enforce_p0_params` is leveraged in optim config
     def _init_param_groups(self) -> List[Dict]:
         """Initialize the parameter groups. Used to ensure weight_decay is not applied to our specified bias
         parameters when we initialize the optimizer.

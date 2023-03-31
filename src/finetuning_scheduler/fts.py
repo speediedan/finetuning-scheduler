@@ -19,7 +19,7 @@ Used to implement flexible fine-tuning training schedules
 import logging
 from copy import deepcopy
 from pprint import pformat
-from typing import Any, Dict, Optional, Sequence, Union
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 import lightning.pytorch as pl
 import torch
@@ -30,7 +30,6 @@ from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.trainer.states import TrainerFn
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug, rank_zero_warn
-from torch.optim.optimizer import Optimizer
 
 from finetuning_scheduler.fts_supporters import (
     CallbackDepMixin,
@@ -41,6 +40,7 @@ from finetuning_scheduler.fts_supporters import (
     STRATEGY_ADAPTERS,
 )
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
+from finetuning_scheduler.types import ParamGroupAddable
 
 log = logging.getLogger(__name__)
 
@@ -99,6 +99,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         restore_best: bool = True,
         gen_ft_sched_only: bool = False,
         epoch_transitions_only: bool = False,
+        reinit_optim_cfg: Optional[Dict] = None,
         reinit_lr_cfg: Optional[Dict] = None,
         strategy_adapter_cfg: Optional[Dict] = None,
         custom_strategy_adapter: Optional[Dict[str, str]] = None,
@@ -140,6 +141,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 ``max_transition_epoch`` defaults to -1 for each phase which signals the application of
                 :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria only.
                 epoch_transitions_only defaults to ``False``.
+            reinit_optim_cfg: An optimizer reinitialization configuration dictionary... document once implemented
             reinit_lr_cfg: A lr scheduler reinitialization configuration dictionary consisting of at minimum a nested
                 ``lr_scheduler_init`` dictionary with a ``class_path`` key specifying the class of the lr scheduler
                 to be instantiated. Optionally, an ``init_args`` dictionary of arguments to initialize the lr scheduler
@@ -228,12 +230,14 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.base_max_lr = base_max_lr
         self.gen_ft_sched_only = gen_ft_sched_only
         self.epoch_transitions_only = epoch_transitions_only
+        self.reinit_optim_cfg = reinit_optim_cfg
         self.reinit_lr_cfg = reinit_lr_cfg
         self.strategy_adapter_cfg = strategy_adapter_cfg or {}
         self.custom_strategy_adapter = custom_strategy_adapter
         self.allow_untested = allow_untested
         self.apply_lambdas_new_pgs = apply_lambdas_new_pgs
         self.enforce_phase0_params = enforce_phase0_params
+        self._has_reinit_schedule = False
         rz_logger = logging.getLogger("lightning.pytorch.utilities.rank_zero")
         rz_logger.setLevel(logging_level)
 
@@ -292,12 +296,22 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             only supports single-schedule/optimizer fine-tuning configurations
         """
         assert self.pl_module.trainer is not None
+        pre_reinit_state = self._save_pre_reinit_lr_state(self.pl_module.trainer)
         if not self._fts_state._resume_fit_from_ckpt:
             if self.restore_best:
                 self.restore_best_ckpt()
-                self.step_pg(depth=self.curr_depth, optimizer=self.pl_module.trainer.optimizers[0])
+                self.step_pg(
+                    depth=self.curr_depth,
+                    optimizer=self.pl_module.trainer.optimizers[0],
+                    pre_reinit_state=pre_reinit_state,
+                )
             else:
-                self.step_pg(depth=self.curr_depth, optimizer=self.pl_module.trainer.optimizers[0], depth_sync=False)
+                self.step_pg(
+                    depth=self.curr_depth,
+                    optimizer=self.pl_module.trainer.optimizers[0],
+                    depth_sync=False,
+                    pre_reinit_state=pre_reinit_state,
+                )
         else:
             self.thaw_to_depth()
         if self.depth_remaining == 0 and not self.epoch_transitions_only:
@@ -320,14 +334,21 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 f" will now end when {max_epochs_msg if self.epoch_transitions_only else composition_msg}"
             )
 
-    def step_pg(self, optimizer: Optimizer, depth: int, depth_sync: bool = True) -> None:
+    def step_pg(
+        self,
+        optimizer: ParamGroupAddable,
+        depth: int,
+        depth_sync: bool = True,
+        pre_reinit_state: Optional[Tuple] = None,
+    ) -> None:
         """Configure optimizer parameter groups for the next scheduled fine-tuning level, adding parameter groups
         beyond the restored optimizer state up to
-        :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.current_depth`
+        :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.current_depth` and reinitializing the optimizer and/or
+        learning rate scheduler as configured.
 
         Args:
-            optimizer (:external+torch:class:`~torch.optim.Optimizer`): The
-                :external+torch:class:`~torch.optim.Optimizer` to which parameter groups will be configured and added.
+            optimizer (:class:`~finetuning_scheduler.types.ParamGroupAddable`): The supported optimizer instance to
+                which parameter groups will be configured and added.
             depth: The maximum index of the fine-tuning schedule for which to configure the optimizer parameter
                 groups.
             depth_sync: If ``True``, configure optimizer parameter groups for all depth indices greater
@@ -338,8 +359,13 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert isinstance(self.ft_schedule, dict)
         assert isinstance(self.pl_module, pl.LightningModule)
         assert isinstance(self.pl_module.trainer, pl.Trainer)
-        if depth_sync:
-            thaw_layers = {d: tl for d, tl in self.ft_schedule.items() if d > self._fts_state._best_ckpt_depth}.items()
+        # if the target depth is 0, implicit optimizer reinitialization should not be executed
+        new_optimizer_cfg = (
+            self.reinit_optim_cfg or self.ft_schedule[depth].get("new_optimizer", None) if depth > 0 else None
+        )
+        restored_depth = -1 if new_optimizer_cfg else self._fts_state._best_ckpt_depth
+        if depth_sync or new_optimizer_cfg:
+            thaw_layers = {d: tl for d, tl in self.ft_schedule.items() if d > restored_depth}.items()
         else:
             thaw_layers = {depth: self.ft_schedule[depth]}.items()
         for i, orig_next_tl in thaw_layers:
@@ -349,34 +375,73 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 _, self._fts_state._curr_thawed_params = self.strategy_adapter.exec_ft_phase(
                     self.pl_module, thaw_pl=next_tl["params"]
                 )
-                FinetuningScheduler.add_optimizer_groups(
-                    module=self.pl_module,
-                    optimizer=optimizer,
-                    thawed_pl=next_tl["params"],
-                    lr=next_tl.get("lr", optimizer.defaults["lr"]),
-                    no_decay=getattr(self.pl_module, "no_decay", None),
-                    apply_lambdas=self.apply_lambdas_new_pgs,
-                )
-                new_scheduler_cfg = self.reinit_lr_cfg or next_tl.get("new_lr_scheduler", None)
-                if new_scheduler_cfg:
-                    self.reinit_lr_scheduler(
-                        new_lr_scheduler=new_scheduler_cfg, trainer=self.pl_module.trainer, optimizer=optimizer
+                if new_optimizer_cfg and i == 0:
+                    # If reinitializing the optimizer, we need to re-add the initial parameter groups (phase 0)
+                    optimizer = self.reinit_optimizer(
+                        new_optimizer=new_optimizer_cfg, trainer=self.pl_module.trainer, init_params=next_tl["params"]
                     )
                 else:
-                    if self.pl_module.trainer.lr_scheduler_configs:
-                        for config in self.pl_module.trainer.lr_scheduler_configs:
-                            show_warn_lambdas = (
-                                hasattr(config.scheduler, "lr_lambdas")
-                                and config.scheduler.lr_lambdas[-1] is not None  # type: ignore[union-attr]
-                                and not self.apply_lambdas_new_pgs
-                            )
-                            if show_warn_lambdas:
-                                rank_zero_warn(
-                                    "The lr scheduler used in this phase has lr_lambdas but will use a "
-                                    "configured lr for new parameter groups because `apply_lambdas_new_pgs` is "
-                                    "set to the default of `False`. If you would like new groups to have lr "
-                                    "lambdas applied, set `apply_lambdas_new_pgs` to `True`."
-                                )
+                    # Add pgs and configure the learning rate scheduler using the current optimizer/schedule
+                    self._add_pgs_config_lrs(optimizer, next_tl, depth, depth == i, pre_reinit_state)
+
+    def _add_pgs_config_lrs(
+        self,
+        optimizer: ParamGroupAddable,
+        next_tl: Dict,
+        depth: int,
+        is_target_depth: bool,
+        pre_reinit_state: Optional[Tuple],
+    ) -> None:
+        """Add optimizer parameter groups and potentially reinitialize/reconfigure the learning rate scheduler
+        according to a given schedule phase configuration.
+
+        Args:
+            optimizer (:class:`~finetuning_scheduler.types.ParamGroupAddable`): The supported optimizer instance to
+                which parameter groups will be configured and added.
+            next_tl (Dict): A dictionary containing the schedule configuration associated with the current phase
+                context.
+            depth (int): The current target depth.
+            is_target_depth (bool): Whether this restoration stage is the current target depth.
+            pre_reinit_state (Tuple): Contingent on restoration context, lr scheduler and optimizer lr state to restore.
+        """
+        # if the target depth is 0, lr scheduler reinitialization should not be executed
+        new_scheduler_cfg = self.reinit_lr_cfg or next_tl.get("new_lr_scheduler", None) if depth > 0 else None
+        if is_target_depth and depth > 0:
+            # NB: The latest optimizer and lr scheduler lr state will be re-applied to all existing param groups before
+            # implementing the next phase.
+            assert pre_reinit_state
+            self._restore_latest_lr_state(*pre_reinit_state)
+        FinetuningScheduler.add_optimizer_groups(
+            module=self.pl_module,
+            optimizer=optimizer,
+            thawed_pl=next_tl["params"],
+            lr=next_tl.get("lr", optimizer.defaults["lr"]),
+            no_decay=getattr(self.pl_module, "no_decay", None),
+            apply_lambdas=self.apply_lambdas_new_pgs,
+        )
+        if new_scheduler_cfg:
+            self.reinit_lr_scheduler(
+                new_lr_scheduler=new_scheduler_cfg, trainer=self.pl_module.trainer, optimizer=optimizer
+            )
+        else:
+            self._maybe_warn_lr_lambdas()
+
+    def _maybe_warn_lr_lambdas(self) -> None:
+        """If appropriate, warn the user that `lr_lambdas` will not be applied given the current configuration."""
+        if self.pl_module.trainer.lr_scheduler_configs:
+            for config in self.pl_module.trainer.lr_scheduler_configs:
+                show_warn_lambdas = (
+                    hasattr(config.scheduler, "lr_lambdas")
+                    and config.scheduler.lr_lambdas[-1] is not None  # type: ignore[union-attr]
+                    and not self.apply_lambdas_new_pgs
+                )
+                if show_warn_lambdas:
+                    rank_zero_warn(
+                        "The lr scheduler used in this phase has lr_lambdas but will use a "
+                        "configured lr for new parameter groups because `apply_lambdas_new_pgs` is "
+                        "set to the default of `False`. If you would like new groups to have lr "
+                        "lambdas applied, set `apply_lambdas_new_pgs` to `True`."
+                    )
 
     def restore_best_ckpt(self) -> None:
         """Restore the current best model checkpoint, according to
@@ -390,17 +455,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             optimizer.param_groups = BaseFinetuning._apply_mapping_to_param_groups(
                 self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"][opt_idx], dict(self.pl_module.named_parameters())
             )
-            if hasattr(optimizer, "consolidate_state_dict"):
-                # for optimizers that shard their states like (e.g. ZeroRedundancyOptimizer, OSS), we need to clear
-                # local optimizer partition caches and repartition to support restoring across multiple depths
-                partition_params = (
-                    optimizer._partition_parameters
-                    if callable(optimizer._partition_parameters)
-                    else optimizer.partition_parameters
-                )
-                optimizer._clear_cache()
-                optimizer.optim.param_groups = partition_params()[optimizer.rank]
-                optimizer._sync_param_groups(optimizer.optim.param_groups, optimizer.param_groups)
+            if self.strategy_adapter.using_sharded_optimizer:
+                ScheduleImplMixin._repartition_sharded_optim(optimizer)
         # we're restoring everything but callbacks and loops, otherwise, checkpoint_connector.restore() could be used
         assert self.pl_module.trainer.checkpoint_callback is not None
         checkpoint_path = self.pl_module.trainer.checkpoint_callback.best_model_path  # type: ignore[attr-defined]
@@ -435,10 +491,14 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 checkpoint_connector.restore_optimizers_and_schedulers()
             except KeyError:
                 assert isinstance(self.ft_schedule, dict)
-                if self.ft_schedule[self.curr_depth].get("new_lr_scheduler", None):
+                if self._has_reinit_schedule:
                     rank_zero_warn(
-                        "incompatible checkpoint detected but attempting to proceed with next phase of training since "
-                        "we're reinitializing the lr scheduler."
+                        "Incompatible checkpoint detected when attempting to restore the optimizer and/or lr "
+                        "scheduler from a previous phase. Attempting to proceed with next phase of training since this "
+                        "schedule reinitializes the optimizer and/or lr scheduler.\n"
+                        "HINT: If subsequent errors are encountered, you can either set ``restore_best`` to ``False`` "
+                        "or alter your reinitialization schedule for the relevant training components (i.e. optimizer, "
+                        "lr scheduler)."
                     )
 
     def _reduce_transition(self, strategy: Strategy, decision: bool) -> bool:
@@ -719,7 +779,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             current_param_groups = optimizer.param_groups
             self._store(pl_module, opt_idx, num_saved_groups, current_param_groups)
 
-    def on_before_zero_grad(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", optimizer: Optimizer) -> None:
+    def on_before_zero_grad(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", optimizer: ParamGroupAddable
+    ) -> None:
         """Afer the latest optimizer step, update the
         :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`, incrementing the
         global fine-tuning steps taken
@@ -729,8 +791,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
             pl_module  (:external+pl:class:`~lightning.pytorch.core.module.LightningModule`): The
                 :external+pl:class:`~lightning.pytorch.core.module.LightningModule` object
-            optimizer (:external+torch:class:`~torch.optim.Optimizer`): The
-                :external+torch:class:`~torch.optim.Optimizer` to which parameter groups will be configured and added.
+            optimizer (:class:`~finetuning_scheduler.types.ParamGroupAddable`): The supported optimizer instance to
+                which parameter groups will be configured and added.
         """
         self._fts_state._ft_global_steps += 1
 
