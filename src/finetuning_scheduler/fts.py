@@ -141,13 +141,30 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 ``max_transition_epoch`` defaults to -1 for each phase which signals the application of
                 :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria only.
                 epoch_transitions_only defaults to ``False``.
-            reinit_optim_cfg: An optimizer reinitialization configuration dictionary... document once implemented
+            reinit_optim_cfg: An optimizer reinitialization configuration dictionary consisting of at minimum a nested
+                ``optimizer_init`` dictionary with a ``class_path`` key specifying the class of the optimizer to be
+                instantiated. Optionally, an ``init_args`` dictionary of arguments with which to initialize the
+                optimizer may be included. A ``reinit_lr_cfg`` configuration can also be specified concurrently. By way
+                of example, one could configure this dictionary via the
+                :external+pl:class:`~lightning.pytorch.cli.LightningCLI` with the following:
+
+                .. code-block:: yaml
+
+                    reinit_optim_cfg:
+                        optimizer_init:
+                            class_path: torch.optim.SGD
+                            init_args:
+                                lr: 1.0e-05
+                                momentum: 0.9
+                                weight_decay: 1.0e-06
+
             reinit_lr_cfg: A lr scheduler reinitialization configuration dictionary consisting of at minimum a nested
                 ``lr_scheduler_init`` dictionary with a ``class_path`` key specifying the class of the lr scheduler
                 to be instantiated. Optionally, an ``init_args`` dictionary of arguments to initialize the lr scheduler
                 with may be included. Additionally, one may optionally include arguments to pass to PyTorch Lightning's
                 lr scheduler configuration :class:`~lightning.pytorch.utilities.types.LRSchedulerConfig` in the
-                ``pl_lrs_cfg`` dictionary. By way of example, one could configure this dictionary via the
+                ``pl_lrs_cfg`` dictionary. A ``reinit_optim_cfg`` configuration can also be specified concurrently. By
+                way of example, one could configure this dictionary via the
                 :external+pl:class:`~lightning.pytorch.cli.LightningCLI` with the following:
 
                 .. code-block:: yaml
@@ -162,6 +179,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                                 interval: epoch
                                 frequency: 1
                                 name: Implicit_Reinit_LR_Scheduler
+                            use_current_optimizer_pg_lrs: true
 
             allow_untested: If ``True``, allows the use of custom or unsupported training strategies and lr schedulers
                 (e.g. ``single_tpu``, ``MyCustomStrategy``, ``MyCustomLRScheduler``) . Defaults to ``False``.
@@ -361,7 +379,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert isinstance(self.pl_module.trainer, pl.Trainer)
         # if the target depth is 0, implicit optimizer reinitialization should not be executed
         new_optimizer_cfg = (
-            self.reinit_optim_cfg or self.ft_schedule[depth].get("new_optimizer", None) if depth > 0 else None
+            (self.reinit_optim_cfg or self.ft_schedule[depth].get("new_optimizer", None)) if depth > 0 else None
         )
         restored_depth = -1 if new_optimizer_cfg else self._fts_state._best_ckpt_depth
         if depth_sync or new_optimizer_cfg:
@@ -405,7 +423,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             pre_reinit_state (Tuple): Contingent on restoration context, lr scheduler and optimizer lr state to restore.
         """
         # if the target depth is 0, lr scheduler reinitialization should not be executed
-        new_scheduler_cfg = self.reinit_lr_cfg or next_tl.get("new_lr_scheduler", None) if depth > 0 else None
+        new_scheduler_cfg = (self.reinit_lr_cfg or next_tl.get("new_lr_scheduler", None)) if depth > 0 else None
         if is_target_depth and depth > 0:
             # NB: The latest optimizer and lr scheduler lr state will be re-applied to all existing param groups before
             # implementing the next phase.

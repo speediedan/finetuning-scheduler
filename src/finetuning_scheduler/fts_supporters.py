@@ -615,7 +615,7 @@ class ScheduleParsingMixin(ABC):
             )
 
     def _optimizer_reinit_key_validation(self, target_sched: Dict, depth: Optional[int] = None) -> None:
-        """Validate the keys in a given lr reinitialization configuration.
+        """Validate the keys in a given lr scheduler reinitialization configuration.
 
         Args:
             target_sched (Dict): The provided optimizer reinitialization configuration for either an implicit mode
@@ -629,7 +629,7 @@ class ScheduleParsingMixin(ABC):
         self._optimizer_sanity_chk(optimizer_init)
 
     def _lr_scheduler_reinit_key_validation(self, target_sched: Dict, depth: Optional[int] = None) -> None:
-        """Validate the keys in a given lr reinitialization configuration.
+        """Validate the keys in a given lr scheduler reinitialization configuration.
 
         Args:
             target_sched (Dict): The provided lr scheduler reinitialization configuration for either an implicit mode
@@ -652,6 +652,17 @@ class ScheduleParsingMixin(ABC):
         # if we're passing pl lr scheduler configuration, validate the keys
         if "pl_lrs_cfg" in target_sched.keys():
             self._pl_lrs_validation(pl_lrs_cfg=target_sched["pl_lrs_cfg"])
+        if (
+            "use_current_optimizer_pg_lrs" in target_sched.keys()
+            and target_sched["use_current_optimizer_pg_lrs"]
+            and "init_pg_lrs" not in target_sched.keys()
+        ):
+            info_msg = (
+                "Since `use_current_optimizer_pg_lrs` has been set to `True`, lr scheduler reinitializations "
+                f"associated with phase {depth} will use the current optimizer `lr`s rather than defaulting "
+                "to the existing optimizer's `initial_lr` configuration for existing parameter groups."
+            )
+            rank_zero_info(info_msg)
         if "init_pg_lrs" in target_sched.keys():
             warn_msg = (
                 "Found an `init_pg_lrs` key in the specified lr scheduler reinitialization config. Remember to "
@@ -684,7 +695,7 @@ class ScheduleParsingMixin(ABC):
                     rfunc(r_cfg, k)
 
     def _validate_reinit_cfg(self) -> None:
-        """Orchestrate optimizer and lr reinitialization configuration validation.
+        """Orchestrate optimizer and lr scheduler reinitialization configuration validation.
 
         Raises:
             MisconfigurationException: If a `new_optimizer` or `new_lr_scheduler` configuration is passed to the initial
@@ -952,6 +963,12 @@ class ScheduleParsingMixin(ABC):
         optimizer_class = self._import_reinit_class(optimizer_init, reinit_target="optimizer")
         reinit_pgs = self._reinit_phase0_pgs(thawed_pl=init_params)
         new_optimizer_handle = optimizer_class(reinit_pgs, **optimizer_init.get("init_args", {}))
+        # If the user or optimizer doesn't set `initial_lr` keys, add them based on the initial lr values.
+        # The latest LR state will still be set in subsequent phases, but this allows subsequent lr scheduler
+        # reinitializations to access an `initial_lr` for the existing optimizer if desired (important for consistency
+        # with lr scheduler-only reinitializations).
+        for group in new_optimizer_handle.param_groups:
+            group["initial_lr"] = group.get("initial_lr", group["lr"])
         trainer.strategy.optimizers = [new_optimizer_handle]
         if trainer.lr_scheduler_configs:
             trainer.lr_scheduler_configs[0].scheduler.optimizer = new_optimizer_handle
@@ -968,11 +985,20 @@ class ScheduleParsingMixin(ABC):
             optimizer (:class:`~finetuning_scheduler.types.ParamGroupAddable`): A supported optimizer instance around
                 which the new lr scheduler will be wrapped.
         """
+        ################################################################################################################
+        # The following precedence governs the configuration of existing parameter group `lr`s when reinitializing an LR
+        # scheduler:
+        #   1. User-provided `lr`s from the `init_pg_lrs` directive if it exists
+        #   2. Existing optimizer `lr`s if ``use_current_optimizer_pg_lrs`` is set to ``True``
+        #   3. The ``initial_lr`` of the current optimizer parameter groups by default
+        #   4. The existing optimizer `lr`s if ``use_current_optimizer_pg_lrs`` is not set to ``True`` but the relevant
+        #      parameter group does not have an ``initial_lr`` key
+        ################################################################################################################
         lr_scheduler_init = new_lr_scheduler["lr_scheduler_init"]
         prev_lrs_repr = repr(trainer.lr_scheduler_configs[0])
         lrs_class = self._import_reinit_class(lr_scheduler_init, reinit_target="lr_scheduler")
-        # unless overridden by user directive, reset optimizer pg lrs to initial before wrapping in new scheduler
-        curr_optimizer_lrs = [group.get("initial_lr", group["lr"]) for group in optimizer.param_groups]
+        existing_lr_key = "initial_lr" if not new_lr_scheduler.get("use_current_optimizer_pg_lrs", None) else "lr"
+        curr_optimizer_lrs = [group.get(existing_lr_key, group["lr"]) for group in optimizer.param_groups]
         reset_init_pg_lrs = True if new_lr_scheduler.get("init_pg_lrs", None) else False
         initial_optimizer_lrs = new_lr_scheduler.get("init_pg_lrs", curr_optimizer_lrs)
         for _, data in enumerate(zip(optimizer.param_groups, initial_optimizer_lrs)):

@@ -19,6 +19,14 @@ trainer:
       # reinitialization behavior in implicit mode
       max_depth: 4
       restore_best: false  # disable restore_best for lr pattern clarity
+      logging_level: 10
+      reinit_optim_cfg:
+        optimizer_init:
+          class_path: torch.optim.SGD
+          init_args:
+            lr: 1.0e-05
+            momentum: 0.9
+            weight_decay: 1.0e-06
       reinit_lr_cfg:
         lr_scheduler_init:
           class_path: torch.optim.lr_scheduler.StepLR
