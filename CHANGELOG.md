@@ -189,7 +189,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
-- removed a few unused internal conditions relating to lr reinitialization and parameter group addition
+- removed a few unused internal conditions relating to lr scheduler reinitialization and parameter group addition
 
 ## [0.2.0] - 2022-08-06
 

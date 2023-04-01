@@ -561,6 +561,8 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         },
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
     }
+    reinitlr_optim_use_curr_sched_dict = deepcopy(reinitlr_optim_sched_dict)
+    reinitlr_optim_use_curr_sched_dict[2]["new_lr_scheduler"]["use_current_optimizer_pg_lrs"] = True
     reinitlr_optim_lambdalr_sched = deepcopy(reinitlr_optim_sched_dict)
     reinitlr_optim_lambdalr_sched[1]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
@@ -626,6 +628,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         reinitlr_optim_sched_dict,
         reinitlr_optim_lambdalr_sched,
         reinitlr_optim_rlrop_sched,
+        reinitlr_optim_use_curr_sched_dict,
     )
 
 
@@ -1424,6 +1427,9 @@ IMP_REINIT_LR_OPTIM_CFG = {
     },
     "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
 }
+IMP_REINIT_LR_OPTIM_USE_CURR_CFG = deepcopy(IMP_REINIT_LR_OPTIM_CFG)
+IMP_REINIT_LR_OPTIM_USE_CURR_CFG["use_current_optimizer_pg_lrs"] = True
+
 
 COMMON_LR_INIT_PATH = {
     0: (0.001,),
@@ -1439,25 +1445,25 @@ COMMON_OPTIM_INIT_PATH = {
 }
 
 EXPECTED_REINIT_OPTIM_LR_STATE = {
-    (False, False): {
+    (False, False, False): {
         **COMMON_LR_INIT_PATH,
-        4: (0.0002401, 1e-05),
-        5: (0.00012005, 5e-06),
+        4: (0.00022, 1e-05),
+        5: (0.00011, 5e-06),
         6: (0.00022, 1e-05, 1e-05),
         7: (0.00011, 5e-06, 5e-06),
         8: (0.00022, 1e-05, 1e-05, 1e-05),
         9: (0.00011, 5e-06, 5e-06, 5e-06),
     },
-    (True, False): {
+    (True, False, False): {
         **COMMON_LR_INIT_PATH,
-        4: (0.0002401, 1e-05),
-        5: (0.00016807, 7e-06),
+        4: (0.00021, 1e-05),
+        5: (0.000147, 7e-06),
         6: (0.002, 1e-05, 3e-06),
         7: (0.0004, 2e-06, 6e-07),
         8: (8e-05, 4e-07, 1.2e-07, 1e-05),
         9: (1.6e-05, 8e-08, 2.4e-08, 2e-06),
     },
-    (True, True): {
+    (True, True, False): {
         **COMMON_LR_INIT_PATH,
         4: (0.0002401, 1e-05),
         5: (0.00016807, 7e-06),
@@ -1466,7 +1472,7 @@ EXPECTED_REINIT_OPTIM_LR_STATE = {
         8: (5.7648e-05, 2.401e-06, 4.9e-06, 1e-05),
         9: (4.0354e-05, 1.681e-06, 3.43e-06, 7e-06),
     },
-    (False, True): {
+    (False, True, False): {
         **COMMON_LR_INIT_PATH,
         4: (0.0002401, 1e-05),
         5: (0.00016807, 7e-06),
@@ -1474,11 +1480,29 @@ EXPECTED_REINIT_OPTIM_LR_STATE = {
         7: (8.2354e-05, 3.43e-06, 7e-06),
         8: (5.7648e-05, 2.401e-06, 4.9e-06, 1e-05),
         9: (4.0354e-05, 1.681e-06, 3.43e-06, 7e-06),
+    },
+    (True, False, True): {
+        **COMMON_LR_INIT_PATH,
+        4: (0.00021, 1e-05),
+        5: (0.000147, 7e-06),
+        6: (0.0001029, 4.9e-06, 3e-06),
+        7: (2.058e-05, 9.8e-07, 6e-07),
+        8: (4.116e-06, 1.96e-07, 1.2e-07, 1e-05),
+        9: (8.23e-07, 3.9e-08, 2.4e-08, 2e-06),
+    },
+    (False, False, True): {
+        **COMMON_LR_INIT_PATH,
+        4: (0.0002401, 1e-05),
+        5: (0.00012005, 5e-06),
+        6: (6.0025e-05, 2.5e-06, 1e-05),
+        7: (3.0012e-05, 1.25e-06, 5e-06),
+        8: (1.5006e-05, 6.25e-07, 2.5e-06, 1e-05),
+        9: (7.503e-06, 3.13e-07, 1.25e-06, 5e-06),
     },
 }
 
 EXPECTED_REINIT_OPTIM_STATE = {
-    (False, False): {
+    (False, False, False): {
         **COMMON_OPTIM_INIT_PATH,
         4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 256, 0.00022),
         5: (1, 2, 5, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 320, 0.00022),
@@ -1487,7 +1511,7 @@ EXPECTED_REINIT_OPTIM_STATE = {
         8: (3, 0, 8, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "Adam", 512, 0.00022),
         9: (3, 0, 9, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "Adam", 576, 0.00022),
     },
-    (True, False): {
+    (True, False, False): {
         **COMMON_OPTIM_INIT_PATH,
         4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 256, 0.00021),
         5: (1, 2, 5, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 320, 0.00021),
@@ -1496,7 +1520,7 @@ EXPECTED_REINIT_OPTIM_STATE = {
         8: (3, 0, 8, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 512, 0.002),
         9: (3, 0, 9, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 576, 0.002),
     },
-    (True, True): {
+    (True, True, False): {
         **COMMON_OPTIM_INIT_PATH,
         4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 256, 0.00021),
         5: (1, 2, 5, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 320, 0.00021),
@@ -1505,7 +1529,25 @@ EXPECTED_REINIT_OPTIM_STATE = {
         8: (3, 0, 8, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 512, 0.002),
         9: (3, 0, 9, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 576, 0.002),
     },
-    (False, True): {
+    (False, True, False): {
+        **COMMON_OPTIM_INIT_PATH,
+        4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 256, 0.00022),
+        5: (1, 2, 5, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 320, 0.00022),
+        6: (2, 1, 6, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "Adam", 384, 0.00022),
+        7: (2, 1, 7, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "Adam", 448, 0.00022),
+        8: (3, 0, 8, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "Adam", 512, 0.00022),
+        9: (3, 0, 9, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "Adam", 576, 0.00022),
+    },
+    (True, False, True): {
+        **COMMON_OPTIM_INIT_PATH,
+        4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 256, 0.00021),
+        5: (1, 2, 5, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 320, 0.00021),
+        6: (2, 1, 6, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "SGD", 384, 0.002),
+        7: (2, 1, 7, 0, 0, 1, 6, 3, 0, 0, 3, (2, 2, 2), "SGD", 448, 0.002),
+        8: (3, 0, 8, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 512, 0.002),
+        9: (3, 0, 9, 0, 0, 1, 8, 4, 0, 0, 4, (2, 2, 2, 2), "SGD", 576, 0.002),
+    },
+    (False, False, True): {
         **COMMON_OPTIM_INIT_PATH,
         4: (1, 2, 4, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 256, 0.00022),
         5: (1, 2, 5, 0, 0, 1, 4, 2, 0, 0, 2, (2, 2), "Adam", 320, 0.00022),
@@ -1517,26 +1559,40 @@ EXPECTED_REINIT_OPTIM_STATE = {
 }
 
 
-@pytest.mark.parametrize("reinit_optim_only", [True, False], ids=["reinit_optim", "reinit_optim_and_lrs"])
-@pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
-def test_finetuningscheduling_reinit_optim(tmpdir, boring_ft_schedule, explicit_mode: bool, reinit_optim_only: bool):
+@pytest.mark.parametrize(
+    "explicit_mode, reinit_optim_only, use_curr_optim_pg",
+    [
+        pytest.param(True, True, False, id="explicit_optim"),
+        pytest.param(True, False, False, id="explicit_optimlr"),
+        pytest.param(False, True, False, id="implicit_optim"),
+        pytest.param(False, False, False, id="implicit_optimlr"),
+        pytest.param(True, False, True, id="explicit_optimlr_use_curr"),
+        pytest.param(False, False, True, id="implicit_optimlr_use_curr"),
+    ],
+)
+def test_finetuningscheduling_reinit_optim(
+    tmpdir, boring_ft_schedule, explicit_mode: bool, reinit_optim_only: bool, use_curr_optim_pg: bool
+):
     """Inspect optimizer state within the training process to ensure it is taking the expected path in both
     explicit and implict fine-tuning modes."""
     seed_everything(42)
     reinit_optim_cfg, reinit_lr_cfg = None, None
     if explicit_mode:
-        ft_schedule = boring_ft_schedule[6] if reinit_optim_only else boring_ft_schedule[7]
+        if reinit_optim_only:
+            ft_schedule = boring_ft_schedule[6]
+        else:
+            ft_schedule = boring_ft_schedule[10] if use_curr_optim_pg else boring_ft_schedule[7]
     else:  # implicit mode tests
         reinit_optim_cfg = IMP_REINIT_OPTIM_CFG
         if not reinit_optim_only:
-            reinit_lr_cfg = IMP_REINIT_LR_OPTIM_CFG
+            reinit_lr_cfg = IMP_REINIT_LR_OPTIM_USE_CURR_CFG if use_curr_optim_pg else IMP_REINIT_LR_OPTIM_CFG
         ft_schedule = None
 
     model = FinetuningSchedulerBoringModel(diverge_on_epoch=1)
     callbacks = [
         OptInspectFTS(
-            expected_state=EXPECTED_REINIT_OPTIM_STATE[(explicit_mode, reinit_optim_only)],
-            lrs_state=EXPECTED_REINIT_OPTIM_LR_STATE[(explicit_mode, reinit_optim_only)],
+            expected_state=EXPECTED_REINIT_OPTIM_STATE[(explicit_mode, reinit_optim_only, use_curr_optim_pg)],
+            lrs_state=EXPECTED_REINIT_OPTIM_LR_STATE[(explicit_mode, reinit_optim_only, use_curr_optim_pg)],
             reinit_optim_cfg=reinit_optim_cfg,
             reinit_lr_cfg=reinit_lr_cfg,
             ft_schedule=ft_schedule,
@@ -1555,8 +1611,8 @@ def test_finetuningscheduling_reinit_optim(tmpdir, boring_ft_schedule, explicit_
 
 EXPECTED_REINIT_OPTIM_LR_NODECAY_STATE = {
     **COMMON_LR_INIT_PATH,
-    4: (0.0002401, 0.00021, 1e-05, 1e-05),
-    5: (0.00016807, 0.000147, 7e-06, 7e-06),
+    4: (0.00021, 0.00021, 1e-05, 1e-05),
+    5: (0.000147, 0.000147, 7e-06, 7e-06),
     6: (0.002, 0.002, 1e-05, 1e-05, 3e-06, 3e-06),
     7: (0.0004, 0.0004, 2e-06, 2e-06, 6e-07, 6e-07),
     8: (8e-05, 8e-05, 4e-07, 4e-07, 1.2e-07, 1e-05, 1e-05),
@@ -1624,12 +1680,12 @@ EXPECTED_REINIT_OPTIM_SPEC_STATE = {
 EXPECTED_REINIT_OPTIM_LR_SPEC_STATE = {
     "reinit_optim_only_lambdalr": {
         **COMMON_LR_INIT_PATH,
-        4: (0.0, 0.0),  # our lambdalr at step 0, base_lr set in new lr init=0.0002401 (restored next lr set by StepLR)
-        5: (0.000153664, 6.4e-06),  # after 64 steps out of 100 warmup, 0.64 the way to 0.0002401
-        6: (0.00023263, 9.689e-06, 3e-06),  # after 128 steps, lambda lr returns 0.9688... of the base 0.0002401
-        7: (0.000215556, 8.978e-06, 2.693e-06),  # after 192 steps, lambda lr returns 0.8977... of the base 0.0002401
-        8: (0.000198483, 8.267e-06, 2.48e-06, 1e-05),  # after 256 steps proper lambda lr
-        9: (0.000181409, 7.556e-06, 2.267e-06, 7.556e-06),  # after 320 steps proper lambda lr
+        4: (0.0, 0.0),  # our lambdalr at step 0, base_lr set via optim `initial_lr`=0.00021 (for pg 0, 1e-05 for pg 1)
+        5: (0.0001344, 6.4e-06),  # after 64 steps out of 100 warmup, 0.64 the way to 0.00021 (for pg 0)
+        6: (0.000203467, 9.689e-06, 3e-06),  # after 128 steps, lambda lr returns 0.9688... of the base 0.00021
+        7: (0.000188533, 8.978e-06, 2.693e-06),  # after 192 steps, lambda lr returns 0.8977... of the base 0.00021
+        8: (0.0001736, 8.267e-06, 2.48e-06, 1e-05),  # after 256 steps proper lambda lr
+        9: (0.000158667, 7.556e-06, 2.267e-06, 7.556e-06),  # after 320 steps proper lambda lr
     },
     "reinit_optim_only_rlrop": {
         **COMMON_LR_INIT_PATH,

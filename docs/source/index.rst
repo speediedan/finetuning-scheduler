@@ -313,6 +313,15 @@ configurations.
       * :external+torch:class:`~torch.optim.lr_scheduler.CosineAnnealingLR`
       * :external+torch:class:`~torch.optim.lr_scheduler.MultiplicativeLR`
 
+.. _supported_reinit_optimizers:
+
+.. note::
+   :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports reinitializing all PyTorch optimizers (or subclasses
+   thereof) `provided in torch.optim <https://pytorch.org/docs/stable/optim.html#algorithms>`_ in the context of all
+   supported training strategies (including FSDP). Use of
+   :external+torch:class:`~torch.distributed.optim.ZeroRedundancyOptimizer` is also supported, but currently only
+   outside the context of optimizer reinitialization.
+
 .. tip::
     Custom or officially unsupported strategies and lr schedulers can be used by setting
     :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.allow_untested` to ``True``.
@@ -492,6 +501,7 @@ Footnotes
    :caption: Advanced Usage
 
    advanced/lr_scheduler_reinitialization
+   advanced/optimizer_reinitialization
    advanced/fsdp_scheduled_fine_tuning
 
 .. toctree::

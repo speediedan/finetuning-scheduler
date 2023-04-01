@@ -1,0 +1,57 @@
+model:
+  class_path: fts_examples.stable.fts_superglue.RteBoolqModule
+  init_args:
+    lr_scheduler_init:
+      class_path: torch.optim.lr_scheduler.StepLR
+      init_args:
+        step_size: 1
+        gamma: 0.7
+    pl_lrs_cfg:
+      interval: epoch
+      frequency: 1
+      name: Implicit_Reinit_LR_Scheduler
+trainer:
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+  - class_path: finetuning_scheduler.FinetuningScheduler
+    init_args:
+      # note, we're not going to see great performance due to the shallow depth, just demonstrating the lr scheduler
+      # reinitialization behavior in implicit mode
+      max_depth: 4
+      restore_best: false  # disable restore_best for lr pattern clarity
+      logging_level: 10
+      reinit_optim_cfg:
+        optimizer_init:
+          class_path: torch.optim.SGD
+          init_args:
+            lr: 1.0e-05
+            momentum: 0.9
+            weight_decay: 1.0e-06
+      reinit_lr_cfg:
+        lr_scheduler_init:
+          class_path: torch.optim.lr_scheduler.StepLR
+          init_args:
+            step_size: 1
+            gamma: 0.7
+        pl_lrs_cfg:
+          interval: epoch
+          frequency: 1
+          name: Implicit_Reinit_LR_Scheduler
+        use_current_optimizer_pg_lrs: true
+  - class_path: finetuning_scheduler.FTSCheckpoint
+    init_args:
+        save_top_k: 5
+        monitor: val_loss
+        verbose: true
+  - class_path: finetuning_scheduler.FTSEarlyStopping
+    init_args:
+      monitor: val_loss
+      min_delta: 0.001
+      patience: 3  # extended patience to demo learning rate patterns
+      verbose: false
+      mode: min
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: lightning_logs
+      name: fts_implicit_reinit_optim_lr
