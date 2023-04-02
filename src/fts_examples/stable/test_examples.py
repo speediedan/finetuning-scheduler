@@ -80,15 +80,25 @@ def test_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
 @RunIf(min_cuda_gpus=1, skip_windows=True)
 @pytest.mark.parametrize(
     "config_file",
-    ["fts_explicit_reinit_lr.yaml", "fts_implicit_reinit_lr.yaml"],
-    ids=["fts_explicit_reinit_lr", "fts_implicit_reinit_lr"],
+    [
+        "reinit_lr/fts_explicit_reinit_lr.yaml",
+        "reinit_lr/fts_implicit_reinit_lr.yaml",
+        "reinit_optim_lr/fts_explicit_reinit_optim_lr.yaml",
+        "reinit_optim_lr/fts_implicit_reinit_optim_lr.yaml",
+    ],
+    ids=[
+        "fts_explicit_reinit_lr",
+        "fts_implicit_reinit_lr",
+        "fts_explicit_reinit_optim_lr",
+        "fts_implicit_reinit_optim_lr",
+    ],
 )
 def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
     from fts_examples.stable.fts_superglue import cli_main
 
     example_script = os.path.join(os.path.dirname(__file__), "fts_superglue.py")
     os.chdir(os.path.dirname(__file__))  # set cwd to that specified in the example
-    config_loc = [os.path.join("config/advanced/reinit_lr", config_file)]
+    config_loc = [os.path.join("config/advanced", config_file)]
 
     cli_args = [
         f"--trainer.default_root_dir={tmpdir.strpath}",
