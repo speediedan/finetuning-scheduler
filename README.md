@@ -130,6 +130,7 @@ ______________________________________________________________________
 - [CLI-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/latest/#example-scheduled-fine-tuning-for-superglue)
 - [FSDP Scheduled Fine-Tuning](https://finetuning-scheduler.readthedocs.io/en/latest/advanced/fsdp_scheduled_fine_tuning.html)
 - [LR Scheduler Reinitialization](https://finetuning-scheduler.readthedocs.io/en/latest/advanced/lr_scheduler_reinitialization.html) (advanced)
+- [Optimizer Reinitialization](https://finetuning-scheduler.readthedocs.io/en/latest/advanced/optimizer_reinitialization.html) (advanced)
 
 ______________________________________________________________________
 

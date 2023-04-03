@@ -8,16 +8,16 @@ Overview
 ********
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` (FTS) supports the initialization of new optimizers according to
 a user-specified fine-tuning schedule. Similarly motivated to Fine-Tuning Scheduler's
-:ref:`LR scheduler reinitialization feature<lrs-reinit-overview>`, one can initialize new optimizers (or reinitialize
+:ref:`lr scheduler reinitialization feature<lrs-reinit-overview>`, one can initialize new optimizers (or reinitialize
 an existing one) at the beginning of one or more scheduled training phases.
 
 Optimizer reinitialization is supported:
 
-- With FTS >= ``2.1.0``
 - In both explicit and implicit fine-tuning schedule modes (see the :ref:`Fine-Tuning Scheduler intro<motivation>` for
   more on basic usage modes)
-- With or without concurrent LR scheduler reinitialization
+- With or without concurrent lr scheduler reinitialization
 - In the context of all supported training strategies (including FSDP)
+- With FTS >= ``2.1.0``
 
 We'll cover both implicit and explicit configuration modes below and provide a slightly altered version of the
 :ref:`lr scheduler reinitialization example<advanced-fine-tuning-lr-example>` that demonstrates concurrent
@@ -64,9 +64,9 @@ Any arguments with which you would like to initialize the specified optimizer sh
             weight_decay: 2.0e-06
     ...
 
-Optionally, one can also provide an LR scheduler reinitialization directive in the same phase as an optimizer
-reinitialization directive. If one does not provide a ``new_lr_scheduler`` directive, the latest LR state will still be
-restored and wrapped around the new optimizer prior to the execution of the new phase (as with LR scheduler
+Optionally, one can also provide an lr scheduler reinitialization directive in the same phase as an optimizer
+reinitialization directive. If one does not provide a ``new_lr_scheduler`` directive, the latest lr state will still be
+restored and wrapped around the new optimizer prior to the execution of the new phase (as with lr scheduler
 reinitialization):
 
 .. code-block:: yaml
@@ -99,6 +99,8 @@ reinitialization):
 All optimizer reinitialization configurations specified in the fine-tuning schedule will have their configurations
 sanity-checked prior to training initiation.
 
+.. _optimizer-compat-note:
+
 .. note::
 
     When reinitializing optimizers, FTS does not fully simulate/evaluate all compatibility scenarios so it is the user's
@@ -114,14 +116,9 @@ sanity-checked prior to training initiation.
 
     Phase ``2`` would fail due to incompatibility between Adam and SGD optimizer states. This issue could be avoided by
     either reinitializing the Adam optimizer again in phase ``2`` or setting
-    :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.restore_best`` to ``False``.
+    :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.restore_best`` to ``False``. [#]_
 
-    While FTS could theoretically cache optimizer state prior to checkpoint restoration for potentially incompatible
-    optimizer reinitialization configurations, that functionality is not currently implemented because of the resource
-    overhead and unnecessary complexity it would add to the default restoration path. If there is sufficient interest
-    in the user community, that functionality may be added in the future.
-
-Both LR scheduler and optimizer reinitialization configurations are only supported for phases >= ``1``. This is because
+Both lr scheduler and optimizer reinitialization configurations are only supported for phases >= ``1``. This is because
 for fine-tuning phase ``0``, training component configurations will be the ones the user initiated the training
 session with, usually via the ``configure_optimizer`` method of
 :external+pl:class:`~lightning.pytorch.core.module.LightningModule`.
@@ -216,18 +213,18 @@ also be specified in implicit mode.
 
 Advanced Usage Examples: Explicit and Implicit Mode Concurrent Optimizer and LR Scheduler Reinitialization
 **********************************************************************************************************
-Demonstration optimizer and concurrent LR scheduler reinitialization configurations for both explicit and
+Demonstration optimizer and concurrent lr scheduler reinitialization configurations for both explicit and
 fine-tuning scheduling contexts are available under ``./fts_examples/stable/config/advanced/reinit_optim_lr``.
 
-The concurrent optimizer and LR scheduler reinitialization examples use the same code and have the same dependencies as
-the LR scheduler reinitialization-only (with the exception of requiring FTS >= ``2.1.0`` )
+The concurrent optimizer and lr scheduler reinitialization examples use the same code and have the same dependencies as
+the lr scheduler reinitialization-only (with the exception of requiring FTS >= ``2.1.0`` )
 :ref:`examples<advanced-fine-tuning-lr-example>`.
 
 The two different demo schedule configurations are composed with shared defaults (``./config/fts_defaults.yaml``).
 
 .. code-block:: bash
 
-    # Demo concurrent optimizer and LR scheduler reinitializations...
+    # Demo concurrent optimizer and lr scheduler reinitializations...
     cd ./fts_examples/stable
 
     # with an explicitly defined fine-tuning schedule:
@@ -242,13 +239,15 @@ The two different demo schedule configurations are composed with shared defaults
 Similar to the explicitly defined lr reinitialization-only schedule example, we are using three distinct lr schedulers
 for three different training phases. In this case, there are also distinctly configured optimizers being used:
 
+.. _explicit-config-overview:
+
 .. figure:: ../_static/images/fts/explicit_optim_lr_scheduler_reinit_pg1_phase0.png
   :alt: Phase 0
   :width: 75%
 
-* Phase ``0`` in :yellow-highlight:`yellow` uses a :external+torch:class:`~torch.optim.AdamW` optimizer and :external+torch:class:`~torch.optim.lr_scheduler.LinearLR` scheduler with the initial lr and optimizer defined via the shared initial optimizer configuration.
-* Phase ``1`` in :blue-highlight:`blue` uses a :external+torch:class:`~torch.optim.SGD` optimizer and :external+torch:class:`~torch.optim.lr_scheduler.StepLR` scheduler, including the specified initial lr for the existing parameter groups (``2.0e-06``).
-* Phase ``2`` in :green-highlight:`green` switches back to a :external+torch:class:`~torch.optim.AdamW` optimizer but uses a :external+torch:class:`~torch.optim.lr_scheduler.CosineAnnealingWarmRestarts` scheduler, with an assigned initial lr for each of the parameter groups.
+* The :ref:`configured phase 0<explicit-phase-0-config>` in :yellow-highlight:`yellow` uses an :external+torch:class:`~torch.optim.AdamW` optimizer and :external+torch:class:`~torch.optim.lr_scheduler.LinearLR` scheduler with the initial lr and optimizer defined via the shared initial optimizer configuration.
+* The :ref:`configured phase 1<explicit-phase-1-config>` in :blue-highlight:`blue` uses a :external+torch:class:`~torch.optim.SGD` optimizer and :external+torch:class:`~torch.optim.lr_scheduler.StepLR` scheduler, including the specified initial lr for the existing parameter groups (``2.0e-06``).
+* The :ref:`configured phase 2<explicit-phase-2-config>` in :green-highlight:`green` switches back to an :external+torch:class:`~torch.optim.AdamW` optimizer but uses a :external+torch:class:`~torch.optim.lr_scheduler.CosineAnnealingWarmRestarts` scheduler, with an assigned initial lr for each of the parameter groups.
 
 
 Because we turned on DEBUG-level logging to trace reinitializations, we observe the following in our training log upon
@@ -265,10 +264,6 @@ the phase ``1`` optimizer reinitialization:
   ... (followed by parameter group config details)
   New optimizer state: SGD
   ... (followed by parameter group initial config details, note existing lr state or user directives may subsequently override the `lr`s in this initial config)
-
-.. _explicit-config-overview:
-
-Here are the configurations for each respective phase in this explicit schedule example: (:ref:`phase 0<explicit-phase-0-config>`, :ref:`phase 1<explicit-phase-1-config>`, :ref:`phase 2<explicit-phase-2-config>`)
 
 In the implicitly defined schedule scenario, we begin using the :external+torch:class:`~torch.optim.AdamW` optimizer
 but the :external+torch:class:`~torch.optim.SGD` optimizer and :external+torch:class:`~torch.optim.lr_scheduler.StepLR`
@@ -315,7 +310,7 @@ reinitialized at each phase transition and applied to all optimizer parameter gr
    :alt: Phase 0
    :width: 75%
 
-   LR log for parameter group 1 reflecting repeated reinitialization of the :external+torch:class:`~torch.optim.SGD` optimizer and :external+torch:class:`~torch.optim.lr_scheduler.StepLR` LR scheduler (initial target lr = ``1.0e-05``).
+   LR log for parameter group 1 reflecting repeated reinitialization of the :external+torch:class:`~torch.optim.SGD` optimizer and :external+torch:class:`~torch.optim.lr_scheduler.StepLR` lr scheduler (initial target lr = ``1.0e-05``) at each phase transition.
    The behavioral impact of ``use_current_optimizer_pg_lrs`` (line 28 above) on the lr scheduler reinitializations can be clearly observed.
 
 Note that we have disabled :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.restore_best` in both examples for
@@ -421,3 +416,11 @@ Phase ``2`` config, like all non-zero phases, defined in our explicit schedule `
         frequency: 1
         name: Explicit_Reinit_LR_Scheduler
       init_pg_lrs: [1.0e-06, 1.0e-06, 2.0e-06, 2.0e-06]
+
+Footnotes
+*********
+
+.. [#] While FTS could theoretically cache optimizer state prior to checkpoint restoration for potentially incompatible
+ optimizer reinitialization configurations, that functionality is not currently implemented because of the resource
+ overhead and unnecessary complexity it would add to the default restoration path. If there is sufficient interest
+ in the user community, that functionality may be added in the future. :ref:`⏎<optimizer-compat-note>`
