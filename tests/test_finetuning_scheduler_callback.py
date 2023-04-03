@@ -1064,7 +1064,11 @@ ENFORCE_P0_LR_STATE = {
 
 @pytest.mark.parametrize(
     "init_lr_key, p0_params",
-    [(None, ["layer.0.weight", "layer.0.bias"]), ("rlrop", None), ("lr_lambdas", None)],
+    [
+        pytest.param(None, ["layer.0.weight", "layer.0.bias"], marks=RunIf(min_torch="1.13")),
+        ("rlrop", None),
+        pytest.param("lr_lambdas", None, marks=RunIf(min_torch="1.13")),
+    ],
     ids=["step_lr", "rlrop", "lr_lambdas"],
 )
 def test_finetuningscheduling_enforce_p0(tmpdir, init_lr_key, p0_params):
