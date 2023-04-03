@@ -85,6 +85,7 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
             "fts_examples.stable.config": ["*.yaml"],
             "fts_examples.stable.config.advanced.fsdp": ["*.yaml"],
             "fts_examples.stable.config.advanced.reinit_lr": ["*.yaml"],
+            "fts_examples.stable.config.advanced.reinit_optim_lr": ["*.yaml"],
             "fts_examples.legacy.config": ["*.yaml"],
             "fts_examples.legacy.config.advanced.fsdp": ["*.yaml"],
             "fts_examples.legacy.config.advanced.reinit_lr": ["*.yaml"],

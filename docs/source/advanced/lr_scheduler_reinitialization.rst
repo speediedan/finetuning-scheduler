@@ -6,22 +6,22 @@ LR Scheduler Reinitialization
 
 Overview
 ********
-In some contexts it can be useful to re-wrap your optimizer with new LR scheduler configurations at the beginning of one
+In some contexts it can be useful to re-wrap your optimizer with new lr scheduler configurations at the beginning of one
 or more scheduled training phases. Among others, example use cases include:
 
-* implementing complex LR schedules along with multi-phase early-stopping
+* implementing complex lr schedules along with multi-phase early-stopping
 * injecting new parameter group specific rates on a scheduled basis
 * programmatically exploring training behavioral dynamics with heterogenous schedulers and early-stopping
 
-LR scheduler reinitialization is supported by the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback:
+LR scheduler reinitialization is supported:
 
-  - With FTS >= ``0.1.4``
-  - In both explicit and implicit fine-tuning schedule modes (see the :ref:`Fine-Tuning Scheduler intro<motivation>` for
-    more on basic usage modes)
-  - With or without concurrent optimizer reinitialization (FTS >= ``2.1.0``)
-  - In the context of all supported training strategies (including FSDP).
+- In both explicit and implicit fine-tuning schedule modes (see the :ref:`Fine-Tuning Scheduler intro<motivation>` for
+  more on basic usage modes)
+- With or without concurrent optimizer reinitialization (FTS >= ``2.1.0``)
+- In the context of all supported training strategies (including FSDP).
+- With FTS >= ``0.1.4``
 
-As LR scheduler reinitialization is likely to be applied most frequently in the context of explicitly defined
+As lr scheduler reinitialization is likely to be applied most frequently in the context of explicitly defined
 fine-tuning schedules, we'll cover configuration in that mode first. Please see the
 :ref:`optimizer reinitialization feature introduction<optim-reinit-overview>` for a review of concurrent optimizer and
 lr scheduler reinitialization.
@@ -38,7 +38,7 @@ desired configuration in the ``new_lr_scheduler`` key. The ``new_lr_scheduler`` 
 annotated yaml schedule below and can be explored using the
 :ref:`advanced usage example<advanced-fine-tuning-lr-example>`.
 
-When specifying an LR scheduler configuration for a given phase, the ``new_lr_scheduler`` dictionary requires at minimum
+When specifying an lr scheduler configuration for a given phase, the ``new_lr_scheduler`` dictionary requires at minimum
 an ``lr_scheduler_init`` dictionary containing a ``class_path`` key indicating the class of the lr scheduler
 (:ref:`list of supported schedulers<supported_lr_schedulers>`) to be instantiated and wrapped around your optimizer.
 
@@ -116,10 +116,12 @@ optimizer being wrapped via a list in the ``init_pg_lrs`` key.
     factors including the ``no_decay`` mapping of parameters specified in previous phases and isn't yet
     introspected/simulated in the current :class:`~finetuning_scheduler.fts.FinetuningScheduler` version.
 
-Finally, when reinitializing an LR scheduler for a given phase, one can direct FTS to use the current optimizer parameter group ``lr`` s rather
+.. _lr-state-precedence:
+
+Finally, when reinitializing an lr scheduler for a given phase, one can direct FTS to use the current optimizer parameter group ``lr`` s rather
 than defaulting to the existing optimizer's ``initial_lr`` configuration for existing parameter groups. This mode is
 enabled by setting the ``use_current_optimizer_pg_lrs`` key to ``True``. For a concrete example of this behavior, see :ref:`this example<use-curr-optim-pg-example>`.
-The ``init_pg_lrs`` key takes precedence over the ``use_current_optimizer_pg_lrs`` key if both are present.
+The ``init_pg_lrs`` key takes precedence over the ``use_current_optimizer_pg_lrs`` key if both are present. [#]_
 
 .. code-block:: yaml
   :linenos:
@@ -137,8 +139,8 @@ The ``init_pg_lrs`` key takes precedence over the ``use_current_optimizer_pg_lrs
 All lr scheduler reinitialization configurations specified in the fine-tuning schedule will have their configurations
 sanity-checked prior to training initiation.
 
-Note that specifying LR scheduler reinitialization configurations is only supported for phases >= ``1``. This is because
-for fine-tuning phase ``0``, the LR scheduler configuration will be the scheduler that you initiate your training
+Note that specifying lr scheduler reinitialization configurations is only supported for phases >= ``1``. This is because
+for fine-tuning phase ``0``, the lr scheduler configuration will be the scheduler that you initiate your training
 session with, usually via the ``configure_optimizer`` method of
 :external+pl:class:`~lightning.pytorch.core.module.LightningModule`.
 
@@ -218,6 +220,11 @@ below, lr schedulers specified in different fine-tuning phases can be of differi
 Once a new lr scheduler is re-initialized, it will continue to be used for subsequent phases unless replaced with
 another lr scheduler configuration defined in a subsequent schedule phase.
 
+.. _lr-state-restoration:
+
+Prior to the execution of each phase transition, the latest lr state [#]_ from the previous phase will be restored before proceeding with any lr scheduler reinitialization directive.
+This is predominantly relevant only when training in :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.restore_best` mode or reinitializing the optimizer as well as lr scheduler.
+
 .. tip::
 
     If you have specified an lr scheduler with an ``lr_lambdas`` attribute in any phase,
@@ -231,8 +238,8 @@ another lr scheduler configuration defined in a subsequent schedule phase.
 
 LR Scheduler Reinitialization With Generated (Implicit Mode) Fine-Tuning Schedules
 **********************************************************************************
-One can also specify LR scheduler reinitialization in the context of implicit mode fine-tuning schedules. Since the
-fine-tuning schedule is automatically generated, the same LR scheduler configuration will be applied at each of the
+One can also specify lr scheduler reinitialization in the context of implicit mode fine-tuning schedules. Since the
+fine-tuning schedule is automatically generated, the same lr scheduler configuration will be applied at each of the
 phase transitions. In implicit mode, the lr scheduler reconfiguration should be supplied to the
 :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_lr_cfg` parameter of
 :class:`~finetuning_scheduler.fts.FinetuningScheduler`.
@@ -275,17 +282,17 @@ lr scheduler configuration can differ in lr scheduler type and configuration fro
 same schedule is applied at each phase transition, the ``init_pg_lrs`` list is not supported in an implicit fine-tuning
 context.
 
-Application of LR scheduler reinitialization in both explicit and implicit modes may be best understood via examples, so
+Application of lr scheduler reinitialization in both explicit and implicit modes may be best understood via examples, so
 we'll proceed to those next.
 
 .. _advanced-fine-tuning-lr-example:
 
 Advanced Usage Examples: Explicit and Implicit Mode LR Scheduler Reinitialization
 *********************************************************************************
-Demonstration LR scheduler reinitialization configurations for both explicit and implicit fine-tuning scheduling contexts
+Demonstration lr scheduler reinitialization configurations for both explicit and implicit fine-tuning scheduling contexts
 are available under ``./fts_examples/stable/config/advanced/reinit_lr``.
 
-The LR scheduler reinitialization examples use the same code and have the same dependencies as the basic
+The lr scheduler reinitialization examples use the same code and have the same dependencies as the basic
 :ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples.
 
 The two different demo schedule configurations are composed with shared defaults (``./config/fts_defaults.yaml``).
@@ -293,10 +300,10 @@ The two different demo schedule configurations are composed with shared defaults
 .. code-block:: bash
 
     cd ./fts_examples/stable
-    # Demo LR scheduler reinitialization with an explicitly defined fine-tuning schedule:
+    # Demo lr scheduler reinitialization with an explicitly defined fine-tuning schedule:
     python fts_superglue.py fit --config config/advanced/reinit_lr/fts_explicit_reinit_lr.yaml
 
-    # Demo LR scheduler reinitialization with an implicitly defined fine-tuning schedule:
+    # Demo lr scheduler reinitialization with an implicitly defined fine-tuning schedule:
     python fts_superglue.py fit --config config/advanced/reinit_lr/fts_implicit_reinit_lr.yaml
 
 
@@ -471,3 +478,15 @@ parameter groups.
 
 Note that we have disabled :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.restore_best` in both examples for
 clarity of lr patterns.
+
+Footnotes
+*********
+
+.. [#] The following precedence governs the configuration of existing parameter group ``lr`` s when reinitializing an lr scheduler:
+
+  1. User-provided ``lr`` s from the ``init_pg_lrs`` directive if it exists
+  2. Existing optimizer ``lr`` s if ``use_current_optimizer_pg_lrs`` is set to ``True``
+  3. The ``initial_lr`` of the current optimizer parameter groups by default
+  4. The existing optimizer ``lr`` s if ``use_current_optimizer_pg_lrs`` is not set to ``True`` but the relevant parameter group does not have an ``initial_lr`` key :ref:`⏎<lr-state-precedence>`
+
+.. [#] The latest lr state consists of the previous lr scheduler ``state_dict`` and the ``lr`` s of each optimizer parameter group. :ref:`⏎<lr-state-restoration>`
