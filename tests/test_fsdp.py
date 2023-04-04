@@ -713,15 +713,7 @@ def test_fsdp_multi_gpus(
     if exception_expected:
         gen_exceptions(trainer, configured_model, model_cfg_key, exception_expected)
     else:
-        if model_cfg_key in (
-            "cust_awp_noprec_use_orig",
-            "cust_awp_nop_ignore_p_no_ofld_uo",
-            "cust_awp_noprec_dynamo_use_orig",
-        ):
-            with mock.patch("lightning.pytorch.strategies.fsdp._optimizer_has_flat_params", lambda x: True):
-                trainer.fit(configured_model)
-        else:
-            trainer.fit(configured_model)
+        trainer.fit(configured_model)
         default_fts_sanity_chk(trainer)
     if trainer.is_global_zero:
         check_fts_fsdp_warns(warns_expected, recwarn, use_dynamo)
