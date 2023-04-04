@@ -58,7 +58,7 @@ repos:
         name: Unused noqa
 
   - repo: https://github.com/PyCQA/isort
-    rev: 5.11.4
+    rev: 5.12.0
     hooks:
       - id: isort
         name: Format imports
@@ -70,11 +70,11 @@ repos:
         name: Format code
 
   - repo: https://github.com/asottile/blacken-docs
-    rev: v1.12.1
+    rev: 1.13.0
     hooks:
       - id: blacken-docs
         args: [--line-length=120]
-        additional_dependencies: [black==21.12b0]
+        additional_dependencies: [black==22.12]
 
   - repo: https://github.com/executablebooks/mdformat
     rev: 0.7.16
@@ -87,7 +87,7 @@ repos:
         exclude: CHANGELOG.md
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: 'v0.0.235'
+    rev: 'v0.0.237'
     hooks:
       - id: ruff
         # Respect `exclude` and `extend-exclude` settings.
