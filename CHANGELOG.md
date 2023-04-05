@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [2.X.X] - 2023-XX-XX
+
+### Added
+
+- Support for PyTorch and PyTorch Lightning 2.1.0
+- Beta support for [optimizer reinitialization](https://finetuning-scheduler.readthedocs.io/en/latest/advanced/optimizer_reinitialization.html)
+- Use structural typing for Fine-Tuning Scheduler supported optimizers with ``ParamGroupAddable``
+
+### Changed
+
+- During schedule phase transitions, the latest LR state will be restored before proceeding with the next phase configuration and execution (mostly relevant to lr scheduler and optimizer reinitialization but also improves configuration when restoring best checkpoints across multiple depths)
+
+### Fixed
+
+- Allow sharded optimizers ``ZeroRedundancyOptimizer`` to be properly reconfigured if necessary in the context of ``enforce_phase0_params`` set to ``True``.
+
 
 ## [2.0.1] - 2023-04-05
 
