@@ -4,12 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [2.X.X] - 2023-XX-XX
+## [2.0.2] - 2023-04-06
 
 ### Added
 
-- Beta support for [optimizer reinitialization](https://finetuning-scheduler.readthedocs.io/en/latest/advanced/optimizer_reinitialization.html)
+- Beta support for [optimizer reinitialization](https://finetuning-scheduler.readthedocs.io/en/stable/advanced/optimizer_reinitialization.html)
 - Use structural typing for Fine-Tuning Scheduler supported optimizers with ``ParamGroupAddable``
+- Support for ``jsonargparse`` version ``4.20.1``
 
 ### Changed
 
