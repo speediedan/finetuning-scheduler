@@ -17,7 +17,7 @@ LR scheduler reinitialization is supported:
 
 - In both explicit and implicit fine-tuning schedule modes (see the :ref:`Fine-Tuning Scheduler intro<motivation>` for
   more on basic usage modes)
-- With or without concurrent optimizer reinitialization (FTS >= ``2.1.0``)
+- With or without concurrent optimizer reinitialization (FTS >= ``2.0.2``)
 - In the context of all supported training strategies (including FSDP).
 - With FTS >= ``0.1.4``
 

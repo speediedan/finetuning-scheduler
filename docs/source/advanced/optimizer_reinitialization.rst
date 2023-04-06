@@ -17,7 +17,7 @@ Optimizer reinitialization is supported:
   more on basic usage modes)
 - With or without concurrent lr scheduler reinitialization
 - In the context of all supported training strategies (including FSDP)
-- With FTS >= ``2.1.0``
+- With FTS >= ``2.0.2``
 
 We'll cover both implicit and explicit configuration modes below and provide a slightly altered version of the
 :ref:`lr scheduler reinitialization example<advanced-fine-tuning-lr-example>` that demonstrates concurrent
@@ -217,7 +217,7 @@ Demonstration optimizer and concurrent lr scheduler reinitialization configurati
 fine-tuning scheduling contexts are available under ``./fts_examples/stable/config/advanced/reinit_optim_lr``.
 
 The concurrent optimizer and lr scheduler reinitialization examples use the same code and have the same dependencies as
-the lr scheduler reinitialization-only (with the exception of requiring FTS >= ``2.1.0`` )
+the lr scheduler reinitialization-only (with the exception of requiring FTS >= ``2.0.2`` )
 :ref:`examples<advanced-fine-tuning-lr-example>`.
 
 The two different demo schedule configurations are composed with shared defaults (``./config/fts_defaults.yaml``).
