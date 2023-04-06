@@ -8,7 +8,6 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
-- Support for PyTorch and PyTorch Lightning 2.1.0
 - Beta support for [optimizer reinitialization](https://finetuning-scheduler.readthedocs.io/en/latest/advanced/optimizer_reinitialization.html)
 - Use structural typing for Fine-Tuning Scheduler supported optimizers with ``ParamGroupAddable``
 
