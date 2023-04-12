@@ -50,7 +50,7 @@ trainer:
       max_name_column_width: 100
       sort_by_key: cuda_time_total
       schedule_cfg:
-        # note, there is currently (as of lightning 1.9.0 release) an open issue regarding superflous profiler messages
+        # note, there is still (as of 2023.04.08) an open issue regarding superflous profiler messages
         # https://github.com/pytorch/pytorch/issues/91886
         skip_first: 20  # comment if you want to profile the first fine-tuning phase instead of the final one
         wait: 1

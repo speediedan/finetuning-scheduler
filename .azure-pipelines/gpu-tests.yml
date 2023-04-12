@@ -45,10 +45,10 @@ jobs:
     strategy:
       matrix:
         'PyTorch | 1.13.1':
-          image: "speediedan/finetuning-scheduler:py3.10-pt1.13.1-pl2.0-azpl-init"
+          image: "speediedan/finetuning-scheduler:py3.10-pt1.13.1-pl2.1-azpl-init"
           scope: "1x"
         'PyTorch | latest':
-          image: "speediedan/finetuning-scheduler:py3.10-pt2.0.0-pl2.0-azpl-init"
+          image: "speediedan/finetuning-scheduler:py3.10-pt2.1.0-pl2.1-azpl-init"
           scope: ""
     # how long to run the job before automatically cancelling
     timeoutInMinutes: "100"

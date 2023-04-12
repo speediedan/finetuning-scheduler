@@ -26,17 +26,22 @@ from contextlib import contextmanager
 from copy import deepcopy
 from functools import partial, partialmethod, wraps
 from pprint import pformat
-from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, Union
 
 import torch
 from lightning.fabric.strategies.fsdp import _setup_activation_checkpointing
 from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
-from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13, _TORCH_GREATER_EQUAL_2_0
+from lightning.fabric.utilities.imports import (
+    _TORCH_GREATER_EQUAL_1_13,
+    _TORCH_GREATER_EQUAL_2_0,
+    _TORCH_GREATER_EQUAL_2_1,
+)
 from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.trainer.connectors.checkpoint_connector import _CheckpointConnector
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.model_helpers import is_overridden
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
+from torch.distributed import all_gather_object
 
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
@@ -48,10 +53,11 @@ if _min_fsdp_available:
     from torch.distributed.fsdp.wrap import _ConfigAutoWrap, _or_policy, lambda_auto_wrap_policy, wrap
 
     if _TORCH_GREATER_EQUAL_2_0:
-        from torch.distributed.fsdp._common_utils import _get_param_to_fqns
+        from torch.distributed.fsdp._common_utils import _get_param_to_fqns, _is_fsdp_flattened
         from torch.distributed.fsdp.wrap import _FSDPPolicy
     else:
         _FSDPPolicy = object  # type: ignore[assignment,misc]
+        from torch.distributed.fsdp._utils import _is_fsdp_flattened  # type: ignore[no-redef]
         from torch.distributed.fsdp.fully_sharded_data_parallel import _get_param_to_unflat_param_names
     _get_params_to_fqns = _get_param_to_fqns if _TORCH_GREATER_EQUAL_2_0 else _get_param_to_unflat_param_names
 
@@ -71,7 +77,14 @@ class FSDPStrategyAdapter(StrategyAdapter):
     In order to support multi-phase scheduled fine-tuning with FSDP, FTS's key precondition is that the defined
     fine-tuning schedule phases have disjoint sets of FSDP-flattened parameters (i.e. ``FlatParameter`` s, which are
     created when wrapping a set of modules in a FSDP instance/unit). This constraint is derived from the fact that the
-    ``requires_grad`` attribute currently must be the same for all parameters flattened into the same ``FlatParameter``.
+    ``requires_grad`` attribute currently must be the same for all parameters flattened into the same ``FlatParameter``
+    (for PyTorch < ``2.1.0`` or if in ``use_orig_params=False`` mode).
+
+    In order to support multi-phase scheduled fine-tuning with FSDP in ``use_orig_params=False`` mode, FTS's key
+    precondition is that the defined fine-tuning schedule phases have disjoint sets of FSDP-flattened parameters (i.e.
+    ``FlatParameter`` s, which are created when wrapping a set of modules in a FSDP instance/unit). This constraint is
+    derived from the fact that (for PyTorch < ``2.1.0`` or ``use_orig_params=False`` mode) the ``requires_grad``
+    attribute must be the same for all parameters flattened into the same ``FlatParameter``.
 
     To facilitate module wrapping in alignment with fine-tuning schedule phases, FTS provides the
     :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides` feature which allows users to
@@ -111,6 +124,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     _ft_schedule_module_map: Dict
     _unscheduled_params: List
     _use_orig_params: bool
+    _allow_mixed_req_grad: bool
     RANK_ZERO_LOG_FQN = "lightning.pytorch.utilities.rank_zero"
 
     def __init__(self, awp_overrides: Optional[List] = None, *args: Any, **kwargs: Any) -> None:
@@ -168,6 +182,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
         # hack to avoid subclassing FSDP strategy for this adapter
         setattr(Strategy, "lightning_restore_optimizer", self.lightning_restore_optimizer)
         self._use_orig_params = self.pls_handle.kwargs.get("use_orig_params", False)
+        # for PyTorch >= `2.1.0` w/ `use_orig_params`, schedule/wrapping alignment constraints can be relaxed
+        self._allow_mixed_req_grad = self._use_orig_params and _TORCH_GREATER_EQUAL_2_1
         self._prune_nodecay()
         self._validate_awp_overrides()
         if is_overridden("configure_sharded_model", self.pl_module):
@@ -200,12 +216,14 @@ class FSDPStrategyAdapter(StrategyAdapter):
             MisconfigurationException: If any FTS FSDP fine-tuning schedule/module wrapping alignment exceptions are
                 thrown. The provided exceptions provide detailed feedback for the user to address the misalignment.
         """
-        fsdp_fts_cfg_errors = self._validate_fsdp_fts_config()
-        # feedback could be narrowed to per-node instead of per-rank here but we're conservatively allowing all ranks to
-        # print the feedback because of the future possibility per-rank wrapping differences
-        if fsdp_fts_cfg_errors:
+        world_error_set: Set = set()
+        world_errors = [[None] for _ in range(self.pls_handle.world_size)]
+        all_gather_object(world_errors, self._validate_fsdp_fts_config())
+        for errors in world_errors:
+            world_error_set.update(errors)  # exceptions could be rank-specific
+        if world_error_set:
             exceptions = []
-            for err_msg in fsdp_fts_cfg_errors:
+            for err_msg in world_error_set:
                 exceptions.append(MisconfigurationException(err_msg))
             raise MisconfigurationException(*exceptions)
 
@@ -416,42 +434,113 @@ class FSDPStrategyAdapter(StrategyAdapter):
         dup_elems = set(elems.elements())
         return dup_elems
 
+    def _validate_nonzero_local_shards(self) -> Optional[str]:
+        """Validate that there is at least one non-zero sized local shard per local optimizer.
+
+        Returns:
+            Optional[str]: A description of the violated local shard constraint along with per-rank debugging info that
+                could be useful in meeting said constraint.
+        """
+        # TODO: this method can be made version-specific and then removed once the local shard constraint is relaxed
+        # in PyTorch upstream
+        curr_optimizer_params = [p for pg in self.pls_handle._optimizers[0].param_groups for p in pg["params"]]
+        if not sum([p.shape[0] for p in curr_optimizer_params if p.requires_grad]):
+            params_w_ls = set()
+            for curr_optim_p in curr_optimizer_params:
+                for fsdp_mod in FullyShardedDataParallel.fsdp_modules(self.pl_module):
+                    fp = fsdp_mod._flat_param
+                    assert fp is not None
+                    assert isinstance(fp._params, Iterable)
+                    assert isinstance(fp._shard_param_infos, Iterable)
+                    for fp_p, fp_shard_info in zip(fp._params, fp._shard_param_infos):
+                        if fp_p is curr_optim_p and not fp_shard_info[0]:
+                            w_local = [p for p, spi in zip(fp._params, fp._shard_param_infos) if spi[0]]
+                            params_w_ls.update(w_local)
+            params_w_ls_names = [self._fsdp_flat_to_unflat_mapping[lsp][0] for lsp in params_w_ls]
+            params_w_ls_names.sort()
+            rank_specific_advice = (
+                "Below are parameters in the same FSDP module as those currently specified in phase 0 but that DO have "
+                f"local shards for rank {self.pl_module.global_rank}. Adding any parameter from this list to the "
+                "current phase 0 would meet the local shard constraint for this rank: "
+                f"{os.linesep}{pformat(params_w_ls_names)}{os.linesep}"
+            )
+            local_shard_advice = (
+                f"The global rank {self.pl_module.global_rank} optimizer has no (non-zero sized) local shards of the "
+                "phase 0 fine-tuning schedule parameters. \n"
+                "HINT: To ensure all optimizers have some local shards, one can include in phase 0 all of parameters "
+                "associated with one of the modules your ``auto_wrap_policy`` wrapped. \n"
+                "This local shard constraint is expected to be removed in a future version of PyTorch and only applies "
+                "to mixed-precision training. \n\n"
+                f"Additional rank-specific details for **RANK {self.pl_module.global_rank}**: {os.linesep}"
+                f"{rank_specific_advice}"
+            )
+            return local_shard_advice
+
     def _validate_fsdp_phases_disjoint(self) -> Tuple:
         """Validate that the defined schedule does not specify any wrapped module or parameter in multiple phases.
 
         Returns:
             Tuple: Any fine-tuning schedule/wrapped module misalignment feedback messages to be provided to the user.
         """
-        fsdp_dup_params = set()
-        unsched_dup_params = set()
-        scheduled_mod_lists = [list(self._ft_schedule_module_map[d]) for d in self._ft_schedule_module_map.keys()]
-        ft_sched_dup_mods = FSDPStrategyAdapter._phasewise_intersection(scheduled_mod_lists)
-        fsdp_dup_params = self._phase_unaligned_fsdp_params()
-        if not fsdp_dup_params:  # unsched_dup_params will be a superset of fsdp_dup_params
-            unsched_dup_params = self._phase_unaligned_fsdp_params(check_unsched=True)
-        fsdp_feedback_msgs = []
-        if ft_sched_dup_mods:
-            fsdp_feedback_msgs.append(self._module_overlap_feedback(ft_sched_dup_mods))
-        if unsched_dup_params:  # conditionally emphasize parameters not included in the fine-tuning schedule
-            fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(unsched_dup_params, unsched_msg=True))
-        elif fsdp_dup_params:
-            fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(fsdp_dup_params))
+        fsdp_feedback_msgs: List[str] = []
+        if self._allow_mixed_req_grad:
+            rank_zero_debug(
+                "Bypassing FSDP-specific phase disjointness validation because `use_orig_params` is "
+                "``True`` and PyTorch is >= `2.1.0`"
+            )
+            # check only required for mixed-precision training
+            if self.pl_module._trainer.precision in ("16-mixed", "bf16-mixed"):
+                has_no_local_shards = self._validate_nonzero_local_shards()
+                if has_no_local_shards:
+                    fsdp_feedback_msgs.append(has_no_local_shards)
+        else:
+            fsdp_dup_params = set()
+            unsched_dup_params = set()
+            scheduled_mod_lists = [list(self._ft_schedule_module_map[d]) for d in self._ft_schedule_module_map.keys()]
+            ft_sched_dup_mods = FSDPStrategyAdapter._phasewise_intersection(scheduled_mod_lists)
+            fsdp_dup_params = self._phase_unaligned_fsdp_params()
+            if not fsdp_dup_params:  # unsched_dup_params will be a superset of fsdp_dup_params
+                unsched_dup_params = self._phase_unaligned_fsdp_params(check_unsched=True)
+            if ft_sched_dup_mods:
+                fsdp_feedback_msgs.append(self._module_overlap_feedback(ft_sched_dup_mods))
+            if unsched_dup_params:  # conditionally emphasize parameters not included in the fine-tuning schedule
+                fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(unsched_dup_params, unsched_msg=True))
+            elif fsdp_dup_params:
+                fsdp_feedback_msgs.append(self._fsdp_param_phase_overlap_feedback(fsdp_dup_params))
         return tuple(fsdp_feedback_msgs)
 
-    def _validate_min_wrap_condition(self) -> Optional[str]:
-        """Validate that at least the first fine-tuning phase includes an FSDP instance.
+    @staticmethod
+    def _module_has_fp(submodule: torch.nn.Module) -> bool:
+        """Evaluate whether a given module has any FSDP-flattened params.
 
-        Technically, the FSDP requirement is a ``FlatParameter``, but in the context of FTS, if no FSDP instance is
-        associated with the first fine-tuning phase, the training session will fail.
+        Args:
+            submodule (torch.nn.Module): The module to inspect for FSDP-flattened params.
 
         Returns:
-            Optional[str]: Error message for the user if the first fine-tuning phase does not include an FSDP instance.
+            bool: ``True`` if the specified module contains any FSDP-flattened params, otherwise ``False``.
         """
-        wrapped_statuses = []
-        for m in self._ft_schedule_module_map[0]:
-            is_wrapped = isinstance(self.pl_module.get_submodule(m), FullyShardedDataParallel)
-            wrapped_statuses.append(is_wrapped)
-        if not any(wrapped_statuses):
+        return any(_is_fsdp_flattened(param) for param in submodule.parameters())
+
+    def _validate_min_wrap_condition(self) -> Optional[str]:
+        """Validate (prior to optimizer validation via Lightning that occurs after a potential FTS phase 0
+        override) that at least scheduled phase 0 contains FSDP flattened parameters with ``requires_grad`` set to
+        ``True``.
+
+        Returns:
+            Optional[str]: Error message for the user if the first fine-tuning phase does not include one or more FSDP
+                flattened parameters.
+        """
+        has_flattened = False
+        # function configuration to inspect at a module level:
+        mod_cfg = (self._ft_schedule_module_map[0], FSDPStrategyAdapter._module_has_fp, self.pl_module.get_submodule)
+        # function configuration to inspect at a parameter level:
+        param_cfg = (self.fts_handle.ft_schedule[0]["params"], _is_fsdp_flattened, self.pl_module.get_parameter)
+
+        def inspect_flattened(iter_inspect: Iterable, inspect_func: Callable, inspect_prepare: Callable) -> bool:
+            return any(inspect_func(inspect_prepare(i)) for i in iter_inspect)
+
+        has_flattened = inspect_flattened(*mod_cfg) if not self._allow_mixed_req_grad else inspect_flattened(*param_cfg)
+        if not has_flattened:
             fts_p0_err = (
                 "Training an FSDP wrapped model requires one or more FSDP parameters to be included in the optimizer."
                 " The `configure_sharded_model method or auto_wrap_policy` you have specified did not wrap any of the"
@@ -516,9 +605,9 @@ class FSDPStrategyAdapter(StrategyAdapter):
         warn_msg = (
             "\n\nFine-tuning schedule phases do not have disjoint FSDP-flattened parameter sets. Because the"
             " `requires_grad` attribute of FSDP-flattened parameters currently must be the same for all flattened"
-            " parameters, fine-tuning schedules must avoid thawing parameters in the same FSDP-flattened parameter in"
-            " different phases. Please ensure parameters associated with each phase are wrapped in separate"
-            " phase-aligned FSDP instances.\n\n"
+            " parameters (for PyTorch < ``2.1.0`` or if in ``use_orig_params=False`` mode), fine-tuning schedules must"
+            " avoid thawing parameters in the same FSDP-flattened parameter in different phases. Please ensure"
+            " parameters associated with each phase are wrapped in separate phase-aligned FSDP instances.\n\n"
             f"""{unsched_param_msg if unsched_msg else ''}\n\n"""
             "The following logical parameters are associated with an FSDP-flattened parameter that spans more than one"
             " fine-tuning phase. The mapping of each logical parameter with the module name wrapped by its associated"
@@ -610,7 +699,16 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
         Subsequently, apply activation checkpointing wrappers if requested
         """
-        with self._enable_name_based_overrides():
+        if self.pls_handle.kwargs.get("auto_wrap_policy", None):
+            with self._enable_name_based_overrides():
+                for n, m in self.pl_module.named_children():
+                    setattr(self.pl_module, n, wrap(m))
+        else:
+            rank_zero_warn(
+                "Wrapping the provided model in an outer FSDP module since neither an ``auto_wrap_policy`` "
+                "nor a manual ``configure_sharded_model`` method for wrapping have been provided. This "
+                "configuration is often (but not always) degenerate and unintended by the user."
+            )
             for n, m in self.pl_module.named_children():
                 setattr(self.pl_module, n, wrap(m))
 

@@ -502,6 +502,7 @@ unwrap_5_7 = {"fsdp_mask": {"wrapped_mods": list(range(5)), "unwrapped_mods": [5
 unwrap_0_1_7 = {"fsdp_mask": {"wrapped_mods": [2, 3, 4, 5], "unwrapped_mods": [0, 1, 7]}}
 wrap_5_7 = {"fsdp_mask": {"wrapped_mods": [5, 7], "unwrapped_mods": [i for i in list(range(8)) if i not in [5, 7]]}}
 wrap_5 = {"fsdp_mask": {"wrapped_mods": [5], "unwrapped_mods": [i for i in list(range(8)) if i != 5]}}
+outer_wrap_only = {"fsdp_mask": {"wrapped_mods": [], "unwrapped_mods": list(range(8))}}
 unwrap_7_diverge = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "diverge_on_epoch": 1}
 unwrap_7_mp = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, **fp16_cfg}
 unwrap_8_mp = {"fsdp_mask": {"wrapped_mods": list(range(7)), "unwrapped_mods": [8]}, **fp16_cfg}
@@ -600,6 +601,7 @@ lrs_path_optimlr_reinit = {0: (0.1,), 1: (0.00021, 1e-06), 2: (0.002, 1e-06, 3e-
 EXPECTED_FSDP_FTS_RESULTS = {
     "cust_awp_noprec": (path_default, *nones(3)),
     "cust_awp_noprec_use_orig": (path_default_orig, *nones(3)),
+    "noawp_noprec_use_orig": (path_default_orig, "degenerate and unintended", *nones(2)),
     "cust_awp_noprec_dynamo_use_orig": (path_default_orig_eo_dyn, *nones(3)),
     "cust_awp_mwp_reinitlr_optim": (path_optimlr_reinit, ("Incompatible check",), None, lrs_path_optimlr_reinit),
     "cust_awp_mwp_parity": (path_default, *nones(3)),
@@ -608,11 +610,13 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "cust_awp_nop_ignore_m_no_ofld": (path_8_14, *nones(3)),
     "cust_awp_nop_ignore_p_no_ofld_uo": (path_ignore_p_uo, *nones(3)),
     "unsupp_torch_version": ({}, None, "is supported from PyTorch", None),
+    "non_disjoint_params_allowed_uo": (path_default_orig, *nones(3)),
     "non_disjoint_phase_fsdp_params": ({}, None, "do not have disjoint FSDP-flattened parameter", None),
     "non_disjoint_phase_mods": ({}, None, "not have disjoint", None),
     "non_disjoint_excluded_ft_params": ({}, None, "parameters not included in", None),
     "already_fsdp_wrapped": ({}, None, "already wrapped by FSDP", None),
     "no_fsdp_params_p0": ({}, None, "one or more FSDP", None),
+    "no_nonzero_local_shards_p0": ({}, None, "local shards of the phase", None),
     "warn_unsupp_nodecay": ({}, "will now be unset", *nones(2)),
     "unmatched_awp_overrides": ({}, None, "did not match any named modules", None),
     "cust_awp_prec": (path_default, *nones(3)),
@@ -645,6 +649,17 @@ EXPECTED_FSDP_FTS_RESULTS = {
             *nones(3),
             test_use_orig,
             marks=RunIf(min_torch="2.0"),
+        ),
+        pytest.param(
+            "noawp_noprec_use_orig",
+            base_model,
+            None,
+            False,
+            0,
+            outer_wrap_only,
+            *nones(3),
+            test_use_orig,
+            marks=RunIf(min_torch="2.1"),
         ),
         pytest.param(
             "cust_awp_noprec_dynamo_use_orig",
@@ -695,6 +710,17 @@ EXPECTED_FSDP_FTS_RESULTS = {
             marks=RunIf(min_torch="2.0"),
         ),
         ("unsupp_torch_version", base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
+        pytest.param(
+            "non_disjoint_params_allowed_uo",
+            base_model,
+            warn_cust_awp,
+            False,
+            0,
+            outer_wrap_only,
+            *nones(3),
+            test_use_orig,
+            marks=RunIf(min_torch="2.1"),
+        ),
         ("non_disjoint_phase_fsdp_params", base_model, warn_cust_awp, False, 0, wrap_5, *nones(4)),
         ("non_disjoint_phase_mods", cust_model, None, False, 1, unwrap_7, *nones(4)),
         ("non_disjoint_excluded_ft_params", cust_model, None, False, 5, unwrap_0_1_7, *nones(4)),
@@ -709,6 +735,17 @@ EXPECTED_FSDP_FTS_RESULTS = {
             marks=RunIf(min_torch="2.0.0"),
         ),
         ("no_fsdp_params_p0", cust_model, None, False, 0, unwrap_5_7, *nones(4)),
+        pytest.param(
+            "no_nonzero_local_shards_p0",
+            base_model,
+            warn_cust_awp,
+            True,
+            0,
+            outer_wrap_only,
+            *nones(3),
+            test_use_orig,
+            marks=RunIf(min_torch="2.1"),
+        ),
         ("warn_unsupp_nodecay", nodecay_model, cust_awp, False, 0, unwrap_7, *nones(4)),
         ("unmatched_awp_overrides", base_model, warn_cust_awp, True, 0, wrap_5_7, awp_5_9, *nones(3)),
         ("cust_awp_prec", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
@@ -728,6 +765,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
     ids=[
         "cust_awp_noprec",
         "cust_awp_noprec_use_orig",
+        "noawp_noprec_use_orig",
         "cust_awp_noprec_dynamo_use_orig",
         "cust_awp_mwp_reinitlr_optim",
         "cust_awp_mwp_parity",
@@ -735,11 +773,13 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "cust_awp_nop_ignore_m_no_ofld",
         "cust_awp_nop_ignore_p_no_ofld_uo",
         "unsupp_torch_version",
+        "non_disjoint_params_allowed_uo",
         "non_disjoint_phase_fsdp_params",
         "non_disjoint_phase_mods",
         "non_disjoint_excluded_ft_params",
         "already_fsdp_wrapped",
         "no_fsdp_params_p0",
+        "no_nonzero_local_shards_p0",
         "warn_unsupp_nodecay",
         "unmatched_awp_overrides",
         "cust_awp_prec",

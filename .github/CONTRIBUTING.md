@@ -4,7 +4,7 @@ Welcome to the community! Fine-Tuning Scheduler extends the most advanced DL res
 
 As Fine-Tuning Scheduler is an extension of Lightning, the remainder of the contribution guidelines conform to (and many are drawn from) the Lightning [contribution documentation](https://pytorch-lightning.readthedocs.io/en/latest/generated/CONTRIBUTING.html).
 
-A giant thank you to the [Lightning team](https://pytorch-lightning.readthedocs.io/en/latest/governance.html) for their tireless effort building the immensely useful Lightning project and their thoughtful feedback on and review of this extension.
+A giant thank you to the [Lightning team](https://lightning.ai/docs/pytorch/latest/community/governance.html) for their tireless effort building the immensely useful Lightning project and their thoughtful feedback on and review of this extension.
 
 ## Main Core Value: One less thing to remember
 

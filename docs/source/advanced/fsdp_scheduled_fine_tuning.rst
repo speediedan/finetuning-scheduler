@@ -29,14 +29,9 @@ Example: Multi-Phase Scheduled Fine-Tuning with FSDP
 Demonstration FTS FSDP training/profiling configurations and a DDP baseline for comparison are available under
 ``./fts_examples/stable/config/advanced/fsdp``.
 
-This FTS FSDP training example has the same dependencies as the basic
+Most of these FTS FSDP training examples have the same dependencies as the basic
 :ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples except PyTorch >= ``2.0`` is
-required.
-
-.. note::
-
-    This version of :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` supports stable PyTorch
-    releases >= 2.0.
+required. Running the :ref:`basic example<basic-fsdp-fine-tuning-example>` requires PyTorch >= ``2.1.0``.
 
 .. note::
 
@@ -50,6 +45,15 @@ The demo schedule configurations are composed with the basic FTS example's share
 
     cd ./fts_examples/stable
 
+    # note, there is still (as of 2023.04.08)) an open issue regarding superflous profiler messages
+    # https://github.com/pytorch/pytorch/issues/91886, settings the environmental variable is a workaround to keep the
+    # example output clean:
+
+    export TORCH_CPP_LOG_LEVEL=ERROR
+
+    # Profiled demo of basic scheduled fine-tuning with FSDP (requires PyTorch >= 2.1.0)
+    python fts_superglue.py fit --config config/advanced/fsdp/fts_fsdp_basic_profile.yaml
+
     # Profiled demo of FSDP scheduled fine-tuning using the ``awp_overrides`` option:
     python fts_superglue.py fit --config config/advanced/fsdp/fts_fsdp_awp_overrides_profile.yaml
 
@@ -60,8 +64,86 @@ The demo schedule configurations are composed with the basic FTS example's share
     # (for reference, not reviewed in this tutorial)
     python fts_superglue.py fit --config config/advanced/fsdp/fts_fsdp_awp_overrides_offload_profile.yaml
 
-FSDP Wrapping For Scheduled Fine-Tuning
-***************************************
+.. _basic-fsdp-fine-tuning-example:
+
+Basic Scheduled Fine-Tuning with FSDP
+*************************************
+
+Beginning with PyTorch version ``2.1.0``, the effective constraints FSDP imposed on fine-tuning schedules were substantially relaxed. As you'll see below,
+scheduled fine-tuning with FSDP is pretty straightforward! All one need do:
+
+1. Pass ``use_orig_params`` to the FSDP strategy configuration.
+2. Provide a simple ``auto_wrap_policy`` configuration (not technically required but almost always desired).
+
+For a given fine-tuning schedule:
+
+.. code-block:: yaml
+  :linenos:
+
+  0:
+    params:
+    - model.classifier.*
+    - model.pooler.dense.*
+    - model.deberta.encoder.layer.11.(output|attention|intermediate).*
+    max_transition_epoch: 1
+  1:
+    params:
+    - model.deberta.encoder.layer.([0-9]|10).(output|attention|intermediate).*
+    max_transition_epoch: 2
+  2:
+    params:
+    - model.deberta.encoder.LayerNorm.bias
+    - model.deberta.encoder.LayerNorm.weight
+    - model.deberta.encoder.rel_embeddings.weight
+
+We can just define an ``auto_wrap_policy`` for our DeBERTa-v3 module, directing FTS/FSDP to wrap the specified Transformer layers in separate FSDP modules:
+
+.. code-block:: yaml
+  :linenos:
+  :emphasize-lines: 5-10
+
+  strategy:
+    class_path: lightning.pytorch.strategies.FSDPStrategy
+    init_args:
+      # other FSDP args as desired ...
+      use_orig_params: True
+      auto_wrap_policy:
+        class_path: torch.distributed.fsdp.wrap.ModuleWrapPolicy
+        init_args:
+          module_classes: !!set
+            ? transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Layer
+
+That's it! Note that we set ``use_orig_params`` to ``True`` in line 5 as it allows for more flexible fine-tuning schedules with PyTorch >= ``2.1.0``.
+
+In the next section, we'll cover some of the more advanced configuration options available for customizing scheduled fine-tuning with FSDP.
+
+.. note::
+
+  If FSDP training with mixed-precision in PyTorch ``2.1.0``, a constraint may be encountered that requires "all optimizers have some local shards" of parameters in phase ``0``.
+  One can ensure this requirement is satisfied by including in phase ``0`` all of parameters associated with one of the modules your ``auto_wrap_policy`` (e.g.
+  ``encoder.layer.11`` in our example above).
+
+  This constraint is expected to be removed in a future version of PyTorch.
+
+Advanced FSDP Wrapping For Scheduled Fine-Tuning
+************************************************
+
+There are a number of usage contexts that might motivate moving beyond the simple configuration above. For instance:
+
+.. list-table:: Motivations for Advanced FSDP Wrapping
+   :widths: 50 50
+   :header-rows: 1
+
+   * - Potential Use case
+     - Relevant Features & Info
+   * - Optimize resource utilization (whether memory, compute or network)
+     - :ref:`activation checkpointing<activation-ckpt-and-cpu-offload>`, :ref:`cpu offload<activation-ckpt-and-cpu-offload>`, :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides`
+   * - More granular control over module wrapping policy w/o manually writing a "configure_sharded_model" method
+     - :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides`
+   * - A desire to use FSDP in the default "use_orig_params=False" mode
+     - `See PyTorch documentation for possible issues <https://pytorch.org/docs/master/fsdp.html?highlight=use_orig_params>`_
+   * - if using a version of PyTorch < ``2.1.0``
+     -
 
 As with standard FSDP module wrapping, one can use an ``auto_wrap_policy`` to wrap a model for FSDP scheduled
 fine-tuning. In the current FTS release, there is only one FTS-specific FSDP configuration enhancement to consider:
@@ -77,7 +159,7 @@ Starting with a defined ``auto_wrap_policy`` and providing module name-based com
 :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides` is often the most expedient approach
 to auto-wrapping models in alignment with a fine-tuning schedule.
 
-We start by defining a simple fine-tuning schedule that we would like to ensure our module wrapping supports:
+We again start by defining a simple fine-tuning schedule that we would like to ensure our module wrapping supports:
 
 .. code-block:: yaml
   :linenos:
@@ -155,6 +237,8 @@ configuration option to FTS like so:
         awp_overrides: ["model.pooler.dense", "model.classifier"]
   ...
 
+.. _activation-ckpt-and-cpu-offload:
+
 Finally, we configure the FSDP training strategy as desired per usual, for instance, specifying
 ``activation_checkpointing`` and ``cpu_offload`` configurations in addition the ``auto_wrap_policy`` we defined above:
 
@@ -185,10 +269,10 @@ that supports FSDP multi-phase scheduled fine-tuning.
 Additional FSDP Wrapping and Debugging Guidance
 ***********************************************
 
-In order to support multi-phase scheduled fine-tuning with FSDP, FTS's key precondition is that the defined fine-tuning
-schedule phases have disjoint sets of FSDP-flattened parameters (a ``FlatParameter`` is created when wrapping a set of
-modules in a FSDP instance/unit). This constraint is derived from the fact that the ``requires_grad`` attribute
-currently (as of PyTorch ``2.0.0``) must be the same for all parameters flattened into the same ``FlatParameter``. [#]_
+In order to support multi-phase scheduled fine-tuning with FSDP in ``use_orig_params=False`` mode, FTS's key precondition
+is that the defined fine-tuning schedule phases have disjoint sets of FSDP-flattened parameters (a ``FlatParameter`` is created when wrapping a set of
+modules in a FSDP instance/unit). This constraint is derived from the fact that (for PyTorch < ``2.1.0`` or ``use_orig_params=False`` mode) the ``requires_grad`` attribute
+must be the same for all parameters flattened into the same ``FlatParameter``. [#]_
 
 FTS will attempt to validate that the module is wrapped in a manner that aligns with the defined fine-tuning
 schedule phases prior to the start of training and provide detailed feedback for the user if a misalignment is
@@ -204,7 +288,7 @@ FTS stops before beginning training and provides extensive context via this erro
 
 .. code-block:: bash
 
-  "Fine-tuning schedule phases do not have disjoint FSDP-flattened parameter sets. Because the `requires_grad` attribute of FSDP-flattened parameters currently must be the same for all flattened parameters, fine-tuning schedules must avoid thawing parameters in the same FSDP-flattened parameter in different phases. Please ensure parameters associated with each phase are wrapped in separate phase-aligned FSDP instances.
+  "Fine-tuning schedule phases do not have disjoint FSDP-flattened parameter sets. Because the `requires_grad` attribute of FSDP-flattened parameters currently must be the same for all flattened parameters (for PyTorch < ``2.1.0`` or if in ``use_orig_params=False`` mode), fine-tuning schedules must avoid thawing parameters in the same FSDP-flattened parameter in different phases. Please ensure parameters associated with each phase are wrapped in separate phase-aligned FSDP instances.
 
   In this particular case, there are parameters not included in your fine-tuning schedule that span more than one fine-tuning phase. HINT: parameters associated with unwrapped modules will be included in the top-level (aka 'root') FSDP instance so ensuring all modules associated with fine-tuning scheduled parameters are wrapped separately from the top-level FSDP instance may avoid triggering this exception.
 
@@ -252,7 +336,5 @@ As always, if needed, one can alternatively override ``configure_sharded_model``
 Footnotes
 *********
 
-.. [#] Once `this PyTorch FSDP feature <https://github.com/pytorch/pytorch/issues/91167>`_ is implemented, PyTorch
-  should allow ``FlatParameter`` s constructed in ``use_orig_params`` mode to contain original params with non-uniform
-  ``requires_grad``. Depending upon the implementation of that feature, some of the aforementioned constraints on FSDP
-  fine-tuning schedules may be relaxed.
+.. [#] As of PyTorch ``2.1.0``, ``FlatParameter`` s constructed in ``use_orig_params`` mode are allowed to contain
+  original params with non-uniform ``requires_grad``.

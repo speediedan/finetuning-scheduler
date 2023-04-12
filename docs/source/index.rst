@@ -353,7 +353,7 @@ A demonstration of the scheduled fine-tuning callback
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` using the
 `RTE <https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte>`_ and
 `BoolQ <https://github.com/google-research-datasets/boolean-questions>`_ tasks of the
-`SuperGLUE <https://super.gluebenchmark.com/>`_ benchmark and the :doc:`LightningCLI<cli/lightning_cli>`
+`SuperGLUE <https://paperswithcode.com/dataset/superglue>`_ benchmark and the :doc:`LightningCLI<cli/lightning_cli>`
 is available under ``./fts_examples/stable``.
 
 Since this CLI-based example requires a few additional packages (e.g. ``transformers``, ``sentencepiece``), you
