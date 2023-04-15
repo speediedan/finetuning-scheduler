@@ -602,6 +602,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "cust_awp_noprec": (path_default, *nones(3)),
     "cust_awp_noprec_use_orig": (path_default_orig, *nones(3)),
     "noawp_noprec_use_orig": (path_default_orig, "degenerate and unintended", *nones(2)),
+    "noawp_prec_use_orig": (path_default_orig, "degenerate and unintended", *nones(2)),
     "cust_awp_noprec_dynamo_use_orig": (path_default_orig_eo_dyn, *nones(3)),
     "cust_awp_mwp_reinitlr_optim": (path_optimlr_reinit, ("Incompatible check",), None, lrs_path_optimlr_reinit),
     "cust_awp_mwp_parity": (path_default, *nones(3)),
@@ -616,7 +617,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "non_disjoint_excluded_ft_params": ({}, None, "parameters not included in", None),
     "already_fsdp_wrapped": ({}, None, "already wrapped by FSDP", None),
     "no_fsdp_params_p0": ({}, None, "one or more FSDP", None),
-    "no_nonzero_local_shards_p0": ({}, None, "local shards of the phase", None),
+    "no_nonzero_local_shards_p0": (path_default_orig, *nones(3)),  # exercise shard allocation DEBUG diagnostics
     "warn_unsupp_nodecay": ({}, "will now be unset", *nones(2)),
     "unmatched_awp_overrides": ({}, None, "did not match any named modules", None),
     "cust_awp_prec": (path_default, *nones(3)),
@@ -633,7 +634,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
 }
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False, min_torch="1.13")
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, model_cfg, strategy_adapter_cfg, fts_cfg,\
           trainer_cfg, strategy_cfg",
@@ -655,6 +656,17 @@ EXPECTED_FSDP_FTS_RESULTS = {
             base_model,
             None,
             False,
+            0,
+            outer_wrap_only,
+            *nones(3),
+            test_use_orig,
+            marks=RunIf(min_torch="2.1"),
+        ),
+        pytest.param(
+            "noawp_prec_use_orig",
+            base_model,
+            None,
+            True,
             0,
             outer_wrap_only,
             *nones(3),
@@ -766,6 +778,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "cust_awp_noprec",
         "cust_awp_noprec_use_orig",
         "noawp_noprec_use_orig",
+        "noawp_prec_use_orig",
         "cust_awp_noprec_dynamo_use_orig",
         "cust_awp_mwp_reinitlr_optim",
         "cust_awp_mwp_parity",

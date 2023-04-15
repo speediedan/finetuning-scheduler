@@ -45,9 +45,8 @@ The demo schedule configurations are composed with the basic FTS example's share
 
     cd ./fts_examples/stable
 
-    # note, there is still (as of 2023.04.08)) an open issue regarding superflous profiler messages
-    # https://github.com/pytorch/pytorch/issues/91886, settings the environmental variable is a workaround to keep the
-    # example output clean:
+    # there is an open issue regarding superfluous profiler messages (still as of 2023.04.15)
+    # setting the environmental variable below is a workaround to keep the example output clean:
 
     export TORCH_CPP_LOG_LEVEL=ERROR
 
@@ -83,15 +82,15 @@ For a given fine-tuning schedule:
   0:
     params:
     - model.classifier.*
-    - model.pooler.dense.*
-    - model.deberta.encoder.layer.11.(output|attention|intermediate).*
     max_transition_epoch: 1
   1:
     params:
-    - model.deberta.encoder.layer.([0-9]|10).(output|attention|intermediate).*
+    - model.pooler.dense.*
+    - model.deberta.encoder.layer.11.(output|attention|intermediate).*
     max_transition_epoch: 2
   2:
     params:
+    - model.deberta.encoder.layer.([0-9]|10).(output|attention|intermediate).*
     - model.deberta.encoder.LayerNorm.bias
     - model.deberta.encoder.LayerNorm.weight
     - model.deberta.encoder.rel_embeddings.weight
@@ -116,14 +115,6 @@ We can just define an ``auto_wrap_policy`` for our DeBERTa-v3 module, directing 
 That's it! Note that we set ``use_orig_params`` to ``True`` in line 5 as it allows for more flexible fine-tuning schedules with PyTorch >= ``2.1.0``.
 
 In the next section, we'll cover some of the more advanced configuration options available for customizing scheduled fine-tuning with FSDP.
-
-.. note::
-
-  If FSDP training with mixed-precision in PyTorch ``2.1.0``, a constraint may be encountered that requires "all optimizers have some local shards" of parameters in phase ``0``.
-  One can ensure this requirement is satisfied by including in phase ``0`` all of parameters associated with one of the modules your ``auto_wrap_policy`` (e.g.
-  ``encoder.layer.11`` in our example above).
-
-  This constraint is expected to be removed in a future version of PyTorch.
 
 Advanced FSDP Wrapping For Scheduled Fine-Tuning
 ************************************************
@@ -317,15 +308,20 @@ As always, if needed, one can alternatively override ``configure_sharded_model``
 
 .. warning::
 
-    :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` is in BETA and subject to change. The
-    interface can bring breaking changes and new features with the next release of PyTorch.
+  :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` is in BETA and subject to change. The
+  interface can bring breaking changes and new features with the next release of PyTorch.
 
 .. note::
 
-    The ``no_decay`` attribute that FTS supports on
-    :external+pl:class:`~lightning.pytorch.core.module.LightningModule` with the base
-    :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is not currently supported in the context of
-    FSDP fine-tuning.
+  The ``no_decay`` attribute that FTS supports on
+  :external+pl:class:`~lightning.pytorch.core.module.LightningModule` with the base
+  :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is not currently supported in the context of
+  FSDP fine-tuning.
+
+.. tip::
+
+  If FSDP training with PyTorch >= ``2.1.0`` and ``use_orig_params=True``, ``DEBUG`` level logging will provide
+  parameter shard allocation diagnostic info where relevant.
 
 .. tip::
 

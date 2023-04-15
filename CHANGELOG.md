@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [2.1.0] - 2023-XX-XX
+
+
+### Added
+
+- Support for simplified scheduled FSDP training with PyTorch >= ``2.1.0`` and ``use_orig_params`` set to ``True``
+
+### Fixed
+
+- updated ``validate_min_wrap_condition`` to avoid overly restrictive validation in some ``use_orig_params`` contexts
+
 ## [2.0.2] - 2023-04-06
 
 ### Added
