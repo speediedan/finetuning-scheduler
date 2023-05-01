@@ -488,6 +488,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 "Bypassing FSDP-specific phase disjointness validation because `use_orig_params` is "
                 "``True`` and PyTorch is >= `2.1.0`"
             )
+            assert self.pl_module._trainer is not None
             # check only required for mixed-precision training with DEBUG level logging requested
             if self.pl_module._trainer.precision in ("16-mixed", "bf16-mixed") and self._rank_zero_logger.level <= 10:
                 has_no_local_shards = self._log_nonzero_local_shards()
@@ -716,7 +717,9 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
         # apply wrappers to enable activation checkpointing if requested
         if self.pls_handle._activation_checkpointing:
-            _setup_activation_checkpointing(module=self.pl_module, layers=self.pls_handle._activation_checkpointing)
+            _setup_activation_checkpointing(
+                module=self.pl_module, layers=self.pls_handle._activation_checkpointing  # type: ignore[arg-type]
+            )
 
     def _after_configure_sharded_model(self) -> None:
         """Generate the parameter-level bi-directional translations the FTS FSDP adapter requires and then execute

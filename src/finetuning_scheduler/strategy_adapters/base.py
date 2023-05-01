@@ -178,7 +178,7 @@ class StrategyAdapter:
             orig_num_pgs.append(len(optimizer.param_groups))
             optimizer.param_groups = []
         for lrs_cfg in trainer.lr_scheduler_configs:
-            lrs_cfg.scheduler.last_epoch = -1
+            lrs_cfg.scheduler.last_epoch = -1  # type: ignore[union-attr]
             if not isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
                 lrs_cfg.scheduler.base_lrs = []
         return orig_num_pgs
@@ -215,7 +215,9 @@ class StrategyAdapter:
             for lrs_cfg in trainer.lr_scheduler_configs:
                 if _TORCH_GREATER_EQUAL_1_13 and not isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
                     lrs_cfg.scheduler._initial_step()
-                lrs_cfg.scheduler._last_lr = [group["lr"] for group in lrs_cfg.scheduler.optimizer.param_groups]
+                lrs_cfg.scheduler._last_lr = [
+                    group["lr"] for group in lrs_cfg.scheduler.optimizer.param_groups  # type: ignore[union-attr]
+                ]
                 if isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
                     lrs_cfg.scheduler.min_lrs = lrs_cfg.scheduler.min_lrs[orig_num_pgs[0] :]
                 elif hasattr(lrs_cfg.scheduler, "lr_lambdas"):
