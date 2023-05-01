@@ -2,7 +2,7 @@ trainer:
   limit_train_batches: 7
   max_epochs: 4
   devices: 2
-  precision: 32 # profile w/o precision until https://github.com/pytorch/pytorch/issues/82206 is resolved
+  precision: 16
   callbacks:
   - class_path: finetuning_scheduler.FinetuningScheduler
     init_args:

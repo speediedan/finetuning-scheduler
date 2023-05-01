@@ -125,7 +125,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     _unscheduled_params: List
     _use_orig_params: bool
     _allow_mixed_req_grad: bool
-    RANK_ZERO_LOG_FQN = "lightning.pytorch.utilities.rank_zero"
+    _rank_zero_logger: logging.Logger = logging.getLogger("lightning.pytorch.utilities.rank_zero")
 
     def __init__(self, awp_overrides: Optional[List] = None, *args: Any, **kwargs: Any) -> None:
         """The only user-facing configuration for
@@ -156,7 +156,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
         super().__init__(*args, **kwargs)
         self.awp_overrides = awp_overrides or []
         self._min_wrap_validated: bool = False
-        self._rank_zero_logger = logging.getLogger(self.RANK_ZERO_LOG_FQN)
         self._suppress_csm_warns()
         self.exec_ft_phase = partial(StrategyAdapter.base_ft_phase, translation_func=self.logical_param_translation)
 
@@ -371,7 +370,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         try:
             # attach to the relevant logger instead of handler because we want to suppress this message narrowly
             lpat = "will assume that all the layers are already wrapped"
-            self._rank_zero_logger.addFilter(lambda record: lpat not in getattr(record, "msg"))
+            FSDPStrategyAdapter._rank_zero_logger.addFilter(lambda record: lpat not in getattr(record, "msg"))
         except Exception:
             # suppressing this message is largely cosmetic so if we cannot suppress this message for any reason at all
             # (e.g. logger rename) continue anyway
@@ -524,7 +523,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         return any(_is_fsdp_flattened(param) for param in submodule.parameters())
 
-    def _validate_min_wrap_condition(self) -> Optional[str]:
+    def _validate_min_wrap_condition(self) -> Optional[Tuple]:
         """Validate (prior to optimizer validation via Lightning that occurs after a potential FTS phase 0
         override) that at least scheduled phase 0 contains FSDP flattened parameters with ``requires_grad`` set to
         ``True``.
@@ -550,7 +549,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 " layers specified in fine-tuning phase 0. Ensure your overridden `configure_sharded_model` method or"
                 " auto_wrap_policy wraps at least one module included in phase `0`."
             )
-            return fts_p0_err
+            return ("ERROR", fts_p0_err)
 
     def _phase_unaligned_fsdp_params(self, check_unsched: bool = False) -> Set:
         """Inspect the fine-tuning schedule and FSDP-wrapped module for parameters that are unaligned with the FSDP

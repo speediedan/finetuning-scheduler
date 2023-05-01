@@ -18,7 +18,11 @@ from unittest import mock
 
 import pytest
 import torch
-from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13, _TORCH_GREATER_EQUAL_2_0
+from lightning.fabric.utilities.imports import (
+    _TORCH_GREATER_EQUAL_1_13,
+    _TORCH_GREATER_EQUAL_2_0,
+    _TORCH_GREATER_EQUAL_2_1,
+)
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.plugins.precision.fsdp import FSDPMixedPrecisionPlugin
 from lightning.pytorch.strategies import FSDPStrategy
@@ -47,7 +51,7 @@ if _min_fsdp_available:
         checkpoint_wrapper,
         CheckpointImpl,
     )
-    from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload, FullyShardedDataParallel
+    from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload, FullyShardedDataParallel, MixedPrecision
     from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy, wrap
 else:
     FullyShardedDataParallel = None  # type: ignore[misc,assignment]
@@ -193,6 +197,7 @@ def fsdp_ckpt(tmpdir_factory, fsdp_ft_schedules) -> Dict:
     test_model_cfg = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}}
     strategy = FSDPStrategy(
         auto_wrap_policy=custom_auto_wrap_policy,
+        use_orig_params=False,
         cpu_offload=CPUOffload(offload_params=True),
     )
     callbacks = [
@@ -549,6 +554,14 @@ class CustomWrapPolicy(_FSDPPolicy):
         return self._policy
 
 
+# RunIf aliases
+runif_map = {
+    "min2_0": {"min_torch": "2.0.0"},
+    "min2_1": {"min_torch": "2.1.0"},
+    "max2_0": {"max_torch": "2.0.0"},
+}
+
+
 # auto-wrap policy aliases
 cust_awp = custom_auto_wrap_policy
 cust_ext_awp = custom_auto_wrap_ext_policy
@@ -562,14 +575,19 @@ awp_7 = {"awp_overrides": ["layer.7"]}
 awp_7_8 = {"awp_overrides": ["l.*yer.8", "layer.7"]}
 
 # FSDP strategy configuration aliases
-act_ckpt_cfg = {"activation_checkpointing": [torch.nn.Linear]}
-ignore_mod_cfg = {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False}
-ignore_params_uo_cfg = {
+act_ckpt_cfg = {"activation_checkpointing": [torch.nn.Linear], "use_orig_params": False}
+ignore_mod_cfg = {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False, "use_orig_params": False}
+ignore_params_cfg = {
     "test_ignored_parameters_names": ["layer.4.weight", "layer.4.bias"],
     "cpu_offload": False,
     "use_orig_params": True,
 }
-test_use_orig = {"use_orig_params": True}
+nouo = {"use_orig_params": False}
+
+cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
+if _TORCH_GREATER_EQUAL_2_1:  # TODO: below should no longer be necessary once the broader solution to PT #99545 lands
+    cust_mp_args["cast_forward_inputs"] = True
+cust_fp16_mp = {"mixed_precision": MixedPrecision(**cust_mp_args), "use_orig_params": False}
 
 # trainer configuration alias
 max_epoch_5 = {"max_epochs": 5}
@@ -597,214 +615,175 @@ path_optimlr_reinit = {0: (2, 4, "SGD", 0, 0.1), 1: (6, 12, "Adam", 32, 0.00021)
 lrs_path_default = {0: (0.1,), 1: (0.07, 1e-06), 2: (0.049, 7e-07, 1e-05)}
 lrs_path_optimlr_reinit = {0: (0.1,), 1: (0.00021, 1e-06), 2: (0.002, 1e-06, 3e-06)}
 
-
-EXPECTED_FSDP_FTS_RESULTS = {
-    "cust_awp_noprec": (path_default, *nones(3)),
-    "cust_awp_noprec_use_orig": (path_default_orig, *nones(3)),
-    "noawp_noprec_use_orig": (path_default_orig, "degenerate and unintended", *nones(2)),
-    "noawp_prec_use_orig": (path_default_orig, "degenerate and unintended", *nones(2)),
-    "cust_awp_noprec_dynamo_use_orig": (path_default_orig_eo_dyn, *nones(3)),
-    "cust_awp_mwp_reinitlr_optim": (path_optimlr_reinit, ("Incompatible check",), None, lrs_path_optimlr_reinit),
-    "cust_awp_mwp_parity": (path_default, *nones(3)),
-    "override_csm_noprec": (path_default, *nones(3)),
-    # TODO: once PyTorch deprecates ``ignored_modules``, check for that deprecation warning in this test
-    "cust_awp_nop_ignore_m_no_ofld": (path_8_14, *nones(3)),
-    "cust_awp_nop_ignore_p_no_ofld_uo": (path_ignore_p_uo, *nones(3)),
-    "unsupp_torch_version": ({}, None, "is supported from PyTorch", None),
-    "non_disjoint_params_allowed_uo": (path_default_orig, *nones(3)),
-    "non_disjoint_phase_fsdp_params": ({}, None, "do not have disjoint FSDP-flattened parameter", None),
-    "non_disjoint_phase_mods": ({}, None, "not have disjoint", None),
-    "non_disjoint_excluded_ft_params": ({}, None, "parameters not included in", None),
-    "already_fsdp_wrapped": ({}, None, "already wrapped by FSDP", None),
-    "no_fsdp_params_p0": ({}, None, "one or more FSDP", None),
-    "no_nonzero_local_shards_p0": (path_default_orig, *nones(3)),  # exercise shard allocation DEBUG diagnostics
-    "warn_unsupp_nodecay": ({}, "will now be unset", *nones(2)),
-    "unmatched_awp_overrides": ({}, None, "did not match any named modules", None),
-    "cust_awp_prec": (path_default, *nones(3)),
-    "cust_awp_prec_pt1x": (path_default, *nones(3)),
-    "enforceP0_cust_awp_prec": (path_default, *nones(3)),
-    # "batch_norm_auto_prec": (path_8_16, "Both mixed precision", None),  # _dynamo/allowed_functions.py suppresses
-    "batch_norm_auto_prec": (path_8_16, *nones(3)),
-    "shared_params_auto_prec": (path_5_10, ("Pruning explicitly specified",), *nones(2)),
-    "override_csm_adam_noprec": (path_ext_7_14, *nones(3)),
-    "cust_awp_overrides_prec": (path_default, *nones(3)),
-    "cust_awp_overrides_prec_ext": (path_ext_8_16, *nones(3)),
-    "warn_ignore_awp_override": ({}, "will be unset and not applied", *nones(2)),
-    "cust_noprec_resume": (path_default, *nones(3)),
+# consolidate all core FTS FSDP test configuration into this dictionary to dedup config
+FTS_FSDP_TESTS = {
+    "cust_awp_noprec_no_use_orig": (
+        (base_model, cust_awp, False, 0, unwrap_7, *nones(3), act_ckpt_cfg),
+        None,
+        (path_default, *nones(3)),
+    ),
+    "cust_awp_noprec": (
+        (base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
+        "min2_0",
+        (path_default_orig, *nones(3)),
+    ),
+    "noawp_noprec": (
+        (base_model, None, False, 0, outer_wrap_only, *nones(4)),
+        "min2_1",
+        (path_default_orig, "degenerate and unintended", *nones(2)),
+    ),
+    "noawp_prec": (
+        (base_model, None, True, 0, outer_wrap_only, *nones(4)),
+        "min2_1",
+        (path_default_orig, "degenerate and unintended", *nones(2)),
+    ),
+    "cust_awp_noprec_dynamo": (
+        (nond_loss_adam_model, cust_awp, False, 7, unwrap_7_dyn, None, epoch_t_only, max_epoch_4, None),
+        "min2_0",
+        (path_default_orig_eo_dyn, *nones(3)),
+    ),
+    "cust_awp_mwp_reinitlr_optim_no_use_orig": (
+        (base_model, awp_mwp_parity, True, 8, unwrap_7_mp, None, opt_inspect, None, nouo),
+        "min2_0",
+        (path_optimlr_reinit, ("Incompatible check",), None, lrs_path_optimlr_reinit),
+    ),
+    "cust_awp_mwp_parity_no_use_orig": (
+        (base_model, awp_mwp_parity, True, 0, unwrap_7_mp, *nones(3), nouo),
+        "min2_0",
+        (path_default, *nones(3)),
+    ),
+    "override_csm_noprec_no_use_orig": (
+        (cust_model, None, False, 0, unwrap_7, *nones(3), nouo),
+        None,
+        (path_default, *nones(3)),
+    ),
+    "cust_awp_nop_ignore_m_no_ofld_no_use_orig": (
+        (base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), ignore_mod_cfg),
+        None,
+        (path_8_14, *nones(3)),
+    ),  # TODO: once PyTorch deprecates ``ignored_modules``, check for the warning with this test
+    "cust_awp_nop_ignore_p_no_ofld": (
+        (base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), ignore_params_cfg),
+        "min2_0",
+        (path_ignore_p_uo, *nones(3)),
+    ),
+    "unsupp_torch_version": (
+        (base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
+        None,
+        ({}, None, "is supported from PyTorch", None),
+    ),
+    "non_disjoint_params_allowed": (
+        (base_model, warn_cust_awp, False, 0, outer_wrap_only, *nones(4)),
+        "min2_1",
+        (path_default_orig, *nones(3)),
+    ),
+    "non_disjoint_phase_fsdp_params_no_use_orig": (
+        (base_model, warn_cust_awp, False, 0, wrap_5, *nones(3), nouo),
+        None,
+        ({}, None, "do not have disjoint FSDP-flattened parameter", None),
+    ),
+    "non_disjoint_phase_mods_no_use_orig": (
+        (cust_model, None, False, 1, unwrap_7, *nones(3), nouo),
+        None,
+        ({}, None, "not have disjoint", None),
+    ),
+    "non_disjoint_excluded_ft_params_no_use_orig": (
+        (cust_model, None, False, 5, unwrap_0_1_7, *nones(3), nouo),
+        None,
+        ({}, None, "parameters not included in", None),
+    ),
+    "already_fsdp_wrapped": (
+        (wrapped_model, cust_awp, False, 0, unwrap_7, *nones(4)),
+        "min2_1",
+        ({}, None, "already wrapped by FSDP", None),
+    ),
+    "no_fsdp_params_p0": (
+        (cust_model, None, False, 0, unwrap_5_7, *nones(3), nouo),
+        None,
+        ({}, None, "one or more FSDP", None),
+    ),
+    "no_nonzero_local_shards_p0": (
+        (base_model, warn_cust_awp, True, 0, outer_wrap_only, *nones(4)),
+        "min2_1",
+        (path_default_orig, *nones(3)),
+    ),  # exercise shard allocation DEBUG diagnostics
+    "warn_unsupp_nodecay": (
+        (nodecay_model, cust_awp, False, 0, unwrap_7, *nones(4)),
+        None,
+        ({}, "will now be unset", *nones(2)),
+    ),
+    "unmatched_awp_overrides": (
+        (base_model, warn_cust_awp, True, 0, wrap_5_7, awp_5_9, *nones(3)),
+        None,
+        ({}, None, "did not match any named modules", None),
+    ),
+    "cust_awp_prec_no_use_orig": (
+        (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), nouo),
+        None,
+        (path_default, *nones(3)),
+    ),
+    "cust_awp_prec_pt1x": (
+        (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
+        "max2_0",
+        (path_default, *nones(3)),
+    ),
+    "enforceP0_cust_awp_prec_no_use_orig": (
+        (enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), nouo),
+        None,
+        (path_default, *nones(3)),
+    ),
+    "batch_norm_auto_prec_no_use_orig": (
+        (BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(3), nouo),
+        "min2_0",
+        (path_8_16, "Both mixed precision", *nones(2)),
+    ),
+    "shared_params_auto_prec_no_use_orig": (
+        (shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(2), nouo),
+        None,
+        (path_5_10, ("Pruning explicitly specified",), *nones(2)),
+    ),
+    "override_csm_adam_noprec_no_use_orig": (
+        (csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, nouo),
+        None,
+        (path_ext_7_14, *nones(3)),
+    ),
+    "cust_awp_overrides_prec_no_use_orig": (
+        (base_model, cust_awp, True, 0, wrap_all_mp, awp_7, *nones(2), cust_fp16_mp),
+        None,
+        (path_default, *nones(3)),
+    ),
+    "cust_awp_overrides_prec_ext_no_use_orig": (
+        (ext_model, cust_ext_awp, True, 6, wrap_ext_mp, awp_7_8, *nones(2), cust_fp16_mp),
+        None,
+        (path_ext_8_16, *nones(3)),
+    ),
+    "warn_ignore_awp_override": (
+        (cust_model, None, False, 0, unwrap_7, awp_7, *nones(3)),
+        None,
+        ({}, "will be unset and not applied", *nones(2)),
+    ),
 }
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False, min_torch="1.13")
+EXPECTED_FSDP_FTS_RESULTS = {k: test_cfg[2] for k, test_cfg in FTS_FSDP_TESTS.items()}
+
+
+FSDP_TEST_CFGS = [
+    pytest.param(
+        k,
+        *test_cfg[0],
+        id=k,
+        marks=RunIf(**runif_map[test_cfg[1]]) if runif_map.get(test_cfg[1], None) else tuple(),
+    )
+    for k, test_cfg in FTS_FSDP_TESTS.items()
+]
+
+
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, model_cfg, strategy_adapter_cfg, fts_cfg,\
           trainer_cfg, strategy_cfg",
-    [
-        ("cust_awp_noprec", base_model, cust_awp, False, 0, unwrap_7, *nones(3), act_ckpt_cfg),
-        pytest.param(
-            "cust_awp_noprec_use_orig",
-            base_model,
-            cust_awp,
-            False,
-            0,
-            unwrap_7,
-            *nones(3),
-            test_use_orig,
-            marks=RunIf(min_torch="2.0"),
-        ),
-        pytest.param(
-            "noawp_noprec_use_orig",
-            base_model,
-            None,
-            False,
-            0,
-            outer_wrap_only,
-            *nones(3),
-            test_use_orig,
-            marks=RunIf(min_torch="2.1"),
-        ),
-        pytest.param(
-            "noawp_prec_use_orig",
-            base_model,
-            None,
-            True,
-            0,
-            outer_wrap_only,
-            *nones(3),
-            test_use_orig,
-            marks=RunIf(min_torch="2.1"),
-        ),
-        pytest.param(
-            "cust_awp_noprec_dynamo_use_orig",
-            nond_loss_adam_model,
-            cust_awp,
-            False,
-            7,
-            unwrap_7_dyn,
-            None,
-            epoch_t_only,
-            max_epoch_4,
-            test_use_orig,
-            marks=RunIf(min_torch="2.0"),
-        ),
-        pytest.param(
-            "cust_awp_mwp_reinitlr_optim",
-            base_model,
-            awp_mwp_parity,
-            True,
-            8,
-            unwrap_7_mp,
-            None,
-            opt_inspect,
-            *nones(2),
-            marks=RunIf(min_torch="2.0"),
-        ),
-        pytest.param(
-            "cust_awp_mwp_parity",
-            base_model,
-            awp_mwp_parity,
-            True,
-            0,
-            unwrap_7_mp,
-            *nones(4),
-            marks=RunIf(min_torch="2.0"),
-        ),
-        ("override_csm_noprec", cust_model, None, False, 0, unwrap_7, *nones(4)),
-        ("cust_awp_nop_ignore_m_no_ofld", base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), ignore_mod_cfg),
-        pytest.param(
-            "cust_awp_nop_ignore_p_no_ofld_uo",
-            base_model,
-            cust_awp,
-            False,
-            0,
-            unwrap_4_7,
-            *nones(3),
-            ignore_params_uo_cfg,
-            marks=RunIf(min_torch="2.0"),
-        ),
-        ("unsupp_torch_version", base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
-        pytest.param(
-            "non_disjoint_params_allowed_uo",
-            base_model,
-            warn_cust_awp,
-            False,
-            0,
-            outer_wrap_only,
-            *nones(3),
-            test_use_orig,
-            marks=RunIf(min_torch="2.1"),
-        ),
-        ("non_disjoint_phase_fsdp_params", base_model, warn_cust_awp, False, 0, wrap_5, *nones(4)),
-        ("non_disjoint_phase_mods", cust_model, None, False, 1, unwrap_7, *nones(4)),
-        ("non_disjoint_excluded_ft_params", cust_model, None, False, 5, unwrap_0_1_7, *nones(4)),
-        pytest.param(
-            "already_fsdp_wrapped",
-            wrapped_model,
-            cust_awp,
-            False,
-            0,
-            unwrap_7,
-            *nones(4),
-            marks=RunIf(min_torch="2.0.0"),
-        ),
-        ("no_fsdp_params_p0", cust_model, None, False, 0, unwrap_5_7, *nones(4)),
-        pytest.param(
-            "no_nonzero_local_shards_p0",
-            base_model,
-            warn_cust_awp,
-            True,
-            0,
-            outer_wrap_only,
-            *nones(3),
-            test_use_orig,
-            marks=RunIf(min_torch="2.1"),
-        ),
-        ("warn_unsupp_nodecay", nodecay_model, cust_awp, False, 0, unwrap_7, *nones(4)),
-        ("unmatched_awp_overrides", base_model, warn_cust_awp, True, 0, wrap_5_7, awp_5_9, *nones(3)),
-        ("cust_awp_prec", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
-        pytest.param(
-            "cust_awp_prec_pt1x", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4), marks=RunIf(max_torch="2.0.0")
-        ),
-        ("enforceP0_cust_awp_prec", enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
-        pytest.param(
-            "batch_norm_auto_prec", BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(4), marks=RunIf(min_torch="2.0.0")
-        ),
-        ("shared_params_auto_prec", shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(3)),
-        ("override_csm_adam_noprec", csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, None),
-        ("cust_awp_overrides_prec", base_model, cust_awp, True, 0, wrap_all_mp, awp_7, *nones(3)),
-        ("cust_awp_overrides_prec_ext", ext_model, cust_ext_awp, True, 6, wrap_ext_mp, awp_7_8, *nones(3)),
-        ("warn_ignore_awp_override", cust_model, None, False, 0, unwrap_7, awp_7, *nones(3)),
-    ],
-    ids=[
-        "cust_awp_noprec",
-        "cust_awp_noprec_use_orig",
-        "noawp_noprec_use_orig",
-        "noawp_prec_use_orig",
-        "cust_awp_noprec_dynamo_use_orig",
-        "cust_awp_mwp_reinitlr_optim",
-        "cust_awp_mwp_parity",
-        "override_csm_noprec",
-        "cust_awp_nop_ignore_m_no_ofld",
-        "cust_awp_nop_ignore_p_no_ofld_uo",
-        "unsupp_torch_version",
-        "non_disjoint_params_allowed_uo",
-        "non_disjoint_phase_fsdp_params",
-        "non_disjoint_phase_mods",
-        "non_disjoint_excluded_ft_params",
-        "already_fsdp_wrapped",
-        "no_fsdp_params_p0",
-        "no_nonzero_local_shards_p0",
-        "warn_unsupp_nodecay",
-        "unmatched_awp_overrides",
-        "cust_awp_prec",
-        "cust_awp_prec_pt1x",
-        "enforceP0_cust_awp_prec",
-        "batch_norm_auto_prec",
-        "shared_params_auto_prec",
-        "override_csm_adam_noprec",
-        "cust_awp_overrides_prec",
-        "cust_awp_overrides_prec_ext",
-        "warn_ignore_awp_override",
-    ],
+    FSDP_TEST_CFGS,
 )
 def test_fsdp_multi_gpus(
     tmpdir,
@@ -823,17 +802,7 @@ def test_fsdp_multi_gpus(
 ):
     """Conservative (end-to-end) set of tests for FTS support of FSDP."""
     cfg = init_test_cfg(model_cfg_key, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precision)
-    (
-        fts_state,
-        lrs_state,
-        warns_expected,
-        exception_expected,
-        model_cfg,
-        fts_cfg,
-        trainer_cfg,
-        strategy_cfg,
-        precision_opts,
-    ) = cfg
+    (fts_state, lrs_state, w_expected, e_expected, model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts) = cfg
     seed_everything(42)
     use_dynamo = True if model_cfg.pop("use_dynamo", None) else False
     model = model_cls(**model_cfg)
@@ -844,33 +813,30 @@ def test_fsdp_multi_gpus(
     strategy = FSDPStrategy(auto_wrap_policy=auto_wrap_policy, **strategy_cfg)
     trainer = configure_trainer(tmpdir, strategy, callbacks, {**trainer_cfg, **precision_opts})
     configured_model = torch.compile(model) if use_dynamo else model
-    if exception_expected:
-        gen_exceptions(trainer, configured_model, model_cfg_key, exception_expected)
+    if e_expected:
+        gen_exceptions(trainer, configured_model, model_cfg_key, e_expected)
     else:
         trainer.fit(configured_model)
         default_fts_sanity_chk(trainer)
     if trainer.is_global_zero:
-        check_fts_fsdp_warns(warns_expected, recwarn, use_dynamo)
+        check_fts_fsdp_warns(w_expected, recwarn, use_dynamo)
 
 
 @RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
 @pytest.mark.parametrize(
-    "model_cfg_key, model_cls, awp, ft_sched_idx, model_cfg",
-    [("cust_noprec_resume", base_model, cust_awp, 0, unwrap_7)],
-    ids=["cust_noprec_resume"],
+    "model_cls, awp, ft_sched_idx, model_cfg",
+    [pytest.param(base_model, cust_awp, 0, unwrap_7, id="cust_noprec_resume_no_use_orig")],
 )
-def test_fsdp_multi_gpus_resume(
-    tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, model_cfg_key, model_cls, awp, ft_sched_idx, model_cfg
-):
+def test_fsdp_multi_gpus_resume(tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, model_cls, awp, ft_sched_idx, model_cfg):
     """Conservative (end-to-end) test for FTS training resumption with FSDP."""
     model_cfg = model_cfg or {}
-    expected_state = EXPECTED_FSDP_FTS_RESULTS[model_cfg_key]
+    expected_state = (path_default, *nones(3))
     warns_expected = expected_state[1]
     seed_everything(42)
     model = model_cls(**model_cfg)
     ft_sched = fsdp_ft_schedules[ft_sched_idx]
     callbacks = callbacks_cfg(FinetuningScheduler, ft_sched, {}, {"patience": 1}, {"save_last": True})
-    strategy = FSDPStrategy(auto_wrap_policy=awp, cpu_offload=CPUOffload(offload_params=True))
+    strategy = FSDPStrategy(auto_wrap_policy=awp, use_orig_params=False, cpu_offload=CPUOffload(offload_params=True))
     trainer = configure_trainer(tmpdir, strategy, callbacks, {"max_epochs": 3})
     trainer.ckpt_path = fsdp_ckpt
     trainer.fit(model)
@@ -881,7 +847,7 @@ def test_fsdp_multi_gpus_resume(
 
 def gen_exceptions(trainer, model, model_cfg_key, exception_expected):
     if model_cfg_key == "no_fsdp_params_p0":
-        with mock.patch.object(FSDPStrategyAdapter, "RANK_ZERO_LOG_FQN", 42):
+        with mock.patch.object(FSDPStrategyAdapter, "_rank_zero_logger", 42):
             with pytest.raises(MisconfigurationException, match=exception_expected):
                 trainer.fit(model)
     elif model_cfg_key == "unsupp_torch_version":

@@ -36,7 +36,6 @@ import torch
 import yaml
 from lightning.fabric.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
 from lightning.fabric.utilities.cloud_io import get_filesystem
-from lightning.fabric.utilities.distributed import _distributed_available
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
@@ -250,7 +249,9 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
             if m.meta.name == self.monitor
         ]
         assert monitor_metric[0] is not None
-        no_sync = (_distributed_available() and monitor_metric[0].is_tensor) and not monitor_metric[0].meta.sync.should
+        no_sync = (torch.distributed.is_available() and monitor_metric[0].is_tensor) and not monitor_metric[
+            0
+        ].meta.sync.should
         return no_sync
 
     def _transition_es_phase(self) -> None:

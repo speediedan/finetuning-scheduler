@@ -138,6 +138,7 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
         file_name=base_reqs,
         standalone=standalone,
         pl_commit="e9d685635580e6150a0e65d9b4c7ee8ad2a1de71",
+        # pl_commit="1d1f6009630d01f5347a7234dad97f6c75f93af0",
     )
     base_setup["install_requires"] = install_requires
     return base_setup
