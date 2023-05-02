@@ -63,8 +63,11 @@ else:
 
 if _TORCH_GREATER_EQUAL_2_0:
     from torch.distributed.fsdp.wrap import _FSDPPolicy
+
+    DISABLE_USE_ORIG = {"use_orig_params": False}
 else:
     _FSDPPolicy = object
+    DISABLE_USE_ORIG = {}
 
 
 additional_fsdp_warns = [
@@ -197,7 +200,7 @@ def fsdp_ckpt(tmpdir_factory, fsdp_ft_schedules) -> Dict:
     test_model_cfg = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}}
     strategy = FSDPStrategy(
         auto_wrap_policy=custom_auto_wrap_policy,
-        use_orig_params=False,
+        **DISABLE_USE_ORIG,
         cpu_offload=CPUOffload(offload_params=True),
     )
     callbacks = [
@@ -575,21 +578,18 @@ awp_7 = {"awp_overrides": ["layer.7"]}
 awp_7_8 = {"awp_overrides": ["l.*yer.8", "layer.7"]}
 
 # FSDP strategy configuration aliases
-act_ckpt_cfg = {"activation_checkpointing": [torch.nn.Linear], "use_orig_params": False}
-ignore_mod_cfg = {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False, "use_orig_params": False}
+act_ckpt_cfg = {"activation_checkpointing": [torch.nn.Linear], **DISABLE_USE_ORIG}
+ignore_mod_cfg = {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False, **DISABLE_USE_ORIG}
 ignore_params_cfg = {
     "test_ignored_parameters_names": ["layer.4.weight", "layer.4.bias"],
     "cpu_offload": False,
     "use_orig_params": True,
 }
-nouo = {"use_orig_params": False}
 
 cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
 if _TORCH_GREATER_EQUAL_2_1:  # TODO: below should no longer be necessary once the broader solution to PT #99545 lands
     cust_mp_args["cast_forward_inputs"] = True
-cust_fp16_mp = (
-    {"mixed_precision": MixedPrecision(**cust_mp_args), "use_orig_params": False} if _min_fsdp_available else {}
-)
+cust_fp16_mp = {"mixed_precision": MixedPrecision(**cust_mp_args), **DISABLE_USE_ORIG} if _min_fsdp_available else {}
 
 # trainer configuration alias
 max_epoch_5 = {"max_epochs": 5}
@@ -645,17 +645,17 @@ FTS_FSDP_TESTS = {
         (path_default_orig_eo_dyn, *nones(3)),
     ),
     "cust_awp_mwp_reinitlr_optim_no_use_orig": (
-        (base_model, awp_mwp_parity, True, 8, unwrap_7_mp, None, opt_inspect, None, nouo),
+        (base_model, awp_mwp_parity, True, 8, unwrap_7_mp, None, opt_inspect, None, DISABLE_USE_ORIG),
         "min2_0",
         (path_optimlr_reinit, ("Incompatible check",), None, lrs_path_optimlr_reinit),
     ),
     "cust_awp_mwp_parity_no_use_orig": (
-        (base_model, awp_mwp_parity, True, 0, unwrap_7_mp, *nones(3), nouo),
+        (base_model, awp_mwp_parity, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
         "min2_0",
         (path_default, *nones(3)),
     ),
     "override_csm_noprec_no_use_orig": (
-        (cust_model, None, False, 0, unwrap_7, *nones(3), nouo),
+        (cust_model, None, False, 0, unwrap_7, *nones(3), DISABLE_USE_ORIG),
         None,
         (path_default, *nones(3)),
     ),
@@ -680,17 +680,17 @@ FTS_FSDP_TESTS = {
         (path_default_orig, *nones(3)),
     ),
     "non_disjoint_phase_fsdp_params_no_use_orig": (
-        (base_model, warn_cust_awp, False, 0, wrap_5, *nones(3), nouo),
+        (base_model, warn_cust_awp, False, 0, wrap_5, *nones(3), DISABLE_USE_ORIG),
         None,
         ({}, None, "do not have disjoint FSDP-flattened parameter", None),
     ),
     "non_disjoint_phase_mods_no_use_orig": (
-        (cust_model, None, False, 1, unwrap_7, *nones(3), nouo),
+        (cust_model, None, False, 1, unwrap_7, *nones(3), DISABLE_USE_ORIG),
         None,
         ({}, None, "not have disjoint", None),
     ),
     "non_disjoint_excluded_ft_params_no_use_orig": (
-        (cust_model, None, False, 5, unwrap_0_1_7, *nones(3), nouo),
+        (cust_model, None, False, 5, unwrap_0_1_7, *nones(3), DISABLE_USE_ORIG),
         None,
         ({}, None, "parameters not included in", None),
     ),
@@ -700,7 +700,7 @@ FTS_FSDP_TESTS = {
         ({}, None, "already wrapped by FSDP", None),
     ),
     "no_fsdp_params_p0": (
-        (cust_model, None, False, 0, unwrap_5_7, *nones(3), nouo),
+        (cust_model, None, False, 0, unwrap_5_7, *nones(3), DISABLE_USE_ORIG),
         None,
         ({}, None, "one or more FSDP", None),
     ),
@@ -720,7 +720,7 @@ FTS_FSDP_TESTS = {
         ({}, None, "did not match any named modules", None),
     ),
     "cust_awp_prec_no_use_orig": (
-        (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), nouo),
+        (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
         None,
         (path_default, *nones(3)),
     ),
@@ -730,22 +730,22 @@ FTS_FSDP_TESTS = {
         (path_default, *nones(3)),
     ),
     "enforceP0_cust_awp_prec_no_use_orig": (
-        (enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), nouo),
+        (enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
         None,
         (path_default, *nones(3)),
     ),
     "batch_norm_auto_prec_no_use_orig": (
-        (BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(3), nouo),
+        (BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(3), DISABLE_USE_ORIG),
         "min2_0",
         (path_8_16, "Both mixed precision", *nones(2)),
     ),
     "shared_params_auto_prec_no_use_orig": (
-        (shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(2), nouo),
+        (shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(2), DISABLE_USE_ORIG),
         None,
         (path_5_10, ("Pruning explicitly specified",), *nones(2)),
     ),
     "override_csm_adam_noprec_no_use_orig": (
-        (csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, nouo),
+        (csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, DISABLE_USE_ORIG),
         None,
         (path_ext_7_14, *nones(3)),
     ),
@@ -838,7 +838,7 @@ def test_fsdp_multi_gpus_resume(tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, m
     model = model_cls(**model_cfg)
     ft_sched = fsdp_ft_schedules[ft_sched_idx]
     callbacks = callbacks_cfg(FinetuningScheduler, ft_sched, {}, {"patience": 1}, {"save_last": True})
-    strategy = FSDPStrategy(auto_wrap_policy=awp, use_orig_params=False, cpu_offload=CPUOffload(offload_params=True))
+    strategy = FSDPStrategy(auto_wrap_policy=awp, **DISABLE_USE_ORIG, cpu_offload=CPUOffload(offload_params=True))
     trainer = configure_trainer(tmpdir, strategy, callbacks, {"max_epochs": 3})
     trainer.ckpt_path = fsdp_ckpt
     trainer.fit(model)
