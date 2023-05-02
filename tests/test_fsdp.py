@@ -587,7 +587,9 @@ nouo = {"use_orig_params": False}
 cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
 if _TORCH_GREATER_EQUAL_2_1:  # TODO: below should no longer be necessary once the broader solution to PT #99545 lands
     cust_mp_args["cast_forward_inputs"] = True
-cust_fp16_mp = {"mixed_precision": MixedPrecision(**cust_mp_args), "use_orig_params": False}
+cust_fp16_mp = (
+    {"mixed_precision": MixedPrecision(**cust_mp_args), "use_orig_params": False} if _min_fsdp_available else {}
+)
 
 # trainer configuration alias
 max_epoch_5 = {"max_epochs": 5}
