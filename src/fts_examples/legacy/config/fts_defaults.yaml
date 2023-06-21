@@ -31,7 +31,7 @@ trainer:
   max_epochs: 1000
   accelerator: gpu
   strategy: ddp_find_unused_parameters_false
-  precision: 16-mixed
+  precision: 16-true
   logger:
     class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
