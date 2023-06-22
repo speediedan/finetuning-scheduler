@@ -31,7 +31,7 @@ jobs:
       matrix:
         # initially building only the latest supported configuration
         python_version: ["3.10"]
-        pytorch_version: ["2.0.0"]
+        pytorch_version: ["2.0.1"]
         cust_base: ["cu11.8-"]
         pl_version: ["2.0"]
     steps:
