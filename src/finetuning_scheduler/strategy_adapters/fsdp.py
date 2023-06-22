@@ -616,7 +616,9 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
         # apply wrappers to enable activation checkpointing if requested
         if self.pls_handle._activation_checkpointing:
-            _setup_activation_checkpointing(module=self.pl_module, layers=self.pls_handle._activation_checkpointing)
+            _setup_activation_checkpointing(
+                module=self.pl_module, layers=self.pls_handle._activation_checkpointing  # type: ignore[arg-type]
+            )
 
     def _after_configure_sharded_model(self) -> None:
         """Generate the parameter-level bi-directional translations the FTS FSDP adapter requires and then execute

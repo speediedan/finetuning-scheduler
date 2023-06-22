@@ -320,13 +320,13 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 self.restore_best_ckpt()
                 self.step_pg(
                     depth=self.curr_depth,
-                    optimizer=self.pl_module.trainer.optimizers[0],
+                    optimizer=self.pl_module.trainer.optimizers[0],  # type: ignore[arg-type]
                     pre_reinit_state=pre_reinit_state,
                 )
             else:
                 self.step_pg(
                     depth=self.curr_depth,
-                    optimizer=self.pl_module.trainer.optimizers[0],
+                    optimizer=self.pl_module.trainer.optimizers[0],  # type: ignore[arg-type]
                     depth_sync=False,
                     pre_reinit_state=pre_reinit_state,
                 )
@@ -474,7 +474,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"][opt_idx], dict(self.pl_module.named_parameters())
             )
             if self.strategy_adapter.using_sharded_optimizer:
-                ScheduleImplMixin._repartition_sharded_optim(optimizer)
+                ScheduleImplMixin._repartition_sharded_optim(optimizer)  # type: ignore[arg-type]
         # we're restoring everything but callbacks and loops, otherwise, checkpoint_connector.restore() could be used
         assert self.pl_module.trainer.checkpoint_callback is not None
         checkpoint_path = self.pl_module.trainer.checkpoint_callback.best_model_path  # type: ignore[attr-defined]
@@ -530,7 +530,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             bool: The reduced decision across all world processes.
         """
         decision = torch.tensor(int(decision), device=strategy.root_device)
-        decision = bool(strategy.reduce(decision, reduce_op=ReduceOp.SUM))
+        decision = bool(strategy.reduce(decision, reduce_op=ReduceOp.SUM))  # type:ignore[arg-type]
         return decision
 
     def _sync_es_state(self, trainer: "pl.Trainer") -> None:
@@ -798,7 +798,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             self._store(pl_module, opt_idx, num_saved_groups, current_param_groups)
 
     def on_before_zero_grad(
-        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", optimizer: ParamGroupAddable
+        self,
+        trainer: "pl.Trainer",
+        pl_module: "pl.LightningModule",
+        optimizer: ParamGroupAddable,  # type: ignore[override]
     ) -> None:
         """Afer the latest optimizer step, update the
         :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`, incrementing the

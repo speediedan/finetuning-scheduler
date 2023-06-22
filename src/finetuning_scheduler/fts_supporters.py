@@ -941,7 +941,7 @@ class ScheduleParsingMixin(ABC):
             Tuple[Dict, List]: The lr state to restore from the current lr scheduler and the most recent `lr`s for
                 parameter groups associated with the current phases's optimizer.
         """
-        curr_lr_state = {}
+        curr_lr_state: Dict = {}
         if trainer.lr_scheduler_configs:
             curr_lr_state = deepcopy(trainer.lr_scheduler_configs[0].scheduler.state_dict())
         prev_optimizer_lrs = copy([group["lr"] for group in trainer.strategy.optimizers[0].param_groups])
@@ -962,18 +962,20 @@ class ScheduleParsingMixin(ABC):
         prev_optim_repr = repr(trainer.strategy.optimizers[0])
         optimizer_class = self._import_reinit_class(optimizer_init, reinit_target="optimizer")
         reinit_pgs = self._reinit_phase0_pgs(thawed_pl=init_params)
-        new_optimizer_handle = optimizer_class(reinit_pgs, **optimizer_init.get("init_args", {}))
+        new_optimizer_handle = optimizer_class(
+            reinit_pgs, **optimizer_init.get("init_args", {})  # type: ignore[operator, arg-type]
+        )
         # If the user or optimizer doesn't set `initial_lr` keys, add them based on the initial lr values.
         # The latest LR state will still be set in subsequent phases, but this allows subsequent lr scheduler
         # reinitializations to access an `initial_lr` for the existing optimizer if desired (important for consistency
         # with lr scheduler-only reinitializations).
-        for group in new_optimizer_handle.param_groups:
+        for group in new_optimizer_handle.param_groups:  # type: ignore[union-attr]
             group["initial_lr"] = group.get("initial_lr", group["lr"])
-        trainer.strategy.optimizers = [new_optimizer_handle]
+        trainer.strategy.optimizers = [new_optimizer_handle]  # type: ignore[list-item]
         if trainer.lr_scheduler_configs:
             trainer.lr_scheduler_configs[0].scheduler.optimizer = new_optimizer_handle
         self._maybe_trace_reinit("optimizer", prev_optim_repr, repr(trainer.strategy.optimizers[0]))
-        return new_optimizer_handle
+        return new_optimizer_handle  # type:ignore[return-value]
 
     def reinit_lr_scheduler(self, new_lr_scheduler: Dict, trainer: pl.Trainer, optimizer: ParamGroupAddable) -> None:
         """Reinitialize the learning rate scheduler, using a validated learning rate scheduler configuration and
@@ -1007,11 +1009,14 @@ class ScheduleParsingMixin(ABC):
             if reset_init_pg_lrs:
                 param_group["initial_lr"] = lr
         if "pl_lrs_cfg" in new_lr_scheduler.keys():
-            new_lr_scheduler["pl_lrs_cfg"] = self._update_pl_lrs(new_lr_scheduler["pl_lrs_cfg"], lrs_class=lrs_class)
+            new_lr_scheduler["pl_lrs_cfg"] = self._update_pl_lrs(
+                new_lr_scheduler["pl_lrs_cfg"], lrs_class=lrs_class  # type:ignore[arg-type]
+            )
+        assert callable(lrs_class)
         new_lrs_config = LRSchedulerConfig(
             scheduler=lrs_class(
-                optimizer=optimizer, **lr_scheduler_init.get("init_args", {})
-            ),  # type: ignore[arg-type]
+                optimizer=optimizer, **lr_scheduler_init.get("init_args", {})  # type: ignore[arg-type]
+            ),
             **new_lr_scheduler.get("pl_lrs_cfg", {}),
         )
         trainer.strategy.lr_scheduler_configs = [new_lrs_config]
@@ -1090,7 +1095,7 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: If the provided optimizer class is known to be currently unsupported in the
                 context of optimizer reinitialization.
         """
-        if issubclass(optim_class, ZeroRedundancyOptimizer):
+        if issubclass(optim_class, ZeroRedundancyOptimizer):  # type: ignore[arg-type]
             error_msg = (
                 f"The provided optimizer ({optim_class}) is not currently supported by FinetuningScheduler in the"
                 " context of optimizer reinitialization. Please use a currently supported torch optimizer (or subclass"
@@ -1115,6 +1120,7 @@ class ScheduleParsingMixin(ABC):
         Returns:
             Union[FTSLRSchedulerType, ParamGroupAddable]: The class to reinitialize.
         """
+        # TODO: refactor this function to enable type narrowing while continuing to share relevant code paths
         try:
             class_module, class_name = reinit_cfg["class_path"].rsplit(".", 1)
             module = __import__(class_module, fromlist=[class_name])
@@ -1183,7 +1189,10 @@ class ScheduleParsingMixin(ABC):
         self._is_supported_reinit_optimizer(optimizer_class)
         test_optimizer_init = copy(optimizer_init.get("init_args", {}))
         try:
-            test_optimizer = optimizer_class(ScheduleParsingMixin.SANITY_CHK_ITERABLE, **test_optimizer_init)
+            assert callable(optimizer_class)
+            test_optimizer = optimizer_class(
+                ScheduleParsingMixin.SANITY_CHK_ITERABLE, **test_optimizer_init  # type: ignore[arg-type]
+            )
         except Exception as err:
             error_msg = (
                 "Could not configure the specified optimizer class using the `init_args` "
@@ -1221,7 +1230,9 @@ class ScheduleParsingMixin(ABC):
         invalid_min_lr = (
             True if min_lr_param and (isinstance(min_lr_param, list) or isinstance(min_lr_param, tuple)) else False
         )
-        reinit_rlrop = is_implicit_mode and issubclass(lrs_class, torch.optim.lr_scheduler.ReduceLROnPlateau)
+        reinit_rlrop = is_implicit_mode and issubclass(
+            lrs_class, torch.optim.lr_scheduler.ReduceLROnPlateau  # type: ignore[arg-type]
+        )
         if reinit_rlrop and invalid_min_lr:
             raise MisconfigurationException(
                 "In the lr scheduler configuration passed via `reinit_lr_cfg` (i.e. implicit mode training)"
@@ -1232,6 +1243,7 @@ class ScheduleParsingMixin(ABC):
         if min_lr_param:
             del test_lr_init["min_lr"]  # our mock optimizer will not have any param groups
         try:
+            assert callable(lrs_class)
             testlr = lrs_class(optimizer=_MockOptimizer(), **test_lr_init)
         except Exception as err:
             error_msg = (
