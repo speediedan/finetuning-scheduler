@@ -37,6 +37,7 @@ EXPECTED_WARNS = [
     "is smaller than the logging interval",
     "sentencepiece tokenizer that you are converting",
     "distutils Version classes are deprecated",
+    "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
 ]
 MIN_VERSION_WARNS = "1.11"
 MAX_VERSION_WARNS = "2.0"

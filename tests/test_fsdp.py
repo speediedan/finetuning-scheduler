@@ -72,6 +72,7 @@ additional_fsdp_warns = [
     "Please use torch.distributed.reduce_scatter_tensor",  # can be removed once PyTorch stops using internally,
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
     "Deallocating Tensor that still has live",  # TODO: investigate the occasional occurance of this warning
+    "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS

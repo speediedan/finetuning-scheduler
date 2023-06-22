@@ -1214,6 +1214,7 @@ EXPECTED_WARNS = [
     "The dirpath has changed from",
     "Torchmetrics v0.9",  # temporarily allow until _ResultMetric updated
     "distutils Version classes are deprecated",  # temporarily allow until PL utilities/migration/utils.py updated
+    "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
 ]
 EXPECTED_TRAIN_CHK_WARNS = ["could not find the monitored key", "callbacks used to create"]
 EXPECTED_DIRPATH = "exists and is not empty"
