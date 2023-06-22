@@ -280,7 +280,10 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
             assert isinstance(self.layer, torch.nn.Sequential)
         if self.precision_key == "auto_16":
             assert isinstance(self.trainer.strategy.precision_plugin, FSDPMixedPrecisionPlugin)
-            precision = torch.float16 if self.trainer.precision == "16-mixed" else torch.bfloat16
+            # TODO: hack, fully test new mp semantics once https://github.com/Lightning-AI/lightning/pull/17807 merged
+            reduce_dtype = buffer_dtype = param_dtype = torch.float16
+            if self.trainer.precision == "16-mixed":
+                param_dtype = torch.float32
         # ensure our ignored module is not wrapped
         for i in self.fsdp_mask["unwrapped_mods"]:
             assert not isinstance(self.layer[i], FullyShardedDataParallel)
@@ -293,9 +296,9 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
                     assert self.layer[i].mixed_precision.reduce_dtype is None
                     assert self.layer[i].mixed_precision.buffer_dtype is None
                 else:
-                    assert self.layer[i].mixed_precision.param_dtype == precision
-                    assert self.layer[i].mixed_precision.reduce_dtype == precision
-                    assert self.layer[i].mixed_precision.buffer_dtype == precision
+                    assert self.layer[i].mixed_precision.param_dtype == param_dtype
+                    assert self.layer[i].mixed_precision.reduce_dtype == reduce_dtype
+                    assert self.layer[i].mixed_precision.buffer_dtype == buffer_dtype
 
 
 class NonDynamicLossAdamFSDPModel(FTSBaseFSDPModel):
@@ -599,6 +602,7 @@ lrs_path_optimlr_reinit = {0: (0.1,), 1: (0.00021, 1e-06), 2: (0.002, 1e-06, 3e-
 
 EXPECTED_FSDP_FTS_RESULTS = {
     "cust_awp_noprec": (path_default, *nones(3)),
+    "cust_awp_noprec_pt1x": (path_default, *nones(3)),
     "cust_awp_noprec_use_orig": (path_default_orig, *nones(3)),
     "cust_awp_noprec_dynamo_use_orig": (path_default_orig_eo_dyn, *nones(3)),
     "cust_awp_mwp_reinitlr_optim": (path_optimlr_reinit, ("Incompatible check",), None, lrs_path_optimlr_reinit),
@@ -616,7 +620,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "warn_unsupp_nodecay": ({}, "will now be unset", *nones(2)),
     "unmatched_awp_overrides": ({}, None, "did not match any named modules", None),
     "cust_awp_prec": (path_default, *nones(3)),
-    "cust_awp_prec_pt1x": (path_default, *nones(3)),
+    # "cust_awp_prec_pt1x": (path_default, *nones(3)),
     "enforceP0_cust_awp_prec": (path_default, *nones(3)),
     # "batch_norm_auto_prec": (path_8_16, "Both mixed precision", None),  # _dynamo/allowed_functions.py suppresses
     "batch_norm_auto_prec": (path_8_16, *nones(3)),
@@ -635,6 +639,9 @@ EXPECTED_FSDP_FTS_RESULTS = {
           trainer_cfg, strategy_cfg",
     [
         ("cust_awp_noprec", base_model, cust_awp, False, 0, unwrap_7, *nones(3), act_ckpt_cfg),
+        pytest.param(
+            "cust_awp_noprec_pt1x", base_model, cust_awp, False, 0, unwrap_7, *nones(4), marks=RunIf(max_torch="2.0.0")
+        ),
         pytest.param(
             "cust_awp_noprec_use_orig",
             base_model,
@@ -710,23 +717,76 @@ EXPECTED_FSDP_FTS_RESULTS = {
         ),
         ("no_fsdp_params_p0", cust_model, None, False, 0, unwrap_5_7, *nones(4)),
         ("warn_unsupp_nodecay", nodecay_model, cust_awp, False, 0, unwrap_7, *nones(4)),
-        ("unmatched_awp_overrides", base_model, warn_cust_awp, True, 0, wrap_5_7, awp_5_9, *nones(3)),
-        ("cust_awp_prec", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
         pytest.param(
-            "cust_awp_prec_pt1x", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4), marks=RunIf(max_torch="2.0.0")
+            "unmatched_awp_overrides",
+            base_model,
+            warn_cust_awp,
+            True,
+            0,
+            wrap_5_7,
+            awp_5_9,
+            *nones(3),
+            marks=RunIf(min_torch="2.0.0"),
         ),
-        ("enforceP0_cust_awp_prec", enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
+        pytest.param(
+            "cust_awp_prec", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4), marks=RunIf(min_torch="2.0.0")
+        ),
+        # pytest.param(
+        #     "cust_awp_prec_pt1x", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4),
+        #     marks=RunIf(max_torch="2.0.0")
+        # ),
+        pytest.param(
+            "enforceP0_cust_awp_prec",
+            enforceP0_model,
+            cust_awp,
+            True,
+            0,
+            unwrap_7_mp,
+            *nones(4),
+            marks=RunIf(min_torch="2.0.0"),
+        ),
         pytest.param(
             "batch_norm_auto_prec", BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(4), marks=RunIf(min_torch="2.0.0")
         ),
-        ("shared_params_auto_prec", shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(3)),
+        pytest.param(
+            "shared_params_auto_prec",
+            shared_model,
+            cust_awp,
+            True,
+            3,
+            unwrap_7_mp,
+            awp_1,
+            *nones(3),
+            marks=RunIf(min_torch="2.0.0"),
+        ),
         ("override_csm_adam_noprec", csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, None),
-        ("cust_awp_overrides_prec", base_model, cust_awp, True, 0, wrap_all_mp, awp_7, *nones(3)),
-        ("cust_awp_overrides_prec_ext", ext_model, cust_ext_awp, True, 6, wrap_ext_mp, awp_7_8, *nones(3)),
+        pytest.param(
+            "cust_awp_overrides_prec",
+            base_model,
+            cust_awp,
+            True,
+            0,
+            wrap_all_mp,
+            awp_7,
+            *nones(3),
+            marks=RunIf(min_torch="2.0.0"),
+        ),
+        pytest.param(
+            "cust_awp_overrides_prec_ext",
+            ext_model,
+            cust_ext_awp,
+            True,
+            6,
+            wrap_ext_mp,
+            awp_7_8,
+            *nones(3),
+            marks=RunIf(min_torch="2.0.0"),
+        ),
         ("warn_ignore_awp_override", cust_model, None, False, 0, unwrap_7, awp_7, *nones(3)),
     ],
     ids=[
         "cust_awp_noprec",
+        "cust_awp_noprec_pt1x",
         "cust_awp_noprec_use_orig",
         "cust_awp_noprec_dynamo_use_orig",
         "cust_awp_mwp_reinitlr_optim",
@@ -743,7 +803,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         "warn_unsupp_nodecay",
         "unmatched_awp_overrides",
         "cust_awp_prec",
-        "cust_awp_prec_pt1x",
+        # "cust_awp_prec_pt1x",
         "enforceP0_cust_awp_prec",
         "batch_norm_auto_prec",
         "shared_params_auto_prec",
