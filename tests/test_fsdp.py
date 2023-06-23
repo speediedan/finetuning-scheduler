@@ -79,6 +79,7 @@ additional_fsdp_warns = [
     "Please use torch.distributed.reduce_scatter_tensor",  # can be removed once PyTorch stops using internally,
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
     "Deallocating Tensor that still has live",  # TODO: investigate the occasional occurance of this warning
+    "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
@@ -504,6 +505,9 @@ enforceP0_model = FTSEnforceP0FSDPModel
 # model configuration aliases
 fp16_cfg = {"precision_key": "auto_16"}
 unwrap_7 = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}}
+wrap_all_debug = {
+    "fsdp_mask": {"wrapped_mods": list(range(6)) + [7], "unwrapped_mods": []}
+}  # TODO: remove after debugging
 unwrap_7_dyn = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "use_dynamo": True}
 unwrap_4_7 = {"fsdp_mask": {"wrapped_mods": [0, 1, 2, 3, 5], "unwrapped_mods": [4, 7]}}
 unwrap_5_7 = {"fsdp_mask": {"wrapped_mods": list(range(5)), "unwrapped_mods": [5, 7]}}
@@ -580,7 +584,7 @@ awp_7_8 = {"awp_overrides": ["l.*yer.8", "layer.7"]}
 # FSDP strategy configuration aliases
 act_ckpt_cfg = {"activation_checkpointing": [torch.nn.Linear], **DISABLE_USE_ORIG}
 ignore_mod_cfg = {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False, **DISABLE_USE_ORIG}
-ignore_params_cfg = {
+ignore_states_cfg = {
     "test_ignored_parameters_names": ["layer.4.weight", "layer.4.bias"],
     "cpu_offload": False,
     "use_orig_params": True,
@@ -589,6 +593,7 @@ ignore_params_cfg = {
 cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
 if _TORCH_GREATER_EQUAL_2_1:  # TODO: below should no longer be necessary once the broader solution to PT #99545 lands
     cust_mp_args["cast_forward_inputs"] = True
+    cust_mp_args["cast_root_forward_inputs"] = False  # temporary fix while waiting for broader solution to #99545
 cust_fp16_mp = {"mixed_precision": MixedPrecision(**cust_mp_args), **DISABLE_USE_ORIG} if _min_fsdp_available else {}
 
 # trainer configuration alias
@@ -624,6 +629,11 @@ FTS_FSDP_TESTS = {
         None,
         (path_default, *nones(3)),
     ),
+    # "cust_awp_noprec_no_use_orig": (  ### DEBUGGING post backward hook scenario
+    #     (base_model, cust_awp, False, 0, wrap_all_debug, awp_7, *nones(2), act_ckpt_cfg),
+    #     None,
+    #     (path_default, *nones(3)),
+    # ),
     "cust_awp_noprec": (
         (base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
         "min2_0",
@@ -647,12 +657,20 @@ FTS_FSDP_TESTS = {
     "cust_awp_mwp_reinitlr_optim_no_use_orig": (
         (base_model, awp_mwp_parity, True, 8, unwrap_7_mp, None, opt_inspect, None, DISABLE_USE_ORIG),
         "min2_0",
-        (path_optimlr_reinit, ("Incompatible check",), None, lrs_path_optimlr_reinit),
+        (
+            path_optimlr_reinit,
+            (
+                "Incompatible check",
+                "Both mixed precision",
+            ),
+            None,
+            lrs_path_optimlr_reinit,
+        ),
     ),
     "cust_awp_mwp_parity_no_use_orig": (
         (base_model, awp_mwp_parity, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
         "min2_0",
-        (path_default, *nones(3)),
+        (path_default, ("Both mixed precision",), *nones(2)),
     ),
     "override_csm_noprec_no_use_orig": (
         (cust_model, None, False, 0, unwrap_7, *nones(3), DISABLE_USE_ORIG),
@@ -665,8 +683,8 @@ FTS_FSDP_TESTS = {
         (path_8_14, *nones(3)),
     ),  # TODO: once PyTorch deprecates ``ignored_modules``, check for the warning with this test
     "cust_awp_nop_ignore_p_no_ofld": (
-        (base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), ignore_params_cfg),
-        "min2_0",
+        (base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), ignore_states_cfg),
+        "min2_1",
         (path_ignore_p_uo, *nones(3)),
     ),
     "unsupp_torch_version": (
@@ -707,7 +725,7 @@ FTS_FSDP_TESTS = {
     "no_nonzero_local_shards_p0": (
         (base_model, warn_cust_awp, True, 0, outer_wrap_only, *nones(4)),
         "min2_1",
-        (path_default_orig, *nones(3)),
+        (path_default_orig, ("Both mixed precision",), *nones(2)),
     ),  # exercise shard allocation DEBUG diagnostics
     "warn_unsupp_nodecay": (
         (nodecay_model, cust_awp, False, 0, unwrap_7, *nones(4)),
@@ -722,7 +740,7 @@ FTS_FSDP_TESTS = {
     "cust_awp_prec_no_use_orig": (
         (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
         None,
-        (path_default, *nones(3)),
+        (path_default, ("Both mixed precision",), *nones(2)),
     ),
     "cust_awp_prec_pt1x": (
         (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
@@ -732,17 +750,25 @@ FTS_FSDP_TESTS = {
     "enforceP0_cust_awp_prec_no_use_orig": (
         (enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
         None,
-        (path_default, *nones(3)),
+        (path_default, ("Both mixed precision",), *nones(2)),
     ),
     "batch_norm_auto_prec_no_use_orig": (
         (BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(3), DISABLE_USE_ORIG),
         "min2_0",
-        (path_8_16, "Both mixed precision", *nones(2)),
+        (path_8_16, ("Both mixed precision",), *nones(2)),
+        # (path_8_16, *nones(3)), temporarily remove until reinstalling pt nightly?
     ),
     "shared_params_auto_prec_no_use_orig": (
         (shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(2), DISABLE_USE_ORIG),
         None,
-        (path_5_10, ("Pruning explicitly specified",), *nones(2)),
+        (
+            path_5_10,
+            (
+                "Pruning explicitly specified",
+                "Both mixed precision",
+            ),
+            *nones(2),
+        ),
     ),
     "override_csm_adam_noprec_no_use_orig": (
         (csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, DISABLE_USE_ORIG),
@@ -752,12 +778,12 @@ FTS_FSDP_TESTS = {
     "cust_awp_overrides_prec_no_use_orig": (
         (base_model, cust_awp, True, 0, wrap_all_mp, awp_7, *nones(2), cust_fp16_mp),
         None,
-        (path_default, *nones(3)),
+        (path_default, ("Both mixed precision",), *nones(2)),
     ),
     "cust_awp_overrides_prec_ext_no_use_orig": (
         (ext_model, cust_ext_awp, True, 6, wrap_ext_mp, awp_7_8, *nones(2), cust_fp16_mp),
         None,
-        (path_ext_8_16, *nones(3)),
+        (path_ext_8_16, ("Both mixed precision",), *nones(2)),
     ),
     "warn_ignore_awp_override": (
         (cust_model, None, False, 0, unwrap_7, awp_7, *nones(3)),
@@ -903,7 +929,7 @@ def map_component_cfgs(model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precis
 
 def load_ignore_directives(strategy_cfg, model):
     if strategy_cfg.get("test_ignored_parameters_names", None):
-        strategy_cfg["ignored_parameters"] = [
+        strategy_cfg["ignored_states"] = [
             model.get_parameter(n) for n in strategy_cfg.pop("test_ignored_parameters_names")
         ]
     elif strategy_cfg.get("test_ignored_modules_names", None):
