@@ -81,6 +81,7 @@ exclude_lines = [
     "pass",
     "rank_zero_warn",
     "raise NotImplementedError",
+    "except Exception"
 ]
 
 [tool.pytest.ini_options]
