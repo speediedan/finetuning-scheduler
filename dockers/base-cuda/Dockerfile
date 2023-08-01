@@ -87,8 +87,9 @@ RUN \
     else \
         # or target a specific cuda build of latest stable packages
         # pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
+        pip install --pre torch==2.1.0.dev20230727  torchvision==0.16.0.dev20230727 -f https://download.pytorch.org/whl/nightly/cu118/torch_nightly.html; \
         #pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu118; \
-        pip install --pre torch torchvision -f https://download.pytorch.org/whl/nightly/cu118/torch_nightly.html; \
+        #pip install --pre torch torchvision -f https://download.pytorch.org/whl/nightly/cu118/torch_nightly.html; \
         # pip install --pre torch torchvision -f https://download.pytorch.org/whl/test/cu118/torch_test.html; \
     fi && \
     # Install all requirements
