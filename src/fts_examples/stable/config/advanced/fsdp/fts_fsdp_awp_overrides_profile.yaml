@@ -25,8 +25,13 @@ trainer:
     class_path: lightning.pytorch.strategies.FSDPStrategy
     init_args:
       cpu_offload: false
-      activation_checkpointing:
-      - transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Layer
+      # TODO: this currently may encounter jsonargparse bug https://github.com/omni-us/jsonargparse/issues/337
+      activation_checkpointing_policy:
+        class_path: torch.distributed.fsdp.wrap.ModuleWrapPolicy
+        init_args:
+          # comment below to generate debugging demo
+          module_classes: !!set
+            ? transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Layer
       auto_wrap_policy:
         class_path: torch.distributed.fsdp.wrap.ModuleWrapPolicy
         init_args:
