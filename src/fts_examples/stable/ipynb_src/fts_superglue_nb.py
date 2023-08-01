@@ -535,7 +535,7 @@ def train() -> None:
         enable_progress_bar=enable_progress_bar,
         max_epochs=1,
         limit_train_batches=2,
-        precision="16-true",
+        precision="16-mixed",
         accelerator="auto",
         devices=1,
         callbacks=callbacks,
