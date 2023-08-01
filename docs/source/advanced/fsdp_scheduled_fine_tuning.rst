@@ -14,7 +14,7 @@ FSDP training.
 
 As with standard FSDP usage, FSDP wrapping of a :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
 can be performed either by providing an ``auto_wrap_policy`` or (for maximal control) by overriding the
-``configure_sharded_model`` method of :external+pl:class:`~lightning.pytorch.core.module.LightningModule` and
+``configure_model`` method of :external+pl:class:`~lightning.pytorch.core.module.LightningModule` and
 manually wrapping the module.
 
 This tutorial walks through the configuration of an example multi-phase, scheduled FSDP fine-tuning training session and
@@ -129,7 +129,7 @@ There are a number of usage contexts that might motivate moving beyond the simpl
      - Relevant Features & Info
    * - Optimize resource utilization (whether memory, compute or network)
      - :ref:`activation checkpointing<activation-ckpt-and-cpu-offload>`, :ref:`cpu offload<activation-ckpt-and-cpu-offload>`, :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides`
-   * - More granular control over module wrapping policy w/o manually writing a "configure_sharded_model" method
+   * - More granular control over module wrapping policy w/o manually writing a "configure_model" method
      - :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides`
    * - A desire to use FSDP in the default "use_orig_params=False" mode
      - `See PyTorch documentation for possible issues <https://pytorch.org/docs/master/fsdp.html?highlight=use_orig_params>`_
@@ -231,7 +231,7 @@ configuration option to FTS like so:
 .. _activation-ckpt-and-cpu-offload:
 
 Finally, we configure the FSDP training strategy as desired per usual, for instance, specifying
-``activation_checkpointing`` and ``cpu_offload`` configurations in addition the ``auto_wrap_policy`` we defined above:
+``activation_checkpointing_policy`` and ``cpu_offload`` configurations in addition the ``auto_wrap_policy`` we defined above:
 
 .. code-block:: yaml
   :linenos:
@@ -243,8 +243,8 @@ Finally, we configure the FSDP training strategy as desired per usual, for insta
       class_path: lightning.pytorch.strategies.FSDPStrategy
       init_args:
         cpu_offload: false
-        activation_checkpointing:
-        - transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Layer
+        activation_checkpointing_policy: !!set
+          ? transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Layer
         auto_wrap_policy:
           class_path: torch.distributed.fsdp.wrap.ModuleWrapPolicy
           init_args:
@@ -303,7 +303,7 @@ parameters in phase ``2``, violating of our specified fine-tuning schedule.
 To avoid violating the phase-wise disjointness constraint, we add ``DebertaV2Encoder`` to our ``auto_wrap_policy``.
 While not technically required, we add ``DebertaV2Embeddings`` separately as well for future experimental flexibility.
 
-As always, if needed, one can alternatively override ``configure_sharded_model`` and manually wrap a given
+As always, if needed, one can alternatively override ``configure_model`` and manually wrap a given
 :external+pl:class:`~lightning.pytorch.core.module.LightningModule` to align with a desired fine-tuning schedule.
 
 .. warning::

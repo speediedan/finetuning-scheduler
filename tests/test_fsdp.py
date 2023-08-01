@@ -18,11 +18,7 @@ from unittest import mock
 
 import pytest
 import torch
-from lightning.fabric.utilities.imports import (
-    _TORCH_GREATER_EQUAL_1_13,
-    _TORCH_GREATER_EQUAL_2_0,
-    _TORCH_GREATER_EQUAL_2_1,
-)
+from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13, _TORCH_GREATER_EQUAL_2_0
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.plugins.precision.fsdp import FSDPMixedPrecisionPlugin
 from lightning.pytorch.strategies import FSDPStrategy
@@ -93,7 +89,7 @@ FSDP_DYNAMO_EXPECTED_WARNS = [
 ##########################
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     """Generates a default fine-tuning schedule for 'implicit' testing, a modified one for 'explicit' mode and an
     epoch-driven transitions only one for epoch_transitions_only testing."""
@@ -194,14 +190,15 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     )
 
 
-@pytest.fixture(scope="function")
-def fsdp_ckpt(tmpdir_factory, fsdp_ft_schedules) -> Dict:
+@pytest.fixture(scope="module", params=[True, False], ids=["use_orig", "no_use_orig"])
+def fsdp_ckpt(tmpdir_factory, fsdp_ft_schedules, request) -> Tuple[Dict, bool]:
     """A fixture that generates a checkpoint with a sharded model."""
     seed_everything(42)
     test_model_cfg = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}}
+    use_orig_kwargs = DISABLE_USE_ORIG if not request.param else {}
     strategy = FSDPStrategy(
         auto_wrap_policy=custom_auto_wrap_policy,
-        **DISABLE_USE_ORIG,
+        **use_orig_kwargs,
         cpu_offload=CPUOffload(offload_params=True),
     )
     callbacks = [
@@ -219,7 +216,7 @@ def fsdp_ckpt(tmpdir_factory, fsdp_ft_schedules) -> Dict:
         max_epochs=1,
     )
     trainer.fit(model)
-    return trainer.checkpoint_callback.best_model_path
+    return trainer.checkpoint_callback.best_model_path, request.param
 
 
 ########################
@@ -249,7 +246,6 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
 
     def configure_optimizers(self):
         parameters = filter(lambda x: x.requires_grad, self.parameters())
-        # return torch.optim.SGD(parameters, lr=0.1)
         optimizer = torch.optim.SGD(parameters, lr=0.1)
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
         return [optimizer], [lr_scheduler]
@@ -289,7 +285,11 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
             assert isinstance(self.layer, torch.nn.Sequential)
         if self.precision_key == "auto_16":
             assert isinstance(self.trainer.strategy.precision_plugin, FSDPMixedPrecisionPlugin)
-            precision = torch.float16 if self.trainer.precision == "16-true" else torch.bfloat16
+            # temp patch while waiting for https://github.com/Lightning-AI/lightning/issues/17609
+            red_buf_precision = torch.float16 if self.trainer.precision == "16-mixed" else torch.bfloat16
+            param_precision = torch.float32 if self.trainer.precision == "16-mixed" else torch.bfloat16
+            # TODO: renable `16-true` testing after #17609
+            # precision = torch.float16 if self.trainer.precision == "16-true" else torch.bfloat16
         # ensure our ignored module is not wrapped
         for i in self.fsdp_mask["unwrapped_mods"]:
             assert not isinstance(self.layer[i], FullyShardedDataParallel)
@@ -302,9 +302,9 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
                     assert self.layer[i].mixed_precision.reduce_dtype is None
                     assert self.layer[i].mixed_precision.buffer_dtype is None
                 else:
-                    assert self.layer[i].mixed_precision.param_dtype == precision
-                    assert self.layer[i].mixed_precision.reduce_dtype == precision
-                    assert self.layer[i].mixed_precision.buffer_dtype == precision
+                    assert self.layer[i].mixed_precision.param_dtype == param_precision
+                    assert self.layer[i].mixed_precision.reduce_dtype == red_buf_precision
+                    assert self.layer[i].mixed_precision.buffer_dtype == red_buf_precision
 
 
 class NonDynamicLossAdamFSDPModel(FTSBaseFSDPModel):
@@ -333,11 +333,11 @@ class NonDynamicLossAdamFSDPModel(FTSBaseFSDPModel):
         return [optimizer], [lr_scheduler]
 
 
-class FTSCsmFSDPModel(FTSBaseFSDPModel):
+class FTSCmFSDPModel(FTSBaseFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def configure_sharded_model(self) -> None:
+    def configure_model(self) -> None:
         # the model is already wrapped with FSDP: no need to wrap again!
         if isinstance(self.layer, FullyShardedDataParallel):
             return
@@ -381,7 +381,7 @@ class FTSEnforceP0FSDPModel(FTSBaseFSDPModel):
         return [optimizer], [lr_scheduler]
 
 
-class FTSCsmAdamFSDPModel(FTSBaseFSDPModel):
+class FTSCmAdamFSDPModel(FTSBaseFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -391,7 +391,7 @@ class FTSCsmAdamFSDPModel(FTSBaseFSDPModel):
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
         return [optimizer], [lr_scheduler]
 
-    def configure_sharded_model(self) -> None:
+    def configure_model(self) -> None:
         # the model is already wrapped with FSDP: no need to wrap again!
         if isinstance(self.layer, FullyShardedDataParallel):
             return
@@ -493,21 +493,18 @@ class FSDPOptInspectFTS(FSDPTestFinetuningScheduler):
 # model aliases
 base_model = FTSBaseFSDPModel
 nond_loss_adam_model = NonDynamicLossAdamFSDPModel
-cust_model = FTSCsmFSDPModel
+cust_model = FTSCmFSDPModel
 wrapped_model = AlreadyWrappedFSDPModel
 nodecay_model = FTSNoDecayFSDPModel
 BN_model = FTSBatchNormFSDPModel
 shared_model = FTSSharedParamFSDPModel
-csm_adam_model = FTSCsmAdamFSDPModel
+cm_adam_model = FTSCmAdamFSDPModel
 ext_model = FTSExtFSDPModel
 enforceP0_model = FTSEnforceP0FSDPModel
 
 # model configuration aliases
 fp16_cfg = {"precision_key": "auto_16"}
 unwrap_7 = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}}
-wrap_all_debug = {
-    "fsdp_mask": {"wrapped_mods": list(range(6)) + [7], "unwrapped_mods": []}
-}  # TODO: remove after debugging
 unwrap_7_dyn = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "use_dynamo": True}
 unwrap_4_7 = {"fsdp_mask": {"wrapped_mods": [0, 1, 2, 3, 5], "unwrapped_mods": [4, 7]}}
 unwrap_5_7 = {"fsdp_mask": {"wrapped_mods": list(range(5)), "unwrapped_mods": [5, 7]}}
@@ -582,18 +579,16 @@ awp_7 = {"awp_overrides": ["layer.7"]}
 awp_7_8 = {"awp_overrides": ["l.*yer.8", "layer.7"]}
 
 # FSDP strategy configuration aliases
-act_ckpt_cfg = {"activation_checkpointing": [torch.nn.Linear], **DISABLE_USE_ORIG}
+act_ckpt_cfg = {"activation_checkpointing_policy": {torch.nn.Linear}, **DISABLE_USE_ORIG}
 ignore_mod_cfg = {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False, **DISABLE_USE_ORIG}
 ignore_states_cfg = {
     "test_ignored_parameters_names": ["layer.4.weight", "layer.4.bias"],
     "cpu_offload": False,
     "use_orig_params": True,
 }
-
-cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
-if _TORCH_GREATER_EQUAL_2_1:  # TODO: below should no longer be necessary once the broader solution to PT #99545 lands
-    cust_mp_args["cast_forward_inputs"] = True
-    cust_mp_args["cast_root_forward_inputs"] = False  # temporary fix while waiting for broader solution to #99545
+# TODO: re-enable uniform torch.float16 once FSDP `16-true` fully supported
+cust_mp_args = {"param_dtype": torch.float32, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
+# cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
 cust_fp16_mp = {"mixed_precision": MixedPrecision(**cust_mp_args), **DISABLE_USE_ORIG} if _min_fsdp_available else {}
 
 # trainer configuration alias
@@ -626,14 +621,9 @@ lrs_path_optimlr_reinit = {0: (0.1,), 1: (0.00021, 1e-06), 2: (0.002, 1e-06, 3e-
 FTS_FSDP_TESTS = {
     "cust_awp_noprec_no_use_orig": (
         (base_model, cust_awp, False, 0, unwrap_7, *nones(3), act_ckpt_cfg),
-        None,
+        "min2_1",
         (path_default, *nones(3)),
     ),
-    # "cust_awp_noprec_no_use_orig": (  ### DEBUGGING post backward hook scenario
-    #     (base_model, cust_awp, False, 0, wrap_all_debug, awp_7, *nones(2), act_ckpt_cfg),
-    #     None,
-    #     (path_default, *nones(3)),
-    # ),
     "cust_awp_noprec": (
         (base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
         "min2_0",
@@ -659,10 +649,7 @@ FTS_FSDP_TESTS = {
         "min2_0",
         (
             path_optimlr_reinit,
-            (
-                "Incompatible check",
-                "Both mixed precision",
-            ),
+            ("Incompatible check",),
             None,
             lrs_path_optimlr_reinit,
         ),
@@ -670,16 +657,16 @@ FTS_FSDP_TESTS = {
     "cust_awp_mwp_parity_no_use_orig": (
         (base_model, awp_mwp_parity, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
         "min2_0",
-        (path_default, ("Both mixed precision",), *nones(2)),
+        (path_default, *nones(3)),
     ),
-    "override_csm_noprec_no_use_orig": (
+    "override_cm_noprec_no_use_orig": (
         (cust_model, None, False, 0, unwrap_7, *nones(3), DISABLE_USE_ORIG),
-        None,
+        "min2_0",
         (path_default, *nones(3)),
     ),
     "cust_awp_nop_ignore_m_no_ofld_no_use_orig": (
         (base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), ignore_mod_cfg),
-        None,
+        "min2_0",
         (path_8_14, *nones(3)),
     ),  # TODO: once PyTorch deprecates ``ignored_modules``, check for the warning with this test
     "cust_awp_nop_ignore_p_no_ofld": (
@@ -689,7 +676,7 @@ FTS_FSDP_TESTS = {
     ),
     "unsupp_torch_version": (
         (base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
-        None,
+        "min2_0",
         ({}, None, "is supported from PyTorch", None),
     ),
     "non_disjoint_params_allowed": (
@@ -699,17 +686,17 @@ FTS_FSDP_TESTS = {
     ),
     "non_disjoint_phase_fsdp_params_no_use_orig": (
         (base_model, warn_cust_awp, False, 0, wrap_5, *nones(3), DISABLE_USE_ORIG),
-        None,
+        "min2_0",
         ({}, None, "do not have disjoint FSDP-flattened parameter", None),
     ),
     "non_disjoint_phase_mods_no_use_orig": (
         (cust_model, None, False, 1, unwrap_7, *nones(3), DISABLE_USE_ORIG),
-        None,
+        "min2_0",
         ({}, None, "not have disjoint", None),
     ),
     "non_disjoint_excluded_ft_params_no_use_orig": (
         (cust_model, None, False, 5, unwrap_0_1_7, *nones(3), DISABLE_USE_ORIG),
-        None,
+        "min2_0",
         ({}, None, "parameters not included in", None),
     ),
     "already_fsdp_wrapped": (
@@ -719,38 +706,39 @@ FTS_FSDP_TESTS = {
     ),
     "no_fsdp_params_p0": (
         (cust_model, None, False, 0, unwrap_5_7, *nones(3), DISABLE_USE_ORIG),
-        None,
+        "min2_0",
         ({}, None, "one or more FSDP", None),
     ),
     "no_nonzero_local_shards_p0": (
         (base_model, warn_cust_awp, True, 0, outer_wrap_only, *nones(4)),
         "min2_1",
-        (path_default_orig, ("Both mixed precision",), *nones(2)),
+        (path_default_orig, *nones(3)),
     ),  # exercise shard allocation DEBUG diagnostics
     "warn_unsupp_nodecay": (
         (nodecay_model, cust_awp, False, 0, unwrap_7, *nones(4)),
-        None,
+        "min2_0",
         ({}, "will now be unset", *nones(2)),
     ),
     "unmatched_awp_overrides": (
         (base_model, warn_cust_awp, True, 0, wrap_5_7, awp_5_9, *nones(3)),
-        None,
+        "min2_0",
         ({}, None, "did not match any named modules", None),
     ),
     "cust_awp_prec_no_use_orig": (
         (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
-        None,
-        (path_default, ("Both mixed precision",), *nones(2)),
-    ),
-    "cust_awp_prec_pt1x": (
-        (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
-        "max2_0",
+        "min2_0",
         (path_default, *nones(3)),
     ),
+    # TODO: re-assess FSDP < 2.0 support before 2.1 release
+    # "cust_awp_prec_pt1x": (
+    #     (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
+    #     "max2_0",
+    #     (path_default, *nones(3)),
+    # ),
     "enforceP0_cust_awp_prec_no_use_orig": (
         (enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
-        None,
-        (path_default, ("Both mixed precision",), *nones(2)),
+        "min2_0",
+        (path_default, *nones(3)),
     ),
     "batch_norm_auto_prec_no_use_orig": (
         (BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(3), DISABLE_USE_ORIG),
@@ -760,34 +748,31 @@ FTS_FSDP_TESTS = {
     ),
     "shared_params_auto_prec_no_use_orig": (
         (shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(2), DISABLE_USE_ORIG),
-        None,
+        "min2_0",
         (
             path_5_10,
-            (
-                "Pruning explicitly specified",
-                "Both mixed precision",
-            ),
+            ("Pruning explicitly specified",),
             *nones(2),
         ),
     ),
-    "override_csm_adam_noprec_no_use_orig": (
-        (csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, DISABLE_USE_ORIG),
-        None,
+    "override_cm_adam_noprec_no_use_orig": (
+        (cm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, DISABLE_USE_ORIG),
+        "min2_0",
         (path_ext_7_14, *nones(3)),
     ),
     "cust_awp_overrides_prec_no_use_orig": (
         (base_model, cust_awp, True, 0, wrap_all_mp, awp_7, *nones(2), cust_fp16_mp),
-        None,
-        (path_default, ("Both mixed precision",), *nones(2)),
+        "min2_0",
+        (path_default, *nones(3)),
     ),
     "cust_awp_overrides_prec_ext_no_use_orig": (
         (ext_model, cust_ext_awp, True, 6, wrap_ext_mp, awp_7_8, *nones(2), cust_fp16_mp),
-        None,
-        (path_ext_8_16, ("Both mixed precision",), *nones(2)),
+        "min2_0",
+        (path_ext_8_16, *nones(3)),
     ),
     "warn_ignore_awp_override": (
         (cust_model, None, False, 0, unwrap_7, awp_7, *nones(3)),
-        None,
+        "min2_0",
         ({}, "will be unset and not applied", *nones(2)),
     ),
 }
@@ -807,7 +792,7 @@ FSDP_TEST_CFGS = [
 ]
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="2.0")
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, model_cfg, strategy_adapter_cfg, fts_cfg,\
           trainer_cfg, strategy_cfg",
@@ -846,14 +831,16 @@ def test_fsdp_multi_gpus(
     else:
         trainer.fit(configured_model)
         default_fts_sanity_chk(trainer)
-    if trainer.is_global_zero:
+    if trainer.is_global_zero and recwarn:
         check_fts_fsdp_warns(w_expected, recwarn, use_dynamo)
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="2.0")
 @pytest.mark.parametrize(
     "model_cls, awp, ft_sched_idx, model_cfg",
-    [pytest.param(base_model, cust_awp, 0, unwrap_7, id="cust_noprec_resume_no_use_orig")],
+    [  # pytest.param(base_model, cust_awp, 0, unwrap_7, id="cust_noprec_resume_no_use_orig"),
+        pytest.param(base_model, cust_awp, 0, unwrap_7, id="cust_noprec_resume")
+    ],
 )
 def test_fsdp_multi_gpus_resume(tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, model_cls, awp, ft_sched_idx, model_cfg):
     """Conservative (end-to-end) test for FTS training resumption with FSDP."""
@@ -864,9 +851,12 @@ def test_fsdp_multi_gpus_resume(tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, m
     model = model_cls(**model_cfg)
     ft_sched = fsdp_ft_schedules[ft_sched_idx]
     callbacks = callbacks_cfg(FinetuningScheduler, ft_sched, {}, {"patience": 1}, {"save_last": True})
-    strategy = FSDPStrategy(auto_wrap_policy=awp, **DISABLE_USE_ORIG, cpu_offload=CPUOffload(offload_params=True))
+    ckpt_path, use_orig_params = fsdp_ckpt
+    use_orig_kwargs = DISABLE_USE_ORIG if not use_orig_params else {}
+    # strategy = FSDPStrategy(auto_wrap_policy=awp, **DISABLE_USE_ORIG, cpu_offload=CPUOffload(offload_params=True))
+    strategy = FSDPStrategy(auto_wrap_policy=awp, **use_orig_kwargs, cpu_offload=CPUOffload(offload_params=True))
     trainer = configure_trainer(tmpdir, strategy, callbacks, {"max_epochs": 3})
-    trainer.ckpt_path = fsdp_ckpt
+    trainer.ckpt_path = ckpt_path
     trainer.fit(model)
     default_fts_sanity_chk(trainer)
     if trainer.is_global_zero:
@@ -923,7 +913,10 @@ def map_component_cfgs(model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precis
     model_cfg = model_cfg or {}
     fts_cfg = fts_cfg or {}
     strategy_cfg = strategy_cfg or {"cpu_offload": True}
-    precision_opts = {"precision": "16-true"} if use_precision else {}
+    # TODO: renable `16-true` testing after #17609
+    # temp patch while waiting for https://github.com/Lightning-AI/lightning/issues/17609
+    precision_opts = {"precision": "16-mixed"} if use_precision else {}
+    # precision_opts = {"precision": "16-true"} if use_precision else {}
     return model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts
 
 
