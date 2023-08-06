@@ -74,7 +74,7 @@ additional_fsdp_warns = [
     "Please use torch.distributed.all_gather_into_tensor",  # can be removed once PyTorch stops using internally,
     "Please use torch.distributed.reduce_scatter_tensor",  # can be removed once PyTorch stops using internally,
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
-    "Deallocating Tensor that still has live",  # TODO: investigate the occasional occurance of this warning
+    "Deallocating Tensor that still has live",
     "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
@@ -729,7 +729,7 @@ FTS_FSDP_TESTS = {
         "min2_0",
         (path_default, *nones(3)),
     ),
-    # TODO: re-assess FSDP < 2.0 support before 2.1 release
+    # TODO: disabling FSDP support < 2.0 until https://github.com/Lightning-AI/lightning/issues/18230 resolved
     # "cust_awp_prec_pt1x": (
     #     (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4)),
     #     "max2_0",

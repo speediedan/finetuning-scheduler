@@ -59,9 +59,8 @@ if _min_fsdp_available:
     )
     from torch.distributed.fsdp.wrap import _ConfigAutoWrap, _or_policy, lambda_auto_wrap_policy, wrap
 
-    # TODO: at least temporarily disabling FSDP support < 2.0 due to upstream issues, re-assess before 2.1 release
+    # TODO: disabling FSDP support < 2.0 until https://github.com/Lightning-AI/lightning/issues/18230 resolved
     if _TORCH_GREATER_EQUAL_2_0:
-        # TODO: alias can be dropped if disabling FSDP support < 2.0 in 2.1 release
         from torch.distributed.fsdp._common_utils import _get_param_to_fqns as _get_params_to_fqns
         from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
         from torch.distributed.fsdp.wrap import _FSDPPolicy
@@ -825,7 +824,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         name_based_override_or_policy: Union[NameDrivenPolicy, Callable]
         if _TORCH_GREATER_EQUAL_2_0:
             name_based_override_or_policy = NameDrivenPolicy(auto_wrap_policy_handle, override_ids=override_ids)
-        # TODO: at least temporarily disabling FSDP support < 2.0 due to upstream issues, re-assess before 2.1 release
+        # TODO: disabling FSDP support < 2.0 until https://github.com/Lightning-AI/lightning/issues/18230 resolved
         # else:
         # name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda m: id(m) in override_ids)
         # name_based_override_or_policy = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
