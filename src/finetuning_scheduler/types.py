@@ -30,7 +30,7 @@ class ParamGroupAddable(Optimizable, Protocol):
         ...  # pragma: no cover
 
 
-# todo: improve FTSLRSchedulerType naming/typing once corresponding changes made upstream in Lightning
+# TODO: improve FTSLRSchedulerType naming/typing once corresponding changes made upstream in Lightning
 supported_lrs = [
     "LambdaLR",
     "MultiplicativeLR",
