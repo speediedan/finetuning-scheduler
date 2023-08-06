@@ -8,6 +8,7 @@ import torch
 from lightning.fabric.accelerators.cuda import is_cuda_available
 from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13
 from lightning.pytorch.cli import LightningCLI
+from lightning.pytorch.strategies import FSDPStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning_utilities.core.imports import compare_version
 from torch.utils import collect_env
@@ -24,6 +25,18 @@ class CustLightningCLI(LightningCLI):
         parser.link_arguments("trainer.logger.init_args.name", "model.init_args.experiment_tag")
         parser.link_arguments("data.init_args.model_name_or_path", "model.init_args.model_name_or_path")
         parser.link_arguments("data.init_args.task_name", "model.init_args.task_name")
+
+
+class CLIpatched_FSDPStrategy(FSDPStrategy):
+    def __init__(
+        self,
+        activation_checkpointing_policy: Optional[Any] = None,
+        auto_wrap_policy: Optional[Any] = None,
+        cpu_offload: Optional[Any] = None,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
 
 
 def instantiate_class(init: Dict[str, Any], args: Optional[Union[Any, Tuple[Any, ...]]] = None) -> Any:
