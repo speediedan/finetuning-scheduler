@@ -59,16 +59,24 @@ if _min_fsdp_available:
     )
     from torch.distributed.fsdp.wrap import _ConfigAutoWrap, _or_policy, lambda_auto_wrap_policy, wrap
 
-    # TODO: disabling FSDP support < 2.0 until https://github.com/Lightning-AI/lightning/issues/18230 resolved
-    if _TORCH_GREATER_EQUAL_2_0:
-        from torch.distributed.fsdp._common_utils import _get_param_to_fqns as _get_params_to_fqns
-        from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
-        from torch.distributed.fsdp.wrap import _FSDPPolicy
-    # else:
-    #     _FSDPPolicy = object  # type: ignore[assignment,misc]
-    #     from torch.distributed.fsdp._utils import _is_fsdp_flattened  # type: ignore[no-redef]
-    #   from torch.distributed.fsdp.fully_sharded_data_parallel import _get_param_to_unflat_param_names
-    # _get_params_to_fqns = _get_param_to_fqns if _TORCH_GREATER_EQUAL_2_0 else _get_param_to_unflat_param_names
+
+if _TORCH_GREATER_EQUAL_2_1:
+    from torch.distributed.fsdp._common_utils import _get_param_to_fqns, _is_fsdp_flattened
+    from torch.distributed.fsdp.wrap import _Policy
+
+    from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
+elif _TORCH_GREATER_EQUAL_2_0:
+    from torch.distributed.fsdp._common_utils import _get_param_to_fqns, _is_fsdp_flattened
+    from torch.distributed.fsdp.wrap import _FSDPPolicy as _Policy  # type: ignore[no-redef]
+
+    from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
+else:
+    _Policy = object  # type: ignore[assignment,misc]
+    NameDrivenPolicy = object  # type: ignore[assignment,misc]
+    from torch.distributed.fsdp._utils import _is_fsdp_flattened  # type: ignore[no-redef]
+    from torch.distributed.fsdp.fully_sharded_data_parallel import _get_param_to_unflat_param_names
+
+_get_params_to_fqns = _get_param_to_fqns if _TORCH_GREATER_EQUAL_2_0 else _get_param_to_unflat_param_names
 
 
 class FSDPStrategyAdapter(StrategyAdapter):
@@ -126,6 +134,13 @@ class FSDPStrategyAdapter(StrategyAdapter):
        approach to auto-wrapping in alignment with a fine-tuning schedule. As always, if needed, one can override
        ``configure_model`` and manually wrap a given
        :external+pl:class:`~lightning.pytorch.core.module.LightningModule` to align with a desired fine-tuning schedule.
+
+    .. deprecated:: v2.1.0
+
+        :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` now uses the ``configure_model`` hook
+        rather than the deprecated ``configure_sharded_model`` hook to apply the relevant model wrapping. See `this PR
+        <https://github.com/Lightning-AI/lightning/pull/18004>`_ for more context regarding
+        ``configure_sharded_model`` deprecation.
     """
 
     _fsdp_flat_to_unflat_mapping: Dict
@@ -264,6 +279,12 @@ class FSDPStrategyAdapter(StrategyAdapter):
             checkpoint_connector (_CheckpointConnector): The ``_CheckpointConnector`` associated with the current
                 training session.
         """
+        if not _TORCH_GREATER_EQUAL_2_0:
+            rank_zero_debug(
+                "Note that saving/restoring optimizer state using the FSDP strategy with PyTorch < 2.0 is not"
+                " supported by Lightning. Bypassing restoration of optimizer state."
+            )
+            return
         optimizer_states = checkpoint_connector._loaded_checkpoint["optimizer_states"]
 
         assert self.pls_handle.model is not None
@@ -297,6 +318,12 @@ class FSDPStrategyAdapter(StrategyAdapter):
         Returns:
             Dict[str, Tensor]: The consolidated full optimizer state dict (if on rank 0, otherwise an empty dict).
         """
+        if not _TORCH_GREATER_EQUAL_2_0:
+            rank_zero_debug(
+                "Note that saving/restoring optimizer states using the FSDP strategy with PyTorch < 2.0 is not"
+                " supported by Lightning. Bypassing saving of optimizer state."
+            )
+            return {}
         assert self.pls_handle.model is not None
 
         # irrespective of `use_orig_params` mode, we need the full, unflattened, unsharded, consolidated osd
@@ -821,49 +848,16 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         auto_wrap_policy_handle = _ConfigAutoWrap.kwargs.pop("auto_wrap_policy", None)
         override_ids = [id(m) for n, m in self.pl_module.named_modules() if n in self.awp_overrides]
-        name_based_override_or_policy: Union[NameDrivenPolicy, Callable]
-        if _TORCH_GREATER_EQUAL_2_0:
-            name_based_override_or_policy = NameDrivenPolicy(auto_wrap_policy_handle, override_ids=override_ids)
-        # TODO: disabling FSDP support < 2.0 until https://github.com/Lightning-AI/lightning/issues/18230 resolved
-        # else:
-        # name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda m: id(m) in override_ids)
-        # name_based_override_or_policy = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
-        _ConfigAutoWrap.kwargs["auto_wrap_policy"] = name_based_override_or_policy
+        name_based_override_policy: Union[NameDrivenPolicy, Callable]
+        if _TORCH_GREATER_EQUAL_2_0 and isinstance(auto_wrap_policy_handle, _Policy):
+            name_based_override_policy = NameDrivenPolicy(auto_wrap_policy_handle, override_ids=override_ids)
+        else:  # Callable policy implementation path
+            name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda m: id(m) in override_ids)
+            name_based_override_policy = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
+        _ConfigAutoWrap.kwargs["auto_wrap_policy"] = name_based_override_policy
         try:
             yield
         finally:
             _ConfigAutoWrap.kwargs["auto_wrap_policy"] = auto_wrap_policy_handle
 
     fts_optim_inspect = partialmethod(fts_optim_transform, inspect_only=True)
-
-
-if _TORCH_GREATER_EQUAL_2_0:
-
-    class NameDrivenPolicy(_FSDPPolicy):
-        """An auto-wrapping policy extension that applies module name-based override directives on top of a given
-        base ``auto_wrap_policy``.
-
-        The composition of module name-based wrapping directives with a given ``auto_wrap_policy`` is
-        achieved here by:
-            1. Generating an object id-based module name mapping lambda and passing it to the standard
-                ``lambda_auto_wrap_policy``.
-            2. Composing the user's provided ``auto_wrap_policy`` with the above name-based policy using the standard
-                ``_or_policy``.
-        """
-
-        def __init__(self, auto_wrap_policy_handle: Union[Callable, _FSDPPolicy], override_ids: List):
-            """Compose the provided ``auto_wrap_policy`` with any provided override directives.
-
-            Args:
-                auto_wrap_policy_handle (Union[Callable, _FSDPPolicy]): The user's base ``auto_wrap_policy``.
-                override_ids (List): Object ids of the desired modules to wrap even if the provided ``auto_wrap_policy``
-                    otherwise would not dictate so.
-            """
-            if isinstance(auto_wrap_policy_handle, _FSDPPolicy):
-                auto_wrap_policy_handle = auto_wrap_policy_handle.policy
-            name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda m: id(m) in override_ids)
-            self._policy: Callable = partial(_or_policy, policies=[auto_wrap_policy_handle, name_driven_policy])
-
-        @property
-        def policy(self) -> Callable:
-            return self._policy
