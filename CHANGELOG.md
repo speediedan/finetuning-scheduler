@@ -9,11 +9,31 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Support for Lightning and PyTorch ``2.1.0``
 - Support for simplified scheduled FSDP training with PyTorch >= ``2.1.0`` and ``use_orig_params`` set to ``True``
+- Unified different FSDP `use_orig_params` mode code-paths to support saving/restoring full, consolidated OSD (PyTorch versions >= ``2.0.0``)
+- added support for FSDP `activation_checkpointing_policy` and updated FSDP profiling examples accordingly
+- added support for `CustomPolicy` and new implementation of `ModuleWrapPolicy` with FSDP `2.1.0`
+
+### Changed
+
+- FSDP profiling examples now use a patched version of ``FSDPStrategy`` to avoid https://github.com/omni-us/jsonargparse/issues/337 with ``jsonargparse`` < ``4.23.1``
 
 ### Fixed
 
 - updated ``validate_min_wrap_condition`` to avoid overly restrictive validation in some ``use_orig_params`` contexts
+
+### Deprecated
+
+- ``FSDPStrategyAdapter`` now uses the ``configure_model`` hook rather than the deprecated ``configure_sharded_model`` hook to apply the relevant model wrapping. See https://github.com/Lightning-AI/lightning/pull/18004 for more context regarding ``configure_sharded_model`` deprecation.
+
+
+## [2.0.4] - 2023-06-22
+
+- Support for PyTorch Lightning 2.0.3 and 2.0.4
+- adjusted default example log name
+- disabled fsdp 1.x mixed precision tests temporarily until https://github.com/Lightning-AI/lightning/pull/17807 is merged
+
 
 ## [2.0.2] - 2023-04-06
 
