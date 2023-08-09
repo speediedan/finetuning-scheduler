@@ -258,12 +258,12 @@ class TestFinetuningScheduler(FinetuningScheduler):
             self.custom_strategy_adapter = MOCK_STRATEGY_MAPPING[self.mock_strategy][2]
         super().setup(trainer, pl_module, stage)
         if self.mock_strategy and self.allow_untested:
-            raise SystemExit()
+            raise SystemExit(0)
 
     def on_fit_start(self, trainer, pl_module) -> None:
         super().on_fit_start(trainer, pl_module)
         if self.allow_untested:
-            raise SystemExit()
+            raise SystemExit(0)
 
     def state_dict(self) -> Dict[str, Any]:
         self.best_ckpt_test_weight = self.pl_module._modules["layer"]._modules["3"].bias.data.detach().clone()
@@ -326,7 +326,7 @@ class TestFinetuningScheduler(FinetuningScheduler):
 class FitStartOnlyFTS(TestFinetuningScheduler):
     def on_fit_start(self, trainer, pl_module) -> None:
         super().on_fit_start(trainer, pl_module)
-        raise SystemExit()
+        raise SystemExit(0)
 
 
 class OptInspectFTS(TestFinetuningScheduler):
@@ -928,7 +928,7 @@ class ComplexNestedModel(LightningModule):
             FinetuningSchedulerBoringModel(),
             True,
             (4, ["layer.2.bias", "layer.2.weight"], ["layer.0.bias", "layer.0.weight"]),
-            marks=RunIf(min_cuda_gpus=2),
+            marks=RunIf(standalone=True, min_cuda_gpus=2),
         ),
         (
             FinetuningSchedulerBoringModel(),
