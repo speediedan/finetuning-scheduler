@@ -24,7 +24,7 @@ from lightning.fabric.utilities.imports import (
     _TORCH_GREATER_EQUAL_2_1,
 )
 from lightning.pytorch import seed_everything, Trainer
-from lightning.pytorch.plugins.precision.fsdp import FSDPMixedPrecisionPlugin
+from lightning.pytorch.plugins.precision.fsdp import FSDPPrecisionPlugin
 from lightning.pytorch.strategies import FSDPStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from torch.utils.data import DataLoader
@@ -62,7 +62,7 @@ else:
     wrap = object
 
 if _TORCH_GREATER_EQUAL_2_1:
-    from torch.distributed.fsdp.wrap import _Policy, CustomPolicy
+    from torch.distributed.fsdp.wrap import CustomPolicy
 
     DISABLE_USE_ORIG = {"use_orig_params": False}
     _FSDPPolicy = object
@@ -72,7 +72,6 @@ elif _TORCH_GREATER_EQUAL_2_0:
     DISABLE_USE_ORIG = {"use_orig_params": False}
 else:
     CustomPolicy = object
-    _Policy = object
     _FSDPPolicy = object
     DISABLE_USE_ORIG = {}
 
@@ -217,7 +216,6 @@ def fsdp_ckpt(tmpdir_factory, fsdp_ft_schedules, request) -> Tuple[Dict, bool]:
         FTSEarlyStopping(monitor="val_loss", patience=1),
         FTSCheckpoint(monitor="val_loss", save_last=True, verbose=True),
     ]
-    # model = FTSBaseFSDPModel(**test_model_cfg)
     model = FTSAdamFSDPModel(**test_model_cfg)
     trainer = Trainer(
         default_root_dir=tmpdir_factory.getbasetemp(),
@@ -296,18 +294,8 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
         else:
             assert isinstance(self.layer, torch.nn.Sequential)
         if self.precision_key == "auto_16":
-            assert isinstance(self.trainer.strategy.precision_plugin, FSDPMixedPrecisionPlugin)
-            # temp patch while waiting for https://github.com/Lightning-AI/lightning/issues/17609
-            red_buf_precision = torch.float16 if self.trainer.precision == "16-mixed" else torch.bfloat16
-            param_precision = torch.float32 if self.trainer.precision == "16-mixed" else torch.bfloat16
-            if self.trainer.precision == "16-mixed" and _TORCH_GREATER_EQUAL_2_0:
-                param_precision = torch.float32
-            elif self.trainer.precision == "16-mixed":
-                param_precision = torch.float16
-            else:
-                param_precision = torch.bfloat16
-            # TODO: renable `16-true` testing after #17609
-            # precision = torch.float16 if self.trainer.precision == "16-true" else torch.bfloat16
+            assert isinstance(self.trainer.strategy.precision_plugin, FSDPPrecisionPlugin)
+            precision = torch.float16 if self.trainer.precision == "16-true" else torch.bfloat16
         # ensure our ignored module is not wrapped
         for i in self.fsdp_mask["unwrapped_mods"]:
             assert not isinstance(self.layer[i], FullyShardedDataParallel)
@@ -320,9 +308,9 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
                     assert self.layer[i].mixed_precision.reduce_dtype is None
                     assert self.layer[i].mixed_precision.buffer_dtype is None
                 else:
-                    assert self.layer[i].mixed_precision.param_dtype == param_precision
-                    assert self.layer[i].mixed_precision.reduce_dtype == red_buf_precision
-                    assert self.layer[i].mixed_precision.buffer_dtype == red_buf_precision
+                    assert self.layer[i].mixed_precision.param_dtype == precision
+                    assert self.layer[i].mixed_precision.reduce_dtype == precision
+                    assert self.layer[i].mixed_precision.buffer_dtype == precision
 
 
 class NonDynamicLossAdamFSDPModel(FTSBaseFSDPModel):
@@ -626,11 +614,10 @@ ignore_states_cfg = {
     "cpu_offload": False,
     "use_orig_params": True,
 }
-# TODO: re-enable uniform torch.float16 once FSDP `16-true` fully supported
-cust_mp_args = {"param_dtype": torch.float32, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
+
 if not _TORCH_GREATER_EQUAL_2_0:
     cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
-# cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
+cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
 cust_fp16_mp = {"mixed_precision": MixedPrecision(**cust_mp_args), **DISABLE_USE_ORIG} if _min_fsdp_available else {}
 
 # trainer configuration alias
@@ -776,7 +763,6 @@ FTS_FSDP_TESTS = {
         "min2_1",
         (path_default, *nones(3)),
     ),
-    # TODO: disabling FSDP support < 2.0 until https://github.com/Lightning-AI/lightning/issues/18230 resolved
     "cust_awp_prec_pt1x": (
         (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), cust_fp16_mp),
         "max1_13",
@@ -890,9 +876,7 @@ def test_fsdp_multi_gpus(
 @RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
 @pytest.mark.parametrize(
     "model_cls, awp, ft_sched_idx, model_cfg",
-    [  # pytest.param(base_model, cust_awp, 0, unwrap_7, id="cust_noprec_resume_no_use_orig"),
-        pytest.param(adam_model, cust_awp, 0, unwrap_7, id="cust_noprec_resume")
-    ],
+    [pytest.param(adam_model, cust_awp, 0, unwrap_7, id="cust_noprec_resume")],
 )
 def test_fsdp_multi_gpus_resume(tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, model_cls, awp, ft_sched_idx, model_cfg):
     """Conservative (end-to-end) test for FTS training resumption with FSDP."""
@@ -905,7 +889,6 @@ def test_fsdp_multi_gpus_resume(tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, m
     callbacks = callbacks_cfg(FinetuningScheduler, ft_sched, {}, {"patience": 1}, {"save_last": True})
     ckpt_path, use_orig_params = fsdp_ckpt
     use_orig_kwargs = DISABLE_USE_ORIG if not use_orig_params else {}
-    # strategy = FSDPStrategy(auto_wrap_policy=awp, **DISABLE_USE_ORIG, cpu_offload=CPUOffload(offload_params=True))
     strategy = FSDPStrategy(auto_wrap_policy=awp, **use_orig_kwargs, cpu_offload=CPUOffload(offload_params=True))
     trainer = configure_trainer(tmpdir, strategy, callbacks, {"max_epochs": 3})
     trainer.ckpt_path = ckpt_path
@@ -965,10 +948,7 @@ def map_component_cfgs(model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precis
     model_cfg = model_cfg or {}
     fts_cfg = fts_cfg or {}
     strategy_cfg = strategy_cfg or {"cpu_offload": True}
-    # TODO: renable `16-true` testing after #17609
-    # temp patch while waiting for https://github.com/Lightning-AI/lightning/issues/17609
-    precision_opts = {"precision": "16-mixed"} if use_precision else {}
-    # precision_opts = {"precision": "16-true"} if use_precision else {}
+    precision_opts = {"precision": "16-true"} if use_precision else {}
     return model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts
 
 
