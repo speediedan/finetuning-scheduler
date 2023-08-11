@@ -46,7 +46,10 @@ jobs:
       matrix:
         'PyTorch | 1.13.1':
           image: "speediedan/finetuning-scheduler:py3.10-pt1.13.1-pl2.1-azpl-init"
-          scope: "1x"
+          scope: "1.13.1"
+        'PyTorch | 2.0.1':
+          image: "speediedan/finetuning-scheduler:py3.10-pt2.0.1-pl2.1-azpl-init"
+          scope: "2.0.1"
         'PyTorch | latest':
           image: "speediedan/finetuning-scheduler:py3.10-pt2.1.0-pl2.1-azpl-init"
           scope: ""
@@ -114,5 +117,5 @@ jobs:
         set -e
         . /tmp/venvs/fts_dev/bin/activate
         python -m pytest src/fts_examples/stable -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
-      condition: ne(variables['scope'], '1x')
+      condition: notIn(variables['scope'], '1.13.1', '2.0.1')
       displayName: 'Testing: examples'
