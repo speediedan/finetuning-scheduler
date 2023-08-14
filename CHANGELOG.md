@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 ### Fixed
 
 - updated ``validate_min_wrap_condition`` to avoid overly restrictive validation in some ``use_orig_params`` contexts
+- for PyTorch versions < 2.0, when using the FSDP strategy, disabled optimizer state saving/restoration per https://github.com/Lightning-AI/lightning/pull/18296
 
 ### Deprecated
 
