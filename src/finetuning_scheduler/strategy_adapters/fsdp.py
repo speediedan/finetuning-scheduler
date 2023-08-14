@@ -51,6 +51,23 @@ from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 _distributed_available = torch.distributed.is_available()
 _min_fsdp_available = _TORCH_GREATER_EQUAL_1_13 and _distributed_available
 
+if _distributed_available:
+    if _TORCH_GREATER_EQUAL_2_1:
+        from torch.distributed.fsdp._common_utils import _get_param_to_fqns, _is_fsdp_flattened
+        from torch.distributed.fsdp.wrap import _Policy
+
+        from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
+    elif _TORCH_GREATER_EQUAL_2_0:
+        from torch.distributed.fsdp._common_utils import _get_param_to_fqns, _is_fsdp_flattened
+        from torch.distributed.fsdp.wrap import _FSDPPolicy as _Policy  # type: ignore[no-redef]
+
+        from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
+    elif _TORCH_GREATER_EQUAL_1_13:
+        _Policy = object  # type: ignore[assignment,misc]
+        NameDrivenPolicy = object  # type: ignore[assignment,misc]
+        from torch.distributed.fsdp._utils import _is_fsdp_flattened  # type: ignore[no-redef]
+        from torch.distributed.fsdp.fully_sharded_data_parallel import _get_param_to_unflat_param_names
+
 if _min_fsdp_available:
     from torch.distributed.fsdp.fully_sharded_data_parallel import (
         FLAT_PARAM,
@@ -59,24 +76,7 @@ if _min_fsdp_available:
     )
     from torch.distributed.fsdp.wrap import _ConfigAutoWrap, _or_policy, lambda_auto_wrap_policy, wrap
 
-
-if _TORCH_GREATER_EQUAL_2_1:
-    from torch.distributed.fsdp._common_utils import _get_param_to_fqns, _is_fsdp_flattened
-    from torch.distributed.fsdp.wrap import _Policy
-
-    from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
-elif _TORCH_GREATER_EQUAL_2_0:
-    from torch.distributed.fsdp._common_utils import _get_param_to_fqns, _is_fsdp_flattened
-    from torch.distributed.fsdp.wrap import _FSDPPolicy as _Policy  # type: ignore[no-redef]
-
-    from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
-else:
-    _Policy = object  # type: ignore[assignment,misc]
-    NameDrivenPolicy = object  # type: ignore[assignment,misc]
-    from torch.distributed.fsdp._utils import _is_fsdp_flattened  # type: ignore[no-redef]
-    from torch.distributed.fsdp.fully_sharded_data_parallel import _get_param_to_unflat_param_names
-
-_get_params_to_fqns = _get_param_to_fqns if _TORCH_GREATER_EQUAL_2_0 else _get_param_to_unflat_param_names
+    _get_params_to_fqns = _get_param_to_fqns if _TORCH_GREATER_EQUAL_2_0 else _get_param_to_unflat_param_names
 
 
 class FSDPStrategyAdapter(StrategyAdapter):
