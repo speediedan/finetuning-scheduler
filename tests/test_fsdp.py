@@ -72,7 +72,6 @@ additional_fsdp_warns = [
     "Please use torch.distributed.reduce_scatter_tensor",  # can be removed once PyTorch stops using internally,
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
     "Deallocating Tensor that still has live",  # TODO: investigate the occasional occurance of this warning
-    "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
@@ -396,7 +395,20 @@ class FTSCsmAdamFSDPModel(FTSBaseFSDPModel):
         self.layer = wrap(self.layer)
 
 
-class FTSExtFSDPModel(FTSBaseFSDPModel):
+class FTSAdamFSDPModel(FTSBaseFSDPModel):
+    # use of this non-SGD optimizer config is required for tests that restore optimizer state with PyTorch 2.0.x
+    # due to https://github.com/pytorch/pytorch/issues/99079
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def configure_optimizers(self):
+        parameters = filter(lambda x: x.requires_grad, self.parameters())
+        optimizer = torch.optim.AdamW(parameters, weight_decay=1.0e-05, eps=1.0e-07, lr=1.0e-05)
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
+        return [optimizer], [lr_scheduler]
+
+
+class FTSExtFSDPModel(FTSAdamFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.layer = torch.nn.Sequential(
@@ -494,6 +506,7 @@ nodecay_model = FTSNoDecayFSDPModel
 BN_model = FTSBatchNormFSDPModel
 shared_model = FTSSharedParamFSDPModel
 csm_adam_model = FTSCsmAdamFSDPModel
+adam_model = FTSAdamFSDPModel
 ext_model = FTSExtFSDPModel
 enforceP0_model = FTSEnforceP0FSDPModel
 
@@ -606,7 +619,8 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "cust_awp_noprec_pt1x": (path_default, *nones(3)),
     "cust_awp_noprec_use_orig": (path_default_orig, *nones(3)),
     "cust_awp_noprec_dynamo_use_orig": (path_default_orig_eo_dyn, *nones(3)),
-    "cust_awp_mwp_reinitlr_optim": (path_optimlr_reinit, ("Incompatible check",), None, lrs_path_optimlr_reinit),
+    # "cust_awp_mwp_reinitlr_optim": (path_optimlr_reinit, ("Incompatible check",), None, lrs_path_optimlr_reinit),
+    "cust_awp_mwp_reinitlr_optim": (path_optimlr_reinit, None, None, lrs_path_optimlr_reinit),
     "cust_awp_mwp_parity": (path_default, *nones(3)),
     "override_csm_noprec": (path_default, *nones(3)),
     # TODO: once PyTorch deprecates ``ignored_modules``, check for that deprecation warning in this test
@@ -681,7 +695,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         ),
         pytest.param(
             "cust_awp_mwp_parity",
-            base_model,
+            adam_model,
             awp_mwp_parity,
             True,
             0,
@@ -730,7 +744,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
             marks=RunIf(min_torch="2.0.0"),
         ),
         pytest.param(
-            "cust_awp_prec", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4), marks=RunIf(min_torch="2.0.0")
+            "cust_awp_prec", adam_model, cust_awp, True, 0, unwrap_7_mp, *nones(4), marks=RunIf(min_torch="2.0.0")
         ),
         # pytest.param(
         #     "cust_awp_prec_pt1x", base_model, cust_awp, True, 0, unwrap_7_mp, *nones(4),
@@ -763,7 +777,7 @@ EXPECTED_FSDP_FTS_RESULTS = {
         ("override_csm_adam_noprec", csm_adam_model, None, False, 4, unwrap_7_diverge, *nones(2), max_epoch_5, None),
         pytest.param(
             "cust_awp_overrides_prec",
-            base_model,
+            adam_model,
             cust_awp,
             True,
             0,
