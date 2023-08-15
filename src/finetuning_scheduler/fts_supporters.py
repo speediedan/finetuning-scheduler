@@ -1348,7 +1348,7 @@ class ScheduleImplMixin(ABC):
             self.pl_module.trainer.fit_loop.max_epochs = max(max_epoch_wm, self.pl_module.trainer.max_epochs)
 
     @rank_zero_only
-    def gen_implicit_schedule(self, sched_dir: os.PathLike) -> None:
+    def gen_implicit_schedule(self, sched_dir: Union[str, os.PathLike]) -> None:
         """Generate the default schedule, save it to ``sched_dir`` and load it into
         :attr:`~finetuning_scheduler.fts.FinetuningScheduler.ft_schedule`
 
