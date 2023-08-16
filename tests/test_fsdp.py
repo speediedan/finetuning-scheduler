@@ -619,8 +619,8 @@ EXPECTED_FSDP_FTS_RESULTS = {
     "cust_awp_noprec_pt1x": (path_default, *nones(3)),
     "cust_awp_noprec_use_orig": (path_default_orig, *nones(3)),
     "cust_awp_noprec_dynamo_use_orig": (path_default_orig_eo_dyn, *nones(3)),
-    # "cust_awp_mwp_reinitlr_optim": (path_optimlr_reinit, ("Incompatible check",), None, lrs_path_optimlr_reinit),
-    "cust_awp_mwp_reinitlr_optim": (path_optimlr_reinit, None, None, lrs_path_optimlr_reinit),
+    "cust_awp_mwp_reinitlr_optim": (path_optimlr_reinit, ("Incompatible check",), None, lrs_path_optimlr_reinit),
+    # "cust_awp_mwp_reinitlr_optim": (path_optimlr_reinit, None, None, lrs_path_optimlr_reinit),
     "cust_awp_mwp_parity": (path_default, *nones(3)),
     "override_csm_noprec": (path_default, *nones(3)),
     # TODO: once PyTorch deprecates ``ignored_modules``, check for that deprecation warning in this test
