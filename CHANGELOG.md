@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [2.0.7] - 2023-08-16
+
+- Support for Lightning 2.0.7
+
+
 ## [2.0.6] - 2023-08-15
 
 - Support for Lightning 2.0.5 and 2.0.6
