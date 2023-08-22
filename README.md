@@ -86,6 +86,8 @@ python -m pip install -e ".[all]" -r requirements/docs.txt
 
 #### *Latest Docker Image*
 
+Note, publishing of new `finetuning-scheduler` version-specific docker images was paused after the `2.0.2` patch release. If new version-specific images are required, please raise an issue.
+
 ![Docker Image Version (tag latest semver)](https://img.shields.io/docker/v/speediedan/finetuning-scheduler/latest?color=%23000080&label=docker)
 
 </details>
