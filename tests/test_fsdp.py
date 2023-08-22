@@ -78,20 +78,20 @@ else:
 
 additional_fsdp_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
-    "The distutils package is deprecated",  # for tensorboard (but not tensorboardX) import as of PT 1.13.1
-    "`tensorboardX` has been removed as a depend",  # in case tensorboard/tensorboardX are not available
-    "is still running",  # subprocess is implicitly cleaned up
+    # "The distutils package is deprecated",  # for tensorboard (but not tensorboardX) import as of PT 1.13.1
+    # "`tensorboardX` has been removed as a depend",  # in case tensorboard/tensorboardX are not available
+    # "is still running",  # subprocess is implicitly cleaned up
     "Please use torch.distributed.all_gather_into_tensor",  # can be removed once PyTorch stops using internally,
     "Please use torch.distributed.reduce_scatter_tensor",  # can be removed once PyTorch stops using internally,
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
-    "Deallocating Tensor that still has live",
-    "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
+    # "Deallocating Tensor that still has live",
+    # "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
 FSDP_DYNAMO_EXPECTED_WARNS = [
     "Final phase max_transition_epoch",
-    "Your compiler for AOTAutograd is returning",  # out of initial scope
+    # "Your compiler for AOTAutograd is returning",  # out of initial scope
 ]
 
 ##########################
