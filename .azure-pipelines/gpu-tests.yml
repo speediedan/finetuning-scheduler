@@ -81,6 +81,7 @@ jobs:
         . /tmp/venvs/fts_dev/bin/activate
         pip install --upgrade pip requests setuptools
         pip install -e . --no-warn-script-location --requirement requirements/devel.txt
+        pip install lightning --upgrade
       #env:
         #PACKAGE_NAME: "pytorch"
       displayName: 'Install dependencies'
