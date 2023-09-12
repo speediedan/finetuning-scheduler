@@ -478,7 +478,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         # we're restoring everything but callbacks and loops, otherwise, checkpoint_connector.restore() could be used
         assert self.pl_module.trainer.checkpoint_callback is not None
         checkpoint_path = self.pl_module.trainer.checkpoint_callback.best_model_path  # type: ignore[attr-defined]
-        self.pl_module.trainer._checkpoint_connector.resume_start(checkpoint_path=checkpoint_path)
+        try:
+            self.pl_module.trainer._checkpoint_connector.resume_start(checkpoint_path=checkpoint_path)
+        except KeyError as ke:  # we may want to allow training to progress conditioned on context of restoration
+            self._maybe_allow_incompatible_reinit_ckpt(ke)
         self.pl_module.trainer._checkpoint_connector.restore_datamodule()
         self.pl_module.trainer._checkpoint_connector.restore_model()
         # we need to override checkpoint_connector.restore_training_state() to bypass loop restoration
@@ -507,17 +510,31 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 self.strategy_adapter.on_before_restore_optimizers_and_lrs()
                 # restore optimizers and schedulers state
                 checkpoint_connector.restore_optimizers_and_schedulers()
-            except KeyError:
-                assert isinstance(self.ft_schedule, dict)
-                if self._has_reinit_schedule:
-                    rank_zero_warn(
-                        "Incompatible checkpoint detected when attempting to restore the optimizer and/or lr "
-                        "scheduler from a previous phase. Attempting to proceed with next phase of training since this "
-                        "schedule reinitializes the optimizer and/or lr scheduler.\n"
-                        "HINT: If subsequent errors are encountered, you can either set ``restore_best`` to ``False`` "
-                        "or alter your reinitialization schedule for the relevant training components (i.e. optimizer, "
-                        "lr scheduler)."
-                    )
+            except KeyError as ke:
+                self._maybe_allow_incompatible_reinit_ckpt(ke)
+
+    def _maybe_allow_incompatible_reinit_ckpt(self, key_error: KeyError) -> None:
+        """Inspect context for a given ``KeyError`` and permit continued training if using lr scheduler or
+        optimizer reinitialization.
+
+        Args:
+            key_error (KeyError): The current key error encountered during checkpoint restoration.
+
+        Raises:
+            key_error: If not training in the context of lr scheduler or optimizer reinitialization, the provided
+                ``KeyError`` will be raised.
+        """
+        if self._has_reinit_schedule:
+            rank_zero_warn(
+                "Incompatible checkpoint detected when attempting to restore the optimizer and/or lr "
+                "scheduler from a previous phase. Attempting to proceed with next phase of training since this "
+                "schedule reinitializes the optimizer and/or lr scheduler.\n"
+                "HINT: If subsequent errors are encountered, you can either set ``restore_best`` to ``False`` "
+                "or alter your reinitialization schedule for the relevant training components (i.e. optimizer, "
+                "lr scheduler)."
+            )
+        else:
+            raise key_error
 
     def _reduce_transition(self, strategy: Strategy, decision: bool) -> bool:
         """Reduce a transition decision across all world processes (effectively a global `any` collective)

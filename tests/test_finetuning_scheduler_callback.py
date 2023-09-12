@@ -1211,7 +1211,7 @@ EXPECTED_WARNS = [
     "GPU available but",
     "`max_epochs` was not",
     # "that ended mid-epoch",
-    # "The dirpath has changed from",
+    "The dirpath has changed from",
     # "Torchmetrics v0.9",  # temporarily allow until _ResultMetric updated
     # "distutils Version classes are deprecated",  # temporarily allow until PL utilities/migration/utils.py updated
     # "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
@@ -1851,6 +1851,14 @@ EXPECTED_LAMBDALR_STATE = {
         7: (0.0, 0.0, 0.0, 0.0),
     },
 }
+
+
+def test_finetuningscheduling_unallowed_key_error():
+    basic_ke = KeyError("Unallowed key error")
+    test_fts = FinetuningScheduler
+    test_fts._has_reinit_schedule = False
+    with pytest.raises(KeyError, match="Unallowed key"):
+        test_fts._maybe_allow_incompatible_reinit_ckpt(test_fts, key_error=basic_ke)
 
 
 @pytest.mark.parametrize(
