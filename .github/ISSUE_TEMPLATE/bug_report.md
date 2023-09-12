@@ -42,7 +42,7 @@ You can also fill out the list below manually.
 - Fine-Tuning Scheduler Version (e.g., 0.1.0):
 - Lightning Version (e.g., 1.5.0):
 - PyTorch Version (e.g., 2.0):
-- Python version (e.g., 3.10):
+- Python version (e.g., 3.11):
 - OS (e.g., Linux):
 - CUDA/cuDNN version:
 - GPU models and configuration:

@@ -16,7 +16,7 @@ ARG OS_VER=ubuntu20.04
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
-ARG PYTHON_VERSION=3.10
+ARG PYTHON_VERSION=3.11
 ARG PYTORCH_VERSION=2.1.0
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
@@ -77,7 +77,7 @@ RUN \
     pip config set global.cache-dir false && \
     pip install virtualenv && \
     mkdir /tmp/venvs && \
-    python -m virtualenv -p python3.10 /tmp/venvs/fts_dev && \
+    python -m virtualenv -p python${PYTHON_VERSION} /tmp/venvs/fts_dev && \
     . /tmp/venvs/fts_dev/bin/activate && \
     # set particular PyTorch version by default
     if [[ "${CUST_BUILD}" -eq 0 ]]; then \

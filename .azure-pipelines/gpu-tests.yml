@@ -51,7 +51,7 @@ jobs:
           image: "speediedan/finetuning-scheduler:py3.10-pt2.0.1-pl2.1-azpl-init"
           scope: "2.0.1"
         'PyTorch | latest':
-          image: "speediedan/finetuning-scheduler:py3.10-pt2.1.0-pl2.1-azpl-init"
+          image: "speediedan/finetuning-scheduler:py3.11-pt2.1.0-pl2.1-azpl-init"
           scope: ""
     # how long to run the job before automatically cancelling
     timeoutInMinutes: "100"
@@ -71,11 +71,6 @@ jobs:
       clean: outputs
 
     steps:
-
-    # - bash: |
-    #     mkdir /tmp/venvs
-    #     python -m virtualenv -p python3.10 /tmp/venvs/fts_dev
-    #   displayName: 'Create virtual environment'
 
     - bash: |
         . /tmp/venvs/fts_dev/bin/activate

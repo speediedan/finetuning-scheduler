@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 ### Added
 
 - Support for Lightning and PyTorch ``2.1.0``
+- Support for Python ``3.11``
 - Support for simplified scheduled FSDP training with PyTorch >= ``2.1.0`` and ``use_orig_params`` set to ``True``
 - Unified different FSDP `use_orig_params` mode code-paths to support saving/restoring full, consolidated OSD (PyTorch versions >= ``2.0.0``)
 - added support for FSDP `activation_checkpointing_policy` and updated FSDP profiling examples accordingly
