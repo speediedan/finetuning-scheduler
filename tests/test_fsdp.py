@@ -78,20 +78,15 @@ else:
 
 additional_fsdp_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
-    # "The distutils package is deprecated",  # for tensorboard (but not tensorboardX) import as of PT 1.13.1
-    # "`tensorboardX` has been removed as a depend",  # in case tensorboard/tensorboardX are not available
-    # "is still running",  # subprocess is implicitly cleaned up
+    "does not support loading the optimizer",  # with PyTorch 1.x Lightning lacks OSD restoration support
     "Please use torch.distributed.all_gather_into_tensor",  # can be removed once PyTorch stops using internally,
     "Please use torch.distributed.reduce_scatter_tensor",  # can be removed once PyTorch stops using internally,
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
-    # "Deallocating Tensor that still has live",
-    # "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
 FSDP_DYNAMO_EXPECTED_WARNS = [
     "Final phase max_transition_epoch",
-    # "Your compiler for AOTAutograd is returning",  # out of initial scope
 ]
 
 ##########################
@@ -777,7 +772,6 @@ FTS_FSDP_TESTS = {
         (BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(3), DISABLE_USE_ORIG),
         "min2_1",
         (path_8_16, ("Both mixed precision",), *nones(2)),
-        # (path_8_16, *nones(3)), temporarily remove until reinstalling pt nightly?
     ),
     "shared_params_auto_prec_no_use_orig": (
         (shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(2), DISABLE_USE_ORIG),
