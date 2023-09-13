@@ -43,6 +43,7 @@ class RunIf:
         min_torch: Optional[str] = None,
         max_torch: Optional[str] = None,
         min_python: Optional[str] = None,
+        max_python: Optional[str] = None,
         bf16_cuda: bool = False,
         skip_windows: bool = False,
         skip_mac_os: bool = False,
@@ -55,9 +56,10 @@ class RunIf:
         Args:
             *args: Any :class:`pytest.mark.skipif` arguments.
             min_cuda_gpus: Require this number of gpus and that the ``PL_RUN_CUDA_TESTS=1`` environment variable is set.
-            min_torch: Require that PyTorch is greater or equal than this version.
-            max_torch: Require that PyTorch is less than this version.
-            min_python: Require that Python is greater or equal than this version.
+            min_torch: Require that PyTorch is greater or equal to this version.
+            max_torch: Require that PyTorch is less than or equal to this version.
+            min_python: Require that Python is greater or equal to this version.
+            max_python: Require that Python is less than this version.
             bf16_cuda: Require that CUDA device supports bf16.
             skip_windows: Skip for Windows platform.
             skip_mac_os: Skip Mac OS platform.
@@ -94,6 +96,11 @@ class RunIf:
             py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
             conditions.append(Version(py_version) < Version(min_python))
             reasons.append(f"python>={min_python}")
+
+        if max_python:
+            py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+            conditions.append(Version(py_version) >= Version(max_python))
+            reasons.append(f"python<{max_python}, {py_version} installed.")
 
         if bf16_cuda:
             try:

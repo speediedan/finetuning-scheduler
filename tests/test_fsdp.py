@@ -579,6 +579,7 @@ runif_map = {
     "only2_0": {"min_torch": "2.0.0", "max_torch": "2.0.1"},
     "min2_1": {"min_torch": "2.1.0"},
     "max1_13": {"max_torch": "1.13.1"},
+    "min2_0_max3_11": {"min_torch": "2.0.0", "max_python": "3.11"},
 }
 
 # auto-wrap policy aliases
@@ -665,7 +666,7 @@ FTS_FSDP_TESTS = {
     ),
     "cust_awp_noprec_dynamo": (
         (nond_loss_adam_model, cust_awp, False, 7, unwrap_7_dyn, None, epoch_t_only, max_epoch_4, None),
-        "min2_0",
+        "min2_0_max3_11",
         (path_default_orig_eo_dyn, *nones(3)),
     ),
     "cust_awp_mwp_2_1_reinitlr_optim_no_use_orig": (
