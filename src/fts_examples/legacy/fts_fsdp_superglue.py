@@ -17,8 +17,7 @@ from typing import Dict, List, Optional, Set, Type, Union
 import torch
 from lightning.fabric.accelerators.cuda import is_cuda_available
 from lightning.fabric.utilities import rank_zero_info
-from lightning.pytorch.profilers.pytorch import PyTorchProfiler
-from lightning.pytorch.utilities.imports import _KINETO_AVAILABLE
+from lightning.pytorch.profilers.pytorch import _KINETO_AVAILABLE, PyTorchProfiler
 from torch.profiler.profiler import ProfilerActivity
 
 from fts_examples import _HF_AVAILABLE
