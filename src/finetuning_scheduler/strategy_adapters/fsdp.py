@@ -425,7 +425,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         :external+pl:class:`~lightning.pytorch.core.module.LightningModule` s remove it (with a warning) because it is
         not currently supported in the context of FSDP fine-tuning.
         """
-        if self.pl_module.no_decay:
+        if hasattr(self.pl_module, "no_decay") and self.pl_module.no_decay is not None:
             rank_zero_warn(
                 "Specifying a `no_decay` lightning module attribute is not currently supported by the Fine-Tuning"
                 f" Scheduler FSDP strategy adapter. The `no_decay` attribute currently set ({self.pl_module.no_decay})"
