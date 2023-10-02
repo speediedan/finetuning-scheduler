@@ -1188,6 +1188,7 @@ def test_finetuningscheduling_decay(tmpdir, boring_ft_schedule, explicit_mode: b
     assert finetuningscheduler_callback._fts_state._ft_epoch == trainer.fit_loop.epoch_progress.current.completed
 
 
+# (diff_dirpath, train_chk_mode, ckpt, max_depth)
 EXPECTED_RESUME_RESULTS = {
     (True, False, "best", -1): (0, 0, 3),
     (True, False, "best", 1): (0, 0, 1),
@@ -1197,13 +1198,13 @@ EXPECTED_RESUME_RESULTS = {
     (True, True, "best", 1): (0, 0, 1),
     (True, True, "kth", -1): (1, 0, 3),
     (True, True, "kth", 1): (1, 0, 1),
-    (False, False, "best", -1): (0, 0, 3),
-    (False, False, "best", 1): (0, 0, 1),
-    (False, False, "kth", -1): (0, 0, 3),
+    (False, False, "best", -1): (1, 0, 3),
+    (False, False, "best", 1): (1, 0, 1),
+    (False, False, "kth", -1): (2, 0, 3),
     (False, False, "kth", 1): (0, 0, 1),
-    (False, True, "best", -1): (0, 0, 3),
-    (False, True, "best", 1): (0, 0, 1),
-    (False, True, "kth", -1): (0, 0, 3),
+    (False, True, "best", -1): (1, 0, 3),
+    (False, True, "best", 1): (1, 0, 1),
+    (False, True, "kth", -1): (2, 0, 3),
     (False, True, "kth", 1): (0, 0, 1),
 }
 EXPECTED_WARNS = [
