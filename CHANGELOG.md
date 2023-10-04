@@ -24,11 +24,24 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - updated ``validate_min_wrap_condition`` to avoid overly restrictive validation in some ``use_orig_params`` contexts
 - for PyTorch versions < 2.0, when using the FSDP strategy, disabled optimizer state saving/restoration per https://github.com/Lightning-AI/lightning/pull/18296
+- improved fsdp strategy adapter `no_decay` attribute handling
 
 ### Deprecated
 
 - ``FSDPStrategyAdapter`` now uses the ``configure_model`` hook rather than the deprecated ``configure_sharded_model`` hook to apply the relevant model wrapping. See https://github.com/Lightning-AI/lightning/pull/18004 for more context regarding ``configure_sharded_model`` deprecation.
+- Dropped support for PyTorch ``1.11.x``.
 
+## [2.0.9] - 2023-10-02
+
+- Support for Lightning 2.0.8 and 2.0.9
+
+## [2.0.7] - 2023-08-16
+
+- Support for Lightning 2.0.7
+
+## [2.0.6] - 2023-08-15
+
+- Support for Lightning 2.0.5 and 2.0.6
 
 ## [2.0.4] - 2023-06-22
 
