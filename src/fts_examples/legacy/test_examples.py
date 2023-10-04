@@ -36,8 +36,8 @@ EXPECTED_WARNS = [
     "sentencepiece tokenizer that you are converting",
     "distutils Version classes are deprecated",
 ]
-MIN_VERSION_WARNS = "1.11"
-MAX_VERSION_WARNS = "2.0"
+MIN_VERSION_WARNS = "1.12"
+MAX_VERSION_WARNS = "2.1"
 # torch version-specific warns will go here
 EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [], MAX_VERSION_WARNS: []}
 torch_version = get_distribution("torch").version

@@ -40,7 +40,7 @@ EXPECTED_WARNS = [
     "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
     "We are importing from `pydantic",  # temp pydantic import migration warning
 ]
-MIN_VERSION_WARNS = "1.11"
+MIN_VERSION_WARNS = "1.12"
 MAX_VERSION_WARNS = "2.1"
 # torch version-specific warns will go here
 EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [], MAX_VERSION_WARNS: []}
