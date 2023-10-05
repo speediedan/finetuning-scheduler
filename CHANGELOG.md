@@ -6,7 +6,6 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ## [2.1.0] - 2023-XX-XX
 
-
 ### Added
 
 - Support for Lightning and PyTorch ``2.1.0``
