@@ -148,7 +148,7 @@ session with, usually via the ``configure_optimizer`` method of
 
     If you want your learning rates logged on the same graph for each of the scheduler configurations defined in various
     phases, ensure that you provide the same name in the
-    `lr_scheduler configuration <https://pytorch-lightning.readthedocs.io/en/latest/common/lightning_module.html>`_
+    `lr_scheduler configuration <https://pytorch-lightning.readthedocs.io/en/stable/common/lightning_module.html>`_
     for each of the defined lr schedulers. For instance, in the
     :ref:`lr scheduler reinitialization example<advanced-fine-tuning-lr-example>`, we provide:
 
