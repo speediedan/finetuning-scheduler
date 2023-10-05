@@ -73,6 +73,7 @@ def restore_env_variables():
         "KMP_DUPLICATE_LIB_OK",  # leaked since PyTorch 1.13
         "CRC32C_SW_MODE",  # leaked by tensorboardX
         "TRITON_CACHE_DIR",  # leaked starting in PyTorch 2.0.0
+        "OMP_NUM_THREADS",  # leaked by Lightning launchers
     }
     leaked_vars.difference_update(allowlist)
     assert not leaked_vars, f"test is leaking environment variable(s): {set(leaked_vars)}"
