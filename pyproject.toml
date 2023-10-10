@@ -4,22 +4,6 @@ requires = [
     "wheel",
 ]
 
-
-[tool.isort]
-known_first_party = [
-    "docs",
-    "fts_examples",
-    "finetuning_scheduler",
-    "tests",
-]
-profile = "black"
-line_length = 120
-force_sort_within_sections = "False"
-order_by_type = "False"
-
-[tool.black]
-line-length = 120
-
 [tool.ruff]
 line-length = 120
 # Enable Pyflakes `E` and `F` codes by default.
@@ -49,6 +33,11 @@ format = "pylint"
 [tool.ruff.mccabe]
 # Unlike Flake8, default to a complexity level of 10.
 max-complexity = 10
+
+[tool.ruff.isort]
+known-first-party = ["docs","fts_examples","finetuning_scheduler","tests"]
+force-sort-within-sections = false
+order-by-type = false
 
 [tool.mypy]
 files = ["src/finetuning_scheduler"]
