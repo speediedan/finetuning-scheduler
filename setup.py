@@ -131,15 +131,15 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
     )
 
     base_reqs = "standalone_base.txt" if standalone else "base.txt"
-    # install_requires = setup_tools._load_requirements(
-    #     _INSTALL_PATHS["require"], file_name=base_reqs, standalone=standalone
-    # )
     install_requires = setup_tools._load_requirements(
-        _INSTALL_PATHS["require"],
-        file_name=base_reqs,
-        standalone=standalone,
-        pl_commit="c39f680160ac31cae70b7efbff95cf09d3347125",
+        _INSTALL_PATHS["require"], file_name=base_reqs, standalone=standalone
     )
+    # install_requires = setup_tools._load_requirements(
+    #     _INSTALL_PATHS["require"],
+    #     file_name=base_reqs,
+    #     standalone=standalone,
+    #     pl_commit="9f173241195450fd8e39a01f28ae2ec94371cd15",
+    # )
     base_setup["install_requires"] = install_requires
     return base_setup
 
