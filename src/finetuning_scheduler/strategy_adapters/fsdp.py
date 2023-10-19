@@ -33,7 +33,6 @@ import torch
 from lightning.fabric.strategies.fsdp import _get_full_state_dict_context, _setup_activation_checkpointing
 from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
 from lightning.fabric.utilities.imports import (
-    _TORCH_GREATER_EQUAL_1_13,
     _TORCH_GREATER_EQUAL_2_0,
     _TORCH_GREATER_EQUAL_2_1,
 )
@@ -48,10 +47,15 @@ from torch.optim import Optimizer
 
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
-_distributed_available = torch.distributed.is_available()
-_min_fsdp_available = _TORCH_GREATER_EQUAL_1_13 and _distributed_available
 
-if _distributed_available:
+if torch.distributed.is_available():
+    from torch.distributed.fsdp.fully_sharded_data_parallel import (
+        FLAT_PARAM,
+        FullyShardedDataParallel,
+        OptimStateKeyType,
+    )
+    from torch.distributed.fsdp.wrap import _ConfigAutoWrap, _or_policy, lambda_auto_wrap_policy, wrap
+
     if _TORCH_GREATER_EQUAL_2_1:
         from torch.distributed.fsdp._common_utils import _get_param_to_fqns, _is_fsdp_flattened
         from torch.distributed.fsdp.wrap import _Policy
@@ -62,19 +66,11 @@ if _distributed_available:
         from torch.distributed.fsdp.wrap import _FSDPPolicy as _Policy  # type: ignore[no-redef]
 
         from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
-    elif _TORCH_GREATER_EQUAL_1_13:
+    else:
         _Policy = object  # type: ignore[assignment,misc]
         NameDrivenPolicy = object  # type: ignore[assignment,misc]
         from torch.distributed.fsdp._utils import _is_fsdp_flattened  # type: ignore[no-redef]
         from torch.distributed.fsdp.fully_sharded_data_parallel import _get_param_to_unflat_param_names
-
-if _min_fsdp_available:
-    from torch.distributed.fsdp.fully_sharded_data_parallel import (
-        FLAT_PARAM,
-        FullyShardedDataParallel,
-        OptimStateKeyType,
-    )
-    from torch.distributed.fsdp.wrap import _ConfigAutoWrap, _or_policy, lambda_auto_wrap_policy, wrap
 
     _get_params_to_fqns = _get_param_to_fqns if _TORCH_GREATER_EQUAL_2_0 else _get_param_to_unflat_param_names
 
@@ -172,11 +168,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
         Attributes:
             awp_overrides: A list of module names to wrap in separate FSDP instances.
         """
-        if not _TORCH_GREATER_EQUAL_1_13:  # because `lambda_auto_wrap_policy` is used to adapt FSDP for FTS
-            raise MisconfigurationException(
-                "Use of Fine-Tuning Scheduler with FSDP (via the `FSDPStrategyAdapter`) is supported from PyTorch"
-                " v1.13.0 onwards."
-            )
         super().__init__(*args, **kwargs)
         self.awp_overrides = awp_overrides or []
         self._min_wrap_validated: bool = False

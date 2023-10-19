@@ -20,7 +20,7 @@ from pkg_resources import get_distribution
 
 from fts_examples import _HF_AVAILABLE
 from tests.helpers.boring_model import unexpected_warns
-from tests.helpers.runif import RunIf
+from tests.helpers.runif import RunIf, EXTENDED_VER_PAT
 
 ARGS_DEFAULT = (
     "--trainer.default_root_dir %(tmpdir)s "
@@ -40,12 +40,16 @@ EXPECTED_WARNS = [
     "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
     "We are importing from `pydantic",  # temp pydantic import migration warning
 ]
-MIN_VERSION_WARNS = "1.12"
-MAX_VERSION_WARNS = "2.1"
-# torch version-specific warns will go here
-EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [], MAX_VERSION_WARNS: []}
+MIN_VERSION_WARNS = "1.13"
+MAX_VERSION_WARNS = "2.2"
+# torch version-specific warns go here
+EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [],
+                          MAX_VERSION_WARNS: [
+                              'PairwiseParallel is deprecated and will be removed soon.',  # temp warning for pt 2.2
+                              ]}
 torch_version = get_distribution("torch").version
-if Version(torch_version) < Version(MAX_VERSION_WARNS):
+extended_torch_ver = EXTENDED_VER_PAT.match(torch_version).group() or torch_version
+if Version(extended_torch_ver) < Version(MAX_VERSION_WARNS):
     EXPECTED_WARNS.extend(EXPECTED_VERSION_WARNS[MIN_VERSION_WARNS])
 else:
     EXPECTED_WARNS.extend(EXPECTED_VERSION_WARNS[MAX_VERSION_WARNS])

@@ -21,7 +21,6 @@ from pprint import pformat as pfmt
 from typing import Callable, List, Optional, Tuple
 
 from lightning.fabric.utilities import rank_zero_info
-from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13
 from lightning.fabric.utilities.types import ReduceLROnPlateau
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
@@ -213,7 +212,7 @@ class StrategyAdapter:
         # certain lr_scheduler variables (including type-dependent ones like ``min_lrs`` and ``lr_lambdas``)
         if trainer.lr_scheduler_configs:
             for lrs_cfg in trainer.lr_scheduler_configs:
-                if _TORCH_GREATER_EQUAL_1_13 and not isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
+                if not isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
                     lrs_cfg.scheduler._initial_step()
                 lrs_cfg.scheduler._last_lr = [  # type: ignore[union-attr]
                     group["lr"] for group in lrs_cfg.scheduler.optimizer.param_groups

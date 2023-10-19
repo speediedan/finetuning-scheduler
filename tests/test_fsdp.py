@@ -19,7 +19,6 @@ from unittest import mock
 import pytest
 import torch
 from lightning.fabric.utilities.imports import (
-    _TORCH_GREATER_EQUAL_1_13,
     _TORCH_GREATER_EQUAL_2_0,
     _TORCH_GREATER_EQUAL_2_1,
 )
@@ -42,10 +41,8 @@ from tests.test_finetuning_scheduler_callback import (
     TestFinetuningScheduler,
 )
 
-_distributed_available = torch.distributed.is_available()
-_min_fsdp_available = _TORCH_GREATER_EQUAL_1_13 and _distributed_available
 
-if _min_fsdp_available:
+if torch.distributed.is_available():
     from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
         apply_activation_checkpointing,
         checkpoint_wrapper,
@@ -347,6 +344,14 @@ class FTSCmFSDPModel(FTSBaseFSDPModel):
                 self.layer[i] = wrap(layer)
         self.layer = wrap(self.layer)
 
+        # starting with https://github.com/pytorch/pytorch/pull/108033, FSDP no longer moves ignored parameters
+        # (or buffers) to device. We need to manually move them to device in versions > 2.1.x (precise version TBD)
+        for param in self.layer._ignored_params:
+            with torch.no_grad():
+                param.data = param.to(self.device)
+                if param.grad is not None:
+                    param.grad.data = param.grad.to(self.device)
+
         # verify activation checkpointing can be manually applied
         check_fn = lambda submodule: isinstance(submodule, tuple([torch.nn.Linear]))  # noqa E731
         wrapper = partial(
@@ -578,6 +583,7 @@ runif_map = {
     "min2_0": {"min_torch": "2.0.0"},
     "only2_0": {"min_torch": "2.0.0", "max_torch": "2.0.1"},
     "min2_1": {"min_torch": "2.1.0"},
+    "min2_2": {"min_torch": "2.2.0"},
     "max1_13": {"max_torch": "1.13.1"},
     "min2_0_max3_11": {"min_torch": "2.0.0", "max_python": "3.11"},
 }
@@ -614,7 +620,7 @@ ignore_states_cfg = {
 if not _TORCH_GREATER_EQUAL_2_0:
     cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
 cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
-cust_fp16_mp = {"mixed_precision": MixedPrecision(**cust_mp_args), **DISABLE_USE_ORIG} if _min_fsdp_available else {}
+cust_fp16_mp = {"mixed_precision": MixedPrecision(**cust_mp_args), **DISABLE_USE_ORIG}
 
 # trainer configuration alias
 max_epoch_5 = {"max_epochs": 5}
@@ -695,20 +701,20 @@ FTS_FSDP_TESTS = {
         (path_default, *nones(3)),
     ),
     "cust_awp_nop_ignore_m_no_ofld_no_use_orig": (
-        (base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), ignore_mod_cfg),
-        "min2_1",
+        (cust_model, None, False, 0, unwrap_4_7, *nones(3), ignore_mod_cfg),
+        "min2_2",
         (path_8_14, *nones(3)),
     ),  # TODO: once PyTorch deprecates ``ignored_modules``, check for the warning with this test
     "cust_awp_nop_ignore_p_no_ofld": (
-        (base_model, cust_awp, False, 0, unwrap_4_7, *nones(3), ignore_states_cfg),
-        "min2_1",
+        (cust_model, None, False, 0, unwrap_4_7, *nones(3), ignore_states_cfg),
+        "min2_2",
         (path_ignore_p_uo, *nones(3)),
     ),
-    "unsupp_torch_version": (
-        (base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
-        None,
-        ({}, None, "is supported from PyTorch", None),
-    ),
+    # "unsupp_torch_version": (
+    #     (base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
+    #     None,
+    #     ({}, None, "is supported from PyTorch", None),
+    # ),
     "non_disjoint_params_allowed": (
         (base_model, warn_cust_awp, False, 0, outer_wrap_only, *nones(4)),
         "min2_1",
@@ -825,7 +831,7 @@ FSDP_TEST_CFGS = [
 ]
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True)
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, model_cfg, strategy_adapter_cfg, fts_cfg,\
           trainer_cfg, strategy_cfg",
@@ -896,10 +902,6 @@ def test_fsdp_multi_gpus_resume(tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, m
 def gen_exceptions(trainer, model, model_cfg_key, exception_expected):
     if model_cfg_key == "no_fsdp_params_p0":
         with mock.patch.object(FSDPStrategyAdapter, "_rank_zero_logger", 42):
-            with pytest.raises(MisconfigurationException, match=exception_expected):
-                trainer.fit(model)
-    elif model_cfg_key == "unsupp_torch_version":
-        with mock.patch("finetuning_scheduler.strategy_adapters.fsdp._TORCH_GREATER_EQUAL_1_13", False):
             with pytest.raises(MisconfigurationException, match=exception_expected):
                 trainer.fit(model)
     else:

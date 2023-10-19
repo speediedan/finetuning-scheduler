@@ -14,15 +14,12 @@ from typing import Any, Callable, Dict, List, Set, Union
 
 import torch
 from lightning.fabric.utilities.imports import (
-    _TORCH_GREATER_EQUAL_1_13,
     _TORCH_GREATER_EQUAL_2_0,
     _TORCH_GREATER_EQUAL_2_1,
 )
 
-_distributed_available = torch.distributed.is_available()
-_min_fsdp_available = _TORCH_GREATER_EQUAL_1_13 and _distributed_available
 
-if _min_fsdp_available:
+if torch.distributed.is_available():
     from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy
 
     if _TORCH_GREATER_EQUAL_2_1:

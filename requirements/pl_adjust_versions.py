@@ -11,8 +11,6 @@ VERSIONS = [
     dict(torch="2.0.0", torchvision="0.15.1"),
     dict(torch="1.13.1", torchvision="0.14.1"),
     dict(torch="1.13.0", torchvision="0.14.0"),
-    dict(torch="1.12.1", torchvision="0.13.1"),
-    dict(torch="1.12.0", torchvision="0.13.0"),
 ]
 
 

@@ -6,14 +6,12 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 from lightning.fabric.accelerators.cuda import is_cuda_available
-from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_1_13
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.strategies import FSDPStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning_utilities.core.imports import compare_version
 from torch.utils import collect_env
 
-_TORCH_GREATER_EQUAL_1_12_1 = compare_version("torch", operator.ge, "1.12.1")
 _JSONGARGPARSE_GREATER_EQUAL_4_23_1 = compare_version("jsonargparse", operator.ge, "4.23.1")
 
 
@@ -154,9 +152,8 @@ def get_env_info():
         "is_xnnpack_available": collect_env.is_xnnpack_available(),
         "cpu_info": collect_env.get_cpu_info(run_lambda),
     }
-    if _TORCH_GREATER_EQUAL_1_13:
-        # get_cuda_module_loading_config() initializes CUDA which we want to avoid so we bypass this inspection
-        systemenv_kwargs["cuda_module_loading"] = "not inspected"
+    # get_cuda_module_loading_config() initializes CUDA which we want to avoid so we bypass this inspection
+    systemenv_kwargs["cuda_module_loading"] = "not inspected"
     return collect_env.SystemEnv(**systemenv_kwargs)
 
 

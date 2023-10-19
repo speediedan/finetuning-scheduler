@@ -46,7 +46,6 @@ from torch.utils.data import DataLoader
 import finetuning_scheduler as fts
 from fts_examples import _HF_AVAILABLE, _SP_AVAILABLE
 from fts_examples.stable.cli_experiment_utils import (
-    _TORCH_GREATER_EQUAL_1_12_1,
     collect_env_info,
     CustLightningCLI,
     instantiate_class,
@@ -300,13 +299,11 @@ class RteBoolqModule(pl.LightningModule):
 
 
 def cli_main() -> None:
-    if not _TORCH_GREATER_EQUAL_1_12_1:
-        print("Running the fts_superglue example requires PyTorch >= ``1.12.1``")
     if not _HF_AVAILABLE:  # pragma: no cover
         print("Running the fts_superglue example requires the `transformers` and `datasets` packages from Hugging Face")
     if not _SP_AVAILABLE:
         print("Note using the default model in this fts_superglue example requires the `sentencepiece` package.")
-    if not all([_TORCH_GREATER_EQUAL_1_12_1, _HF_AVAILABLE, _SP_AVAILABLE]):
+    if not all([_HF_AVAILABLE, _SP_AVAILABLE]):
         return
     # every configuration of this example depends upon a shared set of defaults.
     default_config_file = os.path.join(os.path.dirname(__file__), "config", "fts_defaults.yaml")
