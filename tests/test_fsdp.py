@@ -21,6 +21,7 @@ import torch
 from lightning.fabric.utilities.imports import (
     _TORCH_GREATER_EQUAL_2_0,
     _TORCH_GREATER_EQUAL_2_1,
+    _TORCH_GREATER_EQUAL_2_2
 )
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.plugins.precision.fsdp import FSDPPrecisionPlugin
@@ -344,13 +345,14 @@ class FTSCmFSDPModel(FTSBaseFSDPModel):
                 self.layer[i] = wrap(layer)
         self.layer = wrap(self.layer)
 
-        # starting with https://github.com/pytorch/pytorch/pull/108033, FSDP no longer moves ignored parameters
-        # (or buffers) to device. We need to manually move them to device in versions > 2.1.x (precise version TBD)
-        for param in self.layer._ignored_params:
-            with torch.no_grad():
-                param.data = param.to(self.device)
-                if param.grad is not None:
-                    param.grad.data = param.grad.to(self.device)
+        if _TORCH_GREATER_EQUAL_2_2:
+            # starting with https://github.com/pytorch/pytorch/pull/108033, FSDP no longer moves ignored parameters
+            # (or buffers) to device. We need to manually move them to device in versions > 2.1.x (precise version TBD)
+            for param in self.layer._ignored_params:
+                with torch.no_grad():
+                    param.data = param.to(self.device)
+                    if param.grad is not None:
+                        param.grad.data = param.grad.to(self.device)
 
         # verify activation checkpointing can be manually applied
         check_fn = lambda submodule: isinstance(submodule, tuple([torch.nn.Linear]))  # noqa E731
