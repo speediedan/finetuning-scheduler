@@ -453,8 +453,8 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             if not self.finetuningscheduler_callback.epoch_transitions_only:
                 self.finetuningscheduler_callback.pl_module.trainer.early_stopping_callback.wait_count = 0
         if self.finetuningscheduler_callback._fts_state._resume_fit_from_ckpt:
-            dirpath_from_ckpt = pathlib.Path(state_dict.get("dirpath", self.dirpath))
-            if self.dirpath == dirpath_from_ckpt:
+            dirpath_from_ckpt = state_dict.get("dirpath", self.dirpath)
+            if self.dirpath == dirpath_from_ckpt or self.dirpath == pathlib.Path(dirpath_from_ckpt):
                 self.best_k_models = state_dict.get("best_k_models", self.best_k_models)
                 self.kth_best_model_path = state_dict.get("kth_best_model_path", self.kth_best_model_path)
                 self.kth_value = state_dict.get("kth_value", self.kth_value)
