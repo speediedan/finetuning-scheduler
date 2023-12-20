@@ -971,7 +971,7 @@ class ComplexNestedModel(LightningModule):
     ],
     ids=["dist_boring", "Boring", "ParityRNN", "ComplexNested"],
 )
-def test_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expected: Tuple):
+def test_fts_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expected: Tuple):
     """Validate the default fine-tuning schedule generation."""
     seed_everything(42)
     callbacks = [FinetuningScheduler(gen_ft_sched_only=True)]
@@ -1008,7 +1008,7 @@ EXPECTED_EXPIMP_RESULTS = {
 
 @pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
 @pytest.mark.parametrize("max_depth", [-1, 0, 2, 999], ids=["default", "maxdepth0", "maxdepth2", "maxdepth999"])
-def test_finetuningscheduling_explicit_implicit(tmpdir, boring_ft_schedule, explicit_mode: bool, max_depth: int):
+def test_fts_explicit_implicit(tmpdir, boring_ft_schedule, explicit_mode: bool, max_depth: int):
     """Validate scheduled fine-tuning works as expected in 'explicit' and 'implicit' modes in the context of
     various max_depth specifications."""
     seed_everything(42)
@@ -1098,7 +1098,7 @@ ENFORCE_P0_LR_STATE = {
     ],
     ids=["step_lr", "rlrop", "lr_lambdas"],
 )
-def test_finetuningscheduling_enforce_p0(tmpdir, init_lr_key, p0_params):
+def test_fts_enforce_p0(tmpdir, init_lr_key, p0_params):
     """Inspect the scheduled fine-tuning training path to ensure thawing schedule phase 0 is enforced."""
     seed_everything(42)
     model = EnforcePhase0CfgOptimBoringModel(no_decay=["bias"], init_lr_key=init_lr_key, p0_params=p0_params)
@@ -1134,7 +1134,7 @@ EXPECTED_DYNAMO_P0_INTRAFIT_STATE = {
 
 
 @RunIf(min_torch="2.0.0", skip_windows=True, skip_mac_os=True, max_python="3.11")
-def test_finetuningscheduling_dynamo_enforce_p0(tmpdir, boring_ft_schedule):
+def test_fts_dynamo_enforce_p0(tmpdir, boring_ft_schedule):
     """Inspect the scheduled fine-tuning training path in the context of dynamo to ensure thawing schedule phase 0
     is enforced."""
     seed_everything(42)
@@ -1174,12 +1174,12 @@ EXPECTED_DECAY_RESULTS = {
 
 @pytest.mark.parametrize("nodecay_mode", [False, True], ids=["alldecay", "nodecay"])
 @pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
-def test_finetuningscheduling_decay(tmpdir, boring_ft_schedule, explicit_mode: bool, nodecay_mode: bool):
+def test_fts_decay(tmpdir, boring_ft_schedule, explicit_mode: bool, nodecay_mode: bool):
     """Validate scheduled fine-tuning works as expected in 'explicit' and 'implicit' modes in the context of
     different nodecay list settings.
 
-    Separately parameterized from :meth:`test_finetuningscheduling_explicit_implicit` to avoid
-    costly increase in test volume w/ minimal benefit
+    Separately parameterized from :meth:`test_fts_explicit_implicit` to avoid costly increase in test volume w/ minimal
+    benefit
     """
     seed_everything(42)
     ft_schedule = boring_ft_schedule[1] if explicit_mode else None
@@ -1349,7 +1349,7 @@ EXPECTED_NOLRS_LR_STATE = {
 }
 
 
-def test_finetuningscheduling_nolrs_intrafit(tmpdir):
+def test_fts_nolrs_intrafit(tmpdir):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
     both restore_best modes."""
     seed_everything(42)
@@ -1382,7 +1382,7 @@ EXPECTED_INTRAFIT_STATE = {
 
 
 @pytest.mark.parametrize("restore_best", [True, False], ids=["default", "norestorebest"])
-def test_finetuningscheduling_intrafit(tmpdir, restore_best: bool):
+def test_fts_intrafit(tmpdir, restore_best: bool):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
     both restore_best modes."""
     seed_everything(42)
@@ -1414,7 +1414,7 @@ EXPECTED_DYNAMO_INTRAFIT_STATE = {
 
 @RunIf(min_torch="2.0.0", skip_windows=True, skip_mac_os=True, max_python="3.11")
 @pytest.mark.parametrize("restore_best", [True, False], ids=["default", "norestorebest"])
-def test_finetuningscheduling_dynamo_intrafit(tmpdir, boring_ft_schedule, restore_best: bool):
+def test_fts_dynamo_intrafit(tmpdir, boring_ft_schedule, restore_best: bool):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
     both restore_best modes and dynamo compilation."""
     seed_everything(42)
@@ -1601,7 +1601,7 @@ EXPECTED_REINIT_OPTIM_STATE = {
         pytest.param(False, False, True, id="implicit_optimlr_use_curr"),
     ],
 )
-def test_finetuningscheduling_reinit_optim(
+def test_fts_reinit_optim(
     tmpdir, boring_ft_schedule, explicit_mode: bool, reinit_optim_only: bool, use_curr_optim_pg: bool
 ):
     """Inspect optimizer state within the training process to ensure it is taking the expected path in both
@@ -1661,7 +1661,7 @@ EXPECTED_REINIT_OPTIM_NODECAY_STATE = {
 }
 
 
-def test_finetuningscheduling_reinit_optimlr_nodecay(tmpdir, boring_ft_schedule):
+def test_fts_reinit_optimlr_nodecay(tmpdir, boring_ft_schedule):
     """Inspect optimizer state within the training process to ensure it is taking the expected path in both
     explicit and implict fine-tuning modes."""
     seed_everything(42)
@@ -1738,7 +1738,7 @@ EXPECTED_REINIT_OPTIM_LR_SPEC_STATE = {
     ],
     ids=["reinit_optim_only_lambdalr", "reinit_optim_only_rlrop"],
 )
-def test_finetuningscheduling_reinit_optim_special_lr(tmpdir, boring_ft_schedule, reinit_optim_lr_key, ft_sched_idx):
+def test_fts_reinit_optim_special_lr(tmpdir, boring_ft_schedule, reinit_optim_lr_key, ft_sched_idx):
     """Inspect optimizer state within the training process to ensure it is taking the expected path in both
     explicit and implict fine-tuning modes."""
     seed_everything(42)
@@ -1799,7 +1799,7 @@ EXPECTED_LR_STATE = {
 
 
 @pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
-def test_finetuningscheduling_reinitlr(tmpdir, boring_ft_schedule, explicit_mode: bool):
+def test_fts_reinitlr(tmpdir, boring_ft_schedule, explicit_mode: bool):
     """Inspect learning rate scheduler state within the training process to ensure it is taking the expected path
     in both explicit and implict fine-tuning modes."""
     seed_everything(42)
@@ -1873,7 +1873,7 @@ EXPECTED_LAMBDALR_STATE = {
 }
 
 
-def test_finetuningscheduling_unallowed_key_error():
+def test_fts_unallowed_key_error():
     basic_ke = KeyError("Unallowed key error")
     test_fts = FinetuningScheduler
     test_fts._has_reinit_schedule = False
@@ -1890,7 +1890,7 @@ def test_finetuningscheduling_unallowed_key_error():
     ],
     ids=["explicit_extend_lams", "explicit_nonew_lams", "imp_lamlr"],
 )
-def test_finetuningscheduling_reinitlr_lambda(
+def test_fts_reinitlr_lambda(
     tmpdir, recwarn, boring_ft_schedule, explicit_mode: bool, lam_mode: bool, w_expected
 ):
     """Inspect learning rate scheduler state within the training process to ensure it is taking the expected path
@@ -1976,7 +1976,7 @@ EXPECTED_RLROP_STATE = {
     ],
     ids=["exp_rlrop", "imp_rlrop"],
 )
-def test_finetuningscheduling_reinitlr_rlrop(
+def test_fts_reinitlr_rlrop(
     tmpdir,
     recwarn,
     boring_ft_schedule,
@@ -2062,7 +2062,7 @@ class MockDistFTS(TestFinetuningScheduler):
     ],
     ids=["default", "nondef_es", "def_es", "nondef_ftsckpt", "no_sync"],
 )
-def test_finetuningscheduler_callback_warns(
+def test_fts_callback_warns(
     tmpdir, recwarn, callbacks: List[Callback], dist_mode: str, expected: Tuple[str]
 ):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` warnings that require a
@@ -2075,7 +2075,7 @@ def test_finetuningscheduler_callback_warns(
     assert not unmatched
 
 
-def test_finetuningscheduling_opt_warns():
+def test_fts_opt_warns():
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` warnings that require only an
     :class:`~pytorch_lighting.optim.Optimizer` to be defined are properly issued."""
     fts = FinetuningScheduler()
@@ -2161,7 +2161,7 @@ class TestConnectWarn(Callback, CallbackResolverMixin):
         "imp_reinit_rlrop_mlr",
     ],
 )
-def test_finetuningscheduling_misconfiguration(tmpdir, callbacks: List[Callback], expected: str):
+def test_fts_misconfiguration(tmpdir, callbacks: List[Callback], expected: str):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly
     raised."""
     model = FinetuningSchedulerBoringModel()
@@ -2258,7 +2258,7 @@ def test_fts_init_lrs_misconfiguration(tmpdir, callbacks: List[Callback], cust_m
         "non_contig",
     ],
 )
-def test_finetuningscheduling_invalid_schedules(tmpdir, invalid_schedules, schedule_key: str, expected: Tuple):
+def test_fts_invalid_schedules(tmpdir, invalid_schedules, schedule_key: str, expected: Tuple):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly
     raised."""
     if schedule_key in ("cflict_reinit"):
@@ -2338,7 +2338,7 @@ MOCK_STRATEGY_MAPPING = {
         "deepspeed_s2",
     ],
 )
-def test_finetuningscheduling_distributed_compat(tmpdir, strategy, devices, accelerator, strategy_conf, results_key):
+def test_fts_distributed_compat(tmpdir, strategy, devices, accelerator, strategy_conf, results_key):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly raised
     for currently unsupported strategies."""
     expected_warn, raise_cond = EXPECTED_MOCK_STRATEGY_RESULTS[results_key]
@@ -2490,7 +2490,7 @@ def test_fts_zero_opt_support(monkeypatch, tmpdir, strategy, enf_p0):
     [(True, ((0, 2, 6, 8, 3, 3), "extraneous EarlyS", "maximum phase-specified")), (False, (None, "missing a max_"))],
     ids=["eponly", "noeponly"],
 )
-def test_finetuningscheduling_epoch_trans_only(tmpdir, boring_ft_schedule, epoch_only_cfg: bool, expected_state: Tuple):
+def test_fts_epoch_trans_only(tmpdir, boring_ft_schedule, epoch_only_cfg: bool, expected_state: Tuple):
     """Validate scheduled fine-tuning works as expected in 'epoch_transitions_only' mode while raising the
     appropriate exception/warning with respect to epoch_transitions_only scheduling and early stopping
     respectively."""
