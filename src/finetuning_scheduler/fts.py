@@ -645,7 +645,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         if self.gen_ft_sched_only:
             if trainer.is_global_zero:
                 assert trainer.log_dir is not None
-                _ = self.gen_ft_schedule(pl_module, trainer.log_dir)
+                _ = ScheduleImplMixin.gen_ft_schedule(pl_module, trainer.log_dir)
                 log.info("Bypassing training, generating fine-tuning schedule for review and subsequent fine-tuning")
             raise SystemExit(0)
         if not self.epoch_transitions_only:

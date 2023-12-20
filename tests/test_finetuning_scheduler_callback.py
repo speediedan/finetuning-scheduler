@@ -11,6 +11,7 @@
 # limitations under the License.
 import os
 import re
+from tempfile import gettempdir
 from collections import OrderedDict
 from copy import deepcopy
 from logging import DEBUG
@@ -50,6 +51,22 @@ def get_fts(trainer: "Trainer") -> Callback:
 def nones(num_n) -> Tuple:  # to help dedup config
     return (None,) * num_n
 
+DIST_TEST_SYMDIR = Path(gettempdir()) / "current_dist_test"
+
+def manage_dist_test_symlink(src, dst=DIST_TEST_SYMDIR, overwrite=True):
+    """Creates or updates our symlink for use with distributed tests.
+
+    Args:
+    src: The source path.
+    dst: The destination path.
+    overwrite: Whether to overwrite an existing symlink.
+    """
+    if dst.exists() and not overwrite:
+        return
+    if dst.is_symlink() or dst.exists():
+        os.unlink(dst)
+    os.symlink(src, dst)
+    return dst
 
 class AverageDataset(Dataset):
     def __init__(self, dataset_len=300, sequence_len=100):
@@ -495,6 +512,14 @@ def ckpt_set(tmpdir_factory) -> Dict:
     trainer.fit(model)
     return {"best": trainer.checkpoint_callback.best_model_path, "kth": trainer.checkpoint_callback.kth_best_model_path}
 
+def get_sched_fixture_tmpdir(tmpfactory_handle):
+    rank = getattr(rank_zero_only, "rank", 0)
+    if rank == 0:
+        tmpdir = tmpfactory_handle.getbasetemp()
+        _ = manage_dist_test_symlink(tmpdir)
+    else:
+        tmpdir = DIST_TEST_SYMDIR
+    return tmpdir, rank
 
 @pytest.fixture(scope="function")
 def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
@@ -503,12 +528,14 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     seed_everything(42)
     callbacks = [FinetuningScheduler(gen_ft_sched_only=True)]
     model = FinetuningSchedulerBoringModel()
-    tmpdir = tmpdir_factory.getbasetemp()
+    tmpdir, rank = get_sched_fixture_tmpdir(tmpdir_factory)
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
-    # unmod_schedule_file = tmpdir / "lightning_logs" / "version_0" / f"{model.__class__.__name__}_ft_schedule.yaml"]
-    unmod_schedule_file = Path(trainer.log_dir) / f"{model.__class__.__name__}_ft_schedule.yaml"
-    with pytest.raises(SystemExit):
-        trainer.fit(model)
+    unmod_schedule_file = tmpdir / "lightning_logs" / "version_0" / f"{model.__class__.__name__}_ft_schedule.yaml"
+    # N.B. Though we run this fixture for each rank to avoid adding special logic to each distributed client test, we
+    # only generate a schedule on rank 0, linking to it on the other ranks.
+    if rank == 0:
+        with pytest.raises(SystemExit):
+            trainer.fit(model)
     mod_sched_dict = get_fts(trainer).load_yaml_schedule(unmod_schedule_file)
     reinit_optim_sched_dict = deepcopy(mod_sched_dict)
     reinitlr_sched_dict = deepcopy(mod_sched_dict)
@@ -2562,17 +2589,20 @@ def test_early_stopping_thresholds(tmpdir, stopping_threshold, divergence_thesho
 
 
 @RunIf(standalone=True, min_cuda_gpus=2)
-def test_fts_multi_ddp(tmpdir):
+@pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
+def test_fts_multi_ddp(tmpdir, boring_ft_schedule, explicit_mode):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp'
     distributed context."""
     seed_everything(42)
+    ft_schedule = boring_ft_schedule[1] if explicit_mode else None
+    expected_depth = 2 if explicit_mode else 3
     model = FinetuningSchedulerBoringModel()
-    callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
+    callbacks = [FinetuningScheduler(ft_schedule=ft_schedule), FTSEarlyStopping(monitor="val_loss", patience=1)]
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp", devices=2)
     finetuningscheduler_callback = get_fts(trainer)
     trainer.fit(model)
     assert finetuningscheduler_callback.depth_remaining == 0
-    assert finetuningscheduler_callback.curr_depth == 3
+    assert finetuningscheduler_callback.curr_depth == expected_depth
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 

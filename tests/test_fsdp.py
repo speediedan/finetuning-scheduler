@@ -40,6 +40,7 @@ from tests.test_finetuning_scheduler_callback import (
     get_fts,
     nones,
     TestFinetuningScheduler,
+    get_sched_fixture_tmpdir,
 )
 
 _distributed_available = torch.distributed.is_available()
@@ -102,11 +103,12 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     seed_everything(42)
     callbacks = [FinetuningScheduler(gen_ft_sched_only=True), FTSCheckpoint(monitor="val_loss")]
     model = FinetuningSchedulerBoringModel()
-    tmpdir = tmpdir_factory.getbasetemp()
+    tmpdir, rank = get_sched_fixture_tmpdir(tmpdir_factory)
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
-    unmod_schedule_file = Path(trainer.log_dir) / f"{model.__class__.__name__}_ft_schedule.yaml"
-    with pytest.raises(SystemExit):
-        trainer.fit(model)
+    unmod_schedule_file = tmpdir / "lightning_logs" / "version_0" / f"{model.__class__.__name__}_ft_schedule.yaml"
+    if rank == 0:
+        with pytest.raises(SystemExit):
+            trainer.fit(model)
     mod_sched_dict = get_fts(trainer).load_yaml_schedule(unmod_schedule_file)
     mod_sched_dict[0]["params"].extend(mod_sched_dict.pop(1)["params"])
     mod_sched_dict[0]["max_transition_epoch"] = 3
