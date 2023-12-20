@@ -5,7 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 
-## [2.2.0] - 2023-XX-XX
+## [2.2.0] - 2024-01-XX
+
+
+## [2.1.2] - 2023-12-20
+
+### Added
+
+- Support for Lightning ``2.1.2``
+
+### Fixed
+
+- Explicitly `rank_zero_only`-guarded `ScheduleImplMixin.save_schedule` and `ScheduleImplMixin.gen_ft_schedule`. Some codepaths were incorrectly invoking them from non-`rank_zero_only` guarded contexts. Resolves [#11](https://github.com/speediedan/finetuning-scheduler/issues/11).
+
+
+## [2.1.1] - 2023-11-08
+
+### Added
+
+- Support for Lightning ``2.1.1``
+
 
 ## [2.1.0] - 2023-10-12
 
