@@ -1357,10 +1357,12 @@ class ScheduleImplMixin(ABC):
             sched_dir: directory to which the generated schedule should be written. By default will be
                 ``Trainer.log_dir``.
         """
-        default_ft_schedule = self.gen_ft_schedule(self.pl_module, sched_dir)
+        default_ft_schedule = ScheduleImplMixin.gen_ft_schedule(self.pl_module, sched_dir)
+        assert default_ft_schedule is not None
         rank_zero_info(f"Generated default fine-tuning schedule '{default_ft_schedule}' for iterative fine-tuning")
         self.ft_schedule = self.load_yaml_schedule(default_ft_schedule)
 
+    @rank_zero_only
     @staticmethod
     def save_schedule(schedule_name: str, layer_config: Dict, dump_loc: Union[str, os.PathLike]) -> os.PathLike:
         """Save loaded or generated schedule to a directory to ensure reproducability.
@@ -1385,8 +1387,9 @@ class ScheduleImplMixin(ABC):
         rank_zero_info(f"fine-tuning schedule dumped to {ft_schedule_yaml}.")
         return ft_schedule_yaml
 
+    @rank_zero_only
     @staticmethod
-    def gen_ft_schedule(module: Module, dump_loc: Union[str, os.PathLike]) -> os.PathLike:
+    def gen_ft_schedule(module: Module, dump_loc: Union[str, os.PathLike]) -> Optional[os.PathLike]:
         """Generate the default fine-tuning schedule using a naive, 2-parameters per-level heuristic.
 
         Args:
