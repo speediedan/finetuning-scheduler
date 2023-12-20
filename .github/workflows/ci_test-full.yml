@@ -42,7 +42,7 @@ jobs:
       matrix:
         os: [ubuntu-20.04, windows-2022, macOS-11]
         python-version: ["3.8", "3.11"]  # minimum, maximum
-        # tests will include oldest and newest tested patch versions of pytorch-lightning
+        # tests will include oldest and newest tested patch versions of pytorch
         requires: ["oldest", "latest"]
         release: ["latest"]
         exclude:  # note that occasionally, the oldest PyTorch version does not support the latest python version
