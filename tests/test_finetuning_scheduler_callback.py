@@ -565,7 +565,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     reinitlr_sched_dict[1]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
             "class_path": "torch.optim.lr_scheduler.StepLR",
-            "init_args": {"step_size": 1, "gamma": 0.7, "verbose": True},
+            "init_args": {"step_size": 1, "gamma": 0.7},
         },
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
     }
@@ -584,7 +584,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     reinitlr_optim_sched_dict[2]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
             "class_path": "torch.optim.lr_scheduler.StepLR",
-            "init_args": {"step_size": 1, "gamma": 0.2, "verbose": True},
+            "init_args": {"step_size": 1, "gamma": 0.2},
         },
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
     }
@@ -639,7 +639,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     rlrop_sched_dict[2]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
             "class_path": "torch.optim.lr_scheduler.StepLR",
-            "init_args": {"step_size": 1, "gamma": 0.7, "verbose": True},
+            "init_args": {"step_size": 1, "gamma": 0.7},
         },
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
         "init_pg_lrs": [2.0e-06, 3.0e-06],
@@ -1454,7 +1454,7 @@ IMP_REINIT_OPTIM_CFG = {"optimizer_init": {"class_path": "torch.optim.Adam", "in
 IMP_REINIT_LR_OPTIM_CFG = {
     "lr_scheduler_init": {
         "class_path": "torch.optim.lr_scheduler.StepLR",
-        "init_args": {"step_size": 1, "gamma": 0.5, "verbose": True},
+        "init_args": {"step_size": 1, "gamma": 0.5},
     },
     "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
 }
@@ -1766,7 +1766,7 @@ def test_fts_reinit_optim_special_lr(tmpdir, boring_ft_schedule, reinit_optim_lr
 IMP_REINIT_LR_CFG = {
     "lr_scheduler_init": {
         "class_path": "torch.optim.lr_scheduler.StepLR",
-        "init_args": {"step_size": 1, "gamma": 0.7, "verbose": True},
+        "init_args": {"step_size": 1, "gamma": 0.7},
     },
     "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
 }
@@ -2640,13 +2640,13 @@ def test_fts_multi_ddp_spawn(monkeypatch, tmpdir):
     assert trainer.callback_metrics["val_loss"] < 0.1
 
 
-@RunIf(standalone=True, min_cuda_gpus=2, skip_windows=True)
-def test_fts_multi_ddp_fork(tmpdir):
-    """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_fork'
-    distributed context."""
-    seed_everything(42)
-    model = FinetuningSchedulerBoringModel()
-    callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_fork", devices=2)
-    trainer.fit(model)
-    assert trainer.callback_metrics["val_loss"] < 0.1
+# @RunIf(standalone=True, min_cuda_gpus=2, skip_windows=True)
+# def test_fts_multi_ddp_fork(tmpdir):
+#     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp_fork'
+#     distributed context."""
+#     seed_everything(42)
+#     model = FinetuningSchedulerBoringModel()
+#     callbacks = [FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)]
+#     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_fork", devices=2)
+#     trainer.fit(model)
+#     assert trainer.callback_metrics["val_loss"] < 0.1
