@@ -37,6 +37,7 @@ EXPECTED_WARNS = [
     "is smaller than the logging interval",
     "sentencepiece tokenizer that you are converting",
     "distutils Version classes are deprecated",
+    "Please use torch.utils._pytree.register_pytree_node",  # temp allow deprecated behavior of transformers
     "Conversion of an array with ndim > 0 to",  # warning caused by deprecated behavior of tensorboard
     "We are importing from `pydantic",  # temp pydantic import migration warning
 ]
