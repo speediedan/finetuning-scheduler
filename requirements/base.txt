@@ -1,4 +1,4 @@
 #lightning>=2.2.0,<2.2.1
 # the below is uncommented when master is targeting a specific pl dev master commit
-git+https://github.com/Lightning-AI/lightning.git@12847132b1ea2acf13b51bc0c2d9e1ac267a960a#egg=lightning
+git+https://github.com/Lightning-AI/lightning.git@c989a97aa196431ecb70e1a0f8c839cdeaba9300#egg=lightning
 torch>=1.13.0
