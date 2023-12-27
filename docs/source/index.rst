@@ -369,8 +369,8 @@ adjust the configuration files referenced below as desired for other configurati
 
 Note there will likely be minor variations in training paths and performance as packages (e.g. ``transformers``,
 ``datasets``, ``finetuning-scheduler`` itself etc.) evolve. The precise package versions and salient environmental
-configuration used in the building of this tutorial is available in the tensorboard summaries, logs and checkpoints
-referenced below if you're interested.
+configuration used in the building of this tutorial is available in the logs and checkpoints referenced below if you're
+interested.
 
 .. code-block:: bash
 
@@ -385,8 +385,8 @@ referenced below if you're interested.
 
 
 All three training scenarios use identical configurations with the exception of the provided fine-tuning schedule. See
-the |tensorboard_summ| and table below for a characterization of the relative computational and performance tradeoffs
-associated with these :class:`~finetuning_scheduler.fts.FinetuningScheduler` configurations.
+the table below for a characterization of the relative computational and performance tradeoffs associated with these
+:class:`~finetuning_scheduler.fts.FinetuningScheduler` configurations.
 
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` expands the space of possible
 fine-tuning schedules and the composition of more sophisticated schedules can yield marginal fine-tuning performance
@@ -398,9 +398,7 @@ tuning transition point is immediately apparent:
 .. raw:: html
 
     <div style="max-width:400px; width:50%; height:auto;">
-        <a target="_blank" rel="noopener noreferrer" href="https://tensorboard.dev/experiment/n7U8XhrzRbmvVzC4SQSpWw/#scalars&_smoothingWeight=0&runSelectionState=eyJmdHNfZXhwbGljaXQiOmZhbHNlLCJub2Z0c19iYXNlbGluZSI6ZmFsc2UsImZ0c19pbXBsaWNpdCI6dHJ1ZX0%3D">
-            <img alt="open tensorboard experiment" src="_static/images/fts/implicit_training_transition.png">
-        </a>
+        <img src="_static/images/fts/implicit_training_transition.png">
     </div>
 
 Our val_loss begins a precipitous decline at step 3119 which corresponds to phase 17 in the schedule. Referring to our
@@ -409,8 +407,7 @@ Though beyond the scope of this documentation, it might be worth investigating t
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` allows one to do just that quite
 easily.
 
-In addition to the `tensorboard experiment summaries <https://tensorboard.dev/experiment/n7U8XhrzRbmvVzC4SQSpWw/>`_,
-full logs/schedules for all three scenarios
+Full logs/schedules for all three scenarios
 `are available <https://drive.google.com/file/d/1LrUcisRLHeJgh_BDOOD_GUBPp5iHAkoR/view?usp=sharing>`_
 as well as the `checkpoints produced <https://drive.google.com/file/d/1t7myBgcqcZ9ax_IT9QVk-vFH_l_o5UXB/view?usp=sharing>`_
 in the scenarios (caution, ~3.5GB).
@@ -433,25 +430,19 @@ in the scenarios (caution, ~3.5GB).
         .. raw:: html
 
             <div style='width:150px;height:auto'>
-                <a target="_blank" rel="noopener noreferrer" href="https://tensorboard.dev/experiment/n7U8XhrzRbmvVzC4SQSpWw/#scalars&_smoothingWeight=0&runSelectionState=eyJmdHNfZXhwbGljaXQiOmZhbHNlLCJub2Z0c19iYXNlbGluZSI6dHJ1ZSwiZnRzX2ltcGxpY2l0IjpmYWxzZX0%3D">
-                    <img alt="open tensorboard experiment" src="_static/images/fts/nofts_baseline_accuracy_deberta_base.png">
-                </a>
+                <img src="_static/images/fts/nofts_baseline_accuracy_deberta_base.png">
             </div>
      -
         .. raw:: html
 
             <div style='width:150px;height:auto'>
-                <a target="_blank" rel="noopener noreferrer" href="https://tensorboard.dev/experiment/n7U8XhrzRbmvVzC4SQSpWw/#scalars&_smoothingWeight=0&runSelectionState=eyJmdHNfZXhwbGljaXQiOmZhbHNlLCJub2Z0c19iYXNlbGluZSI6ZmFsc2UsImZ0c19pbXBsaWNpdCI6dHJ1ZX0%3D">
-                    <img alt="open tensorboard experiment" src="_static/images/fts/fts_implicit_accuracy_deberta_base.png">
-                </a>
+                <img src="_static/images/fts/fts_implicit_accuracy_deberta_base.png">
             </div>
      -
         .. raw:: html
 
             <div style='width:150px;height:auto'>
-                <a target="_blank" rel="noopener noreferrer" href="https://tensorboard.dev/experiment/n7U8XhrzRbmvVzC4SQSpWw/#scalars&_smoothingWeight=0&runSelectionState=eyJmdHNfZXhwbGljaXQiOnRydWUsIm5vZnRzX2Jhc2VsaW5lIjpmYWxzZSwiZnRzX2ltcGxpY2l0IjpmYWxzZX0%3D">
-                    <img alt="open tensorboard experiment" src="_static/images/fts/fts_explicit_accuracy_deberta_base.png">
-                </a>
+                <img src="_static/images/fts/fts_explicit_accuracy_deberta_base.png">
             </div>
 
 Note that though this example is intended to capture a common usage scenario, substantial variation is expected among
@@ -477,12 +468,6 @@ Footnotes
     - :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`
     - :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`
     - :external+pl:class:`~lightning.pytorch.callbacks.finetuning.BaseFinetuning`
-
-.. |tensorboard_summ| raw:: html
-
-            <a target="_blank" rel="noopener noreferrer" href="https://tensorboard.dev/experiment/Qy917MVDRlmkx31A895CzA/#scalars&_smoothingWeight=0&runSelectionState=eyJmdHNfZXhwbGljaXQiOnRydWUsImZ0c19pbXBsaWNpdCI6dHJ1ZSwibm9mdHNfYmFzZWxpbmUiOnRydWV9">
-            tensorboard experiment summaries
-            </a>
 
 .. raw:: html
 
