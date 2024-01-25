@@ -1238,8 +1238,8 @@ EXPECTED_WARNS = [
     "GPU available but",
     "`max_epochs` was not",
     "The dirpath has changed from",
-    "reduce_op is deprecated",  # warning caused upstream
-    "`pydantic.config.Extra` is deprecated",
+    #"reduce_op is deprecated",  # warning caused upstream
+    #"`pydantic.config.Extra` is deprecated",
 ]
 EXPECTED_TRAIN_CHK_WARNS = []
 EXPECTED_DIRPATH = ""
@@ -1297,7 +1297,7 @@ DYNAMO_EXPECTED_WARNS = [
     # using different callbacks for now to avoid creating another fixture with limited utility
     # "Be aware that when using `ckpt_path`, callbacks used",
     # "Your compiler for AOTAutograd is returning",  # out of initial scope
-    "tensor cores for float32 matrix multiplication available",  # out of initial scope
+    #"tensor cores for float32 matrix multiplication available",  # out of initial scope
 ]
 
 
