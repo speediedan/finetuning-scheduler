@@ -26,7 +26,8 @@ import yaml
 from lightning.fabric.utilities import rank_zero_only
 from lightning.fabric.utilities.cloud_io import get_filesystem
 from lightning.pytorch import LightningModule, seed_everything, Trainer
-from lightning.pytorch.callbacks import Callback, EarlyStopping, LearningRateFinder, LearningRateMonitor
+from lightning.pytorch.callbacks import (Callback, EarlyStopping, LearningRateFinder, LearningRateMonitor,
+                                         ModelCheckpoint)
 from lightning.pytorch.strategies import StrategyRegistry
 from lightning.pytorch.strategies.single_device import SingleDeviceStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
@@ -164,6 +165,7 @@ class FinetuningSchedulerBoringModel(BoringModel):
         weight_decay: float = 1.0e-06,
         init_lr_key: str = None,
         p0_params: Optional[List] = None,
+        monitor_metric: str = None,
     ):
         super().__init__()
         self.layer = nn.Sequential(nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 2))
@@ -175,6 +177,7 @@ class FinetuningSchedulerBoringModel(BoringModel):
         self.weight_decay = weight_decay
         self.init_lr_key = init_lr_key
         self.p0_params = p0_params
+        self.monitor_metric = monitor_metric or "val_loss"
 
     def training_step(self, batch, batch_idx: int):
         loss = self.step(batch)
@@ -193,7 +196,7 @@ class FinetuningSchedulerBoringModel(BoringModel):
         self.validation_step_outputs.append(loss)
         # we would normally use sync_dist for epoch-only logging in a distributed context but leaving it `False` here
         # to test FTS transition behavior when the test model is used in a distributed context
-        self.log("val_loss", loss, prog_bar=False)
+        self.log(self.monitor_metric, loss, prog_bar=False)
         return {"x": loss}
 
     def on_validation_epoch_end(self):
@@ -1234,12 +1237,10 @@ EXPECTED_RESUME_RESULTS = {
     (False, True, "kth", 1): (0, 0, 1),
 }
 EXPECTED_WARNS = [
-    "does not have many workers",
-    "GPU available but",
-    "`max_epochs` was not",
-    "The dirpath has changed from",
-    #"reduce_op is deprecated",  # warning caused upstream
-    #"`pydantic.config.Extra` is deprecated",
+    "does not have many workers",  # required for all PyTorch/Lightning versions
+    "GPU available but",  # required for all PyTorch/Lightning versions
+    "`max_epochs` was not",  # required for all PyTorch/Lightning versions
+    "The dirpath has changed from",  # required for all PyTorch/Lightning versions
 ]
 EXPECTED_TRAIN_CHK_WARNS = []
 EXPECTED_DIRPATH = ""
@@ -1294,10 +1295,6 @@ def test_fts_callback_resume(
 
 DYNAMO_EXPECTED_WARNS = [
     "Final phase max_transition_epoch",
-    # using different callbacks for now to avoid creating another fixture with limited utility
-    # "Be aware that when using `ckpt_path`, callbacks used",
-    # "Your compiler for AOTAutograd is returning",  # out of initial scope
-    #"tensor cores for float32 matrix multiplication available",  # out of initial scope
 ]
 
 
@@ -2036,17 +2033,29 @@ class MockDistFTS(TestFinetuningScheduler):
 
 
 @pytest.mark.parametrize(
-    "callbacks, dist_mode, expected",
+    "callbacks, cust_monitor, dist_mode, expected",
     [
-        ([FinetuningScheduler()], None, ("an FTSEarlyStopping", "as FTSCheck")),
-        ([FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)], None, ("FTSCheckpoint. Subs")),
+        ([FinetuningScheduler()], None, None, ("an FTSEarlyStopping", "as FTSCheck")),
+        ([FinetuningScheduler(), FTSEarlyStopping(monitor="val_loss", patience=1)], None, None,
+         ("FTSCheckpoint. Subs")),
         (
             [FinetuningScheduler(), EarlyStopping(monitor="val_loss", patience=1)],
+            None, None,
+            ("Stopping. Sub", "Checkpoint. Sub"),
+        ),
+        (
+            [FinetuningScheduler(), EarlyStopping(monitor="abc_val_loss", patience=1),
+             ModelCheckpoint(monitor="abc_val_loss", verbose=True)], 'abc_val_loss',
             None,
             ("Stopping. Sub", "Checkpoint. Sub"),
         ),
         (
-            [FinetuningScheduler(), FTSCheckpoint(monitor="val_loss", verbose=True)],
+            [FinetuningScheduler(), ModelCheckpoint(verbose=True)], None,
+            None,
+            ("Adding an FTSEarlyStopping", "Checkpoint. Sub", "No monitor metric specified"),
+        ),
+        (
+            [FinetuningScheduler(), FTSCheckpoint(monitor="val_loss", verbose=True)], None,
             None,
             ("Adding an FTSEarlyStopping",),
         ),
@@ -2055,19 +2064,19 @@ class MockDistFTS(TestFinetuningScheduler):
                 MockDistFTS(),
                 FTSCheckpoint(monitor="val_loss", verbose=True),
                 FTSEarlyStopping(monitor="val_loss", patience=1),
-            ],
+            ], None,
             "ddp",
             ("not being synchronized",),
         ),
     ],
-    ids=["default", "nondef_es", "def_es", "nondef_ftsckpt", "no_sync"],
+    ids=["default", "nondef_es", "def_es", "extract_base_callback_cfg", "missing_monitor"," nondef_ftsckpt", "no_sync"],
 )
 def test_fts_callback_warns(
-    tmpdir, recwarn, callbacks: List[Callback], dist_mode: str, expected: Tuple[str]
+    tmpdir, recwarn, callbacks: List[Callback], cust_monitor: Optional[str], dist_mode: str, expected: Tuple[str]
 ):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` warnings that require a
     :class:`~pytorch_lighting.trainer.Trainer` to be defined are properly issued"""
-    model = FinetuningSchedulerBoringModel()
+    model = FinetuningSchedulerBoringModel(monitor_metric=cust_monitor)
     dist_args = {"strategy": dist_mode, "accelerator": "cpu", "devices": "auto"} if dist_mode else {"devices": 1}
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, **dist_args)
     trainer.fit(model)

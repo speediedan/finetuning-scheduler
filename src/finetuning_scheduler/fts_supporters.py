@@ -20,6 +20,7 @@ import itertools
 import logging
 import os
 import pathlib
+import inspect
 import re
 import warnings
 from abc import ABC, abstractmethod
@@ -30,6 +31,7 @@ from dataclasses import dataclass, field, fields
 from functools import reduce
 from pprint import pformat
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing_extensions import TypeAlias
 
 import lightning.pytorch as pl
 import torch
@@ -51,7 +53,8 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.nn import Module
 
 from finetuning_scheduler.strategy_adapters.fsdp import FSDPStrategyAdapter, StrategyAdapter
-from finetuning_scheduler.types import FTSLRSchedulerType, FTSLRSchedulerTypeTuple, ParamGroupAddable
+from finetuning_scheduler.types import (FTSLRSchedulerType, FTSLRSchedulerTypeTuple, ParamGroupAddable,
+                                        BaseCallbackDepType)
 
 log = logging.getLogger(__name__)
 
@@ -471,6 +474,8 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             self.last_model_path = state_dict.get("last_model_path", self.last_model_path)
             self.best_model_path = state_dict["best_model_path"]
 
+
+FTSCallbackDepType: TypeAlias = Union[Type[FTSEarlyStopping], Type[FTSCheckpoint]]
 
 class UniqueKeyLoader(yaml.SafeLoader):
     """Alters SafeLoader to enable duplicate key detection by the SafeConstructor."""
@@ -1822,6 +1827,40 @@ class CallbackDepMixin(ABC):
         other_callbacks = [c for c in callbacks if not isinstance(c, target_callback)]
         return other_callbacks + target_callbacks
 
+    @staticmethod
+    def _extract_base_callback_cfg(trainer: "pl.Trainer", callback_type: BaseCallbackDepType) -> Dict:
+        """Extracts the configuration of a user-provided.
+
+        :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` or
+        :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` callback to enable the
+        subsequent instantiation of a fine-tuning schedule-capable FTS analog with a similar configuration.
+
+        Args:
+            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            callback_type (BaseCallbackDepType): The type of base callback from which to extract the configuration.
+
+        Returns:
+            Dict: The extracted user-provided callback configuration.
+        """
+        base_callback  = [c for c in trainer.callbacks if isinstance(c, callback_type)][0]
+        base_callback_params = dict(inspect.signature(base_callback.__init__).parameters)
+        return {k: v for k, v in base_callback.__dict__.items() if k in base_callback_params}
+
+    @staticmethod
+    def _add_fts_callback(trainer: "pl.Trainer", fts_cls: FTSCallbackDepType, cfg: Dict) -> None:
+        """Adds a fine-tuning schedule-capable FTS callback dependency with a specified configuration.
+
+        Args:
+            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            fts_cls (FTSCallbackDepType): The type of FTS callback dependency to instantiate.
+            cfg (Dict): The desired FTS callback configuration.
+        """
+        if cfg.get("monitor", None) is None:
+            cfg["monitor"] = "val_loss"
+            rank_zero_warn(f"No monitor metric specified for {fts_cls.__class__.__name__},"
+                           " using 'val_loss' as default.")
+        trainer.callbacks.append(fts_cls(**cfg))
+
     def _callback_dep_setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
         """Ensures all :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback dependencies are met, adding
         and configuring them if necessary.
@@ -1858,7 +1897,7 @@ class CallbackDepMixin(ABC):
             Bool: Whether a :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callback was added
         """
         has_ckpt_fts, has_ckpt_base, has_es_fts, has_es_base, has_lr_monitor = self._inspect_callback_deps(trainer)
-        added_ckpt_fts, added_es_fts = False, False
+        added_ckpt_fts, added_es_fts, added_ckpt_fts_kwargs, added_es_fts_kwargs = False, False, {}, {}
         if not any([has_es_fts, self.epoch_transitions_only, self.gen_ft_sched_only]):  # type: ignore[attr-defined]
             if has_es_base:
                 rank_zero_warn(
@@ -1866,13 +1905,14 @@ class CallbackDepMixin(ABC):
                     "capable EarlyStopping callback such as FTSEarlyStopping. Substituting current "
                     "EarlyStopping for FTSEarlyStopping"
                 )
+                added_es_fts_kwargs = CallbackDepMixin._extract_base_callback_cfg(trainer, EarlyStopping)
                 trainer.callbacks = [c for c in trainer.callbacks if not isinstance(c, EarlyStopping)]
             else:
                 rank_zero_warn(
                     f"{self.__class__.__name__} currently depends upon an FTSEarlyStopping callback unless configured "
                     "in epoch_transitions_only mode. Adding an FTSEarlyStopping callback with default configuration."
                 )
-            trainer.callbacks.append(FTSEarlyStopping(monitor="val_loss"))
+            CallbackDepMixin._add_fts_callback(trainer, FTSEarlyStopping, added_es_fts_kwargs)
             added_es_fts = True
         if (has_es_fts or has_es_base) and self.epoch_transitions_only:  # type: ignore[attr-defined]
             rank_zero_warn(
@@ -1887,8 +1927,9 @@ class CallbackDepMixin(ABC):
                     "capable ModelCheckpoint callback such as FTSCheckpoint. Substituting current "
                     "ModelCheckpoint for FTSCheckpoint"
                 )
+                added_ckpt_fts_kwargs = CallbackDepMixin._extract_base_callback_cfg(trainer, ModelCheckpoint)
                 trainer.callbacks = [c for c in trainer.callbacks if not isinstance(c, ModelCheckpoint)]
-            trainer.callbacks.append(FTSCheckpoint(monitor="val_loss", verbose=True))
+            CallbackDepMixin._add_fts_callback(trainer, FTSCheckpoint, added_ckpt_fts_kwargs)
             added_ckpt_fts = True
         for uc in [c for c in trainer.callbacks if any([isinstance(c, d) for d in CALLBACK_DEP_PARENTS.values()])]:
             uc.connect_callback(trainer)  # type: ignore[attr-defined]

@@ -17,9 +17,11 @@ Type definitions required for Fine-Tuning Scheduler.
 
 """
 from typing import Any, Dict, Protocol, runtime_checkable, Type, Union
+from typing_extensions import TypeAlias
 
 import torch
 from lightning.fabric.utilities.types import _TORCH_LRSCHEDULER, Optimizable, ReduceLROnPlateau
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 
 
 @runtime_checkable
@@ -45,3 +47,5 @@ supported_lrs = [
 ]
 FTSLRSchedulerTypeTuple = tuple(getattr(torch.optim.lr_scheduler, lr_class) for lr_class in supported_lrs)
 FTSLRSchedulerType = Union[Type[_TORCH_LRSCHEDULER], Type[ReduceLROnPlateau]]
+
+BaseCallbackDepType: TypeAlias = Union[Type[EarlyStopping], Type[ModelCheckpoint]]

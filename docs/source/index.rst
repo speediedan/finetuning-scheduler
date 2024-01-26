@@ -20,7 +20,7 @@ foundation model experimentation with flexible fine-tuning schedules. Training w
    If you're exploring using the :class:`~finetuning_scheduler.fts.FinetuningScheduler`, this is a great place
    to start!
    You may also find the `notebook-based tutorial <https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html>`_
-   useful and for those using the :doc:`LightningCLI<cli/lightning_cli>`, there is a
+   useful and for those using the :external+pl:class:`~lightning.pytorch.cli.LightningCLI`, there is a
    :ref:`CLI-based<scheduled-fine-tuning-superglue>` example at the bottom of this introduction.
 
 Setup
@@ -69,6 +69,14 @@ and :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks with
 
     trainer = L.Trainer(callbacks=[FinetuningScheduler()])
 
+.. note::
+    If not provided, FTS will instantiate its callback dependencies
+    (:class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` and
+    :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint`) with default configurations and ``monitor=val_loss``.
+    If the user provides base versions of these dependencies (e.g.
+    :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`,
+    :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`) the provided configuration of
+    those callbacks will be used to instantiate their FTS analogs instead.
 
 .. _default schedule:
 
@@ -353,8 +361,8 @@ A demonstration of the scheduled fine-tuning callback
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` using the
 `RTE <https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte>`_ and
 `BoolQ <https://github.com/google-research-datasets/boolean-questions>`_ tasks of the
-`SuperGLUE <https://paperswithcode.com/dataset/superglue>`_ benchmark and the :doc:`LightningCLI<cli/lightning_cli>`
-is available under ``./fts_examples/stable``.
+`SuperGLUE <https://paperswithcode.com/dataset/superglue>`_ benchmark and the
+:external+pl:class:`~lightning.pytorch.cli.LightningCLI` is available under ``./fts_examples/stable``.
 
 Since this CLI-based example requires a few additional packages (e.g. ``transformers``, ``sentencepiece``), you
 should install them using the ``[examples]`` extra:
