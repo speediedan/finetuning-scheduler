@@ -78,14 +78,14 @@ else:
 additional_fsdp_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
     "does not support loading the optimizer",  # with PyTorch 1.x Lightning lacks OSD restoration support
-    "Please use torch.distributed.all_gather_into_tensor",  # can be removed once PyTorch stops using internally,
-    "Please use torch.distributed.reduce_scatter_tensor",  # can be removed once PyTorch stops using internally,
+    "Please use torch.distributed.all_gather_into_tensor",  # still required for PyTorch/Lightning <=2.1
+    "Please use torch.distributed.reduce_scatter_tensor",  # still required for PyTorch/Lightning <=2.1
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
 FSDP_DYNAMO_EXPECTED_WARNS = [
-    "Final phase max_transition_epoch",
+    "Final phase max_transition_epoch",  # still required for PyTorch/Lightning <=2.0
 ]
 
 ##########################
