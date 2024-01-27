@@ -180,10 +180,9 @@ either integers or convertible to integers via ``int()``.
     as directed in the explicitly specified or implicitly generated schedule. Prior to beginning the first phase of
     training (phase ``0``), FinetuningScheduler will inspect the optimizer to determine if the user has manually
     initialized the optimizer with parameters that are non-trainable or otherwise altered the parameter trainability
-    states from that expected of the configured phase ``0``. By default (starting with FinetuningScheduler ``2.0``), FTS
-    ensures the optimizer configured in ``configure_optimizers`` will optimize the parameters (and only those
-    parameters) scheduled to be optimized in phase ``0`` of the current fine-tuning schedule. This auto-configuration
-    can be disabled if desired by setting
+    states from that expected of the configured phase ``0``. By default, FTS ensures the optimizer configured in
+    ``configure_optimizers`` will optimize the parameters (and only those parameters) scheduled to be optimized in phase
+    ``0`` of the current fine-tuning schedule. This auto-configuration can be disabled if desired by setting
     :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.enforce_phase0_params` to ``False``.
 
 EarlyStopping and Epoch-Driven Phase Transition Criteria

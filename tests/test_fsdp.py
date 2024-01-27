@@ -19,7 +19,6 @@ from unittest import mock
 import pytest
 import torch
 from lightning.fabric.utilities.imports import (
-    _TORCH_GREATER_EQUAL_2_0,
     _TORCH_GREATER_EQUAL_2_1,
     _TORCH_GREATER_EQUAL_2_2
 )
@@ -65,14 +64,10 @@ if _TORCH_GREATER_EQUAL_2_1:
 
     DISABLE_USE_ORIG = {"use_orig_params": False}
     _FSDPPolicy = object
-elif _TORCH_GREATER_EQUAL_2_0:
+else:
     from torch.distributed.fsdp.wrap import _FSDPPolicy
 
     DISABLE_USE_ORIG = {"use_orig_params": False}
-else:
-    CustomPolicy = object
-    _FSDPPolicy = object
-    DISABLE_USE_ORIG = {}
 
 
 additional_fsdp_warns = [
@@ -584,12 +579,10 @@ class CustomWrapPolicy(_FSDPPolicy):
 
 # RunIf aliases
 runif_map = {
-    "min2_0": {"min_torch": "2.0.0"},
-    "only2_0": {"min_torch": "2.0.0", "max_torch": "2.0.1"},
+    "only2_0": {"max_torch": "2.0.1"},
     "min2_1": {"min_torch": "2.1.0"},
     "min2_2": {"min_torch": "2.2.0"},
-    "max1_13": {"max_torch": "1.13.1"},
-    "min2_0_max3_11": {"min_torch": "2.0.0", "max_python": "3.11"},
+    "max3_11": {"max_python": "3.11"},
 }
 
 # auto-wrap policy aliases
@@ -600,11 +593,9 @@ if _TORCH_GREATER_EQUAL_2_1:
     numel_constant = 67
     awp_mwp_2_1_parity = CustomPolicy(lambda_fn=lambda m: sum(p.numel() for p in m.parameters()) >= numel_constant)
     awp_mwp_2_0_parity = None
-elif _TORCH_GREATER_EQUAL_2_0:
+else:
     awp_mwp_2_0_parity = CustomWrapPolicy(min_num_params=67)
     awp_mwp_2_1_parity = None
-else:
-    awp_mwp_2_0_parity, awp_mwp_2_1_parity = None, None
 
 # awp_overrides configuration aliases
 awp_5_9 = {"awp_overrides": ["layer.9", "layer.5"]}
@@ -621,8 +612,6 @@ ignore_states_cfg = {
     "use_orig_params": True,
 }
 
-if not _TORCH_GREATER_EQUAL_2_0:
-    cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
 cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
 cust_fp16_mp = {"mixed_precision": MixedPrecision(**cust_mp_args), **DISABLE_USE_ORIG}
 
@@ -661,7 +650,7 @@ FTS_FSDP_TESTS = {
     ),
     "cust_awp_noprec": (
         (adam_model, cust_awp, False, 0, unwrap_7, *nones(4)),
-        "min2_0",
+        None,
         (path_default_orig, *nones(3)),
     ),
     "noawp_noprec": (
@@ -676,7 +665,7 @@ FTS_FSDP_TESTS = {
     ),
     "cust_awp_noprec_dynamo": (
         (nond_loss_adam_model, cust_awp, False, 7, unwrap_7_dyn, None, epoch_t_only, max_epoch_4, None),
-        "min2_0_max3_11",
+        "max3_11",
         (path_default_orig_eo_dyn, *nones(3)),
     ),
     "cust_awp_mwp_2_1_reinitlr_optim_no_use_orig": (
@@ -769,11 +758,6 @@ FTS_FSDP_TESTS = {
         "min2_1",
         (path_default, *nones(3)),
     ),
-    "cust_awp_prec_pt1x": (
-        (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), cust_fp16_mp),
-        "max1_13",
-        (path_default, *nones(3)),
-    ),
     "enforceP0_cust_awp_prec_no_use_orig": (
         (enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
         "min2_1",
@@ -800,7 +784,7 @@ FTS_FSDP_TESTS = {
     ),
     "cust_awp_overrides_prec_no_use_orig": (
         (adam_model, cust_awp, True, 0, wrap_all_mp, awp_7, *nones(2), cust_fp16_mp),
-        "min2_0",
+        None,
         (path_default, *nones(3)),
     ),
     "cust_awp_overrides_mwp_prec_no_use_orig": (
@@ -878,7 +862,7 @@ def test_fsdp_multi_gpus(
         check_fts_fsdp_warns(w_expected, recwarn, use_dynamo)
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True, min_torch="1.13")
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True)
 @pytest.mark.parametrize(
     "model_cls, awp, ft_sched_idx, model_cfg",
     [pytest.param(adam_model, cust_awp, 0, unwrap_7, id="cust_noprec_resume")],

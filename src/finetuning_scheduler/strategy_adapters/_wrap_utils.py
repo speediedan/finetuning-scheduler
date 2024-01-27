@@ -14,7 +14,6 @@ from typing import Any, Callable, Dict, List, Set, Union
 
 import torch
 from lightning.fabric.utilities.imports import (
-    _TORCH_GREATER_EQUAL_2_0,
     _TORCH_GREATER_EQUAL_2_1,
 )
 
@@ -26,7 +25,7 @@ if torch.distributed.is_available():
         # N.B. while imports using the public API are preferred, avoiding use of `_Policy` here would mean excluding
         # support for user policies that directly subclass `_Policy` (rather than `CustomPolicy` or `ModuleWrapPolicy`)
         from torch.distributed.fsdp.wrap import _Policy, CustomPolicy
-    elif _TORCH_GREATER_EQUAL_2_0:
+    else:
         from torch.distributed.fsdp.wrap import _FSDPPolicy
 
 
@@ -69,7 +68,7 @@ if _TORCH_GREATER_EQUAL_2_1:
 
     NameDrivenPolicy = NameDrivenCustomPolicy
 
-elif _TORCH_GREATER_EQUAL_2_0:
+else:
 
     class NameDrivenFSDPPolicy(_FSDPPolicy):
         """An auto-wrapping policy extension that applies module name-based override directives on top of a given

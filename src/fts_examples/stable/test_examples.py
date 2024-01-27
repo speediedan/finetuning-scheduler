@@ -40,8 +40,8 @@ EXPECTED_WARNS = [
     "Please use torch.utils._pytree.register_pytree_node",  # temp allow deprecated behavior of transformers
     "We are importing from `pydantic",  # temp pydantic import migration warning
 ]
-MIN_VERSION_WARNS = "1.13"
-MAX_VERSION_WARNS = "2.2"
+MIN_VERSION_WARNS = "2.0"
+MAX_VERSION_WARNS = "2.3"
 # torch version-specific warns go here
 EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [],
                           MAX_VERSION_WARNS: [

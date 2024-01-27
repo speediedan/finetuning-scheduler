@@ -30,8 +30,8 @@ Demonstration FTS FSDP training/profiling configurations and a DDP baseline for 
 ``./fts_examples/stable/config/advanced/fsdp``.
 
 Most of these FTS FSDP training examples have the same dependencies as the basic
-:ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples except PyTorch >= ``2.0`` is
-required. Running the :ref:`basic example<basic-fsdp-fine-tuning-example>` requires PyTorch >= ``2.1.0``.
+:ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples. Running the
+:ref:`basic example<basic-fsdp-fine-tuning-example>` requires PyTorch >= ``2.1.0``.
 
 .. note::
 
@@ -322,13 +322,6 @@ As always, if needed, one can alternatively override ``configure_model`` and man
 
   Resuming across heterogeneous ``use_orig_params`` contexts with FTS is not currently supported (e.g.
   ``use_orig_params=True`` checkpoints need to be resumed with ``use_orig_params=True`` set)
-
-.. note::
-
-  With PyTorch versions < ``2.0``, optimizer state dicts are not currently saved/loaded when restoring checkpoints
-  in the context of FSDP training. This comports with upstream Lightning behavior/limitations. Please use PyTorch >=
-  ``2.0`` if restoring optimizer state from checkpoints (while FSDP training) is critical to your use case. For more
-  regarding this version constraint, see `this issue <https://github.com/Lightning-AI/lightning/issues/18230>`_.
 
 .. tip::
 

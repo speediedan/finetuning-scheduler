@@ -33,7 +33,6 @@ import torch
 from lightning.fabric.strategies.fsdp import _get_full_state_dict_context, _setup_activation_checkpointing
 from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
 from lightning.fabric.utilities.imports import (
-    _TORCH_GREATER_EQUAL_2_0,
     _TORCH_GREATER_EQUAL_2_1,
 )
 from lightning.pytorch.strategies.strategy import Strategy
@@ -61,18 +60,11 @@ if torch.distributed.is_available():
         from torch.distributed.fsdp.wrap import _Policy
 
         from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
-    elif _TORCH_GREATER_EQUAL_2_0:
+    else:
         from torch.distributed.fsdp._common_utils import _get_param_to_fqns, _is_fsdp_flattened
         from torch.distributed.fsdp.wrap import _FSDPPolicy as _Policy  # type: ignore[no-redef]
 
         from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
-    else:
-        _Policy = object  # type: ignore[assignment,misc]
-        NameDrivenPolicy = object  # type: ignore[assignment,misc]
-        from torch.distributed.fsdp._utils import _is_fsdp_flattened  # type: ignore[no-redef]
-        from torch.distributed.fsdp.fully_sharded_data_parallel import _get_param_to_unflat_param_names
-
-    _get_params_to_fqns = _get_param_to_fqns if _TORCH_GREATER_EQUAL_2_0 else _get_param_to_unflat_param_names
 
 
 class FSDPStrategyAdapter(StrategyAdapter):
@@ -270,12 +262,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
             checkpoint_connector (_CheckpointConnector): The ``_CheckpointConnector`` associated with the current
                 training session.
         """
-        if not _TORCH_GREATER_EQUAL_2_0:
-            rank_zero_debug(
-                "Note that saving/restoring optimizer state using the FSDP strategy with PyTorch < 2.0 is not"
-                " supported by Lightning. Bypassing restoration of optimizer state."
-            )
-            return
         optimizer_states = checkpoint_connector._loaded_checkpoint["optimizer_states"]
 
         assert self.pls_handle.model is not None
@@ -311,12 +297,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
         Returns:
             Dict[str, Tensor]: The consolidated full optimizer state dict (if on rank 0, otherwise an empty dict).
         """
-        if not _TORCH_GREATER_EQUAL_2_0:
-            rank_zero_debug(
-                "Note that saving/restoring optimizer states using the FSDP strategy with PyTorch < 2.0 is not"
-                " supported by Lightning. Bypassing saving of optimizer state."
-            )
-            return {}
         assert self.pls_handle.model is not None
 
         # irrespective of `use_orig_params` mode, we need the full, unflattened, unsharded, consolidated osd
@@ -798,7 +778,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def _init_fsdp_param_map(self) -> None:
         """Generate parameter-level bi-directional translations between unflat (original) and flat (FSDP-flattened)
         parameters."""
-        self._fsdp_flat_to_unflat_mapping = _get_params_to_fqns(self.pl_module)
+        self._fsdp_flat_to_unflat_mapping = _get_param_to_fqns(self.pl_module)
         self._fsdp_unflat_to_flat_mapping = {
             up: fpn for fpn, upl in self._fsdp_flat_to_unflat_mapping.items() for up in upl
         }
@@ -842,7 +822,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         auto_wrap_policy_handle = _ConfigAutoWrap.kwargs.pop("auto_wrap_policy", None)
         override_ids = [id(m) for n, m in self.pl_module.named_modules() if n in self.awp_overrides]
         name_based_override_policy: Union[NameDrivenPolicy, Callable]
-        if _TORCH_GREATER_EQUAL_2_0 and isinstance(auto_wrap_policy_handle, _Policy):
+        if isinstance(auto_wrap_policy_handle, _Policy):
             name_based_override_policy = NameDrivenPolicy(auto_wrap_policy_handle, override_ids=override_ids)
         else:  # Callable policy implementation path
             name_driven_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda m: id(m) in override_ids)

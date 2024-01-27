@@ -381,9 +381,9 @@ class RteBoolqModule(L.LightningModule):
         self.log_dict(metric_dict, prog_bar=True)
 
     def configure_optimizers(self):
-        # With FTS >= 2.0, ``FinetuningScheduler`` simplifies initial optimizer configuration by ensuring the optimizer
-        # configured here will optimize the parameters (and only those parameters) scheduled to be optimized in phase 0
-        # of the current fine-tuning schedule. This auto-configuration can be disabled if desired by setting
+        # ``FinetuningScheduler`` simplifies initial optimizer configuration by ensuring the optimizer configured here
+        # will optimize the parameters (and only those parameters) scheduled to be optimized in phase 0 of the current
+        # fine-tuning schedule. This auto-configuration can be disabled if desired by setting
         # ``enforce_phase0_params`` to ``False``.
         optimizer = AdamW(params=self.model.parameters(), **self.hparams.optimizer_init)
         scheduler = {

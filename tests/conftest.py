@@ -65,14 +65,13 @@ def restore_env_variables():
         "WANDB_MODE",
         "WANDB_REQUIRE_SERVICE",
         "WANDB_SERVICE",
-        "HOROVOD_FUSION_THRESHOLD",  # set by HorovodStrategy # TODO: remove in v2.0.0
         "RANK",  # set by DeepSpeed
         "POPLAR_ENGINE_OPTIONS",  # set by IPUStrategy
-        "CUDA_MODULE_LOADING",  # leaked since PyTorch 1.13
-        "KMP_INIT_AT_FORK",  # leaked since PyTorch 1.13
-        "KMP_DUPLICATE_LIB_OK",  # leaked since PyTorch 1.13
+        "CUDA_MODULE_LOADING",
+        "KMP_INIT_AT_FORK",
+        "KMP_DUPLICATE_LIB_OK",
         "CRC32C_SW_MODE",  # leaked by tensorboardX
-        "TRITON_CACHE_DIR",  # leaked starting in PyTorch 2.0.0
+        "TRITON_CACHE_DIR",
         "OMP_NUM_THREADS",  # leaked by Lightning launchers
     }
     leaked_vars.difference_update(allowlist)
