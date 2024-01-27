@@ -5,7 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 
-## [2.2.0] - 2024-01-XX
+## [2.2.0] - 2024-XX-XX
+
+### Added
+
+- Support for Lightning and PyTorch ``2.2.0``
+- FTS now inspects any base `EarlyStopping` or `ModelCheckpoint` configuration passed in by the user and applies that configuration when instantiating the required FTS callback dependencies (i.e., `FTSEarlyStopping` or `FTSCheckpoint`). Part of the resolution to [#12](https://github.com/speediedan/finetuning-scheduler/issues/12).
+
+### Changed
+
+- updated reference to renamed `FSDPPrecision`
+- increased `jsonargparse` minimum supported version to `4.26.1`
+- bumped `sphinx` requirement to `>5.0,<6.0`
+
+### Fixed
+
+- Explicitly `rank_zero_only`-guarded `ScheduleImplMixin.save_schedule` and `ScheduleImplMixin.gen_ft_schedule`. Some codepaths were incorrectly invoking them from non-`rank_zero_only` guarded contexts. Resolved [#11](https://github.com/speediedan/finetuning-scheduler/issues/11).
+- Added a [note in the documentation](https://finetuning-scheduler.readthedocs.io/en/latest/#:~:text=If%20not%20provided%2C%20FTS%20will%20instantiate%20its%20callback%20dependencies) indicating more clearly the behavior of FTS when no monitor metric configuration is provided. Part of the resolution to [#12](https://github.com/speediedan/finetuning-scheduler/issues/12).
+
+### Deprecated
+
+- removed support for PyTorch `1.12`
+- removed legacy FTS examples
+- removed deprecated lr `verbose` init param usage
+- removed deprecated `tensorboard.dev` references
 
 
 ## [2.1.3] - 2023-12-21
