@@ -74,8 +74,8 @@ repos:
           - mdformat_frontmatter
         exclude: CHANGELOG.md
 
-  - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: 'v0.0.291'
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 'v0.1.15'
     hooks:
       - id: ruff
         # Respect `exclude` and `extend-exclude` settings.
