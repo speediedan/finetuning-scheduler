@@ -30,6 +30,21 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - removed deprecated lr `verbose` init param usage
 - removed deprecated `tensorboard.dev` references
 
+## [2.1.4] - 2024-02-02
+
+### Added
+
+- Support for Lightning ``2.1.4``
+
+### Changed
+
+- bumped `sphinx` requirement to `>5.0,<6.0`
+
+### Deprecated
+
+- removed deprecated lr `verbose` init param usage
+- removed deprecated `tensorboard.dev` references
+
 
 ## [2.1.3] - 2023-12-21
 
