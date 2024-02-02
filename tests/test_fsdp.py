@@ -24,7 +24,7 @@ from lightning.fabric.utilities.imports import (
     _TORCH_GREATER_EQUAL_2_1,
 )
 from lightning.pytorch import seed_everything, Trainer
-from lightning.pytorch.plugins.precision.fsdp import FSDPPrecision
+from lightning.pytorch.plugins.precision.fsdp import FSDPPrecisionPlugin
 from lightning.pytorch.strategies import FSDPStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from torch.utils.data import DataLoader
@@ -292,7 +292,7 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
         else:
             assert isinstance(self.layer, torch.nn.Sequential)
         if self.precision_key == "auto_16":
-            assert isinstance(self.trainer.strategy.precision_plugin, FSDPPrecision)
+            assert isinstance(self.trainer.strategy.precision_plugin, FSDPPrecisionPlugin)
             precision = torch.float16 if self.trainer.precision == "16-true" else torch.bfloat16
         # ensure our ignored module is not wrapped
         for i in self.fsdp_mask["unwrapped_mods"]:
