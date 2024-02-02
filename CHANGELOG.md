@@ -16,7 +16,6 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - updated reference to renamed `FSDPPrecision`
 - increased `jsonargparse` minimum supported version to `4.26.1`
-- bumped `sphinx` requirement to `>5.0,<6.0`
 
 ### Fixed
 
@@ -27,6 +26,20 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - removed support for PyTorch `1.12`
 - removed legacy FTS examples
+
+
+## [2.1.4] - 2024-02-02
+
+### Added
+
+- Support for Lightning ``2.1.4``
+
+### Changed
+
+- bumped `sphinx` requirement to `>5.0,<6.0`
+
+### Deprecated
+
 - removed deprecated lr `verbose` init param usage
 - removed deprecated `tensorboard.dev` references
 
