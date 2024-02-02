@@ -2059,14 +2059,14 @@ class MockDistFTS(TestFinetuningScheduler):
             None,
             ("Adding an FTSEarlyStopping",),
         ),
-        (
+        pytest.param(
             [
                 MockDistFTS(),
                 FTSCheckpoint(monitor="val_loss", verbose=True),
                 FTSEarlyStopping(monitor="val_loss", patience=1),
             ], None,
             "ddp",
-            ("not being synchronized",),
+            ("not being synchronized",), marks=RunIf(skip_windows=True)
         ),
     ],
     ids=["default", "nondef_es", "def_es", "extract_base_callback_cfg", "missing_monitor"," nondef_ftsckpt", "no_sync"],
@@ -2332,7 +2332,7 @@ MOCK_STRATEGY_MAPPING = {
     "strategy, devices, accelerator, strategy_conf, results_key",
     [
         pytest.param("test_strategy", 1, "auto", "stgy_allow_untest", "allow_untest"),
-        pytest.param("ddp", 1, "auto", "stgy_disallow_untest", "disallow_untest"),
+        pytest.param("ddp", 1, "auto", "stgy_disallow_untest", "disallow_untest", marks=RunIf(skip_windows=True)),
         pytest.param("test_strategy", 1, "cpu", "cust_stgy_adapter_found", "cust_stgy_adapter_found"),
         pytest.param("test_strategy", 1, "cpu", "cust_stgy_adapter_not_found", "cust_stgy_adapter_not_found"),
         pytest.param("test_strategy", 1, "cpu", "cust_stgy_adapter_not_importable", "cust_stgy_adapter_not_importable"),
