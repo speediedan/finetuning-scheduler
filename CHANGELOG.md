@@ -27,8 +27,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - removed support for PyTorch `1.12`
 - removed legacy FTS examples
-- removed deprecated lr `verbose` init param usage
-- removed deprecated `tensorboard.dev` references
+
 
 ## [2.1.4] - 2024-02-02
 
