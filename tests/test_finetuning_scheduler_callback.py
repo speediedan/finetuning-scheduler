@@ -565,7 +565,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     reinitlr_sched_dict[1]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
             "class_path": "torch.optim.lr_scheduler.StepLR",
-            "init_args": {"step_size": 1, "gamma": 0.7, "verbose": True},
+            "init_args": {"step_size": 1, "gamma": 0.7},
         },
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
     }
@@ -584,7 +584,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     reinitlr_optim_sched_dict[2]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
             "class_path": "torch.optim.lr_scheduler.StepLR",
-            "init_args": {"step_size": 1, "gamma": 0.2, "verbose": True},
+            "init_args": {"step_size": 1, "gamma": 0.2},
         },
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
     }
@@ -639,7 +639,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     rlrop_sched_dict[2]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
             "class_path": "torch.optim.lr_scheduler.StepLR",
-            "init_args": {"step_size": 1, "gamma": 0.7, "verbose": True},
+            "init_args": {"step_size": 1, "gamma": 0.7},
         },
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
         "init_pg_lrs": [2.0e-06, 3.0e-06],
@@ -1454,7 +1454,7 @@ IMP_REINIT_OPTIM_CFG = {"optimizer_init": {"class_path": "torch.optim.Adam", "in
 IMP_REINIT_LR_OPTIM_CFG = {
     "lr_scheduler_init": {
         "class_path": "torch.optim.lr_scheduler.StepLR",
-        "init_args": {"step_size": 1, "gamma": 0.5, "verbose": True},
+        "init_args": {"step_size": 1, "gamma": 0.5},
     },
     "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
 }
@@ -1766,7 +1766,7 @@ def test_finetuningscheduling_reinit_optim_special_lr(tmpdir, boring_ft_schedule
 IMP_REINIT_LR_CFG = {
     "lr_scheduler_init": {
         "class_path": "torch.optim.lr_scheduler.StepLR",
-        "init_args": {"step_size": 1, "gamma": 0.7, "verbose": True},
+        "init_args": {"step_size": 1, "gamma": 0.7},
     },
     "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
 }

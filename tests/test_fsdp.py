@@ -24,7 +24,7 @@ from lightning.fabric.utilities.imports import (
     _TORCH_GREATER_EQUAL_2_1,
 )
 from lightning.pytorch import seed_everything, Trainer
-from lightning.pytorch.plugins.precision.fsdp import FSDPPrecisionPlugin
+from lightning.pytorch.plugins.precision.fsdp import FSDPPrecision
 from lightning.pytorch.strategies import FSDPStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from torch.utils.data import DataLoader
@@ -140,7 +140,7 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     fsdp_reinitlr_sched_dict[1]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
             "class_path": "torch.optim.lr_scheduler.StepLR",
-            "init_args": {"step_size": 1, "gamma": 0.7, "verbose": True},
+            "init_args": {"step_size": 1, "gamma": 0.7},
         },
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
     }
@@ -159,7 +159,7 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     fsdp_reinitlr_optim_sched_dict[2]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
             "class_path": "torch.optim.lr_scheduler.StepLR",
-            "init_args": {"step_size": 1, "gamma": 0.2, "verbose": True},
+            "init_args": {"step_size": 1, "gamma": 0.2},
         },
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
     }
@@ -292,7 +292,7 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
         else:
             assert isinstance(self.layer, torch.nn.Sequential)
         if self.precision_key == "auto_16":
-            assert isinstance(self.trainer.strategy.precision_plugin, FSDPPrecisionPlugin)
+            assert isinstance(self.trainer.strategy.precision_plugin, FSDPPrecision)
             precision = torch.float16 if self.trainer.precision == "16-true" else torch.bfloat16
         # ensure our ignored module is not wrapped
         for i in self.fsdp_mask["unwrapped_mods"]:
@@ -963,7 +963,7 @@ def load_ignore_directives(strategy_cfg, model):
 
 
 def callbacks_cfg(fts_cls, ft_sched, non_def_fts_cfg, fts_es_cfg, fts_ckpt_cfg):
-    default_dep_cfg = {"monitor": "val_loss", "verbose": True}
+    default_dep_cfg = {"monitor": "val_loss"}
     fts_es_cfg = {**fts_es_cfg, **default_dep_cfg}
     fts_ckpt_cfg = {**fts_ckpt_cfg, **default_dep_cfg}
     override_fts_cb = {
