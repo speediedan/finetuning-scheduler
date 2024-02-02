@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 
+## [2.1.4] - 2024-02-02
+
+### Added
+
+- Support for Lightning ``2.1.4``
+
+### Changed
+
+- updated reference to renamed `FSDPPrecision`
+- bumped `sphinx` requirement to `>5.0,<6.0`
+
+### Deprecated
+
+- removed deprecated lr `verbose` init param usage
+- removed deprecated `tensorboard.dev` references
+
+
 ## [2.1.3] - 2023-12-21
 
 ### Added
