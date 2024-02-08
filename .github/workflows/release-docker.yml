@@ -32,7 +32,7 @@ jobs:
         # initially building only the latest supported configuration
         python_version: ["3.11"]
         pytorch_version: ["2.2.0"]
-        cust_base: ["cu12.1-"]
+        cust_base: ["cu12.1.0-"]
         pl_version: ["2.2"]
     steps:
       - name: Checkout
