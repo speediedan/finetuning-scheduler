@@ -20,7 +20,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 ### Fixed
 
 - Explicitly `rank_zero_only`-guarded `ScheduleImplMixin.save_schedule` and `ScheduleImplMixin.gen_ft_schedule`. Some codepaths were incorrectly invoking them from non-`rank_zero_only` guarded contexts. Resolved [#11](https://github.com/speediedan/finetuning-scheduler/issues/11).
-- Added a [note in the documentation](https://finetuning-scheduler.readthedocs.io/en/latest/#basic-usage) indicating more clearly the behavior of FTS when no monitor metric configuration is provided. Part of the resolution to [#12](https://github.com/speediedan/finetuning-scheduler/issues/12).
+- Added a note in the documentation indicating more clearly the behavior of FTS when no monitor metric configuration is provided. Part of the resolution to [#12](https://github.com/speediedan/finetuning-scheduler/issues/12).
 
 ### Deprecated
 
