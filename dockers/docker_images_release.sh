@@ -21,16 +21,21 @@ d=`date +%Y%m%d%H%M%S`
 tmp_docker_build_log_dir="/tmp"
 docker_build_log="${tmp_docker_build_log_dir}/fts_build_docker_release_images_${d}.log"
 
-
 maybe_push(){
     if [[ $push_remote -ne 0 ]]; then
         echo "Beginning upload of built images..." >> $docker_build_log
+		echo "Pushing ${registry_name}:${latest_pt} ..." >> $docker_build_log
         docker push ${registry_name}:${latest_pt} >> $docker_build_log
-		docker push ${registry_name}:${latest_azpl_init} >> $docker_build_log
+		echo "Pushing ${registry_name}:${latest_azpl} ..." >> $docker_build_log
+		docker push ${registry_name}:${latest_azpl} >> $docker_build_log
+		echo "Pushing ${registry_name}:${pt_1_13_1} ..." >> $docker_build_log
 		docker push ${registry_name}:${pt_1_13_1} >> $docker_build_log
-		docker push ${registry_name}:${pt_1_13_1_azpl_init} >> $docker_build_log
+		echo "Pushing ${registry_name}:${pt_1_13_1_azpl} ..." >> $docker_build_log
+		docker push ${registry_name}:${pt_1_13_1_azpl} >> $docker_build_log
+		echo "Pushing ${registry_name}:${pt_2_0_1} ..." >> $docker_build_log
 		docker push ${registry_name}:${pt_2_0_1} >> $docker_build_log
-		docker push ${registry_name}:${pt_2_0_1_azpl_init} >> $docker_build_log
+		echo "Pushing ${registry_name}:${pt_2_0_1_azpl} ..." >> $docker_build_log
+		docker push ${registry_name}:${pt_2_0_1_azpl} >> $docker_build_log
     else
         echo "Directed to skip push of built images." >> $docker_build_log
     fi
@@ -62,7 +67,7 @@ build_eval(){
 	if [[ $build_new -ne 0 ]]; then
 		echo "All image builds successful." >> $docker_build_log
 	else
-        echo "Directed to skip building of new images, now checking whether to push..."
+        echo "Directed to skip building of new images, now checking whether to push..." >> $docker_build_log
     fi
 }
 
