@@ -5,6 +5,7 @@
 # `docker login` command or more likely, a local wrapper script that invokes this script
 
 set -eo pipefail
+source $(dirname "$0")/build_image_version.sh
 
 repo_home=$1
 registry_name=$2
@@ -22,10 +23,10 @@ docker_build_log="${tmp_docker_build_log_dir}/fts_build_docker_release_images_${
 
 
 maybe_push(){
-    if [[ -n $push_remote ]]; then
+    if [[ $push_remote -ne 0 ]]; then
         echo "Beginning upload of built images..." >> $docker_build_log
         docker push ${registry_name}:${latest_pt} >> $docker_build_log
-		docker push ${registry_name}:${latest_azpl_init} >> >> $docker_build_log
+		docker push ${registry_name}:${latest_azpl_init} >> $docker_build_log
 		docker push ${registry_name}:${pt_1_13_1} >> $docker_build_log
 		docker push ${registry_name}:${pt_1_13_1_azpl_init} >> $docker_build_log
 		docker push ${registry_name}:${pt_2_0_1} >> $docker_build_log
@@ -37,42 +38,29 @@ maybe_push(){
 
 maybe_build(){
 	if [[ $build_new -ne 0 ]]; then
-        # release latest supported PyTorch image
-    	latest_pt="base-cu12.1-py3.11-pt2.2.0-pl2.2"
-		echo "Building latest pt: ${latest_pt}" >> $docker_build_log
-        docker image build -t ${latest_pt} -f dockers/base-cuda/Dockerfile --build-arg PYTHON_VERSION=3.11 \
-          --build-arg PYTORCH_VERSION=2.2.0 --build-arg CUST_BUILD=1 --no-cache . >> $docker_build_log
-		docker tag ${latest_pt} ${registry_name}:${latest_pt} >> $docker_build_log
-		# associated azpl-init image
-		latest_azpl_init="py3.11-pt2.2.0-pl2.2-azpl-init"
-		docker image build -t ${latest_azpl_init} -f dockers/fts-az-base/Dockerfile --build-arg PYTHON_VERSION=3.11 \
-          --build-arg CUST_BASE=cu12.1- --no-cache . >> $docker_build_log
-		docker tag ${latest_azpl_init} ${registry_name}:${latest_azpl_init} >> $docker_build_log
-		################################################################################################################
-        # other previous PyTorch image(s)
-		# PyTorch 2.0.1 currently required
-		pt_2_0_1="base-cu11.8-py3.10-pt2.0.1-pl2.2"
-		echo "Building images for pt 2.0.1: ${pt_2_0_1}" >> $docker_build_log
-		docker image build -t ${pt_2_0_1} -f dockers/base-cuda/Dockerfile --build-arg PYTHON_VERSION=3.10 \
-          --build-arg PYTORCH_VERSION=2.0.1 --build-arg CUST_BUILD=0 --no-cache . >> $docker_build_log
-		docker tag ${pt_2_0_1} ${registry_name}:${pt_2_0_1} >> $docker_build_log
-		# associated azpl-init image
-		pt_2_0_1_azpl_init="py3.10-pt2.0.1-pl2.2-azpl-init"
-		docker image build -t ${pt_2_0_1_azpl_init} -f dockers/fts-az-base/Dockerfile --build-arg PYTHON_VERSION=3.10 \
-          --build-arg CUST_BASE=cu11.8- --build-arg PYTORCH_VERSION=2.0.1 --no-cache . >> $docker_build_log
-		docker tag ${pt_2_0_1_azpl_init} ${registry_name}:${pt_2_0_1_azpl_init} >> $docker_build_log
-		# PyTorch 1.13.1 currently required
-		pt_1_13_1="base-cu11.7-py3.10-pt1.13.1-pl2.2"
-		echo "Building images for pt 1.13.1: ${pt_1_13_1}" >> $docker_build_log
-		docker image build -t ${pt_1_13_1} -f dockers/base-cuda/Dockerfile --build-arg PYTHON_VERSION=3.10 \
-          --build-arg PYTORCH_VERSION=1.13.1 --build-arg CUST_BUILD=0 --no-cache . >> $docker_build_log
-		docker tag ${pt_1_13_1} ${registry_name}:${pt_1_13_1} >> $docker_build_log
-		# associated azpl-init image
-		pt_1_13_1_azpl_init="py3.10-pt1.13.1-pl2.2-azpl-init"
-		docker image build -t ${pt_1_13_1_azpl_init} -f dockers/fts-az-base/Dockerfile --build-arg PYTHON_VERSION=3.10 \
-          --build-arg CUST_BASE=cu11.7- --build-arg PYTORCH_VERSION=1.13.1 --no-cache . >> $docker_build_log
-		docker tag ${pt_1_13_1_azpl_init} ${registry_name}:${pt_1_13_1_azpl_init} >> $docker_build_log
-		echo "Image build successful" >> $docker_build_log
+		echo "Building images base: $2 and azpl-init: $3" >> $docker_build_log
+		build_version "$1" "$2" "$3"
+	fi
+}
+
+build_eval(){
+	# latest PyTorch image supported by release
+	declare -A iv=(["cuda"]="12.1.0" ["python"]="3.11" ["pytorch"]="2.2.0" ["lightning"]="2.2" ["cust_build"]="0")
+	export latest_pt="base-cu${iv["cuda"]}-py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}"
+	export latest_azpl="py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}-azpl-init"
+	maybe_build iv "${latest_pt}" "${latest_azpl}"
+	# PyTorch 2.0.1 currently required for complete coverage
+	declare -A iv=(["cuda"]="11.8.0" ["python"]="3.10" ["pytorch"]="2.0.1" ["lightning"]="2.2" ["cust_build"]="0")
+	export pt_2_0_1="base-cu${iv["cuda"]}-py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}"
+	export pt_2_0_1_azpl="py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}-azpl-init"
+	maybe_build iv "${pt_2_0_1}" "${pt_2_0_1_azpl}"
+	# PyTorch 1.13.1 currently required for complete coverage
+	declare -A iv=(["cuda"]="11.7.1" ["python"]="3.10" ["pytorch"]="1.13.1" ["lightning"]="2.2" ["cust_build"]="0")
+	export pt_1_13_1="base-cu${iv["cuda"]}-py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}"
+	export pt_1_13_1_azpl="py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}-azpl-init"
+	maybe_build iv "${pt_1_13_1}" "${pt_1_13_1_azpl}"
+	if [[ $build_new -ne 0 ]]; then
+		echo "All image builds successful." >> $docker_build_log
 	else
         echo "Directed to skip building of new images, now checking whether to push..."
     fi
@@ -80,6 +68,6 @@ maybe_build(){
 
 
 cd ${repo_home}
-echo "Building images for repository home: ${repo_home}" >> $docker_build_log
-maybe_build
+echo "Building and/or pushing images for repository home: ${repo_home}" >> $docker_build_log
+build_eval
 maybe_push
