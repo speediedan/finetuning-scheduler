@@ -26,16 +26,22 @@ maybe_push(){
         echo "Beginning upload of built images..." >> $docker_build_log
 		echo "Pushing ${registry_name}:${latest_pt} ..." >> $docker_build_log
         docker push ${registry_name}:${latest_pt} >> $docker_build_log
+		echo "Finished pushing ${registry_name}:${latest_pt} ..." >> $docker_build_log
 		echo "Pushing ${registry_name}:${latest_azpl} ..." >> $docker_build_log
 		docker push ${registry_name}:${latest_azpl} >> $docker_build_log
+		echo "Finished pushing ${registry_name}:${latest_azpl} ..." >> $docker_build_log
 		echo "Pushing ${registry_name}:${pt_1_13_1} ..." >> $docker_build_log
 		docker push ${registry_name}:${pt_1_13_1} >> $docker_build_log
+		echo "Finished pushing ${registry_name}:${pt_1_13_1} ..." >> $docker_build_log
 		echo "Pushing ${registry_name}:${pt_1_13_1_azpl} ..." >> $docker_build_log
 		docker push ${registry_name}:${pt_1_13_1_azpl} >> $docker_build_log
+		echo "Finished pushing ${registry_name}:${pt_1_13_1_azpl} ..." >> $docker_build_log
 		echo "Pushing ${registry_name}:${pt_2_0_1} ..." >> $docker_build_log
 		docker push ${registry_name}:${pt_2_0_1} >> $docker_build_log
+		echo "Finished pushing ${registry_name}:${pt_2_0_1} ..." >> $docker_build_log
 		echo "Pushing ${registry_name}:${pt_2_0_1_azpl} ..." >> $docker_build_log
 		docker push ${registry_name}:${pt_2_0_1_azpl} >> $docker_build_log
+		echo "Finished pushing ${registry_name}:${pt_2_0_1_azpl} ..." >> $docker_build_log
     else
         echo "Directed to skip push of built images." >> $docker_build_log
     fi
@@ -76,3 +82,4 @@ cd ${repo_home}
 echo "Building and/or pushing images for repository home: ${repo_home}" >> $docker_build_log
 build_eval
 maybe_push
+echo "Finished building and/or updating images for repository home: ${repo_home}" >> $docker_build_log
