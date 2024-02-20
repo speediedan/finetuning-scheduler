@@ -12,7 +12,7 @@
 # initially based on https://bit.ly/3pdAf1G
 
 ARG CUDA_VERSION=12.1.0
-ARG OS_VER=ubuntu20.04
+ARG OS_VER=ubuntu22.04
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
@@ -29,7 +29,7 @@ ENV \
     TZ=US/Pacific \
     PATH="$PATH:/root/.local/bin" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
-    TORCH_CUDA_ARCH_LIST="6.0;7.0;7.5;8.0;8.6" \
+    TORCH_CUDA_ARCH_LIST="6.0;7.0;7.5;8.0;8.6;9.0" \
     MKL_THREADING_LAYER=${MKL_THREADING_LAYER} \
     MAKEFLAGS="-j2"
 RUN apt-get update -qq --fix-missing  && \
