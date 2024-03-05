@@ -4,8 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [2.3.0] - 2024-XX-XX
 
-## [2.2.0] - 2024-XX-XX
+
+## [2.2.1] - 2024-03-04
+
+### Added
+
+- Support for Lightning ``2.2.1``
+
+## [2.2.0] - 2024-02-08
 
 ### Added
 
@@ -16,12 +24,11 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - updated reference to renamed `FSDPPrecision`
 - increased `jsonargparse` minimum supported version to `4.26.1`
-- bumped `sphinx` requirement to `>5.0,<6.0`
 
 ### Fixed
 
 - Explicitly `rank_zero_only`-guarded `ScheduleImplMixin.save_schedule` and `ScheduleImplMixin.gen_ft_schedule`. Some codepaths were incorrectly invoking them from non-`rank_zero_only` guarded contexts. Resolved [#11](https://github.com/speediedan/finetuning-scheduler/issues/11).
-- Added a [note in the documentation](https://finetuning-scheduler.readthedocs.io/en/latest/#basic-usage) indicating more clearly the behavior of FTS when no monitor metric configuration is provided. Part of the resolution to [#12](https://github.com/speediedan/finetuning-scheduler/issues/12).
+- Added a note in the documentation indicating more clearly the behavior of FTS when no monitor metric configuration is provided. Part of the resolution to [#12](https://github.com/speediedan/finetuning-scheduler/issues/12).
 
 ### Deprecated
 

@@ -36,7 +36,7 @@ EXPECTED_WARNS = [
     "does not have many workers",
     "is smaller than the logging interval",
     "sentencepiece tokenizer that you are converting",
-    "distutils Version classes are deprecated",  # still required for PyTorch/Lightning <=2.2
+    "distutils Version classes are deprecated",  # still required as of PyTorch/Lightning 2.2
     "Please use torch.utils._pytree.register_pytree_node",  # temp allow deprecated behavior of transformers
     "We are importing from `pydantic",  # temp pydantic import migration warning
 ]
