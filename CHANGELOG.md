@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 
+## [2.2.4] - 2024-05-XX
+
+### Added
+
+- Support for Lightning ``2.2.4`` and PyTorch ``2.2.2``
+
 ## [2.2.1] - 2024-03-04
 
 ### Added
