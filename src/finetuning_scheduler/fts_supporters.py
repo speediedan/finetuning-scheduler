@@ -979,7 +979,7 @@ class ScheduleParsingMixin(ABC):
             group["initial_lr"] = group.get("initial_lr", group["lr"])
         trainer.strategy.optimizers = [new_optimizer_handle]  # type: ignore[list-item]
         if trainer.lr_scheduler_configs:
-            trainer.lr_scheduler_configs[0].scheduler.optimizer = new_optimizer_handle
+            trainer.lr_scheduler_configs[0].scheduler.optimizer = new_optimizer_handle  # type: ignore[assignment]
         self._maybe_trace_reinit("optimizer", prev_optim_repr, repr(trainer.strategy.optimizers[0]))
         return new_optimizer_handle  # type:ignore[return-value]
 

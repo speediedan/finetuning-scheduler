@@ -85,11 +85,11 @@ RUN \
     else \
         # or target a specific cuda build, by specifying a particular index url w/...
         # ... default channel
-        # pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu121; \
+        pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu121; \
         # ... pytorch patch version
         # pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
         # ... pytorch nightly dev version
-        pip install --pre torch==2.3.0.dev20240209  torchvision==0.18.0.dev20240209 -f https://download.pytorch.org/whl/nightly/cu121/torch_nightly.html; \
+        #pip install --pre torch==2.3.0.dev20240209  torchvision==0.18.0.dev20240209 -f https://download.pytorch.org/whl/nightly/cu121/torch_nightly.html; \
         # ... test channel
         # pip install --pre torch torchvision -f https://download.pytorch.org/whl/test/cu121/torch_test.html; \
     fi && \

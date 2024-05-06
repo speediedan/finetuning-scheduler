@@ -20,7 +20,8 @@ from typing import Any, Dict, Protocol, runtime_checkable, Type, Union
 from typing_extensions import TypeAlias
 
 import torch
-from lightning.fabric.utilities.types import _TORCH_LRSCHEDULER, Optimizable, ReduceLROnPlateau
+from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
+from lightning.fabric.utilities.types import Optimizable
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 
 
@@ -46,6 +47,6 @@ supported_lrs = [
     "LinearLR",
 ]
 FTSLRSchedulerTypeTuple = tuple(getattr(torch.optim.lr_scheduler, lr_class) for lr_class in supported_lrs)
-FTSLRSchedulerType = Union[Type[_TORCH_LRSCHEDULER], Type[ReduceLROnPlateau]]
+FTSLRSchedulerType = Union[Type[LRScheduler], Type[ReduceLROnPlateau]]
 
 BaseCallbackDepType: TypeAlias = Union[Type[EarlyStopping], Type[ModelCheckpoint]]

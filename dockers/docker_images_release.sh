@@ -56,7 +56,7 @@ maybe_build(){
 
 build_eval(){
 	# latest PyTorch image supported by release
-	declare -A iv=(["cuda"]="12.1.0" ["python"]="3.11" ["pytorch"]="2.2.1" ["lightning"]="2.2" ["cust_build"]="0")
+	declare -A iv=(["cuda"]="12.1.0" ["python"]="3.11" ["pytorch"]="2.2.2" ["lightning"]="2.2" ["cust_build"]="0")
 	export latest_pt="base-cu${iv["cuda"]}-py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}"
 	export latest_azpl="py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}-azpl-init"
 	maybe_build iv "${latest_pt}" "${latest_azpl}"

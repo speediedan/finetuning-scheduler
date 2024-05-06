@@ -51,7 +51,7 @@ ENV \
     # LD_LIBRARY_PATH="/root/miniconda3/lib:$LD_LIBRARY_PATH" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     MAKEFLAGS="-j2" \
-    TORCH_CUDA_ARCH_LIST="6.0;7.0;7.5;8.0;8.6" \
+    TORCH_CUDA_ARCH_LIST="6.0;7.0;7.5;8.0;8.6:9.0" \
     CONDA_ENV=finetuning-scheduler \
     CONDA_DEFAULT_ENV=${CONDA_ENV}
 
