@@ -250,11 +250,20 @@ class RteBoolqDataModule(L.LightningDataModule):
         super().__init__()
         task_name = task_name if task_name in TASK_NUM_LABELS.keys() else DEFAULT_TASK
         self.text_fields = self.TASK_TEXT_FIELD_MAP[task_name]
+        self.init_hparams = {
+            "model_name_or_path": model_name_or_path,
+            "task_name": task_name,
+            "max_seq_length": max_seq_length,
+            "train_batch_size": train_batch_size,
+            "eval_batch_size": eval_batch_size,
+            "dataloader_kwargs": dataloader_kwargs,
+            "tokenizers_parallelism": tokenizers_parallelism,
+        }
+        self.save_hyperparameters(self.init_hparams)
         self.dataloader_kwargs = {
             "num_workers": dataloader_kwargs.get("num_workers", 0),
             "pin_memory": dataloader_kwargs.get("pin_memory", False),
         }
-        self.save_hyperparameters()
         os.environ["TOKENIZERS_PARALLELISM"] = "true" if self.hparams.tokenizers_parallelism else "false"
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.hparams.model_name_or_path, use_fast=True, local_files_only=False
