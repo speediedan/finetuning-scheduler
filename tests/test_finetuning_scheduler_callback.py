@@ -13,7 +13,7 @@ import os
 import re
 from tempfile import gettempdir
 from collections import OrderedDict
-from copy import deepcopy
+from copy import deepcopy, copy
 from logging import DEBUG
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -1242,9 +1242,7 @@ EXPECTED_WARNS = [
     "`max_epochs` was not",  # required for all PyTorch/Lightning versions
     "The dirpath has changed from",  # required for all PyTorch/Lightning versions
 ]
-EXPECTED_TRAIN_CHK_WARNS = []
-EXPECTED_DIRPATH = ""
-
+EXPECTED_DIRPATH = "is not empty."
 
 @pytest.mark.parametrize("diff_dirpath,", [True, False], ids=["diffdirpath", "samedirpath"])
 @pytest.mark.parametrize("train_chk_mode,", [None, True], ids=["defaultchk", "trainchk"])
@@ -1255,7 +1253,7 @@ def test_fts_callback_resume(
 ):
     """Validate scheduled fine-tuning resumption functions as expected from both 'best' and 'kth'(not-best)
     checkpoints in both train/val stage check modes with and without max_depth specified."""
-    resume_warns = EXPECTED_WARNS
+    resume_warns = copy(EXPECTED_WARNS)
     dirpath = None if diff_dirpath else Path(ckpt_set["best"]).parent
     resume_callbacks = [
         FTSEarlyStopping(monitor="val_loss", patience=1, min_delta=0.001),
@@ -1284,8 +1282,6 @@ def test_fts_callback_resume(
     assert finetuningscheduler_callback.depth_remaining == expected_state[1]
     assert finetuningscheduler_callback.curr_depth == expected_state[2]
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
-    if train_chk_mode:
-        resume_warns.extend(EXPECTED_TRAIN_CHK_WARNS)
     if not diff_dirpath:
         resume_warns.append(EXPECTED_DIRPATH)
     # ensure no unexpected warnings detected
@@ -1295,13 +1291,17 @@ def test_fts_callback_resume(
 
 DYNAMO_EXPECTED_WARNS = [
     "Final phase max_transition_epoch",
+    "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
 ]
+
+# this warn is expected when we use the ckpt_set fixture with a different callback configuration
+EXPECTED_CKPT_WARNS = ["Be aware that when using `ckpt_path`, callbacks"]
 
 
 @RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.2.0", max_python="3.12")
 def test_fts_dynamo_resume(tmpdir, ckpt_set, boring_ft_schedule, recwarn):
     """Validate scheduled fine-tuning resumption functions as expected with a default dynamo configuration."""
-    resume_warns = EXPECTED_WARNS + DYNAMO_EXPECTED_WARNS + [EXPECTED_DIRPATH]
+    resume_warns = copy(EXPECTED_WARNS) + copy(DYNAMO_EXPECTED_WARNS) + copy(EXPECTED_CKPT_WARNS) + [EXPECTED_DIRPATH]
     dirpath = Path(ckpt_set["best"]).parent
     callbacks = [
         FinetuningScheduler(ft_schedule=boring_ft_schedule[2], epoch_transitions_only=True, logging_level=DEBUG),
@@ -2449,7 +2449,7 @@ def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, enforce_
         else:
             with pytest.warns(Warning, match=warn_expected):
                 trainer.fit(model)
-    init_warns = EXPECTED_WARNS + ["currently depends upon"]
+    init_warns = copy(EXPECTED_WARNS) + ["currently depends upon"] + ["No monitor metric specified"]
     if warn_expected:
         init_warns.extend(warn_expected)
     # ensure no unexpected warnings detected
