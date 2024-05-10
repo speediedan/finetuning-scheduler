@@ -192,7 +192,7 @@ either integers or convertible to integers via ``int()``.
      have ``track_running_stats`` set to ``True``, set the FTS parameter
      :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.frozen_bn_track_running_stats` to ``True``.
      Beginning with FTS ``2.4.0``,
-     :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.frozen_bn_track_running_stats`  will default to ``True``
+     :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.frozen_bn_track_running_stats`  will default to ``True``.
 
 
 EarlyStopping and Epoch-Driven Phase Transition Criteria
