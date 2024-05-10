@@ -30,7 +30,7 @@ from copy import copy, deepcopy
 from dataclasses import dataclass, field, fields
 from functools import reduce
 from pprint import pformat
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union, Set
 from typing_extensions import TypeAlias
 
 import lightning.pytorch as pl
@@ -1271,6 +1271,7 @@ class ScheduleImplMixin(ABC):
     reinit_optim_cfg: Optional[Dict]
     reinit_lr_cfg: Optional[Dict]
     max_depth: int
+    _msg_cache: Set
     _fts_state: FTSState
     PHASE_0_DIVERGENCE_MSG = (
         "After executing the provided `configure_optimizers` method, the optimizer state differs from the configuration"
@@ -1479,6 +1480,7 @@ class ScheduleImplMixin(ABC):
         depth = depth or self.curr_depth
         for i, next_tl in self.ft_schedule.items():  # type: ignore[union-attr]
             if i <= depth:
+                self.strategy_adapter._maybe_set_bn_track_running_stats(i)
                 _, self._fts_state._curr_thawed_params = self.strategy_adapter.exec_ft_phase(
                     self.pl_module, thaw_pl=self.strategy_adapter.fts_optim_transform(next_tl["params"])
                 )
@@ -1748,6 +1750,23 @@ class ScheduleImplMixin(ABC):
                         " and training failure in pytorch during a future fine-tuning phase."
                     )
                 rank_zero_warn(w_msg)
+
+    def _conditional_warn_once(self, condition: Any, msg: str) -> None:
+        """A helper function that conditionally issues a warning message only once based on the provided condition
+        variable. Robust to context managers that may prevent warnings.filterwarnings("once") from behaving as
+        expected.
+
+        Args:
+            condition (Any): The condition to evaluate for issuing the warning.
+            msg (str): The warning message to display.
+
+        Returns:
+            None
+        """
+        if not bool(condition) or msg in self._msg_cache:
+            return
+        self._msg_cache.add(msg)
+        rank_zero_warn(msg)
 
 
 class CallbackDepMixin(ABC):

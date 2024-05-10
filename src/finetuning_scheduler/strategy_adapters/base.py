@@ -18,15 +18,17 @@ Base adapter class to extend Fine-Tuning Scheduler support of complex or custom 
 """
 from functools import partialmethod
 from pprint import pformat as pfmt
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Dict
+
+import torch
 
 from lightning.fabric.utilities import rank_zero_info
 from lightning.fabric.utilities.types import ReduceLROnPlateau
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
+from lightning.pytorch.callbacks import BaseFinetuning
 from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
-from torch.nn import Module
 
 
 class StrategyAdapter:
@@ -51,6 +53,14 @@ class StrategyAdapter:
     """
 
     fts_handle: Callback
+    _ft_schedule_module_map: Dict
+    _unscheduled_params: List
+
+    FROZEN_BN_DEFAULT_WARN = ( # TODO: remove warning with release of FTS 2.4.0
+        "Starting with the next minor release of FTS (2.4.0), the default value for `frozen_bn_track_running_stats`"
+        " will change to `True`. To retain the current `track_running_stats` `False` behavior with FTS >= 2.4.0, frozen"
+        " `BatchNorm` layers like those in this model will require setting `frozen_bn_track_running_stats` to `False`."
+    )
 
     def __init__(self) -> None:
         """The default fine-tuning phase execution function is set on
@@ -106,6 +116,9 @@ class StrategyAdapter:
         """Hook executed in :class:`~finetuning_scheduler.fts.FinetuningScheduler` setup immediately after
         :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.init_fts`.
         """
+        self._gen_ft_sched_module_map()
+        self.scheduled_mod_lists = [list(self._ft_schedule_module_map[d]) for d in self._ft_schedule_module_map.keys()]
+        self._maybe_set_bn_track_running_stats(0)
         _, self.fts_handle._fts_state._curr_thawed_params = self.exec_ft_phase(
             self.pl_module,
             thaw_pl=self.fts_optim_transform(self.fts_handle.ft_schedule[0]["params"]),
@@ -159,6 +172,26 @@ class StrategyAdapter:
                 :external+pl:class:`~lightning.pytorch.strategies.Strategy`'s transformation.
         """
         return param_names
+
+    def _gen_ft_sched_module_map(self) -> None:
+        """Generate a module-level mapping of the modules associated with each fine-tuning phase, including modules
+        not present in the fine-tuning schedule grouped together into a single unscheduled phase to facilitate the
+        relevant disjointness check."""
+        assert isinstance(self.fts_handle.ft_schedule, Dict)
+        module_map: Dict = {}
+        for depth in self.fts_handle.ft_schedule.keys():  # type: ignore[union-attr]
+            phase_params = self.fts_handle.ft_schedule[depth].get("params", [])  # type: ignore[union-attr]
+            module_map[depth] = set()
+            for p in phase_params:
+                module_map[depth].add(p.rpartition(".")[0])
+        self._ft_schedule_module_map = module_map
+        scheduled_mods = list(set().union(*module_map.values()))
+        unscheduled_mods = tuple(
+            n for n, m in self.pl_module.named_modules() if n not in scheduled_mods and m._parameters
+        )
+        self._unscheduled_params = [
+            f"{m}.{n}" for m in unscheduled_mods for n, _ in self.pl_module.get_submodule(m).named_parameters()
+        ]
 
     @staticmethod
     def _clean_optim_lr_pgs(trainer: Trainer) -> List:
@@ -246,8 +279,8 @@ class StrategyAdapter:
 
     @staticmethod
     def base_ft_phase(
-        module: Module, thaw_pl: List, translation_func: Optional[Callable] = None, init_thaw: bool = False
-    ) -> Tuple[List, List]:
+        module: torch.nn.Module, thaw_pl: List, translation_func: Optional[Callable] = None, init_thaw: bool = False) \
+            -> Tuple[List, List]:
         """Thaw/unfreeze the provided list of parameters in the provided :class:`~torch.nn.Module`
 
         Args:
@@ -280,5 +313,62 @@ class StrategyAdapter:
             f"{pfmt(translation_func(curr_thawed)) if translation_func else pfmt([n for n in curr_thawed])}"
         )
         return thawed_p_names, curr_thawed
+
+    ####################################################################################################################
+    # BatchNorm module-specific handling
+    # (if additional modules require special handling, these will be refactored to accommodate a more generic
+    # dispatching pattern for module-specific handling)
+    ####################################################################################################################
+
+    def _module_specific_freezing(self, modules: torch.nn.Module) -> None:
+        """Orchestrates module-specific freezing behavior. Currently only.
+
+        :external+torch:class:`~torch.nn.modules.batchnorm._BatchNorm` layers require special handling. Running
+        statistics tracking for frozen `BatchNorm` layers is conditionally re-enabled here based on the
+        `frozen_bn_track_running_stats` flag.
+
+        Args:
+            modules (torch.nn.Module): The modules for which the `BatchNorm` layer running statistics should be enabled.
+        Returns:
+            None
+        """
+        if self.fts_handle.frozen_bn_track_running_stats:
+            rank_zero_info("Since `frozen_bn_track_running_stats` is currently set to `True`, FinetuningScheduler"
+                            " will set `track_running_stats` to `True` for all `BatchNorm` layers.")
+            modules = BaseFinetuning.flatten_modules(modules)  # type: ignore[assignment]
+            for mod in modules:
+                if isinstance(mod, torch.nn.modules.batchnorm._BatchNorm):
+                    mod.track_running_stats = True
+
+    def _maybe_set_bn_track_running_stats(self, schedule_phase: int) -> None:
+        """Enable `track_running_stats` for :external+torch:class:`~torch.nn.modules.batchnorm._BatchNorm` modules
+        that may require it based on `frozen_bn_track_running_stats` and a given schedule phase.
+
+        Args:
+            schedule_phase (int): The phase of the schedule to evaluate.
+
+        Returns:
+            None
+        """
+        if not self.fts_handle.frozen_bn_track_running_stats:
+            target_bn_modules = self._get_target_bn_modules(schedule_phase)
+            self.fts_handle._conditional_warn_once(target_bn_modules, self.FROZEN_BN_DEFAULT_WARN)
+            for _, m in target_bn_modules:
+                m.track_running_stats = True
+
+    def _get_target_bn_modules(self, schedule_phase: int) -> List:
+        """Enumerate the :external+torch:class:`~torch.nn.modules.batchnorm._BatchNorm` modules for a given
+        schedule phase.
+
+        Args:
+            schedule_phase (int): The phase of the schedule to evaluate.
+
+        Returns:
+            List[Tuple[str, torch.nn.modules.batchnorm._BatchNorm]]: A list of tuples containing the names and instances
+              of `BatchNorm` modules associated with a given schedule phase.
+        """
+        return [(n, m) for n, m in self.pl_module.named_modules() if
+                n in self.scheduled_mod_lists[schedule_phase] and
+                isinstance(m, torch.nn.modules.batchnorm._BatchNorm)]
 
     fts_optim_inspect = partialmethod(fts_optim_transform, inspect_only=True)

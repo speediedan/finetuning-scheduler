@@ -28,6 +28,7 @@ from copy import deepcopy
 from functools import partial, partialmethod, wraps
 from pprint import pformat
 from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, Union
+from typing_extensions import override
 
 import torch
 from lightning.fabric.strategies.fsdp import _get_full_state_dict_context, _setup_activation_checkpointing
@@ -211,6 +212,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """To accommodate FSDP, we defer executing the first fine-tuning phase that would otherwise be executed in
         this hook, which fires in :class:`~finetuning_scheduler.fts.FinetuningScheduler` setup immediately after
         :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.init_fts`"""
+        self._gen_ft_sched_module_map()
+        self.scheduled_mod_lists = [list(self._ft_schedule_module_map[d]) for d in self._ft_schedule_module_map.keys()]
 
     def on_before_fts_fit_start(self) -> None:
         """In this hook executed immediately before the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
@@ -539,8 +542,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
                     feedback_nonerrors.append(has_no_local_shards)
         fsdp_dup_params = set()
         unsched_dup_params = set()
-        scheduled_mod_lists = [list(self._ft_schedule_module_map[d]) for d in self._ft_schedule_module_map.keys()]
-        ft_sched_dup_mods = FSDPStrategyAdapter._phasewise_intersection(scheduled_mod_lists)
+        ft_sched_dup_mods = FSDPStrategyAdapter._phasewise_intersection(self.scheduled_mod_lists)
         fsdp_dup_params = self._phase_unaligned_fsdp_params()
         if not fsdp_dup_params:  # unsched_dup_params will be a superset of fsdp_dup_params
             unsched_dup_params = self._phase_unaligned_fsdp_params(check_unsched=True)
@@ -715,29 +717,9 @@ class FSDPStrategyAdapter(StrategyAdapter):
                     "The provided model is already wrapped by FSDP. Cannot apply an FSDP auto-wrapping policy along"
                     " fine-tuning schedule phase boundaries if the model is already wrapped."
                 )
-        self._gen_ft_sched_module_map()
         self._fts_auto_wrap()
         self._after_configure_model()
 
-    def _gen_ft_sched_module_map(self) -> None:
-        """Generate a module-level mapping of the modules associated with each fine-tuning phase, including modules
-        not present in the fine-tuning schedule grouped together into a single unscheduled phase to facilitate the
-        relevant disjointness check."""
-        assert isinstance(self.fts_handle.ft_schedule, Dict)
-        module_map: Dict = {}
-        for depth in self.fts_handle.ft_schedule.keys():  # type: ignore[union-attr]
-            phase_params = self.fts_handle.ft_schedule[depth].get("params", [])  # type: ignore[union-attr]
-            module_map[depth] = set()
-            for p in phase_params:
-                module_map[depth].add(p.rpartition(".")[0])
-        self._ft_schedule_module_map = module_map
-        scheduled_mods = list(set().union(*module_map.values()))
-        unscheduled_mods = tuple(
-            n for n, m in self.pl_module.named_modules() if n not in scheduled_mods and m._parameters
-        )
-        self._unscheduled_params = [
-            f"{m}.{n}" for m in unscheduled_mods for n, _ in self.pl_module.get_submodule(m).named_parameters()
-        ]
 
     def _fts_auto_wrap(self) -> None:
         """Apply the provided ``auto_wrap_policy`` within a context-manager that composes any ``awp_overrides``
@@ -769,6 +751,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         the previously deferred first fine-tuning phase."""
         assert isinstance(self.fts_handle.ft_schedule, Dict)  # TODO: move/consolidate ft_schedule assertions
         self._init_fsdp_param_map()
+        self._maybe_set_bn_track_running_stats(0)
         _, self.fts_handle._fts_state._curr_thawed_params = self.exec_ft_phase(
             self.pl_module,
             thaw_pl=self.fts_optim_transform(self.fts_handle.ft_schedule[0]["params"]),
@@ -798,7 +781,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
         @wraps(csm_func)
         def wrapped_func() -> None:
-            self._gen_ft_sched_module_map()
             csm_func()
             self._after_configure_model()
 
@@ -832,5 +814,28 @@ class FSDPStrategyAdapter(StrategyAdapter):
             yield
         finally:
             _ConfigAutoWrap.kwargs["auto_wrap_policy"] = auto_wrap_policy_handle
+
+    @override
+    def _get_target_bn_modules(self, schedule_phase: int) -> List:
+        """Enumerate the :external+torch:class:`~torch.nn.modules.batchnorm._BatchNorm` modules for a given
+        schedule phase.
+
+        Args:
+            schedule_phase (int): The phase of the schedule to evaluate.
+
+        Returns:
+            List[Tuple[str, torch.nn.modules.batchnorm._BatchNorm]]: A list of tuples containing the names and
+              (possibly FSDP wrapped) instances of `BatchNorm` modules associated with a given schedule phase.
+        """
+        target_bn_modules = []
+        for m_name in self.scheduled_mod_lists[schedule_phase]:
+            mod = self.pl_module.get_submodule(m_name)
+            if isinstance(mod, torch.nn.modules.batchnorm._BatchNorm):
+                target_bn_modules.append((m_name, mod))
+            # TODO: once 2.0 is no longer supported, switch to using FSDP_WRAPPED_MODULE constant here
+            elif orig_mod := getattr(mod, '_fsdp_wrapped_module', None):
+                if isinstance(orig_mod, torch.nn.modules.batchnorm._BatchNorm):
+                    target_bn_modules.append((m_name, orig_mod))
+        return target_bn_modules
 
     fts_optim_inspect = partialmethod(fts_optim_transform, inspect_only=True)

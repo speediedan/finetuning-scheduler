@@ -32,6 +32,10 @@ from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlySto
 from finetuning_scheduler.strategy_adapters import FSDPStrategyAdapter
 from tests.helpers.boring_model import RandomDataset, unexpected_warns, unmatched_warns
 from tests.helpers.runif import RunIf
+from tests.fsdp_expected_paths import (path_default, path_default_orig, path_default_orig_eo_dyn, path_ignore_p_uo,
+                                       path_8_14, path_5_10, path_ext_7_14, path_ext_8_16, path_optimlr_reinit,
+                                       lrs_path_optimlr_reinit, path_bn_track_false, path_bn_track_true, ResultEnum)
+
 from tests.test_finetuning_scheduler_callback import (
     EXPECTED_WARNS,
     ExplicitLossFTSCheckpoint,
@@ -86,7 +90,6 @@ FSDP_DYNAMO_EXPECTED_WARNS = [
 ##########################
 # FTS FSDP Test Fixtures #
 ##########################
-
 
 @pytest.fixture(scope="module")
 def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
@@ -156,8 +159,8 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
     }
     fsdp_bn_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
-    fsdp_bn_gen_sched_dict[0]["params"] = ["layer.(8|[4-6]).*"]
-    fsdp_bn_gen_sched_dict[1]["params"] = ["layer.[1-3].*"]
+    fsdp_bn_gen_sched_dict[0]["params"] = ["layer.(9|[5-7]).*"]
+    fsdp_bn_gen_sched_dict[1]["params"] = ["layer.[1-4].*"]
     fsdp_shared_param_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_shared_param_sched_dict[0]["params"] = ["layer.(7|4).*", "layer.5.weight", "layer.5.bias"]
     fsdp_shared_param_sched_dict[1]["params"] = ["layer.2.*", "layer.3.weight", "layer.3.bias"]
@@ -441,6 +444,7 @@ class FTSBatchNormFSDPModel(FTSBaseFSDPModel):
         self.layer = torch.nn.Sequential(
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
+            torch.nn.BatchNorm1d(32),
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
@@ -507,6 +511,41 @@ class FSDPOptInspectFTS(FSDPTestFinetuningScheduler):
         lrs_state = tuple(round(pg["lr"], 9) for pg in trainer.optimizers[0].param_groups)
         self.inspect_or_assert(current_state, lrs_state, state_key)
 
+
+class BNInspectFTS(FSDPTestFinetuningScheduler):
+    def on_train_epoch_start(self, trainer, pl_module):
+        super(TestFinetuningScheduler, self).on_train_epoch_start(trainer, pl_module)
+        state_key = trainer.current_epoch
+        bn_layer_state = self._collect_bnl_state()
+        current_state = (
+            bn_layer_state,
+            len(self._fts_state._curr_thawed_params),
+            len(self.strategy_adapter.logical_param_translation(self._fts_state._curr_thawed_params)),
+        )
+        lrs_state = None
+        self.inspect_or_assert(current_state, lrs_state, state_key)
+
+    def _collect_bnl_state(self):
+        bnl_sample = {}
+        for i, (n, bn_layer) in enumerate(self.pl_module.named_modules()):
+            if isinstance(bn_layer, torch.nn.modules.batchnorm._BatchNorm):
+                bnl_sample.setdefault(i, {})
+                bnl_sample[i]['layer_fqn'] = n
+                for attr in ['track_running_stats', 'training']:
+                    attr_v = getattr(bn_layer, attr, None)
+                    bnl_sample[i][attr] = attr_v
+                for attr in ['running_mean', 'running_var']:
+                    attr_v = bn_layer._buffers.get(attr, None)
+                    if attr_v is not None:
+                        attr_v = round(attr_v.max().item(), 9)
+                        # inspect whether  default or non-default bn tracking values are present
+                        bnl_sample[i][attr] = ResultEnum.nondefault if attr_v not in [0.0, 1.0] else ResultEnum.default
+                    else:
+                        bnl_sample[i][attr] = attr_v  # None
+                bnl_sample[i]['num_batches_tracked'] = round(bn_layer.num_batches_tracked.item(), 2) if \
+                    bn_layer.num_batches_tracked is not None else None
+                bnl_sample[i]['requires_grad'] = bn_layer.weight.requires_grad
+        return bnl_sample
 
 # model aliases
 base_model = FTSBaseFSDPModel
@@ -625,21 +664,10 @@ epoch_t_only = {
     "test_es": "disable",
     "test_ckpt": ExplicitLossFTSCheckpoint(monitor="val_loss", verbose=True),
 }
+bn_inspect = {"test_fts": BNInspectFTS}
+bn_track_false = {**bn_inspect, "frozen_bn_track_running_stats": False}
+bn_track_true = {**bn_inspect, "frozen_bn_track_running_stats": True}
 opt_inspect = {"test_fts": FSDPOptInspectFTS}
-
-# expected training path aliases
-path_default = {0: (2, 4), 1: (6, 12), 2: (7, 14)}
-path_default_orig = {0: (4, 4), 1: (12, 12), 2: (14, 14)}
-path_default_orig_eo_dyn = {0: (4, 4), 1: (12, 12), 2: (14, 14), 3: (14, 14)}
-path_ignore_p_uo = {0: (4, 4), 1: (12, 12), 2: (14, 14)}
-path_8_14 = {0: (2, 4), 1: (7, 12), 2: (8, 14)}
-path_8_16 = {0: (4, 8), 1: (7, 14), 2: (8, 16)}
-path_5_10 = {0: (2, 4), 1: (3, 6), 2: (5, 10)}
-path_ext_7_14 = {0: (2, 4), 1: (2, 4), 2: (6, 12), 3: (6, 12), 4: (7, 14)}
-path_ext_8_16 = {0: (3, 6), 1: (7, 14), 2: (8, 16)}
-path_optimlr_reinit = {0: (2, 4, "SGD", 0, 0.1), 1: (6, 12, "Adam", 32, 0.00021), 2: (7, 14, "SGD", 64, 0.002)}
-lrs_path_default = {0: (0.1,), 1: (0.07, 1e-06), 2: (0.049, 7e-07, 1e-05)}
-lrs_path_optimlr_reinit = {0: (0.1,), 1: (0.00021, 1e-06), 2: (0.002, 1e-06, 3e-06)}
 
 # consolidate all core FTS FSDP test configuration into this dictionary to dedup config
 FTS_FSDP_TESTS = {
@@ -763,10 +791,15 @@ FTS_FSDP_TESTS = {
         "min2_1",
         (path_default, *nones(3)),
     ),
-    "batch_norm_auto_prec_no_use_orig": (
-        (BN_model, cust_awp, True, 2, unwrap_8_mp, *nones(3), DISABLE_USE_ORIG),
+    "batch_norm_auto_prec_no_use_orig_track_false": (
+        (BN_model, cust_awp, True, 2, unwrap_8_mp, None, bn_track_false, max_epoch_5, DISABLE_USE_ORIG),
         "min2_1",
-        (path_8_16, ("Both mixed precision",), *nones(2)),
+        (path_bn_track_false, ("Both mixed precision", "retain the current `track_running_stats`"), *nones(2)),
+    ),
+    "batch_norm_auto_prec_no_use_orig_track_true": (
+        (BN_model, cust_awp, True, 2, unwrap_8_mp, None, bn_track_true, max_epoch_5, DISABLE_USE_ORIG),
+        "min2_1",
+        (path_bn_track_true, ("Both mixed precision",), *nones(2)),
     ),
     "shared_params_auto_prec_no_use_orig": (
         (shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(2), DISABLE_USE_ORIG),
@@ -887,6 +920,17 @@ def test_fsdp_multi_gpus_resume(tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, m
         check_fts_fsdp_warns(warns_expected, recwarn)
 
 
+def test_fsdp_get_bn_unwrapped():
+    """Conservative (end-to-end) test for FTS training resumption with FSDP."""
+    test_adapter = FSDPStrategyAdapter()
+    test_adapter.scheduled_mod_lists = {0: ['layer.0']}
+    test_module = torch.nn.Module()
+    test_module.layer = torch.nn.Sequential(torch.nn.BatchNorm1d(32))
+    setattr(test_adapter, 'fts_handle', FinetuningScheduler())
+    setattr(test_adapter.fts_handle, 'pl_module', test_module)
+    bn_modules = test_adapter._get_target_bn_modules(0)
+    assert all(isinstance(m, torch.nn.modules.batchnorm._BatchNorm) for _, m in bn_modules)
+
 def gen_exceptions(trainer, model, model_cfg_key, exception_expected):
     if model_cfg_key == "no_fsdp_params_p0":
         with mock.patch.object(FSDPStrategyAdapter, "_rank_zero_logger", 42):
@@ -903,7 +947,7 @@ def init_fts_cfg(fts_state, lrs_state, strategy_adapter_cfg, fts_cfg, tmpdir):
         "expected_state": fts_state,
         "lrs_state": lrs_state,
         "strategy_adapter_cfg": strategy_adapter_cfg,
-        # "state_log_dir": tmpdir
+        #"state_log_dir": tmpdir
     }
     fts_cls = fts_cfg.pop("test_fts") if fts_cfg and fts_cfg.get("test_fts") else FSDPTestFinetuningScheduler
     test_cfg = {**fts_cfg, **def_fts_cfg}

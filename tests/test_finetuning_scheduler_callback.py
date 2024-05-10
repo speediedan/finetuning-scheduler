@@ -38,7 +38,8 @@ from torch.utils.data import DataLoader, Dataset
 
 from finetuning_scheduler import CallbackResolverMixin, FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from tests.helpers import BoringModel
-from tests.helpers.boring_model import CustomLRScheduler, LinearWarmupLR, unexpected_warns, unmatched_warns
+from tests.helpers.boring_model import (CustomLRScheduler, LinearWarmupLR, unexpected_warns, unmatched_warns,
+                                        RandomDataset)
 from tests.helpers.runif import RunIf
 
 fts_resolver = CallbackResolverMixin()
@@ -238,6 +239,19 @@ class FinetuningSchedulerBoringModel(BoringModel):
         return [optimizer], [lr_scheduler]
 
 
+class BNBoringModel(FinetuningSchedulerBoringModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.layer = nn.Sequential(
+            OrderedDict(
+                [("lin_base", nn.Linear(32, 32)), ("bn", nn.BatchNorm1d(32)), ("lin_classif", nn.Linear(32, 2))]
+            )
+        )
+
+    def train_dataloader(self):
+        # when testing BatchNorm layers, we need to ensure there are more than 1 samples per batch
+        return DataLoader(RandomDataset(32, 64), batch_size=2)
+
 class FTSCustLRModel(FinetuningSchedulerBoringModel):
     """overrides lr_scheduler_step to allow lr scheduler testing."""
 
@@ -340,13 +354,52 @@ class TestFinetuningScheduler(FinetuningScheduler):
             for dev_d in [self.dev_expected_states, self.dev_lrs_states]:
                 fp.write(os.linesep)
                 for k, v in dev_d.items():  # control formatting precisely to allow copy/paste expected output
-                    fp.write(f"{' ' * 8}{k}: {v},{os.linesep}")
+                    if isinstance(k, int):
+                        fp.write(f"{' ' * 8}{k}: {v},{os.linesep}")
+                    else:
+                        fp.write(f"""{' ' * 8}'{k}': {v},{os.linesep}""")
 
 
 class FitStartOnlyFTS(TestFinetuningScheduler):
     def on_fit_start(self, trainer, pl_module) -> None:
         super().on_fit_start(trainer, pl_module)
         raise SystemExit(0)
+
+class BNInspectFTS(TestFinetuningScheduler):
+
+    def sample_bn_state(self, trainer, pl_module) -> None:
+        phase_subkey = "train" if pl_module.training else "val"
+        state_key = f"{trainer.current_epoch}_{phase_subkey}"
+        sample_running_mean = self.pl_module.layer.bn._buffers.get('running_mean', None)
+        sample_running_var = self.pl_module.layer.bn._buffers.get('running_var', None)
+        sample_num_tracked = self.pl_module.layer.bn.num_batches_tracked
+        current_state = (
+            self.pl_module.layer.bn.track_running_stats,
+            self.pl_module.layer.bn.weight.requires_grad,
+            self.pl_module.layer.bn.training,
+            round(sample_num_tracked.item(), 6) if sample_num_tracked is not None else None,
+            round(sample_running_mean.max().item(), 6) if sample_running_mean is not None else None,
+            round(sample_running_var.max().item(), 6) if sample_running_var is not None else None,
+        )
+        lrs_state = None
+        return current_state, lrs_state, state_key
+
+    def on_train_epoch_start(self, trainer, pl_module):
+        super(TestFinetuningScheduler, self).on_train_epoch_start(trainer, pl_module)
+        current_state, lrs_state, state_key = self.sample_bn_state(trainer, pl_module)
+        self.inspect_or_assert(current_state, lrs_state, state_key)
+
+    def on_validation_epoch_start(self, trainer, pl_module):
+        super(TestFinetuningScheduler, self).on_train_epoch_start(trainer, pl_module)
+        current_state, lrs_state, state_key = self.sample_bn_state(trainer, pl_module)
+        self.inspect_or_assert(current_state, lrs_state, state_key)
+
+    def state_dict(self) -> Dict[str, Any]:
+        return super(TestFinetuningScheduler, self).state_dict()
+
+    def restore_best_ckpt(self) -> None:
+        super(TestFinetuningScheduler, self).restore_best_ckpt()
+        self.restored_best_cnt += 1
 
 
 class OptInspectFTS(TestFinetuningScheduler):
@@ -647,6 +700,11 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
         "init_pg_lrs": [2.0e-06, 3.0e-06],
     }
+    bn_sched_dict = {0: {'params': ['layer.lin_classif.bias', 'layer.lin_classif.weight']},
+                     1: {'params': ['layer.bn.bias', 'layer.bn.weight']},
+                     2: {'params': ['layer.lin_base.bias', 'layer.lin_base.weight']}}
+    bn_sched_dict[0]["max_transition_epoch"] = 1
+    bn_sched_dict[1]["max_transition_epoch"] = 2
     return (
         unmod_schedule_file,
         mod_sched_dict,
@@ -659,6 +717,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         reinitlr_optim_lambdalr_sched,
         reinitlr_optim_rlrop_sched,
         reinitlr_optim_use_curr_sched_dict,
+        bn_sched_dict,
     )
 
 
@@ -2534,6 +2593,53 @@ def test_fts_epoch_trans_only(tmpdir, boring_ft_schedule, epoch_only_cfg: bool, 
     else:
         with pytest.raises(MisconfigurationException, match=expected_state[1]):
             trainer.fit(model)
+
+
+EXPECTED_BN_INTRAFIT_STATE = {
+    (False,): {
+        '0_train': (False, False, True, 0, 0.0, 1.0),
+        '0_val': (False, False, False, 0, 0.0, 1.0),
+        '1_train': (True, True, True, 0, 0.0, 1.0),
+        '1_val': (True, True, False, 32, 0.30678, 0.688297),
+        '2_train': (True, True, True, 0, 0.0, 1.0),
+        '2_val': (True, True, False, 32, 0.306801, 0.688293),
+
+},
+    (True,): {
+        '0_train': (True, False, True, 0, 0.0, 1.0),
+        '0_val': (True, False, False, 32, 0.30678, 0.688297),
+        '1_train': (True, True, True, 32, 0.30678, 0.688297),
+        '1_val': (True, True, False, 64, 0.317314, 0.677594),
+        '2_train': (True, True, True, 64, 0.317314, 0.677594),
+        '2_val': (True, True, False, 96, 0.317694, 0.677223),
+}
+}
+
+
+@pytest.mark.parametrize("frozen_bn_track_running_stats", [True, False], ids=["frozen_bn_track", "no_frozen_bn_track"])
+def test_fts_frozen_bn_track_running_stats(tmpdir, boring_ft_schedule, frozen_bn_track_running_stats: bool):
+    """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
+    both restore_best modes."""
+    seed_everything(42)
+    ft_schedule = boring_ft_schedule[11]
+    model = BNBoringModel()
+    callbacks = [
+        BNInspectFTS(expected_state=EXPECTED_BN_INTRAFIT_STATE[(frozen_bn_track_running_stats,)],
+                     ft_schedule=ft_schedule, frozen_bn_track_running_stats=frozen_bn_track_running_stats,
+                     #state_log_dir=tmpdir
+                    ),
+        FTSEarlyStopping(monitor="val_loss", patience=1),
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1, max_epochs=3, num_sanity_val_steps=0)
+    if not frozen_bn_track_running_stats:
+        with pytest.warns(UserWarning, match="with the next minor release of FTS"):
+            trainer.fit(model)
+    else:
+        trainer.fit(model)
+    finetuningscheduler_callback = get_fts(trainer)
+    assert finetuningscheduler_callback.depth_remaining == 0
+    assert finetuningscheduler_callback.curr_depth == 2
+    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
 @pytest.mark.parametrize("stop_value", [torch.tensor(np.inf), torch.tensor(np.nan)])

@@ -20,6 +20,7 @@ import logging
 from copy import deepcopy
 from pprint import pformat
 from typing import Any, Dict, Optional, Sequence, Tuple, Union
+from typing_extensions import override
 
 import lightning.pytorch as pl
 import torch
@@ -87,6 +88,12 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
        While :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the use of
        :external+torch:class:`~torch.distributed.optim.ZeroRedundancyOptimizer`, setting ``overlap_with_ddp`` to
        ``True`` is not supported because that optimizer mode only supports a single parameter group.
+
+    .. note::
+
+       While :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the use of
+       :external+torch:class:`~torch.distributed.optim.ZeroRedundancyOptimizer`, setting ``overlap_with_ddp`` to
+       ``True`` is not supported because that optimizer mode only supports a single parameter group.
     """
     pl_module: pl.LightningModule
     strategy_adapter: StrategyAdapter
@@ -107,6 +114,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         apply_lambdas_new_pgs: bool = False,
         logging_level: int = logging.INFO,
         enforce_phase0_params: bool = True,
+        frozen_bn_track_running_stats: bool = False,
     ):
         r"""
         Arguments used to define and configure a scheduled fine-tuning training session:
@@ -229,6 +237,11 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 and present in the optimizer differs from the parameters specified in phase 0. Only the parameters
                 included in the optimizer are affected; the choice of optimizer, lr_scheduler etc. remains unaltered.
                 Defaults to ``True``.
+            frozen_bn_track_running_stats: When freezing ``torch.nn.modules.batchnorm._BatchNorm`` layers, whether
+                :class:`~finetuning_scheduler.fts.FinetuningScheduler` should set ``BatchNorm`` ``track_running_stats``
+                to ``True``. Setting this to ``True`` overrides the the default Lightning behavior that sets
+                ``BatchNorm`` ``track_running_stats`` to ``False`` when freezing ``BatchNorm`` layers. Defaults to
+                ``False`` for backwards compatibility. Default will be ``True`` with FTS >= 2.4.0.
 
         Attributes:
             _fts_state: The internal :class:`~finetuning_scheduler.fts.FinetuningScheduler` state.
@@ -255,7 +268,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.allow_untested = allow_untested
         self.apply_lambdas_new_pgs = apply_lambdas_new_pgs
         self.enforce_phase0_params = enforce_phase0_params
+        self.frozen_bn_track_running_stats = frozen_bn_track_running_stats
         self._has_reinit_schedule = False
+        self._msg_cache = set()
         rz_logger = logging.getLogger("lightning.pytorch.utilities.rank_zero")
         rz_logger.setLevel(logging_level)
 
@@ -292,6 +307,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             # "deepspeed",  # relevant FTS strategy adapter not yet available, PRs welcome!
         )
 
+    @override
     def freeze_before_training(self, pl_module: "pl.LightningModule") -> None:
         """Freezes all model parameters so that parameter subsets can be subsequently thawed according to the fine-
         tuning schedule.
@@ -300,7 +316,11 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             pl_module (:external+pl:class:`~lightning.pytorch.core.module.LightningModule`): The target
                 :external+pl:class:`~lightning.pytorch.core.module.LightningModule` to freeze parameters of
         """
-        self.freeze(modules=pl_module, train_bn=False)
+        # We avoid overriding `BaseFinetuning`'s `freeze` and `freeze_module` methods at the small marginal cost
+        # of conditionally revisiting `BatchNorm` layers to set `track_running_stats` to `True` when we are in
+        # `frozen_bn_track_running_stats` mode.
+        BaseFinetuning.freeze(modules=pl_module, train_bn=False)
+        self.strategy_adapter._module_specific_freezing(modules=pl_module)
 
     def step(self) -> None:
         """Prepare and execute the next scheduled fine-tuning level
@@ -387,6 +407,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         else:
             thaw_layers = {depth: self.ft_schedule[depth]}.items()
         for i, orig_next_tl in thaw_layers:
+            self.strategy_adapter._maybe_set_bn_track_running_stats(i)
             next_tl = deepcopy(orig_next_tl)
             if i <= depth:
                 next_tl["params"] = self.strategy_adapter.fts_optim_transform(next_tl["params"])
