@@ -16,6 +16,7 @@ from collections import OrderedDict
 from copy import deepcopy, copy
 from logging import DEBUG
 from pathlib import Path
+from unittest import mock
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -1300,6 +1301,9 @@ EXPECTED_WARNS = [
     "GPU available but",  # required for all PyTorch/Lightning versions
     "`max_epochs` was not",  # required for all PyTorch/Lightning versions
     "The dirpath has changed from",  # required for all PyTorch/Lightning versions
+    # allowing below until https://github.com/pytorch/pytorch/pull/123619 is resolved wrt `ZeroRedundancyOptimizer`
+    "TorchScript support for functional optimizers is",
+
 ]
 EXPECTED_DIRPATH = "is not empty."
 
@@ -1931,10 +1935,12 @@ EXPECTED_LAMBDALR_STATE = {
 
 def test_fts_unallowed_key_error():
     basic_ke = KeyError("Unallowed key error")
-    test_fts = FinetuningScheduler
+    test_fts = FinetuningScheduler()
     test_fts._has_reinit_schedule = False
+    test_fts.pl_module = mock.MagicMock()
+    test_fts.pl_module.trainer._checkpoint_connector.resume_start = mock.MagicMock(side_effect=basic_ke)
     with pytest.raises(KeyError, match="Unallowed key"):
-        test_fts._maybe_allow_incompatible_reinit_ckpt(test_fts, key_error=basic_ke)
+        test_fts.restore_best_ckpt()
 
 
 @pytest.mark.parametrize(

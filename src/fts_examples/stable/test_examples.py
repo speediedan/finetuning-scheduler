@@ -40,9 +40,11 @@ EXPECTED_WARNS = [
     "distutils Version classes are deprecated",  # still required as of PyTorch/Lightning 2.2
     "Please use torch.utils._pytree.register_pytree_node",  # temp allow deprecated behavior of transformers
     "We are importing from `pydantic",  # temp pydantic import migration warning
+    # allowing below until https://github.com/pytorch/pytorch/pull/123619 is resolved wrt `ZeroRedundancyOptimizer`
+    "TorchScript support for functional optimizers is",
 ]
 MIN_VERSION_WARNS = "2.0"
-MAX_VERSION_WARNS = "2.3"
+MAX_VERSION_WARNS = "2.4"
 # torch version-specific warns go here
 EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [],
                           MAX_VERSION_WARNS: [

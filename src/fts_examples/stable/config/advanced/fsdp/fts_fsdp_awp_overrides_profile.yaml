@@ -22,9 +22,7 @@ trainer:
       verbose: false
       mode: min
   strategy:
-    # patch FSDPStrategy to avoid https://github.com/omni-us/jsonargparse/issues/337 with `jsonargparse` < 4.23.1
-    class_path: fts_examples.stable.cli_experiment_utils.PatchedFSDPStrategy
-    #class_path: lightning.pytorch.strategies.FSDPStrategy
+    class_path: lightning.pytorch.strategies.FSDPStrategy
     init_args:
       cpu_offload: false
       activation_checkpointing_policy:

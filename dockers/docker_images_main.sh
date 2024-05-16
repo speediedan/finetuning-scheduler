@@ -29,12 +29,6 @@ maybe_push(){
 		echo "Pushing ${registry_name}:${latest_azpl} ..." >> $docker_build_log
 		docker push ${registry_name}:${latest_azpl} >> $docker_build_log
 		echo "Finished pushing ${registry_name}:${latest_azpl} ..." >> $docker_build_log
-		echo "Pushing ${registry_name}:${pt_2_0_1} ..." >> $docker_build_log
-		docker push ${registry_name}:${pt_2_0_1} >> $docker_build_log
-		echo "Finished pushing ${registry_name}:${pt_2_0_1} ..." >> $docker_build_log
-		echo "Pushing ${registry_name}:${pt_2_0_1_azpl} ..." >> $docker_build_log
-		docker push ${registry_name}:${pt_2_0_1_azpl} >> $docker_build_log
-		echo "Finished pushing ${registry_name}:${pt_2_0_1_azpl} ..." >> $docker_build_log
     else
         echo "Directed to skip push of built images." >> $docker_build_log
     fi
@@ -49,15 +43,10 @@ maybe_build(){
 
 build_eval(){
 	# latest PyTorch image supported by release
-	declare -A iv=(["cuda"]="12.1.0" ["python"]="3.11" ["pytorch"]="2.3.0" ["lightning"]="2.3" ["cust_build"]="1")
+	declare -A iv=(["cuda"]="12.1.0" ["python"]="3.11" ["pytorch"]="2.4.0" ["lightning"]="2.4" ["cust_build"]="1")
 	export latest_pt="base-cu${iv["cuda"]}-py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}"
 	export latest_azpl="py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}-azpl-init"
 	maybe_build iv "${latest_pt}" "${latest_azpl}"
-	# PyTorch 2.0.1 currently required for complete coverage
-	declare -A iv=(["cuda"]="11.8.0" ["python"]="3.10" ["pytorch"]="2.0.1" ["lightning"]="2.3" ["cust_build"]="0")
-	export pt_2_0_1="base-cu${iv["cuda"]}-py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}"
-	export pt_2_0_1_azpl="py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}-azpl-init"
-	maybe_build iv "${pt_2_0_1}" "${pt_2_0_1_azpl}"
 	if [[ $build_new -ne 0 ]]; then
 		echo "All image builds successful." >> $docker_build_log
 	else

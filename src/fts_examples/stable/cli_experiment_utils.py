@@ -1,4 +1,3 @@
-import operator
 import os
 import sys
 from collections import namedtuple
@@ -7,12 +6,8 @@ from typing import Any, Dict, Optional, Tuple, Union
 import torch
 from lightning.fabric.accelerators.cuda import is_cuda_available
 from lightning.pytorch.cli import LightningCLI
-from lightning.pytorch.strategies import FSDPStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
-from lightning_utilities.core.imports import compare_version
 from torch.utils import collect_env
-
-_JSONGARGPARSE_GREATER_EQUAL_4_23_1 = compare_version("jsonargparse", operator.ge, "4.23.1")
 
 
 class CustLightningCLI(LightningCLI):
@@ -24,28 +19,6 @@ class CustLightningCLI(LightningCLI):
         parser.link_arguments("trainer.logger.init_args.name", "model.init_args.experiment_tag")
         parser.link_arguments("data.init_args.model_name_or_path", "model.init_args.model_name_or_path")
         parser.link_arguments("data.init_args.task_name", "model.init_args.task_name")
-
-
-if _JSONGARGPARSE_GREATER_EQUAL_4_23_1:
-    PatchedFSDPStrategy = FSDPStrategy
-else:
-    # patch of FSDPStrategy to avoid https://github.com/omni-us/jsonargparse/issues/337 with `jsonargparse`` < 4.23.1
-    class PatchedFSDPStrategy(FSDPStrategy):
-        def __init__(
-            self,
-            activation_checkpointing_policy: Optional[Any] = None,
-            auto_wrap_policy: Optional[Any] = None,
-            cpu_offload: Optional[Any] = None,
-            *args,
-            **kwargs,
-        ):
-            super().__init__(
-                activation_checkpointing_policy=activation_checkpointing_policy,
-                auto_wrap_policy=auto_wrap_policy,
-                cpu_offload=cpu_offload,
-                *args,
-                **kwargs,
-            )
 
 
 def instantiate_class(init: Dict[str, Any], args: Optional[Union[Any, Tuple[Any, ...]]] = None) -> Any:

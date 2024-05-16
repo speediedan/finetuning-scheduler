@@ -73,6 +73,7 @@ def restore_env_variables():
         "CRC32C_SW_MODE",  # leaked by tensorboardX
         "TRITON_CACHE_DIR",
         "OMP_NUM_THREADS",  # leaked by Lightning launchers
+        "TORCHINDUCTOR_CACHE_DIR", # leaked by torch inductor
         "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR",  # leaked by torch.compile
     }
     leaked_vars.difference_update(allowlist)

@@ -33,9 +33,6 @@ from typing_extensions import override
 import torch
 from lightning.fabric.strategies.fsdp import _get_full_state_dict_context, _setup_activation_checkpointing
 from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
-from lightning.fabric.utilities.imports import (
-    _TORCH_GREATER_EQUAL_2_1,
-)
 from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.trainer.connectors.checkpoint_connector import _CheckpointConnector
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
@@ -55,17 +52,11 @@ if torch.distributed.is_available():
         OptimStateKeyType,
     )
     from torch.distributed.fsdp.wrap import _ConfigAutoWrap, _or_policy, lambda_auto_wrap_policy, wrap
+    from torch.distributed.fsdp._common_utils import _get_param_to_fqns, _is_fsdp_flattened
+    from torch.distributed.fsdp.wrap import _Policy
 
-    if _TORCH_GREATER_EQUAL_2_1:
-        from torch.distributed.fsdp._common_utils import _get_param_to_fqns, _is_fsdp_flattened
-        from torch.distributed.fsdp.wrap import _Policy
+    from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
 
-        from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
-    else:
-        from torch.distributed.fsdp._common_utils import _get_param_to_fqns, _is_fsdp_flattened
-        from torch.distributed.fsdp.wrap import _FSDPPolicy as _Policy  # type: ignore[no-redef]
-
-        from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
 
 
 class FSDPStrategyAdapter(StrategyAdapter):
@@ -191,8 +182,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
         setattr(Strategy, "lightning_restore_optimizer", self.lightning_restore_optimizer)
         setattr(self.pls_handle, "optimizer_state", self.optimizer_state)
         self._use_orig_params = self.pls_handle.kwargs.get("use_orig_params", False)
-        # for PyTorch >= `2.1.0` w/ `use_orig_params`, schedule/wrapping alignment constraints can be relaxed
-        self._allow_mixed_req_grad = self._use_orig_params and _TORCH_GREATER_EQUAL_2_1
+        # w/ `use_orig_params`, schedule/wrapping alignment constraints can be relaxed
+        self._allow_mixed_req_grad = self._use_orig_params
         self._prune_nodecay()
         self._validate_awp_overrides()
         if is_overridden("configure_model", self.pl_module):

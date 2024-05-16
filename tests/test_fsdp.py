@@ -18,10 +18,7 @@ from unittest import mock
 
 import pytest
 import torch
-from lightning.fabric.utilities.imports import (
-    _TORCH_GREATER_EQUAL_2_1,
-    _TORCH_GREATER_EQUAL_2_2
-)
+from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_2_2
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.plugins.precision.fsdp import FSDPPrecision
 from lightning.pytorch.strategies import FSDPStrategy
@@ -63,15 +60,10 @@ else:
     size_based_auto_wrap_policy = object
     wrap = object
 
-if _TORCH_GREATER_EQUAL_2_1:
-    from torch.distributed.fsdp.wrap import CustomPolicy
+from torch.distributed.fsdp.wrap import CustomPolicy
 
-    DISABLE_USE_ORIG = {"use_orig_params": False}
-    _FSDPPolicy = object
-else:
-    from torch.distributed.fsdp.wrap import _FSDPPolicy
-
-    DISABLE_USE_ORIG = {"use_orig_params": False}
+DISABLE_USE_ORIG = {"use_orig_params": False}
+_FSDPPolicy = object
 
 
 additional_fsdp_warns = [
@@ -249,7 +241,7 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
 
     def configure_optimizers(self):
         parameters = filter(lambda x: x.requires_grad, self.parameters())
-        optimizer = torch.optim.SGD(parameters, lr=0.1)
+        optimizer = torch.optim.SGD(parameters, lr=0.1, momentum=1)
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
         return [optimizer], [lr_scheduler]
 
@@ -384,7 +376,7 @@ class FTSEnforceP0FSDPModel(FTSBaseFSDPModel):
         super().__init__(*args, **kwargs)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.SGD(self.parameters(), lr=1e-3, weight_decay=self.weight_decay)
+        optimizer = torch.optim.SGD(self.parameters(), momentum=1, lr=1e-3, weight_decay=self.weight_decay)
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
         return [optimizer], [lr_scheduler]
 
@@ -618,8 +610,6 @@ class CustomWrapPolicy(_FSDPPolicy):
 
 # RunIf aliases
 runif_map = {
-    "only2_0": {"max_torch": "2.0.1"},
-    "min2_1": {"min_torch": "2.1.0"},
     "min2_2": {"min_torch": "2.2.0"},
     "max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
 }
@@ -628,13 +618,9 @@ runif_map = {
 cust_awp = custom_auto_wrap_policy
 cust_ext_awp = custom_auto_wrap_ext_policy
 warn_cust_awp = warn_custom_auto_wrap_policy
-if _TORCH_GREATER_EQUAL_2_1:
-    numel_constant = 67
-    awp_mwp_2_1_parity = CustomPolicy(lambda_fn=lambda m: sum(p.numel() for p in m.parameters()) >= numel_constant)
-    awp_mwp_2_0_parity = None
-else:
-    awp_mwp_2_0_parity = CustomWrapPolicy(min_num_params=67)
-    awp_mwp_2_1_parity = None
+numel_constant = 67
+awp_mwp_2_1_parity = CustomPolicy(lambda_fn=lambda m: sum(p.numel() for p in m.parameters()) >= numel_constant)
+awp_mwp_2_0_parity = None
 
 # awp_overrides configuration aliases
 awp_5_9 = {"awp_overrides": ["layer.9", "layer.5"]}
@@ -683,12 +669,12 @@ FTS_FSDP_TESTS = {
     ),
     "noawp_noprec": (
         (base_model, None, False, 0, outer_wrap_only, *nones(4)),
-        "min2_1",
+        None,
         (path_default_orig, "degenerate and unintended", *nones(2)),
     ),
     "noawp_prec": (
         (base_model, None, True, 0, outer_wrap_only, *nones(4)),
-        "min2_1",
+        None,
         (path_default_orig, "degenerate and unintended", *nones(2)),
     ),
     "cust_awp_noprec_dynamo": (
@@ -698,27 +684,22 @@ FTS_FSDP_TESTS = {
     ),
     "cust_awp_mwp_2_1_reinitlr_optim_no_use_orig": (
         (base_model, awp_mwp_2_1_parity, True, 8, unwrap_7_mp, None, opt_inspect, None, DISABLE_USE_ORIG),
-        "min2_1",
+        None,
         (
             path_optimlr_reinit,
-            ("Incompatible check",),
+            None,  #("Incompatible check",),
             None,
             lrs_path_optimlr_reinit,
         ),
     ),
-    "cust_awp_mwp_2_0_parity_no_use_orig": (
-        (adam_model, awp_mwp_2_0_parity, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
-        "only2_0",
-        (path_default, *nones(3)),
-    ),
     "cust_awp_mwp_2_1_parity_no_use_orig": (
         (base_model, awp_mwp_2_1_parity, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
-        "min2_1",
+        None,
         (path_default, *nones(3)),
     ),
     "override_cm_noprec_no_use_orig": (
         (cust_model, None, False, 0, unwrap_7, *nones(3), DISABLE_USE_ORIG),
-        "min2_1",
+        None,
         (path_default, *nones(3)),
     ),
     "cust_awp_nop_ignore_m_no_ofld_no_use_orig": (
@@ -731,14 +712,9 @@ FTS_FSDP_TESTS = {
         "min2_2",
         (path_ignore_p_uo, *nones(3)),
     ),
-    # "unsupp_torch_version": (
-    #     (base_model, cust_awp, False, 0, unwrap_7, *nones(4)),
-    #     None,
-    #     ({}, None, "is supported from PyTorch", None),
-    # ),
     "non_disjoint_params_allowed": (
         (base_model, warn_cust_awp, False, 0, outer_wrap_only, *nones(4)),
-        "min2_1",
+        None,
         (path_default_orig, *nones(3)),
     ),
     "non_disjoint_phase_fsdp_params_no_use_orig": (
@@ -758,7 +734,7 @@ FTS_FSDP_TESTS = {
     ),
     "already_fsdp_wrapped": (
         (wrapped_model, cust_awp, False, 0, unwrap_7, *nones(4)),
-        "min2_1",
+        None,
         ({}, None, "already wrapped by FSDP", None),
     ),
     "no_fsdp_params_p0": (
@@ -768,12 +744,12 @@ FTS_FSDP_TESTS = {
     ),
     "no_nonzero_local_shards_p0": (
         (base_model, warn_cust_awp, True, 0, outer_wrap_only, *nones(4)),
-        "min2_1",
+        None,
         (path_default_orig, *nones(3)),
     ),  # exercise shard allocation DEBUG diagnostics
     "warn_unsupp_nodecay": (
         (nodecay_model, cust_awp, False, 0, unwrap_7, *nones(4)),
-        "min2_1",
+        None,
         ({}, "will now be unset", *nones(2)),
     ),
     "unmatched_awp_overrides": (
@@ -783,27 +759,27 @@ FTS_FSDP_TESTS = {
     ),
     "cust_awp_prec_no_use_orig": (
         (base_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
-        "min2_1",
+        None,
         (path_default, *nones(3)),
     ),
     "enforceP0_cust_awp_prec_no_use_orig": (
         (enforceP0_model, cust_awp, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
-        "min2_1",
+        None,
         (path_default, *nones(3)),
     ),
     "batch_norm_auto_prec_no_use_orig_track_false": (
         (BN_model, cust_awp, True, 2, unwrap_8_mp, None, bn_track_false, max_epoch_5, DISABLE_USE_ORIG),
-        "min2_1",
+        None,
         (path_bn_track_false, ("Both mixed precision", "retain the current `track_running_stats`"), *nones(2)),
     ),
     "batch_norm_auto_prec_no_use_orig_track_true": (
         (BN_model, cust_awp, True, 2, unwrap_8_mp, None, bn_track_true, max_epoch_5, DISABLE_USE_ORIG),
-        "min2_1",
+        None,
         (path_bn_track_true, ("Both mixed precision",), *nones(2)),
     ),
     "shared_params_auto_prec_no_use_orig": (
         (shared_model, cust_awp, True, 3, unwrap_7_mp, awp_1, *nones(2), DISABLE_USE_ORIG),
-        "min2_1",
+        None,
         (
             path_5_10,
             ("Pruning explicitly specified",),
@@ -822,17 +798,17 @@ FTS_FSDP_TESTS = {
     ),
     "cust_awp_overrides_mwp_prec_no_use_orig": (
         (base_model, awp_mwp_2_1_parity, True, 0, wrap_all_mp, awp_7, *nones(2), cust_fp16_mp),
-        "min2_1",
+        None,
         (path_default, *nones(3)),
     ),
     "cust_awp_overrides_mwp_prec_ext_no_use_orig": (
         (ext_model, cust_ext_awp, True, 6, wrap_ext_mp, awp_7_8, *nones(2), cust_fp16_mp),
-        "min2_1",
+        None,
         (path_ext_8_16, *nones(3)),
     ),
     "warn_ignore_awp_override": (
         (cust_model, None, False, 0, unwrap_7, awp_7, *nones(3)),
-        "min2_1",
+        None,
         ({}, "will be unset and not applied", *nones(2)),
     ),
 }
