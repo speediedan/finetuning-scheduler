@@ -1,3 +1,8 @@
+########################################################################################################################
+# Because Lightning is not currently planning an official `2.3.0` release, this FTS release is marked as a pre-release
+# and pins the below `lightning` commit. A return to normal Lightning cadence is expected with `2.4.0` and FTS will
+# release accordingly.
+########################################################################################################################
 #pytorch-lightning>=2.3.0,<2.3.1
 # the below is uncommented when master is targeting a specific pl dev master commit
 git+https://github.com/Lightning-AI/pytorch-lightning.git@90d04b5b86f37994cdceccc6de32f0e93b1cc7f0#egg=pytorch-lightning
