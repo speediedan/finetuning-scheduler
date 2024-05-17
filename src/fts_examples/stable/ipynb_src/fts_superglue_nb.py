@@ -186,6 +186,9 @@ from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTok
 from transformers import logging as transformers_logging
 from transformers.tokenization_utils_base import BatchEncoding
 
+# TODO: remove this temporary patch activation once `datasets` datasets supports `numpy` `2.0.0`
+from fts_examples.stable.patching.dep_patch_shim import _ACTIVE_PATCHES  # noqa: F401
+
 # set notebook-level variables
 TASK_NUM_LABELS = {"boolq": 2, "rte": 2}
 DEFAULT_TASK = "rte"
