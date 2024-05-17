@@ -63,9 +63,11 @@ jobs:
         files: 'dist/*'
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-  publish-package:
+  publish-package-testpypi:
     runs-on: ubuntu-22.04
     needs: build-package
+    permissions:
+      id-token: write
     # only publish packages with new tags or release
     if: startsWith(github.event.ref, 'refs/tags') || github.event_name == 'release'
     steps:
@@ -80,18 +82,39 @@ jobs:
       # give time to verify that the release looks good on github before proceeding with pypi
       uses: juliangruber/sleep-action@v1
       with:
-        time: 5m
+        time: 3m
 
     - name: Publish to Test PyPI
-      uses: pypa/gh-action-pypi-publish@v1.5.0
+      uses: pypa/gh-action-pypi-publish@v1.8.14
+      # with:
+      #   user: __token__
+      #   password: ${{ secrets.test_pypi_password }}
+      #   repository_url: https://test.pypi.org/legacy/
+      #   verbose: true
+
+  publish-package-pypi:
+    runs-on: ubuntu-22.04
+    needs: publish-package-testpypi
+    permissions:
+      id-token: write
+    # only publish packages with new tags or release
+    if: startsWith(github.event.ref, 'refs/tags') || github.event_name == 'release'
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/download-artifact@v3
       with:
-        user: __token__
-        password: ${{ secrets.test_pypi_password }}
-        repository_url: https://test.pypi.org/legacy/
-        verbose: true
+        name: pypi-packages-${{ github.sha }}
+        path: dist
+    - run: ls -lh dist/
+
+    - name: Delay releasing
+      # give time to verify that the release looks good on github before proceeding with pypi
+      uses: juliangruber/sleep-action@v1
+      with:
+        time: 2m
 
     - name: Publish distribution 📦 to PyPI
-      uses: pypa/gh-action-pypi-publish@v1.5.0
-      with:
-        user: __token__
-        password: ${{ secrets.pypi_password }}
+      uses: pypa/gh-action-pypi-publish@v1.8.14
+      # with:
+      #   user: __token__
+      #   password: ${{ secrets.pypi_password }}
