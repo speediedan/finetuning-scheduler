@@ -38,6 +38,15 @@ ______________________________________________________________________
 
 ## Setup
 
+> \[!NOTE\]
+> Because Lightning is not currently planning an official `2.3.0` release, this FTS release is marked as a pre-release and pins a `lightning` `2.3.0dev` commit. A return to normal Lightning cadence is expected with `2.4.0` and FTS will release accordingly. Installation of this FTS pre-release can either follow the normal installation from source or use the release archive, e.g.:
+
+```bash
+export FTS_VERSION=2.3.0 && \
+wget https://github.com/speediedan/finetuning-scheduler/releases/download/v${FTS_VERSION}-rc1/finetuning_scheduler-${FTS_VERSION}rc1.tar.gz && \
+pip install finetuning_scheduler-${FTS_VERSION}rc1.tar.gz
+```
+
 ### Step 0: Install from PyPI
 
 ```bash
