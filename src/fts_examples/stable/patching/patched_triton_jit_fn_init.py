@@ -1,9 +1,9 @@
-import sys
+from fts_examples.stable.patching._patch_utils import _prepare_module_ctx
 import re
 from triton.runtime import jit  # noqa: F401
 
 
-globals().update(vars(sys.modules.get('triton.runtime.jit')))
+globals().update(_prepare_module_ctx('triton.runtime.jit', globals()))
 
 # we ignore these for the entire file since we're using our global namespace trickeration to patch
 # ruff: noqa: F821

@@ -1,27 +1,7 @@
 import operator
 import sys
 from typing import NamedTuple, Tuple, Callable
-import importlib.metadata
-from packaging.version import Version
-from functools import lru_cache
-
-
-@lru_cache
-def lwt_compare_version(package: str, op: Callable, version: str, use_base_version: bool = True,
-                        local_version: str = None) -> bool:
-    try:
-        pkg_version = Version(importlib.metadata.version(package))
-    except (importlib.metadata.PackageNotFoundError):
-        return False
-    except TypeError:
-        # possibly mocked by Sphinx so needs to return True to generate summaries
-        return True
-    if local_version:
-        if not operator.eq(local_version, pkg_version.local):
-            return False
-    if use_base_version:
-        pkg_version = Version(pkg_version.base_version)
-    return op(pkg_version, Version(version))
+from fts_examples.stable.patching._patch_utils import lwt_compare_version
 
 
 class DependencyPatch(NamedTuple):
@@ -39,7 +19,7 @@ DependencyPatch.__repr__ = _dep_patch_repr
 
 
 def _patch_unsupported_numpy_arrow_extractor():
-    from fts_examples.stable.patched_numpyarrowextractor import NumpyArrowExtractor
+    from fts_examples.stable.patching.patched_numpyarrowextractor import NumpyArrowExtractor
     # since the TorchFormatter and NumpyFormatter classes are already defined we need to patch both definitions
     # to use our patched `NumpyArrowExtractor`
     for old_mod, stale_ref in zip(['torch_formatter', 'np_formatter'], ['TorchFormatter', 'NumpyFormatter']):
@@ -48,7 +28,7 @@ def _patch_unsupported_numpy_arrow_extractor():
 
 
 def _patch_triton():
-    from fts_examples.stable.patched_triton_jit_fn_init import _new_init
+    from fts_examples.stable.patching.patched_triton_jit_fn_init import _new_init
     target_mod = 'triton.runtime.jit'
     sys.modules.get(target_mod).__dict__.get('JITFunction').__init__ = _new_init
 

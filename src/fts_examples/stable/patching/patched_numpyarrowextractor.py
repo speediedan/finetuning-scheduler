@@ -1,6 +1,8 @@
-import sys
+from fts_examples.stable.patching._patch_utils import _prepare_module_ctx
 
-globals().update(vars(sys.modules.get('datasets.formatting.formatting')))
+
+globals().update(_prepare_module_ctx('datasets.formatting.formatting', globals()))
+
 
 # we ignore these for the entire file since we're using our global namespace trickeration to patch
 # ruff: noqa: F821
