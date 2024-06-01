@@ -1876,8 +1876,7 @@ class CallbackDepMixin(ABC):
         """
         if cfg.get("monitor", None) is None:
             cfg["monitor"] = "val_loss"
-            rank_zero_warn(f"No monitor metric specified for {fts_cls.__class__.__name__},"
-                           " using 'val_loss' as default.")
+            rank_zero_warn(f"No monitor metric specified for {fts_cls.__name__}, using 'val_loss' as default.")
         trainer.callbacks.append(fts_cls(**cfg))
 
     def _callback_dep_setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
