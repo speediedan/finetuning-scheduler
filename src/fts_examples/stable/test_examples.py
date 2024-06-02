@@ -41,7 +41,8 @@ EXPECTED_WARNS = [
     "Please use torch.utils._pytree.register_pytree_node",  # temp allow deprecated behavior of transformers
     "We are importing from `pydantic",  # temp pydantic import migration warning
     # allowing below until https://github.com/pytorch/pytorch/pull/123619 is resolved wrt `ZeroRedundancyOptimizer`
-    "TorchScript support for functional optimizers is",
+    "`TorchScript` support for functional optimizers is",  # required with pt 2.4 nightly 20240601
+    "`is_compiling` is deprecated",  # required with pt 2.4 nightly 20240601 and `transformers` 4.41.2
 ]
 MIN_VERSION_WARNS = "2.0"
 MAX_VERSION_WARNS = "2.4"
