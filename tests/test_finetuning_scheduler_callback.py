@@ -2639,11 +2639,7 @@ def test_fts_frozen_bn_track_running_stats(tmpdir, boring_ft_schedule, frozen_bn
         FTSEarlyStopping(monitor="val_loss", patience=1),
     ]
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1, max_epochs=3, num_sanity_val_steps=0)
-    if not frozen_bn_track_running_stats:
-        with pytest.warns(UserWarning, match="with the next minor release of FTS"):
-            trainer.fit(model)
-    else:
-        trainer.fit(model)
+    trainer.fit(model)
     finetuningscheduler_callback = get_fts(trainer)
     assert finetuningscheduler_callback.depth_remaining == 0
     assert finetuningscheduler_callback.curr_depth == 2

@@ -188,11 +188,10 @@ either integers or convertible to integers via ``int()``.
 .. note::
 
      When freezing ``torch.nn.modules.batchnorm._BatchNorm`` modules, Lightning by default disables
-     ``BatchNorm.track_running_stats``. To override this behavior so that even frozen ``BatchNorm`` layers continue to
-     have ``track_running_stats`` set to ``True``, set the FTS parameter
-     :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.frozen_bn_track_running_stats` to ``True``.
-     Beginning with FTS ``2.4.0``,
-     :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.frozen_bn_track_running_stats`  will default to ``True``.
+     ``BatchNorm.track_running_stats``. Beginning with FTS ``2.4.0``, FTS overrides this behavior by default so that
+     even frozen ``BatchNorm`` layers continue to have ``track_running_stats`` set to ``True``. To disable
+     ``BatchNorm.track_running_stats`` when freezing ``torch.nn.modules.batchnorm._BatchNorm`` modules, one can set the
+     FTS parameter :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.frozen_bn_track_running_stats` to ``False``.
 
 
 EarlyStopping and Epoch-Driven Phase Transition Criteria

@@ -56,12 +56,6 @@ class StrategyAdapter:
     _ft_schedule_module_map: Dict
     _unscheduled_params: List
 
-    FROZEN_BN_DEFAULT_WARN = ( # TODO: remove warning with release of FTS 2.4.0
-        "Starting with the next minor release of FTS (2.4.0), the default value for `frozen_bn_track_running_stats`"
-        " will change to `True`. To retain the current `track_running_stats` `False` behavior with FTS >= 2.4.0, frozen"
-        " `BatchNorm` layers like those in this model will require setting `frozen_bn_track_running_stats` to `False`."
-    )
-
     def __init__(self) -> None:
         """The default fine-tuning phase execution function is set on
         :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` initialization. This can be overridden by
@@ -352,7 +346,6 @@ class StrategyAdapter:
         """
         if not self.fts_handle.frozen_bn_track_running_stats:
             target_bn_modules = self._get_target_bn_modules(schedule_phase)
-            self.fts_handle._conditional_warn_once(target_bn_modules, self.FROZEN_BN_DEFAULT_WARN)
             for _, m in target_bn_modules:
                 m.track_running_stats = True
 

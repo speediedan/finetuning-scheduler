@@ -771,7 +771,7 @@ FTS_FSDP_TESTS = {
     "batch_norm_auto_prec_no_use_orig_track_false": (
         (BN_model, cust_awp, True, 2, unwrap_8_mp, None, bn_track_false, max_epoch_4, DISABLE_USE_ORIG),
         None,
-        (path_bn_track_false, ("Both mixed precision", "retain the current `track_running_stats`"), *nones(2)),
+        (path_bn_track_false, ("Both mixed precision",), *nones(2)),
     ),
     "batch_norm_auto_prec_no_use_orig_track_true": (
         (BN_model, cust_awp, True, 2, unwrap_8_mp, None, bn_track_true, max_epoch_4, DISABLE_USE_ORIG),

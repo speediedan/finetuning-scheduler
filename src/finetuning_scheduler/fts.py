@@ -114,7 +114,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         apply_lambdas_new_pgs: bool = False,
         logging_level: int = logging.INFO,
         enforce_phase0_params: bool = True,
-        frozen_bn_track_running_stats: bool = False,
+        frozen_bn_track_running_stats: bool = True,
     ):
         r"""
         Arguments used to define and configure a scheduled fine-tuning training session:
@@ -241,7 +241,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 :class:`~finetuning_scheduler.fts.FinetuningScheduler` should set ``BatchNorm`` ``track_running_stats``
                 to ``True``. Setting this to ``True`` overrides the the default Lightning behavior that sets
                 ``BatchNorm`` ``track_running_stats`` to ``False`` when freezing ``BatchNorm`` layers. Defaults to
-                ``False`` for backwards compatibility. Default will be ``True`` with FTS >= 2.4.0.
+                ``True``.
 
         Attributes:
             _fts_state: The internal :class:`~finetuning_scheduler.fts.FinetuningScheduler` state.
