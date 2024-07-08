@@ -17,7 +17,7 @@ ARG OS_VER=ubuntu22.04
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
 ARG PYTHON_VERSION=3.11
-ARG PYTORCH_VERSION=2.3.0
+ARG PYTORCH_VERSION=2.3.1
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
 
@@ -89,7 +89,7 @@ RUN \
         # ... pytorch patch version
         # pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
         # ... pytorch nightly dev version
-        #pip install --pre torch==2.3.0.dev20240209  torchvision==0.18.0.dev20240209 -f https://download.pytorch.org/whl/nightly/cu121/torch_nightly.html; \
+        #pip install --pre torch==2.3.1.dev20240209  torchvision==0.18.0.dev20240209 -f https://download.pytorch.org/whl/nightly/cu121/torch_nightly.html; \
         # ... test channel
         # pip install --pre torch torchvision -f https://download.pytorch.org/whl/test/cu121/torch_test.html; \
     fi && \

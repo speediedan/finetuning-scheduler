@@ -38,15 +38,6 @@ ______________________________________________________________________
 
 ## Setup
 
-> \[!NOTE\]
-> Because Lightning is not currently planning an official `2.3.0` release, this FTS release is marked as a pre-release and pins a `lightning` `2.3.0dev` commit. A return to normal Lightning cadence is expected with `2.4.0` and FTS will release accordingly. Installation of this FTS pre-release can either follow the normal installation from source or use the release archive, e.g.:
-
-```bash
-export FTS_VERSION=2.3.0 && \
-wget https://github.com/speediedan/finetuning-scheduler/releases/download/v${FTS_VERSION}-rc1/finetuning_scheduler-${FTS_VERSION}rc1.tar.gz && \
-pip install finetuning_scheduler-${FTS_VERSION}rc1.tar.gz
-```
-
 ### Step 0: Install from PyPI
 
 ```bash
@@ -154,7 +145,7 @@ To ensure maximum stability, the latest Lightning patch release fully tested wit
 <details>
   <summary>Current build statuses for Fine-Tuning Scheduler </summary>
 
-| System / (PyTorch/Python ver) |                                                                                                        2.0.1/3.8                                                                                                         |                                                                                                              2.3.0/3.8, 2.3.0/3.11                                                                                                               |
+| System / (PyTorch/Python ver) |                                                                                                        2.0.1/3.8                                                                                                         |                                                                                                              2.3.2/3.8, 2.3.2/3.11                                                                                                               |
 | :---------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
 |      Linux \[GPUs\*\*\]       |                                                                                                            -                                                                                                             | [![Build Status](https://dev.azure.com//speediedan/finetuning-scheduler/_apis/build/status/Multi-GPU%20&%20Example%20Tests?branchName=main)](https://dev.azure.com/speediedan/finetuning-scheduler/_build/latest?definitionId=1&branchName=main) |
 |     Linux (Ubuntu 22.04)      | [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml) |             [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml)             |
