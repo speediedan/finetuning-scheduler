@@ -24,7 +24,7 @@ path_optimlr_reinit = {0: (2, 4, "SGD", 0, 0.1), 1: (6, 12, "Adam", 32, 0.00021)
 lrs_path_default = {0: (0.1,), 1: (0.07, 1e-06), 2: (0.049, 7e-07, 1e-05)}
 lrs_path_optimlr_reinit = {0: (0.1,), 1: (0.00021, 1e-06), 2: (0.002, 1e-06, 3e-06)}
 
-
+# (bn_layer_state, len(curr_thawed_params), len(logical_param_translation(curr_thawed_params)))
 path_bn_track_false = {
     0: (
         {

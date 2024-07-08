@@ -71,7 +71,8 @@ additional_fsdp_warns = [
     "Please use torch.distributed.all_gather_into_tensor",  # still required for PyTorch/Lightning <=2.1
     "Please use torch.distributed.reduce_scatter_tensor",  # still required for PyTorch/Lightning <=2.1
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
-    ".*torch.cpu.amp.autocast.*",  # temporarily req for 20240601 nightly, likey removable w/ PT 2.4 release
+    "torch.cpu.amp.autocast",  # required as of PT 2.4
+    "FSDP.state_dict_type", # temporarily required until Lightning usings new FSDP state dict API with PT 2.4
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
@@ -530,7 +531,7 @@ class BNInspectFTS(FSDPTestFinetuningScheduler):
                     attr_v = bn_layer._buffers.get(attr, None)
                     if attr_v is not None:
                         attr_v = round(attr_v.max().item(), 9)
-                        # inspect whether  default or non-default bn tracking values are present
+                        # inspect whether default or non-default bn tracking values are present
                         bnl_sample[i][attr] = ResultEnum.nondefault if attr_v not in [0.0, 1.0] else ResultEnum.default
                     else:
                         bnl_sample[i][attr] = attr_v  # None
@@ -768,12 +769,12 @@ FTS_FSDP_TESTS = {
         (path_default, *nones(3)),
     ),
     "batch_norm_auto_prec_no_use_orig_track_false": (
-        (BN_model, cust_awp, True, 2, unwrap_8_mp, None, bn_track_false, max_epoch_5, DISABLE_USE_ORIG),
+        (BN_model, cust_awp, True, 2, unwrap_8_mp, None, bn_track_false, max_epoch_4, DISABLE_USE_ORIG),
         None,
         (path_bn_track_false, ("Both mixed precision", "retain the current `track_running_stats`"), *nones(2)),
     ),
     "batch_norm_auto_prec_no_use_orig_track_true": (
-        (BN_model, cust_awp, True, 2, unwrap_8_mp, None, bn_track_true, max_epoch_5, DISABLE_USE_ORIG),
+        (BN_model, cust_awp, True, 2, unwrap_8_mp, None, bn_track_true, max_epoch_4, DISABLE_USE_ORIG),
         None,
         (path_bn_track_true, ("Both mixed precision",), *nones(2)),
     ),
@@ -894,7 +895,6 @@ def test_fsdp_multi_gpus_resume(tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, m
     default_fts_sanity_chk(trainer)
     if trainer.is_global_zero:
         check_fts_fsdp_warns(warns_expected, recwarn)
-
 
 def test_fsdp_get_bn_unwrapped():
     """Conservative (end-to-end) test for FTS training resumption with FSDP."""

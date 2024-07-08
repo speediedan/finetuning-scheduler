@@ -1,5 +1,5 @@
 #pytorch-lightning>=2.4.0,<2.4.1
 # the below is uncommented when master is targeting a specific pl dev master commit
-git+https://github.com/Lightning-AI/pytorch-lightning.git@a99a6d3af1e9b8090d892dfc24b4f616853a8a40#egg=pytorch-lightning
+git+https://github.com/Lightning-AI/pytorch-lightning.git@a40affb953b23c252926968bbdf732b8bfca4c1a#egg=pytorch-lightning
 torch>=2.1.0
 #mpmath<1.4.0  # temporary requirement to avoid installation of alpha version of mpmath

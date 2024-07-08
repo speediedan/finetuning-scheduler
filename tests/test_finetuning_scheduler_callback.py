@@ -1303,6 +1303,8 @@ EXPECTED_WARNS = [
     "The dirpath has changed from",  # required for all PyTorch/Lightning versions
     # allowing below until https://github.com/pytorch/pytorch/pull/123619 is resolved wrt `ZeroRedundancyOptimizer`
     "TorchScript support for functional optimizers is",
+    # required starting with PT 2.4.0 (until upstream Lightning changes `weights_only` default value)
+    "You are using `torch.load` with `weights_only=False`",
 
 ]
 EXPECTED_DIRPATH = "is not empty."

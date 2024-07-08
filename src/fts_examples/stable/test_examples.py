@@ -43,6 +43,8 @@ EXPECTED_WARNS = [
     # allowing below until https://github.com/pytorch/pytorch/pull/123619 is resolved wrt `ZeroRedundancyOptimizer`
     "`TorchScript` support for functional optimizers is",  # required with pt 2.4 nightly 20240601
     "`is_compiling` is deprecated",  # required with pt 2.4 nightly 20240601 and `transformers` 4.41.2
+    # required starting with PT 2.4.0 (until upstream Lightning changes `weights_only` default value)
+    "You are using `torch.load` with `weights_only=False`",
 ]
 MIN_VERSION_WARNS = "2.0"
 MAX_VERSION_WARNS = "2.4"

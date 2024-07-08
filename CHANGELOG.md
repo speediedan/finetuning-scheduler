@@ -4,12 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [2.3.0] - 2024-XX-XX
+## [2.4.0] - 2024-XX-XX
+
+## [2.3.2] - 2024-07-08
+
+- Support for Lightning <= ``2.3.2`` and PyTorch <= ``2.3.1``
+
+## [2.3.0] - 2024-05-17
 
 ### Added
 
 - Support for Lightning and PyTorch ``2.3.0``
 - Introduced the ``frozen_bn_track_running_stats`` option to the FTS callback constructor, allowing the user to override the default Lightning behavior that disables ``track_running_stats`` when freezing BatchNorm layers. Resolves[#13](https://github.com/speediedan/finetuning-scheduler/issues/13).
+
+### Deprecated
+
+- removed support for PyTorch `1.13`
 
 ## [2.2.4] - 2024-05-04
 
