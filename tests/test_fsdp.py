@@ -72,7 +72,7 @@ additional_fsdp_warns = [
     "Please use torch.distributed.reduce_scatter_tensor",  # still required for PyTorch/Lightning <=2.1
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
     "torch.cpu.amp.autocast",  # required as of PT 2.4
-    "FSDP.state_dict_type", # temporarily required until Lightning usings new FSDP state dict API with PT 2.4
+    "FSDP.state_dict_type", # temporarily required until Lightning uses new FSDP state dict API with PT 2.4
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
