@@ -14,6 +14,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Changed default value of the ``frozen_bn_track_running_stats`` option to the FTS callback constructor to ``True``.
 
+## [2.3.3] - 2024-07-09
+
+- Support for Lightning <= ``2.3.3`` (includes critical security fixes) and PyTorch <= ``2.3.1``
 
 ## [2.3.2] - 2024-07-08
 

@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-2022, macOS-12]
+        os: [ubuntu-22.04, windows-2022, macOS-14]
         python-version: ["3.8", "3.11"]  # minimum, maximum
         # tests will include oldest and newest tested patch versions of pytorch
         requires: ["oldest", "latest"]
@@ -48,7 +48,7 @@ jobs:
         exclude:  # note that occasionally, the oldest PyTorch version does not support the latest python version
           - {os: ubuntu-22.04, python-version: "3.11", requires: "oldest"}
           - {os: windows-2022, python-version: "3.11", requires: "oldest"}
-          - {os: macOS-12, python-version: "3.11", requires: "oldest"}
+          - {os: macOS-14, python-version: "3.11", requires: "oldest"}
         # include:
         #   # adding when using a release candidate
         #   # - {os: ubuntu-22.04, python-version: "3.10", requires: "latest", release: "pre"}
