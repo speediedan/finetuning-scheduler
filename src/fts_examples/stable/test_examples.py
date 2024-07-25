@@ -45,6 +45,11 @@ EXPECTED_WARNS = [
     "`is_compiling` is deprecated",  # required with pt 2.4 nightly 20240601 and `transformers` 4.41.2
     # required w/ PT 2.4 (until Lightning changes `weights_only` default value or offers a way to override it)
     "You are using `torch.load` with `weights_only=False`",
+    # required for datasets <= 2.20.0 with python 3.12
+    'co_lnotab is deprecated, use co_lines instead.',
+    # required for google protobuf <= 3.20.1 with python 3.12
+    "Use timezone-aware"
+
 ]
 MIN_VERSION_WARNS = "2.0"
 MAX_VERSION_WARNS = "2.4"

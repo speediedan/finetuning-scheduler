@@ -1305,6 +1305,8 @@ EXPECTED_WARNS = [
     "TorchScript support for functional optimizers is",
     # required w/ PT 2.4 (until Lightning changes `weights_only` default value or offers a way to override it)
     "You are using `torch.load` with `weights_only=False`",
+    # still required for pytorch 2.1
+    "Conversion of an array with ndim > 0"
 
 ]
 EXPECTED_DIRPATH = "is not empty."
