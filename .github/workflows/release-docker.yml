@@ -30,7 +30,7 @@ jobs:
       fail-fast: false
       matrix:
         # initially building only the latest supported configuration
-        python_version: ["3.11"]
+        python_version: ["3.12"]
         pytorch_version: ["2.4.0"]
         cust_base: ["cu12.4.0-"]
         pl_version: ["2.4"]

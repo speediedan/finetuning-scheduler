@@ -612,7 +612,7 @@ class CustomWrapPolicy(_FSDPPolicy):
 # RunIf aliases
 runif_map = {
     "min2_2": {"min_torch": "2.2.0"},
-    "max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
+    #"max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
 }
 
 # auto-wrap policy aliases
@@ -680,7 +680,7 @@ FTS_FSDP_TESTS = {
     ),
     "cust_awp_noprec_dynamo": (
         (nond_loss_adam_model, cust_awp, False, 7, unwrap_7_dyn, None, epoch_t_only, max_epoch_4, None),
-        "max3_12_min2_2",
+        "min2_2",
         (path_default_orig_eo_dyn, *nones(3)),
     ),
     "cust_awp_mwp_2_1_reinitlr_optim_no_use_orig": (

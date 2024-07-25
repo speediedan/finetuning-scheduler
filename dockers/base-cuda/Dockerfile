@@ -16,7 +16,7 @@ ARG OS_VER=ubuntu22.04
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
-ARG PYTHON_VERSION=3.11
+ARG PYTHON_VERSION=3.12
 ARG PYTORCH_VERSION=2.4.0
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
@@ -85,17 +85,17 @@ RUN \
     else \
         # or target a specific cuda build, by specifying a particular index url w/...
         # ... default channel
-        #pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu121; \
+        pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124; \
         # ... pytorch patch version
         # pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
         # ... pytorch nightly dev version
         #pip install --pre torch==2.4.0.dev20240601  torchvision==0.19.0.dev20240601 -f https://download.pytorch.org/whl/nightly/cu121/torch_nightly.html; \
         # ... test channel
-        pip install --pre torch==2.4.0 torchvision --index-url https://download.pytorch.org/whl/test/cu124; \
+        #pip install --pre torch==2.4.0 torchvision --index-url https://download.pytorch.org/whl/test/cu124; \
     fi && \
     # Install all requirements
     pip install -r requirements/devel.txt --no-cache-dir && \
-    # Update six to avoid unnecessary warnings associated with 3.10: https://github.com/benjaminp/six/pull/343
+    # Update six
     pip install -U six --no-cache-dir && \
     chmod -R 777 /tmp/venvs/fts_dev && \
     rm -rf requirements.* requirements/
@@ -103,7 +103,7 @@ RUN \
 RUN \
     . /tmp/venvs/fts_dev/bin/activate && \
     CUDA_VERSION_MAJOR=$(python -c "import torch; print(torch.version.cuda.split('.')[0])") && \
-    py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.10'.split('.')))")
+    py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.12'.split('.')))")
 
 RUN \
     # Show what we have

@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG PYTHON_VERSION=3.11
+ARG PYTHON_VERSION=3.12
 ARG PYTORCH_VERSION=2.4.0
 ARG LIGHTNING_VERSION=2.4
 ARG CUST_BASE

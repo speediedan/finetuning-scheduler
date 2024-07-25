@@ -101,7 +101,7 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
             "fine-tuning",
             "finetuning",
         ],
-        python_requires=">=3.8",
+        python_requires=">=3.9",
         setup_requires=[],
         extras_require=_prepare_extras(),
         project_urls={
@@ -120,10 +120,10 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
             "License :: OSI Approved :: Apache Software License",
             "Operating System :: OS Independent",
             "Programming Language :: Python :: 3",
-            "Programming Language :: Python :: 3.8",
             "Programming Language :: Python :: 3.9",
             "Programming Language :: Python :: 3.10",
             "Programming Language :: Python :: 3.11",
+            "Programming Language :: Python :: 3.12",
         ],
     )
 
@@ -135,7 +135,7 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
         _INSTALL_PATHS["require"],
         file_name=base_reqs,
         standalone=standalone,
-        pl_commit="bf25167bbf64f50ba335aa759318946b21775cd2",
+        pl_commit="2064887b12dd934a5f9a2bf45897f29e3bfc74d1",
     )
     base_setup["install_requires"] = install_requires
     return base_setup
