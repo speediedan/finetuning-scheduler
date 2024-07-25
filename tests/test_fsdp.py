@@ -26,8 +26,9 @@ from torch.utils.data import DataLoader
 
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from finetuning_scheduler.strategy_adapters import FSDPStrategyAdapter
-from tests.helpers.boring_model import RandomDataset, unexpected_warns, unmatched_warns
-from tests.helpers.runif import RunIf
+from tests.helpers.boring_models import RandomDataset
+from tests.helpers.common import get_fts, unexpected_warns, unmatched_warns, nones
+from tests.helpers.runif import RunIf, RUNIF_MAP
 from tests.fsdp_expected_paths import (path_default, path_default_orig, path_default_orig_eo_dyn, path_ignore_p_uo,
                                        path_8_14, path_5_10, path_ext_7_14, path_ext_8_16, path_optimlr_reinit,
                                        lrs_path_optimlr_reinit, path_bn_track_false, path_bn_track_true, ResultEnum)
@@ -104,13 +105,13 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     mod_sched_dict[1] = mod_sched_dict.pop(2)
     mod_sched_dict[1]["lr"] = 1e-06
     mod_sched_dict[2] = mod_sched_dict.pop(3)
-    mod_sched_dict[2]["params"] = ["layer.0.*"]
+    mod_sched_dict[2]["params"] = ["model.0.*"]
     fsdp_sched_dict = deepcopy(mod_sched_dict)
-    fsdp_sched_dict[0]["params"] = ["layer.(4|2).*"]
+    fsdp_sched_dict[0]["params"] = ["model.(4|2).*"]
     fsdp_gen_sched_dict = deepcopy(fsdp_sched_dict)
-    fsdp_gen_sched_dict[0]["params"] = ["layer.(7|5).*"]
+    fsdp_gen_sched_dict[0]["params"] = ["model.(7|5).*"]
     fsdp_gen_sched_dict[0]["max_transition_epoch"] = 1
-    fsdp_gen_sched_dict[1]["params"] = ["layer.[1-4].*"]
+    fsdp_gen_sched_dict[1]["params"] = ["model.[1-4].*"]
     fsdp_gen_sched_dict[1]["max_transition_epoch"] = 2
     fsdp_reinit_optim_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_reinitlr_sched_dict = deepcopy(fsdp_gen_sched_dict)
@@ -153,24 +154,24 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
     }
     fsdp_bn_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
-    fsdp_bn_gen_sched_dict[0]["params"] = ["layer.(9|[5-7]).*"]
-    fsdp_bn_gen_sched_dict[1]["params"] = ["layer.[1-4].*"]
+    fsdp_bn_gen_sched_dict[0]["params"] = ["model.(9|[5-7]).*"]
+    fsdp_bn_gen_sched_dict[1]["params"] = ["model.[1-4].*"]
     fsdp_shared_param_sched_dict = deepcopy(fsdp_gen_sched_dict)
-    fsdp_shared_param_sched_dict[0]["params"] = ["layer.(7|4).*", "layer.5.weight", "layer.5.bias"]
-    fsdp_shared_param_sched_dict[1]["params"] = ["layer.2.*", "layer.3.weight", "layer.3.bias"]
-    fsdp_shared_param_sched_dict[2]["params"] = ["layer.[0-1].*"]
+    fsdp_shared_param_sched_dict[0]["params"] = ["model.(7|4).*", "model.5.weight", "model.5.bias"]
+    fsdp_shared_param_sched_dict[1]["params"] = ["model.2.*", "model.3.weight", "model.3.bias"]
+    fsdp_shared_param_sched_dict[2]["params"] = ["model.[0-1].*"]
     fsdp_nondis_mod_sched_dict = deepcopy(fsdp_gen_sched_dict)
-    fsdp_nondis_mod_sched_dict[1]["params"] = ["layer.[1-4].*", "layer.0.bias"]
-    fsdp_nondis_mod_sched_dict[2]["params"] = ["layer.0.weight"]
+    fsdp_nondis_mod_sched_dict[1]["params"] = ["model.[1-4].*", "model.0.bias"]
+    fsdp_nondis_mod_sched_dict[2]["params"] = ["model.0.weight"]
     fsdp_nondis_mod_ex_sched_dict = deepcopy(fsdp_gen_sched_dict)
-    fsdp_nondis_mod_ex_sched_dict[1]["params"] = ["layer.[2-4].*"]
+    fsdp_nondis_mod_ex_sched_dict[1]["params"] = ["model.[2-4].*"]
     del fsdp_nondis_mod_ex_sched_dict[1]["max_transition_epoch"]
     del fsdp_nondis_mod_ex_sched_dict[2]
     fsdp_adam_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_adam_gen_sched_dict[0]["max_transition_epoch"] = 2
     fsdp_adam_gen_sched_dict[1]["max_transition_epoch"] = 4
     fsdp_ext_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
-    fsdp_ext_gen_sched_dict[0]["params"] = ["layer.(5|[7-8]).*"]
+    fsdp_ext_gen_sched_dict[0]["params"] = ["model.(5|[7-8]).*"]
     fsdp_epoch_only_sched = deepcopy(fsdp_gen_sched_dict)
     fsdp_epoch_only_sched[1]["max_transition_epoch"] = 2
     fsdp_epoch_only_sched[2]["max_transition_epoch"] = 3
@@ -230,7 +231,7 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
         self.outer_is_wrapped = outer_is_wrapped
         self.precision_key = precision_key
 
-        self.layer = torch.nn.Sequential(
+        self.model = torch.nn.Sequential(
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
@@ -277,27 +278,27 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
 
     def _assert_layer_fsdp_instance(self) -> None:
         if self.outer_is_wrapped:
-            assert isinstance(self.layer, FullyShardedDataParallel)
+            assert isinstance(self.model, FullyShardedDataParallel)
         else:
-            assert isinstance(self.layer, torch.nn.Sequential)
+            assert isinstance(self.model, torch.nn.Sequential)
         if self.precision_key == "auto_16":
             assert isinstance(self.trainer.strategy.precision_plugin, FSDPPrecision)
             precision = torch.float16 if self.trainer.precision == "16-true" else torch.bfloat16
         # ensure our ignored module is not wrapped
         for i in self.fsdp_mask["unwrapped_mods"]:
-            assert not isinstance(self.layer[i], FullyShardedDataParallel)
+            assert not isinstance(self.model[i], FullyShardedDataParallel)
         # but that all other modules are wrapped
         for i in self.fsdp_mask["wrapped_mods"]:
-            assert isinstance(self.layer[i], FullyShardedDataParallel)
+            assert isinstance(self.model[i], FullyShardedDataParallel)
             if self.precision_key:
-                if isinstance(self.layer[i].module, torch.nn.modules.batchnorm._BatchNorm):
-                    assert self.layer[i].mixed_precision.param_dtype is None
-                    assert self.layer[i].mixed_precision.reduce_dtype is None
-                    assert self.layer[i].mixed_precision.buffer_dtype is None
+                if isinstance(self.model[i].module, torch.nn.modules.batchnorm._BatchNorm):
+                    assert self.model[i].mixed_precision.param_dtype is None
+                    assert self.model[i].mixed_precision.reduce_dtype is None
+                    assert self.model[i].mixed_precision.buffer_dtype is None
                 else:
-                    assert self.layer[i].mixed_precision.param_dtype == precision
-                    assert self.layer[i].mixed_precision.reduce_dtype == precision
-                    assert self.layer[i].mixed_precision.buffer_dtype == precision
+                    assert self.model[i].mixed_precision.param_dtype == precision
+                    assert self.model[i].mixed_precision.reduce_dtype == precision
+                    assert self.model[i].mixed_precision.buffer_dtype == precision
 
 
 class NonDynamicLossAdamFSDPModel(FTSBaseFSDPModel):
@@ -332,14 +333,14 @@ class FTSCmFSDPModel(FTSBaseFSDPModel):
 
     def configure_model(self) -> None:
         # the model is already wrapped with FSDP: no need to wrap again!
-        if isinstance(self.layer, FullyShardedDataParallel):
+        if isinstance(self.model, FullyShardedDataParallel):
             return
-        for i, layer in enumerate(self.layer):
+        for i, layer in enumerate(self.model):
             if i in self.fsdp_mask["wrapped_mods"]:
-                self.layer[i] = wrap(layer)
-        self.layer = wrap(self.layer)
+                self.model[i] = wrap(layer)
+        self.model = wrap(self.model)
 
-        for param in self.layer._ignored_params:
+        for param in self.model._ignored_params:
             with torch.no_grad():
                 param.data = param.to(self.device)
                 if param.grad is not None:
@@ -351,7 +352,7 @@ class FTSCmFSDPModel(FTSBaseFSDPModel):
             checkpoint_wrapper,
             checkpoint_impl=CheckpointImpl.NO_REENTRANT,
         )
-        apply_activation_checkpointing(self.layer, checkpoint_wrapper_fn=wrapper, check_fn=check_fn)
+        apply_activation_checkpointing(self.model, checkpoint_wrapper_fn=wrapper, check_fn=check_fn)
 
 
 class FTSNoDecayFSDPModel(FTSBaseFSDPModel):
@@ -366,8 +367,8 @@ class AlreadyWrappedFSDPModel(FTSBaseFSDPModel):
 
     def setup(self, stage: str):
         with self._trainer.strategy.model_sharded_context():
-            self.layer[0] = wrap(self.layer[0])
-            assert isinstance(self.layer[0], FullyShardedDataParallel)
+            self.model[0] = wrap(self.model[0])
+            assert isinstance(self.model[0], FullyShardedDataParallel)
 
 
 class FTSEnforceP0FSDPModel(FTSBaseFSDPModel):
@@ -392,12 +393,12 @@ class FTSCmAdamFSDPModel(FTSBaseFSDPModel):
 
     def configure_model(self) -> None:
         # the model is already wrapped with FSDP: no need to wrap again!
-        if isinstance(self.layer, FullyShardedDataParallel):
+        if isinstance(self.model, FullyShardedDataParallel):
             return
-        for i, layer in enumerate(self.layer):
+        for i, layer in enumerate(self.model):
             if i in self.fsdp_mask["wrapped_mods"]:
-                self.layer[i] = wrap(layer)
-        self.layer = wrap(self.layer)
+                self.model[i] = wrap(layer)
+        self.model = wrap(self.model)
 
 
 class FTSAdamFSDPModel(FTSBaseFSDPModel):
@@ -416,7 +417,7 @@ class FTSAdamFSDPModel(FTSBaseFSDPModel):
 class FTSExtFSDPModel(FTSBaseFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.layer = torch.nn.Sequential(
+        self.model = torch.nn.Sequential(
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
@@ -432,7 +433,7 @@ class FTSExtFSDPModel(FTSBaseFSDPModel):
 class FTSBatchNormFSDPModel(FTSBaseFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.layer = torch.nn.Sequential(
+        self.model = torch.nn.Sequential(
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
             torch.nn.BatchNorm1d(32),
@@ -453,7 +454,7 @@ class FTSBatchNormFSDPModel(FTSBaseFSDPModel):
 class FTSSharedParamFSDPModel(FTSBaseFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.layer = torch.nn.Sequential(
+        self.model = torch.nn.Sequential(
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
@@ -463,10 +464,10 @@ class FTSSharedParamFSDPModel(FTSBaseFSDPModel):
             torch.nn.ReLU(),
             torch.nn.Linear(32, 2),
         )
-        self.layer[4].weight = self.layer[5].weight
-        self.layer[4].bias = self.layer[5].bias
-        self.layer[3].weight = self.layer[1].weight
-        self.layer[3].bias = self.layer[1].bias
+        self.model[4].weight = self.model[5].weight
+        self.model[4].bias = self.model[5].bias
+        self.model[3].weight = self.model[1].weight
+        self.model[3].bias = self.model[1].bias
 
 
 class FSDPTestFinetuningScheduler(TestFinetuningScheduler):
@@ -609,7 +610,7 @@ class CustomWrapPolicy(_FSDPPolicy):
 
 # RunIf aliases
 runif_map = {
-    #"min2_2": {"min_torch": "2.2.0"},
+    "min2_2": {"min_torch": "2.2.0"},
     #"max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
 }
 
@@ -622,16 +623,16 @@ awp_mwp_2_1_parity = CustomPolicy(lambda_fn=lambda m: sum(p.numel() for p in m.p
 awp_mwp_2_0_parity = None
 
 # awp_overrides configuration aliases
-awp_5_9 = {"awp_overrides": ["layer.9", "layer.5"]}
+awp_5_9 = {"awp_overrides": ["model.9", "model.5"]}
 awp_1 = {"awp_overrides": ["l.*yer.1"]}
-awp_7 = {"awp_overrides": ["layer.7"]}
-awp_7_8 = {"awp_overrides": ["l.*yer.8", "layer.7"]}
+awp_7 = {"awp_overrides": ["model.7"]}
+awp_7_8 = {"awp_overrides": ["l.*yer.8", "model.7"]}
 
 # FSDP strategy configuration aliases
 act_ckpt_cfg = {"activation_checkpointing_policy": {torch.nn.Linear}, **DISABLE_USE_ORIG}
-ignore_mod_cfg = {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False, **DISABLE_USE_ORIG}
+ignore_mod_cfg = {"test_ignored_modules_names": ["model.4"], "cpu_offload": False, **DISABLE_USE_ORIG}
 ignore_states_cfg = {
-    "test_ignored_parameters_names": ["layer.4.weight", "layer.4.bias"],
+    "test_ignored_parameters_names": ["model.4.weight", "model.4.bias"],
     "cpu_offload": False,
     "use_orig_params": True,
 }
@@ -821,13 +822,13 @@ FSDP_TEST_CFGS = [
         k,
         *test_cfg[0],
         id=k,
-        marks=RunIf(**runif_map[test_cfg[1]]) if runif_map.get(test_cfg[1], None) else tuple(),
+        marks=RunIf(**RUNIF_MAP[test_cfg[1]]) if RUNIF_MAP.get(test_cfg[1], None) else tuple(),
     )
     for k, test_cfg in FTS_FSDP_TESTS.items()
 ]
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True)
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False)
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, model_cfg, strategy_adapter_cfg, fts_cfg,\
           trainer_cfg, strategy_cfg",
@@ -897,7 +898,7 @@ def test_fsdp_multi_gpus_resume(tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, m
 def test_fsdp_get_bn_unwrapped():
     """Conservative (end-to-end) test for FTS training resumption with FSDP."""
     test_adapter = FSDPStrategyAdapter()
-    test_adapter.scheduled_mod_lists = {0: ['layer.0']}
+    test_adapter.scheduled_mod_lists = {0: ['model.0']}
     test_module = torch.nn.Module()
     test_module.layer = torch.nn.Sequential(torch.nn.BatchNorm1d(32))
     setattr(test_adapter, 'fts_handle', FinetuningScheduler())

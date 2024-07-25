@@ -150,6 +150,7 @@ legacy/checkpoints/
 *ubyte
 
 # pl tests
+datasets/
 ml-runs/
 mlruns/
 *.zip

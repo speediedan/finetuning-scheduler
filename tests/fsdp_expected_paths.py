@@ -24,12 +24,12 @@ path_optimlr_reinit = {0: (2, 4, "SGD", 0, 0.1), 1: (6, 12, "Adam", 32, 0.00021)
 lrs_path_default = {0: (0.1,), 1: (0.07, 1e-06), 2: (0.049, 7e-07, 1e-05)}
 lrs_path_optimlr_reinit = {0: (0.1,), 1: (0.00021, 1e-06), 2: (0.002, 1e-06, 3e-06)}
 
-# (bn_layer_state, len(curr_thawed_params), len(logical_param_translation(curr_thawed_params)))
+# current_epoch: (bn_layer_state, len(curr_thawed_params), len(logical_param_translation(curr_thawed_params)))
 path_bn_track_false = {
     0: (
         {
             8: {
-                "layer_fqn": "layer._fsdp_wrapped_module.2._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.2._fsdp_wrapped_module",
                 "track_running_stats": False,
                 "training": True,
                 "running_mean": ResultEnum.default,
@@ -38,7 +38,7 @@ path_bn_track_false = {
                 "requires_grad": False,
             },
             16: {
-                "layer_fqn": "layer._fsdp_wrapped_module.6._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.6._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.default,
@@ -53,7 +53,7 @@ path_bn_track_false = {
     1: (
         {
             8: {
-                "layer_fqn": "layer._fsdp_wrapped_module.2._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.2._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.default,
@@ -62,7 +62,7 @@ path_bn_track_false = {
                 "requires_grad": True,
             },
             16: {
-                "layer_fqn": "layer._fsdp_wrapped_module.6._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.6._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.nondefault,
@@ -77,7 +77,7 @@ path_bn_track_false = {
     2: (
         {
             8: {
-                "layer_fqn": "layer._fsdp_wrapped_module.2._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.2._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.default,
@@ -86,7 +86,7 @@ path_bn_track_false = {
                 "requires_grad": True,
             },
             16: {
-                "layer_fqn": "layer._fsdp_wrapped_module.6._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.6._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.nondefault,
@@ -101,7 +101,7 @@ path_bn_track_false = {
     3: (
         {
             8: {
-                "layer_fqn": "layer._fsdp_wrapped_module.2._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.2._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.nondefault,
@@ -110,7 +110,7 @@ path_bn_track_false = {
                 "requires_grad": True,
             },
             16: {
-                "layer_fqn": "layer._fsdp_wrapped_module.6._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.6._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.nondefault,
@@ -128,7 +128,7 @@ path_bn_track_true = {
     0: (
         {
             8: {
-                "layer_fqn": "layer._fsdp_wrapped_module.2._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.2._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.default,
@@ -137,7 +137,7 @@ path_bn_track_true = {
                 "requires_grad": False,
             },
             16: {
-                "layer_fqn": "layer._fsdp_wrapped_module.6._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.6._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.default,
@@ -152,7 +152,7 @@ path_bn_track_true = {
     1: (
         {
             8: {
-                "layer_fqn": "layer._fsdp_wrapped_module.2._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.2._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.nondefault,
@@ -161,7 +161,7 @@ path_bn_track_true = {
                 "requires_grad": True,
             },
             16: {
-                "layer_fqn": "layer._fsdp_wrapped_module.6._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.6._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.nondefault,
@@ -176,7 +176,7 @@ path_bn_track_true = {
     2: (
         {
             8: {
-                "layer_fqn": "layer._fsdp_wrapped_module.2._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.2._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.nondefault,
@@ -185,7 +185,7 @@ path_bn_track_true = {
                 "requires_grad": True,
             },
             16: {
-                "layer_fqn": "layer._fsdp_wrapped_module.6._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.6._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.nondefault,
@@ -200,7 +200,7 @@ path_bn_track_true = {
     3: (
         {
             8: {
-                "layer_fqn": "layer._fsdp_wrapped_module.2._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.2._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.nondefault,
@@ -209,7 +209,7 @@ path_bn_track_true = {
                 "requires_grad": True,
             },
             16: {
-                "layer_fqn": "layer._fsdp_wrapped_module.6._fsdp_wrapped_module",
+                "layer_fqn": "model._fsdp_wrapped_module.6._fsdp_wrapped_module",
                 "track_running_stats": True,
                 "training": True,
                 "running_mean": ResultEnum.nondefault,

@@ -19,7 +19,7 @@ from packaging.version import Version
 from pkg_resources import get_distribution
 
 from fts_examples import _HF_AVAILABLE
-from tests.helpers.boring_model import unexpected_warns
+from tests.helpers.common import unexpected_warns
 from tests.helpers.runif import RunIf, EXTENDED_VER_PAT
 
 ARGS_DEFAULT = (

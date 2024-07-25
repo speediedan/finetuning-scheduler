@@ -52,7 +52,9 @@ from torch import Tensor
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.nn import Module
 
-from finetuning_scheduler.strategy_adapters.fsdp import FSDPStrategyAdapter, StrategyAdapter
+from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
+from finetuning_scheduler.strategy_adapters.fsdp import FSDPStrategyAdapter
+from finetuning_scheduler.strategy_adapters.model_parallel import ModelParallelStrategyAdapter
 from finetuning_scheduler.types import (FTSLRSchedulerType, FTSLRSchedulerTypeTuple, ParamGroupAddable,
                                         BaseCallbackDepType)
 
@@ -61,7 +63,7 @@ log = logging.getLogger(__name__)
 CALLBACK_DEP_PARENTS = {"ModelCheckpoint": ModelCheckpoint, "EarlyStopping": EarlyStopping}
 CALLBACK_ATTRS = ("ft_schedule", "max_depth")
 TARGET_CALLBACK_REF = "FinetuningScheduler"
-STRATEGY_ADAPTERS = {"fsdp": FSDPStrategyAdapter}
+STRATEGY_ADAPTERS = {"fsdp": FSDPStrategyAdapter, "modelparallelstrategy": ModelParallelStrategyAdapter}
 
 
 @dataclass
@@ -328,6 +330,16 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
                     self._transition_es_phase()
         return should_stop, reason
 
+    def _improvement_message(self, current: Tensor) -> str:
+        """Override standard EarlyStopping._improvement_message to accommodate loss_parallel/Dtensor."""
+        if torch.isfinite(self.best_score):
+            msg = (
+                f"Metric {self.monitor} improved by {abs(self.best_score - current).item():.3f} >="
+                f" min_delta = {abs(self.min_delta)}. New best score: {current.item():.3f}"
+            )
+        else:
+            msg = f"Metric {self.monitor} improved. New best score: {current.item():.3f}"
+        return msg
 
 class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
     r"""

@@ -239,7 +239,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 Defaults to ``True``.
             frozen_bn_track_running_stats: When freezing ``torch.nn.modules.batchnorm._BatchNorm`` layers, whether
                 :class:`~finetuning_scheduler.fts.FinetuningScheduler` should set ``BatchNorm`` ``track_running_stats``
-                to ``True``. Setting this to ``True`` overrides the the default Lightning behavior that sets
+                to ``True``. Setting this to ``True`` overrides the default Lightning behavior that sets
                 ``BatchNorm`` ``track_running_stats`` to ``False`` when freezing ``BatchNorm`` layers. Defaults to
                 ``True``.
 
@@ -304,6 +304,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             "single_device",
             "fsdp",
             "fsdp_cpu_offload",
+            'modelparallelstrategy',
             # "deepspeed",  # relevant FTS strategy adapter not yet available, PRs welcome!
         )
 
@@ -612,8 +613,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 compatible with the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback.
         """
         strategy = trainer.strategy
-        connector_flag = getattr(trainer._accelerator_connector, "_strategy_flag", None)
-        strategy_flag = connector_flag.strategy_name if isinstance(connector_flag, Strategy) else connector_flag
+        connect_flg = getattr(trainer._accelerator_connector, "_strategy_flag", "")
+        strategy_flag = getattr(connect_flg, "strategy_name", connect_flg.__class__.__name__.lower()) if \
+            isinstance(connect_flg, Strategy) else connect_flg
         supported = [t.lower() for t in self._supported_strategy_flags()]
         if strategy_flag and strategy_flag not in supported:  # type: ignore[attr-defined]
             if not self.allow_untested:

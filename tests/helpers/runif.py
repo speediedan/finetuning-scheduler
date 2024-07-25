@@ -24,6 +24,14 @@ from pkg_resources import get_distribution
 
 EXTENDED_VER_PAT = re.compile(r"([0-9]+\.){2}[0-9]+")
 
+# RunIf aliases
+RUNIF_MAP = {
+    "min2_4": {"min_torch": "2.4.0"},
+    "min2_2": {"min_torch": "2.2.0"},
+    "max3_12_min2_3": {"max_python": "3.12", "min_torch": "2.3.0"},
+    "max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
+}
+
 
 class RunIf:
     """RunIf wrapper for simple marking specific cases, fully compatible with pytest.mark::
