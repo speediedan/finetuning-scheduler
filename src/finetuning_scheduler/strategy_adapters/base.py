@@ -22,13 +22,12 @@ from typing import Callable, List, Optional, Tuple, Dict
 
 import torch
 
-from lightning.fabric.utilities import rank_zero_info
+from lightning.fabric.utilities import rank_zero_info, rank_zero_debug
 from lightning.fabric.utilities.types import ReduceLROnPlateau
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.callbacks import BaseFinetuning
 from lightning.pytorch.strategies.strategy import Strategy
-from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 
 
 class StrategyAdapter:
@@ -327,7 +326,7 @@ class StrategyAdapter:
             None
         """
         if self.fts_handle.frozen_bn_track_running_stats:
-            rank_zero_info("Since `frozen_bn_track_running_stats` is currently set to `True`, FinetuningScheduler"
+            rank_zero_debug("Since `frozen_bn_track_running_stats` is currently set to `True`, FinetuningScheduler"
                             " will set `track_running_stats` to `True` for all `BatchNorm` layers.")
             modules = BaseFinetuning.flatten_modules(modules)  # type: ignore[assignment]
             for mod in modules:

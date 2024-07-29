@@ -9,10 +9,16 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 ### Added
 
 - Support for Lightning and PyTorch ``2.4.0``
+- Support for Python ``3.12``
 
 ### Changed
 
 - Changed default value of the ``frozen_bn_track_running_stats`` option to the FTS callback constructor to ``True``.
+
+### Deprecated
+
+- removed support for PyTorch `2.0`
+- removed support for Python `3.8`
 
 ## [2.3.3] - 2024-07-09
 
