@@ -24,13 +24,13 @@ from typing_extensions import override
 
 import lightning.pytorch as pl
 import torch
-from lightning.fabric.utilities import rank_zero_info
+from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
 from lightning.fabric.utilities.distributed import ReduceOp
 from lightning.pytorch.callbacks import BaseFinetuning
 from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.trainer.states import TrainerFn
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
-from lightning.pytorch.utilities.rank_zero import rank_zero_debug, rank_zero_warn
+from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 
 from finetuning_scheduler.fts_supporters import (
     CallbackDepMixin,

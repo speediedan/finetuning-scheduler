@@ -22,12 +22,13 @@ from typing import Callable, List, Optional, Tuple, Dict
 
 import torch
 
-from lightning.fabric.utilities import rank_zero_info, rank_zero_debug
+from lightning.fabric.utilities import rank_zero_info
 from lightning.fabric.utilities.types import ReduceLROnPlateau
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.callbacks import BaseFinetuning
 from lightning.pytorch.strategies.strategy import Strategy
+from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 
 
 class StrategyAdapter:
