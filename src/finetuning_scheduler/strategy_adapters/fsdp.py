@@ -75,12 +75,12 @@ class FSDPStrategyAdapter(StrategyAdapter):
     fine-tuning schedule phases have disjoint sets of FSDP-flattened parameters (i.e. ``FlatParameter`` s, which are
     created when wrapping a set of modules in a FSDP instance/unit). This constraint is derived from the fact that the
     ``requires_grad`` attribute currently must be the same for all parameters flattened into the same ``FlatParameter``
-    (for PyTorch < ``2.1.0`` or if in ``use_orig_params=False`` mode).
+    (if in ``use_orig_params=False`` mode).
 
     In order to support multi-phase scheduled fine-tuning with FSDP in ``use_orig_params=False`` mode, FTS's key
     precondition is that the defined fine-tuning schedule phases have disjoint sets of FSDP-flattened parameters (i.e.
     ``FlatParameter`` s, which are created when wrapping a set of modules in a FSDP instance/unit). This constraint is
-    derived from the fact that (for PyTorch < ``2.1.0`` or ``use_orig_params=False`` mode) the ``requires_grad``
+    derived from the fact that (if in ``use_orig_params=False`` mode) the ``requires_grad``
     attribute must be the same for all parameters flattened into the same ``FlatParameter``.
 
     To facilitate module wrapping in alignment with fine-tuning schedule phases, FTS provides the
@@ -114,13 +114,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
        approach to auto-wrapping in alignment with a fine-tuning schedule. As always, if needed, one can override
        ``configure_model`` and manually wrap a given
        :external+pl:class:`~lightning.pytorch.core.module.LightningModule` to align with a desired fine-tuning schedule.
-
-    .. deprecated:: v2.1.0
-
-        :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` now uses the ``configure_model`` hook
-        rather than the deprecated ``configure_sharded_model`` hook to apply the relevant model wrapping. See `this PR
-        <https://github.com/Lightning-AI/lightning/pull/18004>`_ for more context regarding
-        ``configure_sharded_model`` deprecation.
     """
 
     _fsdp_flat_to_unflat_mapping: Dict
@@ -519,8 +512,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         feedback_nonerrors: List[str] = []
         if self._allow_mixed_req_grad:
             rank_zero_debug(
-                "Bypassing FSDP-specific phase disjointness validation because `use_orig_params` is "
-                "``True`` and PyTorch is >= `2.1.0`"
+                "Bypassing FSDP-specific phase disjointness validation because `use_orig_params` is ``True``"
             )
             assert self.pl_module._trainer is not None
             # check only required for mixed-precision training with DEBUG level logging requested
@@ -644,7 +636,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         warn_msg = (
             "\n\nFine-tuning schedule phases do not have disjoint FSDP-flattened parameter sets. Because the"
             " `requires_grad` attribute of FSDP-flattened parameters currently must be the same for all flattened"
-            " parameters (for PyTorch < ``2.1.0`` or if in ``use_orig_params=False`` mode), fine-tuning schedules must"
+            " parameters (if in ``use_orig_params=False`` mode), fine-tuning schedules must"
             " avoid thawing parameters in the same FSDP-flattened parameter in different phases. Please ensure"
             " parameters associated with each phase are wrapped in separate phase-aligned FSDP instances.\n\n"
             f"""{unsched_param_msg if unsched_msg else ''}\n\n"""

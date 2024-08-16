@@ -135,6 +135,7 @@ class RteBoolqDataModule(pl.LightningDataModule):
         }
         os.environ["TOKENIZERS_PARALLELISM"] = "true" if self.hparams.tokenizers_parallelism else "false"
         self.tokenizer = AutoTokenizer.from_pretrained(self.hparams.model_name_or_path, use_fast=True,
+                                                       clean_up_tokenization_spaces=True,
                                                        local_files_only=False)
 
     def prepare_data(self):

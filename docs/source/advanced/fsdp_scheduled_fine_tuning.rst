@@ -31,7 +31,7 @@ Demonstration FTS FSDP training/profiling configurations and a DDP baseline for 
 
 Most of these FTS FSDP training examples have the same dependencies as the basic
 :ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples. Running the
-:ref:`basic example<basic-fsdp-fine-tuning-example>` requires PyTorch >= ``2.1.0``.
+:ref:`basic example<basic-fsdp-fine-tuning-example>`.
 
 .. note::
 
@@ -50,7 +50,7 @@ The demo schedule configurations are composed with the basic FTS example's share
 
     export TORCH_CPP_LOG_LEVEL=ERROR
 
-    # Profiled demo of basic scheduled fine-tuning with FSDP (requires PyTorch >= 2.1.0)
+    # Profiled demo of basic scheduled fine-tuning with FSDP
     python fts_superglue.py fit --config config/advanced/fsdp/fts_fsdp_basic_profile.yaml
 
     # Profiled demo of FSDP scheduled fine-tuning using the ``awp_overrides`` option:
@@ -68,8 +68,7 @@ The demo schedule configurations are composed with the basic FTS example's share
 Basic Scheduled Fine-Tuning with FSDP
 *************************************
 
-Beginning with PyTorch version ``2.1.0``, the effective constraints FSDP imposed on fine-tuning schedules were substantially relaxed. As you'll see below,
-scheduled fine-tuning with FSDP is pretty straightforward! All one need do:
+As you'll see below, scheduled fine-tuning with FSDP is pretty straightforward! All one need do:
 
 1. Pass ``use_orig_params`` to the FSDP strategy configuration.
 2. Provide a simple ``auto_wrap_policy`` configuration (not technically required but almost always desired).
@@ -112,7 +111,7 @@ We can just define an ``auto_wrap_policy`` for our DeBERTa-v3 module, directing 
           module_classes: !!set
             ? transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Layer
 
-That's it! Note that we set ``use_orig_params`` to ``True`` in line 5 as it allows for more flexible fine-tuning schedules with PyTorch >= ``2.1.0``.
+That's it! Note that we set ``use_orig_params`` to ``True`` in line 5 as it allows for more flexible fine-tuning schedules.
 
 In the next section, we'll cover some of the more advanced configuration options available for customizing scheduled fine-tuning with FSDP.
 
@@ -133,8 +132,6 @@ There are a number of usage contexts that might motivate moving beyond the simpl
      - :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides`
    * - A desire to use FSDP in the default "use_orig_params=False" mode
      - `See PyTorch documentation for possible issues <https://pytorch.org/docs/master/fsdp.html?highlight=use_orig_params>`_
-   * - if using a version of PyTorch < ``2.1.0``
-     -
 
 As with standard FSDP module wrapping, one can use an ``auto_wrap_policy`` to wrap a model for FSDP scheduled
 fine-tuning. In the current FTS release, there is only one FTS-specific FSDP configuration enhancement to consider:
@@ -262,7 +259,7 @@ Additional FSDP Wrapping and Debugging Guidance
 
 In order to support multi-phase scheduled fine-tuning with FSDP in ``use_orig_params=False`` mode, FTS's key precondition
 is that the defined fine-tuning schedule phases have disjoint sets of FSDP-flattened parameters (a ``FlatParameter`` is created when wrapping a set of
-modules in a FSDP instance/unit). This constraint is derived from the fact that (for PyTorch < ``2.1.0`` or ``use_orig_params=False`` mode) the ``requires_grad`` attribute
+modules in a FSDP instance/unit). This constraint is derived from the fact that (if in ``use_orig_params=False`` mode) the ``requires_grad`` attribute
 must be the same for all parameters flattened into the same ``FlatParameter``. [#]_
 
 FTS will attempt to validate that the module is wrapped in a manner that aligns with the defined fine-tuning
@@ -279,7 +276,7 @@ FTS stops before beginning training and provides extensive context via this erro
 
 .. code-block:: bash
 
-  "Fine-tuning schedule phases do not have disjoint FSDP-flattened parameter sets. Because the `requires_grad` attribute of FSDP-flattened parameters currently must be the same for all flattened parameters (for PyTorch < ``2.1.0`` or if in ``use_orig_params=False`` mode), fine-tuning schedules must avoid thawing parameters in the same FSDP-flattened parameter in different phases. Please ensure parameters associated with each phase are wrapped in separate phase-aligned FSDP instances.
+  "Fine-tuning schedule phases do not have disjoint FSDP-flattened parameter sets. Because the `requires_grad` attribute of FSDP-flattened parameters currently must be the same for all flattened parameters (if in ``use_orig_params=False`` mode), fine-tuning schedules must avoid thawing parameters in the same FSDP-flattened parameter in different phases. Please ensure parameters associated with each phase are wrapped in separate phase-aligned FSDP instances.
 
   In this particular case, there are parameters not included in your fine-tuning schedule that span more than one fine-tuning phase. HINT: parameters associated with unwrapped modules will be included in the top-level (aka 'root') FSDP instance so ensuring all modules associated with fine-tuning scheduled parameters are wrapped separately from the top-level FSDP instance may avoid triggering this exception.
 
@@ -325,17 +322,11 @@ As always, if needed, one can alternatively override ``configure_model`` and man
 
 .. tip::
 
-  If FSDP training with PyTorch >= ``2.1.0`` and ``use_orig_params=True``, ``DEBUG`` level logging will provide
-  parameter shard allocation diagnostic info where relevant.
+  If FSDP training with ``use_orig_params=True``, ``DEBUG`` level logging will provide parameter shard allocation
+  diagnostic info where relevant.
 
 .. tip::
 
   If you want to extend FTS to use a custom, currently unsupported strategy or override current FTS behavior with a
   given training strategy, subclassing :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is a way to do
   so.
-
-Footnotes
-*********
-
-.. [#] As of PyTorch ``2.1.0``, ``FlatParameter`` s constructed in ``use_orig_params`` mode are allowed to contain
-  original params with non-uniform ``requires_grad``.

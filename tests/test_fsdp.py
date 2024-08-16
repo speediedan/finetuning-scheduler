@@ -18,7 +18,6 @@ from unittest import mock
 
 import pytest
 import torch
-from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_2_2
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.plugins.precision.fsdp import FSDPPrecision
 from lightning.pytorch.strategies import FSDPStrategy
@@ -73,6 +72,8 @@ additional_fsdp_warns = [
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
     "torch.cpu.amp.autocast",  # required as of PT 2.4
     "FSDP.state_dict_type", # temporarily required until Lightning uses new FSDP state dict API with PT 2.4
+    "of Tensor.pin_memory",  # required as of PT 2.5 nightly for FSDP1 `_flat_param` internal usage
+    "Tensor.is_pinned",  # required as of PT 2.5 nightly for FSDP1 `_flat_param` internal usage
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
@@ -338,14 +339,11 @@ class FTSCmFSDPModel(FTSBaseFSDPModel):
                 self.layer[i] = wrap(layer)
         self.layer = wrap(self.layer)
 
-        if _TORCH_GREATER_EQUAL_2_2:
-            # starting with https://github.com/pytorch/pytorch/pull/108033, FSDP no longer moves ignored parameters
-            # (or buffers) to device. We need to manually move them to device in versions > 2.1.x (precise version TBD)
-            for param in self.layer._ignored_params:
-                with torch.no_grad():
-                    param.data = param.to(self.device)
-                    if param.grad is not None:
-                        param.grad.data = param.grad.to(self.device)
+        for param in self.layer._ignored_params:
+            with torch.no_grad():
+                param.data = param.to(self.device)
+                if param.grad is not None:
+                    param.grad.data = param.grad.to(self.device)
 
         # verify activation checkpointing can be manually applied
         check_fn = lambda submodule: isinstance(submodule, tuple([torch.nn.Linear]))  # noqa E731
@@ -611,7 +609,7 @@ class CustomWrapPolicy(_FSDPPolicy):
 
 # RunIf aliases
 runif_map = {
-    "min2_2": {"min_torch": "2.2.0"},
+    #"min2_2": {"min_torch": "2.2.0"},
     #"max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
 }
 
@@ -680,7 +678,7 @@ FTS_FSDP_TESTS = {
     ),
     "cust_awp_noprec_dynamo": (
         (nond_loss_adam_model, cust_awp, False, 7, unwrap_7_dyn, None, epoch_t_only, max_epoch_4, None),
-        "min2_2",
+        None,
         (path_default_orig_eo_dyn, *nones(3)),
     ),
     "cust_awp_mwp_2_1_reinitlr_optim_no_use_orig": (
@@ -705,12 +703,12 @@ FTS_FSDP_TESTS = {
     ),
     "cust_awp_nop_ignore_m_no_ofld_no_use_orig": (
         (cust_model, None, False, 0, unwrap_4_7, *nones(3), ignore_mod_cfg),
-        "min2_2",
+        None,
         (path_8_14, *nones(3)),
     ),  # TODO: once PyTorch deprecates ``ignored_modules``, check for the warning with this test
     "cust_awp_nop_ignore_p_no_ofld": (
         (cust_model, None, False, 0, unwrap_4_7, *nones(3), ignore_states_cfg),
-        "min2_2",
+        None,
         (path_ignore_p_uo, *nones(3)),
     ),
     "non_disjoint_params_allowed": (
