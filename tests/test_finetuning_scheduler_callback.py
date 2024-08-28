@@ -509,6 +509,13 @@ class FTSZeroRedundancyOptimizerModel(FinetuningSchedulerBoringModel):
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
         return [optimizer], [lr_scheduler]
 
+class ConstantLossBoringModel(FinetuningSchedulerBoringModel):
+    def validation_step(self, batch, batch_idx):
+        output = self(batch)
+        loss = self.val_loss(batch, output)
+        self.validation_step_outputs.append(loss)
+        self.log(self.monitor_metric, 1, prog_bar=False)  # edge case with every checkpoint having the same loss
+        return {"x": loss}
 
 class NonDynamicLossBoringModel(FinetuningSchedulerBoringModel):
     def val_loss(self, batch, prediction):
@@ -543,28 +550,38 @@ class ExplicitLossFTSCheckpoint(FTSCheckpoint):
 
 class NonDynamicPhase0EnforceModel(NonDynamicLossBoringModel):
     def configure_optimizers(self):
-        # if self.p0_params:
-        #     for n, p in self.named_parameters():
-        #         p.requires_grad = True if n in self.p0_params else False
-        #     parameters = list(filter(lambda x: x.requires_grad, self.parameters()))
-        #     optimizer = torch.optim.SGD(parameters, lr=1e-3, weight_decay=self.weight_decay)
-        # else:
         optimizer = torch.optim.SGD(self.parameters(), lr=1e-3, weight_decay=self.weight_decay)
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
         return [optimizer], [lr_scheduler]
+
+
+def ckpt_set_setup(save_top_k: int, save_last: Optional[bool] = None) -> Dict:
+    seed_everything(42)
+    callbacks = [
+        FinetuningScheduler(max_depth=1),
+        FTSEarlyStopping(monitor="val_loss", patience=1, min_delta=0.001),
+        FTSCheckpoint(monitor="val_loss", verbose=True, save_last=save_last, save_top_k=save_top_k),
+    ]
+    model = FinetuningSchedulerBoringModel()
+    return callbacks, model
+
+
+@pytest.fixture(scope="function")
+def ckpt_set_last(tmpdir_factory) -> Dict:
+    """A fixture that generates a 'best', 'kth' and 'last' checkpoint to be used in scheduled fine-tuning
+    resumption testing."""
+    callbacks, model = ckpt_set_setup(save_top_k=3, save_last=True)
+    trainer = Trainer(default_root_dir=tmpdir_factory.getbasetemp(), callbacks=callbacks, devices=1)
+    trainer.fit(model)
+    return {"best": trainer.checkpoint_callback.best_model_path, "kth": trainer.checkpoint_callback.kth_best_model_path,
+            "last": trainer.checkpoint_callback.last_model_path}
 
 
 @pytest.fixture(scope="function")
 def ckpt_set(tmpdir_factory) -> Dict:
     """A fixture that generates a 'best' and 'kth' checkpoint to be used in scheduled fine-tuning resumption
     testing."""
-    seed_everything(42)
-    callbacks = [
-        FinetuningScheduler(max_depth=1),
-        FTSEarlyStopping(monitor="val_loss", patience=1, min_delta=0.001),
-        FTSCheckpoint(monitor="val_loss", verbose=True, save_top_k=2),
-    ]
-    model = FinetuningSchedulerBoringModel()
+    callbacks, model = ckpt_set_setup(save_top_k=2)
     trainer = Trainer(default_root_dir=tmpdir_factory.getbasetemp(), callbacks=callbacks, devices=1)
     trainer.fit(model)
     return {"best": trainer.checkpoint_callback.best_model_path, "kth": trainer.checkpoint_callback.kth_best_model_path}
@@ -1311,21 +1328,14 @@ EXPECTED_WARNS = [
 ]
 EXPECTED_DIRPATH = "is not empty."
 
-@pytest.mark.parametrize("diff_dirpath,", [True, False], ids=["diffdirpath", "samedirpath"])
-@pytest.mark.parametrize("train_chk_mode,", [None, True], ids=["defaultchk", "trainchk"])
-@pytest.mark.parametrize("ckpt,", ["best", "kth"], ids=["best", "kth"])
-@pytest.mark.parametrize("max_depth", [-1, 1], ids=["nomaxdepth", "maxdepth1"])
-def test_fts_callback_resume(
-    tmpdir, ckpt_set, recwarn, diff_dirpath: bool, train_chk_mode: Optional[bool], ckpt: str, max_depth: int
-):
-    """Validate scheduled fine-tuning resumption functions as expected from both 'best' and 'kth'(not-best)
-    checkpoints in both train/val stage check modes with and without max_depth specified."""
-    resume_warns = copy(EXPECTED_WARNS)
-    dirpath = None if diff_dirpath else Path(ckpt_set["best"]).parent
+def ckpt_resume_launch(ckpt_set_fixture: object, diff_dirpath: bool, ckpt: str, max_depth: int, tmpdir: Path,
+                       save_on_train_epoch_end: Optional[bool] = None) -> None:
+    dirpath = None if diff_dirpath else Path(ckpt_set_fixture["best"]).parent
     resume_callbacks = [
         FTSEarlyStopping(monitor="val_loss", patience=1, min_delta=0.001),
         FTSCheckpoint(
-            monitor="val_loss", dirpath=dirpath, save_on_train_epoch_end=train_chk_mode, verbose=True, save_top_k=3
+            monitor="val_loss", dirpath=dirpath, verbose=True, save_top_k=3,
+            save_on_train_epoch_end=save_on_train_epoch_end
         ),
     ]
     resume_callbacks.append(FinetuningScheduler(max_depth=max_depth, logging_level=DEBUG))
@@ -1334,8 +1344,38 @@ def test_fts_callback_resume(
     model = FinetuningSchedulerBoringModel()
     trainer = Trainer(default_root_dir=tmpdir, callbacks=resume_callbacks, devices=1)
     finetuningscheduler_callback = get_fts(trainer)
-    trainer.ckpt_path = ckpt_set[ckpt]
+    trainer.ckpt_path = ckpt_set_fixture[ckpt]
     trainer.fit(model)
+    return finetuningscheduler_callback, resume_callbacks, trainer
+
+@pytest.mark.parametrize("diff_dirpath,", [True, False], ids=["diffdirpath", "samedirpath"])
+@pytest.mark.parametrize("ckpt,", ["best", "kth", "last"], ids=["best", "kth", "last"])
+def test_fts_callback_resume_last(tmpdir, ckpt_set_last, recwarn, diff_dirpath: bool, ckpt: str):
+    """Validate scheduled fine-tuning resumption functions as expected from both 'best' and 'kth'(not-best)
+    checkpoints in both train/val stage check modes with and without max_depth specified."""
+    resume_warns = copy(EXPECTED_WARNS)
+    fts_callback, *_ = ckpt_resume_launch(ckpt_set_fixture=ckpt_set_last, diff_dirpath=diff_dirpath, ckpt=ckpt,
+                                          max_depth=1, tmpdir=tmpdir)
+    assert fts_callback.curr_depth == fts_callback.max_depth
+    if not diff_dirpath:
+        resume_warns.append(EXPECTED_DIRPATH)
+    # ensure no unexpected warnings detected
+    unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=resume_warns)
+    assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
+
+
+@pytest.mark.parametrize("diff_dirpath,", [True, False], ids=["diffdirpath", "samedirpath"])
+@pytest.mark.parametrize("train_chk_mode,", [None, True], ids=["defaultchk", "trainchk"])
+@pytest.mark.parametrize("ckpt,", ["best", "kth"], ids=["best", "kth"])
+@pytest.mark.parametrize("max_depth", [-1, 1], ids=["nomaxdepth", "maxdepth1"])
+def test_fts_callback_resume(tmpdir, ckpt_set, recwarn, diff_dirpath: bool, train_chk_mode: Optional[bool], ckpt: str,
+                             max_depth: int):
+    """Validate scheduled fine-tuning resumption functions as expected from both 'best' and 'kth'(not-best)
+    checkpoints in both train/val stage check modes with and without max_depth specified."""
+    resume_warns = copy(EXPECTED_WARNS)
+    fts_callback, resume_callbacks, trainer = ckpt_resume_launch(ckpt_set_fixture=ckpt_set, diff_dirpath=diff_dirpath,
+                                                                 ckpt=ckpt, save_on_train_epoch_end=train_chk_mode,
+                                                                 max_depth=max_depth, tmpdir=tmpdir)
     # note if save_on_train_epoch_end is set to `None` then it will be False by default
     expected_state = EXPECTED_RESUME_RESULTS[
         (
@@ -1346,9 +1386,9 @@ def test_fts_callback_resume(
         )
     ]
     assert trainer.checkpoint_callback.best_ckpt_depth == expected_state[0]
-    assert finetuningscheduler_callback.depth_remaining == expected_state[1]
-    assert finetuningscheduler_callback.curr_depth == expected_state[2]
-    assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
+    assert fts_callback.depth_remaining == expected_state[1]
+    assert fts_callback.curr_depth == expected_state[2]
+    assert fts_callback.curr_depth == fts_callback.max_depth
     if not diff_dirpath:
         resume_warns.append(EXPECTED_DIRPATH)
     # ensure no unexpected warnings detected
@@ -2561,6 +2601,32 @@ def test_fts_zero_opt_support(monkeypatch, tmpdir, strategy, enf_p0):
     ]
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, accelerator="gpu", devices=2, strategy=strategy)
     trainer.fit(model)
+
+
+@pytest.mark.parametrize(
+    "constant_loss, expected_state",
+    [(True, (5, 0, 3, 1, 1, 0)), (False,  (6, 2, 1, 1, 1, 0))],
+    ids=["constant_loss", "normal_loss"],
+)
+def test_fts_constant_loss(tmpdir, constant_loss: bool, expected_state: Tuple):
+    """Validate scheduled fine-tuning works as expected in edge cases where the monitored loss value is constant
+    across multiple depths, exercising the logic necessary to disambiguate the current best checkpoint metadata."""
+    seed_everything(42)
+    model = ConstantLossBoringModel()if constant_loss else FinetuningSchedulerBoringModel()
+    callbacks = [
+        FTSCheckpoint(monitor="val_loss", verbose=True, save_top_k=3),
+        FinetuningScheduler(),
+        FTSEarlyStopping(monitor="val_loss", patience=1),  # including an extraneous earlystopping callback to test warn
+    ]
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1, max_epochs=6)
+    finetuningscheduler_callback = get_fts(trainer)
+    trainer.fit(model)
+    assert finetuningscheduler_callback._fts_state._ft_epoch == expected_state[0]
+    assert finetuningscheduler_callback.depth_remaining == expected_state[1]
+    assert finetuningscheduler_callback.curr_depth == expected_state[2]
+    assert len(finetuningscheduler_callback._fts_state._fts_ckpt_metadata['best_ckpt_pgs']) == expected_state[3]
+    assert finetuningscheduler_callback._fts_state._fts_ckpt_metadata['current_ckpt_depth'] == expected_state[4]
+    assert finetuningscheduler_callback._fts_state._fts_ckpt_metadata['best_ckpt_depth'] == expected_state[5]
 
 
 @pytest.mark.parametrize(
