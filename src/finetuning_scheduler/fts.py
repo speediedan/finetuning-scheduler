@@ -723,7 +723,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert self.pl_module is not None and self.pl_module.trainer is not None
         trainer = self.pl_module.trainer
         checkpoint_callback = trainer.checkpoint_callback
-        if checkpoint_callback.current_score == checkpoint_callback.best_model_score:  # type: ignore[union-attr]
+        if checkpoint_callback._should_update_depth_meta:  # type: ignore [union-attr]
             self._fts_state._best_ckpt_depth = self._fts_state._curr_depth
             for opt_idx, _ in enumerate(trainer.optimizers):
                 self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"][opt_idx] = deepcopy(

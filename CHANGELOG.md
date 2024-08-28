@@ -15,6 +15,17 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - removed support for PyTorch `2.1`
 
 
+## [2.4.1] - 2024-XX-XX
+
+### Added
+
+- Support for Lightning and PyTorch ``2.4.1``
+
+### Fixed
+
+- Added logic to more robustly condition depth-aligned checkpoint metadata updates to address edge-cases where `current_score` precisely equaled the `best_model_score` at multiple different depths. Resolved [#15](https://github.com/speediedan/finetuning-scheduler/issues/15).
+
+
 ## [2.4.0] - 2024-08-15
 
 ### Added
