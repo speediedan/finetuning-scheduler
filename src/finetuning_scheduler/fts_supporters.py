@@ -23,6 +23,7 @@ import pathlib
 import inspect
 import re
 import warnings
+from contextlib import contextmanager
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import KeysView
@@ -30,8 +31,8 @@ from copy import copy, deepcopy
 from dataclasses import dataclass, field, fields
 from functools import reduce
 from pprint import pformat
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union, Set
-from typing_extensions import TypeAlias
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union, Set, Iterator
+from typing_extensions import TypeAlias, override
 
 import lightning.pytorch as pl
 import torch
@@ -375,6 +376,8 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         self.current_ckpt_depth = 0
         self.best_ckpt_depth = 0
         self.finetuningscheduler_callback = None
+        self._prev_best_model_path = ''
+        self._has_depth_metadata_lock = False
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
         """Verify a valid callback configuration is present before beginning training.
@@ -422,10 +425,8 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             Dict[str, Any]: the callback state dictionary that will be saved.
         """
         self.current_ckpt_depth = self.finetuningscheduler_callback.curr_depth  # type: ignore[attr-defined]
-        # note, if current score is precisely the best score but a previous depth had the same score the
-        # best ckpt depth will be set to the latest (deepest) depth with that score.
         # a future enhancement of per-depth best score mapping could allow more fine-grained control of this behavior
-        if self.current_score == self.best_model_score:
+        if self._should_update_depth_meta:
             self.best_ckpt_depth = self.current_ckpt_depth
         return {
             "monitor": self.monitor,
@@ -474,6 +475,33 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             self.last_model_path = state_dict.get("last_model_path", self.last_model_path)
             self.best_model_path = state_dict["best_model_path"]
 
+    @property
+    def _should_update_depth_meta(self) -> bool:
+        # Depth-aligned checkpoint metadata is only updated if:
+        # 1. We are currently saving a top-k checkpoint
+        # 2. The `best_model_path` has changed
+        return self._has_depth_metadata_lock and self._prev_best_model_path != self.best_model_path
+
+    @contextmanager
+    def _depth_metadata_lock(self) -> Iterator[None]:
+        """Context manager that conditions just-in-time mutability of depth-aligned checkpoint metadata."""
+        try:
+            self._has_depth_metadata_lock = True
+            yield
+        finally:
+            self._has_depth_metadata_lock = False
+
+    @override
+    def _save_topk_checkpoint(self, trainer: "pl.Trainer", monitor_candidates: Dict[str, Tensor]) -> None:
+        """Wrapper around :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`'s
+        ``_save_topk_checkpoint`` method.
+
+        To avoid altering the checkpoint sorting and saving logic of the superclass while conditionally enriching it
+        with depth-aligned checkpoint metadata and handling edge cases, we wrap this method with additional context.
+        """
+        with self._depth_metadata_lock():
+            self._prev_best_model_path = self.best_model_path
+            super()._save_topk_checkpoint(trainer, monitor_candidates)
 
 FTSCallbackDepType: TypeAlias = Union[Type[FTSEarlyStopping], Type[FTSCheckpoint]]
 
