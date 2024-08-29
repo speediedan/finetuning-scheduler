@@ -37,8 +37,6 @@ from tests.test_finetuning_scheduler_callback import (
     EXPECTED_WARNS,
     ExplicitLossFTSCheckpoint,
     FinetuningSchedulerBoringModel,
-    get_fts,
-    nones,
     TestFinetuningScheduler,
     get_sched_fixture_tmpdir,
 )
@@ -624,9 +622,9 @@ awp_mwp_2_0_parity = None
 
 # awp_overrides configuration aliases
 awp_5_9 = {"awp_overrides": ["model.9", "model.5"]}
-awp_1 = {"awp_overrides": ["l.*yer.1"]}
+awp_1 = {"awp_overrides": ["m.*del.1"]}
 awp_7 = {"awp_overrides": ["model.7"]}
-awp_7_8 = {"awp_overrides": ["l.*yer.8", "model.7"]}
+awp_7_8 = {"awp_overrides": ["m.*del.8", "model.7"]}
 
 # FSDP strategy configuration aliases
 act_ckpt_cfg = {"activation_checkpointing_policy": {torch.nn.Linear}, **DISABLE_USE_ORIG}
@@ -828,7 +826,7 @@ FSDP_TEST_CFGS = [
 ]
 
 
-@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=False)
+@RunIf(min_cuda_gpus=2, skip_windows=True, standalone=True)
 @pytest.mark.parametrize(
     "model_cfg_key, model_cls, auto_wrap_policy, use_precision, ft_sched_idx, model_cfg, strategy_adapter_cfg, fts_cfg,\
           trainer_cfg, strategy_cfg",
@@ -898,7 +896,7 @@ def test_fsdp_multi_gpus_resume(tmpdir, recwarn, fsdp_ft_schedules, fsdp_ckpt, m
 def test_fsdp_get_bn_unwrapped():
     """Conservative (end-to-end) test for FTS training resumption with FSDP."""
     test_adapter = FSDPStrategyAdapter()
-    test_adapter.scheduled_mod_lists = {0: ['model.0']}
+    test_adapter.scheduled_mod_lists = {0: ['layer.0']}
     test_module = torch.nn.Module()
     test_module.layer = torch.nn.Sequential(torch.nn.BatchNorm1d(32))
     setattr(test_adapter, 'fts_handle', FinetuningScheduler())

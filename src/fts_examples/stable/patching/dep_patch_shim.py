@@ -1,6 +1,7 @@
 import operator
 import sys
 import os
+from enum import Enum
 from typing import NamedTuple, Tuple, Callable
 from fts_examples.stable.patching._patch_utils import lwt_compare_version
 
@@ -35,7 +36,7 @@ def _patch_einsum_strategies():
 
     # In this case fortunately, we only import/call `gen_einsum_strategies` from
     # `torch.distributed._tensor.ops.matrix_ops`, so only need to patch there.
-    target_mod = 'torch.distributed._tensor.ops.matrix_ops'
+    target_mod = 'torch.distributed._tensor.ops._matrix_ops'
     sys.modules.get(target_mod).__dict__['gen_einsum_strategies'] = gen_einsum_strategies
 
 def _patch_unsupported_numpy_arrow_extractor():
@@ -54,7 +55,7 @@ def _patch_triton():
 
 
 einsum_strategies_patch = DependencyPatch(
-    condition=(lwt_compare_version("torch", operator.le, "2.4.1"),),
+    condition=(lwt_compare_version("torch", operator.le, "2.5.1"),),
     env_flag=OSEnvToggle("ENABLE_FTS_EINSUM_STRATEGY_PATCH", default="0"),
     function=_patch_einsum_strategies, patched_package='torch',
     description='Address trivial tp submesh limitation until PyTorch provides upstream fix')
@@ -73,11 +74,17 @@ triton_codgen_patch = DependencyPatch(
     function=_patch_triton, patched_package='pytorch-triton',
     description='Address `triton` #3564 until PyTorch pins the upstream fix')
 
-_DEFINED_PATCHES = {einsum_strategies_patch, datasets_numpy_extractor_patch, triton_codgen_patch}
+class ExpPatch(Enum):
+    EINSUM_STRATEGIES = einsum_strategies_patch
+    NUMPY_EXTRACTOR = datasets_numpy_extractor_patch
+    TRITON_CODEGEN = triton_codgen_patch
+
+#_DEFINED_PATCHES = {einsum_strategies_patch, datasets_numpy_extractor_patch, triton_codgen_patch}
+_DEFINED_PATCHES = set(ExpPatch)
 _ACTIVE_PATCHES = set()
 
 for defined_patch in _DEFINED_PATCHES:
-    if all(defined_patch.condition) and os.environ.get(defined_patch.env_flag.env_var_name,
-                                                       defined_patch.env_flag.default) == "1":
-        defined_patch.function()
+    if all(defined_patch.value.condition) and os.environ.get(defined_patch.value.env_flag.env_var_name,
+                                                       defined_patch.value.env_flag.default) == "1":
+        defined_patch.value.function()
         _ACTIVE_PATCHES.add(defined_patch)

@@ -324,7 +324,7 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
                     should_stop = True
                     reason = (
                         f"Monitored metric {self.monitor} did not improve in the last {self.wait_count} records."
-                        f" Best score: {self.best_score:.3f}. Signaling Trainer to stop."
+                        f" Best score: {self.best_score.item():.3f}. Signaling Trainer to stop."
                     )
                 else:
                     self._transition_es_phase()

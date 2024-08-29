@@ -137,10 +137,6 @@ class BoringModel(LightningModule):
     def training_step(self, batch: Tensor, batch_idx: int) -> STEP_OUTPUT:
         return {"loss": self.step(batch)}
 
-    # def training_step(self, batch, batch_idx):
-    #     output = self(batch)
-    #     loss = self.loss(batch, output)
-    #     return {"loss": loss}
 
     def training_step_end(self, training_step_output: STEP_OUTPUT) -> STEP_OUTPUT:
         return training_step_output
@@ -148,24 +144,9 @@ class BoringModel(LightningModule):
     def validation_step(self, batch: Tensor, batch_idx: int) -> Optional[STEP_OUTPUT]:
         return {"x": self.step(batch)}
 
-    # def validation_step(self, batch, batch_idx):
-    #     output = self(batch)
-    #     loss = self.loss(batch, output)
-    #     return {"x": loss}
-
-    # def on_validation_epoch_end(self, outputs) -> None:
-    #     torch.stack([x["x"] for x in outputs]).mean()
-
-    # def test_step(self, batch, batch_idx):
-    #     output = self(batch)
-    #     loss = self.loss(batch, output)
-    #     return {"y": loss}
 
     def test_step(self, batch: Tensor, batch_idx: int) -> Optional[STEP_OUTPUT]:
         return {"y": self.step(batch)}
-
-    # def test_epoch_end(self, outputs) -> None:
-    #     torch.stack([x["y"] for x in outputs]).mean()
 
     def configure_optimizers(self) -> Tuple[List[torch.optim.Optimizer], List[LRScheduler]]:
         optimizer = torch.optim.SGD(self.model.parameters(), lr=0.1)
@@ -224,15 +205,6 @@ class ManualOptimBoringModel(BoringModel):
         super().__init__()
         self.automatic_optimization = False
 
-    # def training_step(self, batch, batch_idx):
-    #     opt = self.optimizers()
-    #     output = self(batch)
-    #     loss = self.loss(batch, output)
-    #     opt.zero_grad()
-    #     self.manual_backward(loss)
-    #     opt.step()
-    #     return loss
-
     def training_step(self, batch: Tensor, batch_idx: int) -> STEP_OUTPUT:
         opt = self.optimizers()
         assert isinstance(opt, (Optimizer, LightningOptimizer))
@@ -249,43 +221,6 @@ class FTSWikiText2(WikiText2):
     def __init__(self, data_dir: Path = Path(_PATH_DATASETS), block_size: int = 32, *args, **kwargs) -> None:
         super().__init__(data_dir=data_dir, block_size=block_size, *args, **kwargs)
 
-    # @property
-    # def vocab_size(self) -> int:
-    #     return len(self.dictionary)
-
-    # def __len__(self) -> int:
-    #     return len(self.data) // self.block_size - 1
-
-    # def __getitem__(self, index: int) -> Tuple[Tensor, Tensor]:
-    #     start = index * self.block_size
-    #     end = start + self.block_size
-    #     inputs = self.data[start:end]
-    #     target = self.data[(start + 1) : (end + 1)]
-    #     return inputs, target
-
-    # @staticmethod
-    # def download(destination: Path) -> None:
-    #     if not _REQUESTS_AVAILABLE:
-    #         raise ModuleNotFoundError(str(_REQUESTS_AVAILABLE))
-
-    #     import requests
-
-    #     os.makedirs(destination.parent, exist_ok=True)
-    #     url = "https://raw.githubusercontent.com/pytorch/examples/main/word_language_model/data/wikitext-2/train.txt"
-    #     if os.path.exists(destination):
-    #         return
-    #     with open(destination, "w") as f:
-    #         f.write(requests.get(url).text)
-
-
-# class SampledOutput(NamedTuple):
-#     """Sampled Output Named Tuple.
-
-#     Named tuple object for if we want to output both logits and tokens.
-#     """
-
-#     tokens: Union[torch.Tensor, str]
-#     logits: torch.Tensor
 
 ################################################################################
 # Toy Configurable Transformer (non-TransformerLens)
@@ -295,9 +230,6 @@ class FTSWikiText2(WikiText2):
 ################################################################################
 
 
-
-
-
 @dataclass
 class TestModelArgs:
     n_layers: int = 2  # 2
@@ -305,23 +237,10 @@ class TestModelArgs:
     max_seq_len: int = 200  # 10
     dim: int = 200  # 10
     n_heads: int = 2
-    dropout_p: float = 0.2  # 0.1
+    dropout_p: float = 0.0  # 0.2  # 0.1
     use_attn_mask: bool = True
     weight_tying: bool = False  # True
     checkpoint_activations: bool = False
-    #tokenizer: Optional[Callable] = None
-    #device: Optional[torch.device] = None
-    #dtype: Optional[torch.dtype] = None
-    # handle below can be used at runtime to allow this model's `generate` to adapt to various configuration contexts
-    #ctx_handle: Optional[torch.nn.Module] = None
-
-    # def __post_init__(self):
-    #     if self.ctx_handle:
-    #         # snag potentially useful context references and then delete the handle
-    #         #self.tokenizer = self.tokenizer or self.ctx_handle.it_cfg.tokenizer
-    #         self.device = self.device or self.ctx_handle.device
-    #         self.dtype = self.dtype or self.ctx_handle.torch_dtype
-    #         del self.ctx_handle
 
 
 class Attention(torch.nn.Module):

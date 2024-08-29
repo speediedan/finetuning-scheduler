@@ -13,7 +13,7 @@
 import os
 import re
 import sys
-from typing import Optional
+from typing import Optional, Set
 
 import pytest
 import torch
@@ -21,15 +21,17 @@ from lightning.fabric.accelerators.cuda import num_cuda_devices
 from lightning.pytorch.strategies.deepspeed import _DEEPSPEED_AVAILABLE
 from packaging.version import Version
 from pkg_resources import get_distribution
+from fts_examples.stable.patching.dep_patch_shim import ExpPatch, _ACTIVE_PATCHES
 
 EXTENDED_VER_PAT = re.compile(r"([0-9]+\.){2}[0-9]+")
 
 # RunIf aliases
 RUNIF_MAP = {
-    "min2_4": {"min_torch": "2.4.0"},
+    "min2_5": {"min_torch": "2.5.0"},
     "min2_2": {"min_torch": "2.2.0"},
     "max3_12_min2_3": {"max_python": "3.12", "min_torch": "2.3.0"},
     "max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
+    "einsum_exp": {"exp_patch": {ExpPatch.EINSUM_STRATEGIES}, "min_torch": "2.5.0"},
 }
 
 
@@ -58,6 +60,7 @@ class RunIf:
         standalone: bool = False,
         deepspeed: bool = False,
         slow: bool = False,
+        exp_patch: Optional[ExpPatch|Set[ExpPatch]] = None,
         **kwargs,
     ):
         """
@@ -74,6 +77,7 @@ class RunIf:
             standalone: Mark the test as standalone, our CI will run it in a separate process.
                 This requires that the ``PL_RUN_STANDALONE_TESTS=1`` environment variable is set.
             deepspeed: Require that microsoft/DeepSpeed is installed.
+            exp_patch: Require that a given experimental patch is installed.
             slow: Mark the test as slow, our CI will run it in a separate job.
                 This requires that the ``PL_RUN_SLOW_TESTS=1`` environment variable is set.
             **kwargs: Any :class:`pytest.mark.skipif` keyword arguments.
@@ -142,6 +146,12 @@ class RunIf:
         if deepspeed:
             conditions.append(not _DEEPSPEED_AVAILABLE)
             reasons.append("Deepspeed")
+
+        if exp_patch:
+            if not isinstance(exp_patch, Set):
+                exp_patch = {exp_patch}
+            conditions.append(not exp_patch.issubset(_ACTIVE_PATCHES))
+            reasons.append(f"Required experimental patch configuration {exp_patch} is not active.")
 
         if slow:
             env_flag = os.getenv("PL_RUN_SLOW_TESTS", "0")

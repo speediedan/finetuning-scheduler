@@ -337,12 +337,12 @@ class TestFinetuningScheduler(FinetuningScheduler):
             raise SystemExit(0)
 
     def state_dict(self) -> Dict[str, Any]:
-        self.best_ckpt_test_weight = self.pl_module._modules["layer"]._modules["3"].bias.data.detach().clone()
+        self.best_ckpt_test_weight = self.pl_module._modules["model"]._modules["3"].bias.data.detach().clone()
         return super().state_dict()
 
     def restore_best_ckpt(self) -> None:
         super().restore_best_ckpt()
-        assert torch.equal(self.pl_module._modules["layer"]._modules["3"].bias.data, self.best_ckpt_test_weight)
+        assert torch.equal(self.pl_module._modules["model"]._modules["3"].bias.data, self.best_ckpt_test_weight)
         self.restored_best_cnt += 1
 
     def on_train_epoch_start(self, trainer, pl_module):
@@ -742,11 +742,6 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
                      2: {'params': ['model.lin_base.bias', 'model.lin_base.weight']}}
     bn_sched_dict[0]["max_transition_epoch"] = 1
     bn_sched_dict[1]["max_transition_epoch"] = 2
-    # mp_tp_sched_dict = {0: {'params': ['model.w3.bias', 'model.w3.weight']},
-    #                  1: {'params': ['model.w2.bias', 'model.w2.weight']},
-    #                  2: {'params': ['model.w1.bias', 'model.w1.weight']}}
-    # mp_tp_sched_dict[0]["max_transition_epoch"] = 1
-    # mp_tp_sched_dict[1]["max_transition_epoch"] = 2
     return (
         unmod_schedule_file,
         mod_sched_dict,
