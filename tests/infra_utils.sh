@@ -152,15 +152,13 @@ show_test_results(){
   if [ -f ${tmp_out} ]; then
     if grep_errors=($(grep --ignore-case --extended-regexp 'error|exception|traceback|failed' ${tmp_out})); then
       echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $test_log
-      printf "Potential errors detected. See ${tmp_out} for details. Exception/error lines to follow. \n" | tee -a $test_log
+      printf "Potential errors detected. Uploading ${tmp_out} and grepping exception/error lines below: \n" | tee -a $test_log
       echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $test_log
-      printf "\n" | tee -a $test_log
-      show_final_summary "$test_log"
-      echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $test_log
-      printf "Grepped exception/error lines: \n" | tee -a $test_log
-      echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $test_log
+      printf ": \n" | tee -a $test_log
+      echo "##vso[task.uploadfile]${tmp_out}"
       grep --ignore-case --extended-regexp 'error|exception' ${tmp_out} | tee -a $test_log
       printf "\n" | tee -a $test_log
+      show_final_summary "$test_log"
     else
       printf "No detected errors. \n" | tee -a $test_log
       printf "\n" | tee -a $test_log
