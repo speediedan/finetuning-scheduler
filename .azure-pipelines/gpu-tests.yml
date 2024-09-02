@@ -60,7 +60,7 @@ jobs:
       mapDockerSocket: false
       volumes:
       - /var/run/user/998/docker.sock:/var/run/docker.sock
-      options: --gpus all
+      options: --gpus all --shm-size=512m
 
     workspace:
       clean: outputs
