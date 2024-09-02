@@ -81,7 +81,7 @@ if [ -s "${experiments_list}" ]; then
   fi
 fi
 special_test_session_log=${log_file:-"${tmp_log_dir}/special_tests_${mark_type}_${d}.log"}
-test_session_tmp_log="${tmp_log_dir}/special_tests_${mark_type}_${d}.log"
+test_session_tmp_log="${tmp_log_dir}/special_tests_raw_${mark_type}_${d}.log"
 
 # default python coverage arguments
 exec_defaults='-m coverage run --source src/finetuning_scheduler --append -m pytest --capture=no --no-header -v -s -rA'
