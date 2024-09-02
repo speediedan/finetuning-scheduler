@@ -97,10 +97,10 @@ jobs:
         bash ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
       displayName: 'Testing: standalone multi-gpu'
 
-    # - bash: |
-    #     . /tmp/venvs/fts_dev/bin/activate
-    #     bash ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0"
-    #   displayName: 'Testing: experimental einsum patch'
+    - bash: |
+        . /tmp/venvs/fts_dev/bin/activate
+        bash ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0"
+      displayName: 'Testing: experimental einsum patch'
 
     - bash: |
         . /tmp/venvs/fts_dev/bin/activate
