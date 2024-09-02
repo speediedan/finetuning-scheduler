@@ -53,7 +53,7 @@ execute_tests(){
   ensure_tests
   local execute_def="$1"
   local execute_log="$2"
-  local tmp_out="$3"
+  local tmp_raw_log="$3"
   # hardcoded tests to skip - space separated
   blocklist=''
   export report=''
@@ -72,15 +72,15 @@ execute_tests(){
 
     # run the test
     echo "Running ${parameterization}" | tee -a $execute_log
-    (python ${execute_def} ${parameterization} 2>&1 | sed "s,\x1b\[[0-9;]*[a-zA-Z],,g" >> $tmp_out) > /dev/null
+    (python ${execute_def} ${parameterization} 2>&1 | sed "s,\x1b\[[0-9;]*[a-zA-Z],,g" >> $tmp_raw_log) > /dev/null
     test_to_find=`echo ${parameterization} | sed 's/\[/\\\[/g; s/\]/\\\]/g'`
-    if pass_or_fail=$(grep -E "(PASSED|FAILED|XPASS|XFAIL) .*${test_to_find}" $tmp_out); then
+    if pass_or_fail=$(grep -E "(PASSED|FAILED|XPASS|XFAIL) .*${test_to_find}" $tmp_raw_log); then
       parameterization_result=`echo $pass_or_fail | awk 'NR==1 {print $2 ": "  $1}'`;
-    elif skipped=$(grep -E "${test_to_find}.*SKIPPED" $tmp_out); then
+    elif skipped=$(grep -E "${test_to_find}.*SKIPPED" $tmp_raw_log); then
       parameterization_result=`echo $skipped | awk 'NR==1 {print $1 ": "  $2}'`;
     else
       echo "Could not parse result!" | tee -a $execute_log
-      parameterization_result="UNKNOWN: see $tmp_out"
+      parameterization_result="UNKNOWN: see $tmp_raw_log"
     fi
     report+="Ran\t${parameterization_result}\n"
   done
@@ -119,7 +119,7 @@ show_summary(){
 
 show_final_summary(){
   local test_log="$1"
-  local tmp_out="${2:-}"
+  local tmp_raw_log="${2:-}"
   show_summary "$test_log"
   show_test_counts "$test_log"
   show_elapsed_time "$test_log"
@@ -148,15 +148,15 @@ ensure_tests(){
 show_test_results(){
   ensure_tests
   local test_log="$1"
-  local tmp_out="$2"
-  if [ -f ${tmp_out} ]; then
-    if grep_errors=($(grep --ignore-case --extended-regexp 'error|exception|traceback|failed' ${tmp_out})); then
+  local tmp_raw_log="$2"
+  if [ -f ${tmp_raw_log} ]; then
+    if grep_errors=($(grep --ignore-case --extended-regexp 'error|exception|traceback|failed' ${tmp_raw_log})); then
       echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $test_log
-      printf "Potential errors detected. Uploading ${tmp_out} and grepping exception/error lines below: \n" | tee -a $test_log
+      printf "Potential errors detected. Uploading ${tmp_raw_log} and grepping exception/error lines below: \n" | tee -a $test_log
       echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $test_log
       printf ": \n" | tee -a $test_log
-      echo "##vso[task.uploadfile]${tmp_out}"
-      grep --ignore-case --extended-regexp 'error|exception' ${tmp_out} | tee -a $test_log
+      echo "##vso[task.uploadfile]$tmp_raw_log"
+      grep --ignore-case --extended-regexp 'error|exception' ${tmp_raw_log} | tee -a $test_log
       printf "\n" | tee -a $test_log
       show_final_summary "$test_log"
     else
@@ -164,7 +164,7 @@ show_test_results(){
       printf "\n" | tee -a $test_log
       show_final_summary "$test_log"
     fi
-  elif [ -f ${test_log} ]; then  # if the log but not the out exists, check for collection errors
+  elif [ -f ${test_log} ]; then  # if the summary log but not the raw test log exists, check for collection errors
     if grep --ignore-case --extended-regexp 'traceback|failed' ${test_log} ; then
       echo "Potential collection error!" | tee -a $test_log
       show_final_summary "$test_log"

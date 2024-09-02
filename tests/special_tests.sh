@@ -81,7 +81,7 @@ if [ -s "${experiments_list}" ]; then
   fi
 fi
 special_test_session_log=${log_file:-"${tmp_log_dir}/special_tests_${mark_type}_${d}.log"}
-test_session_tmp_out="${tmp_log_dir}/special_tests_${mark_type}_${d}.out"
+test_session_tmp_log="${tmp_log_dir}/special_tests_${mark_type}_${d}.log"
 
 # default python coverage arguments
 exec_defaults='-m coverage run --source src/finetuning_scheduler --append -m pytest --capture=no --no-header -v -s -rA'
@@ -127,9 +127,9 @@ define_configuration(){
   printf '\n' | tee -a  $special_test_session_log
 }
 
-trap 'show_test_results "$special_test_session_log" "$test_session_tmp_out"' EXIT  # show the output on exit
+trap 'show_test_results "$special_test_session_log" "$test_session_tmp_log"' EXIT  # show the output on exit
 
 ## Special coverage collection flow
 define_configuration
 collect_tests "$collect_defaults" "$special_test_session_log"
-execute_tests "$exec_defaults" "$special_test_session_log" "$test_session_tmp_out"
+execute_tests "$exec_defaults" "$special_test_session_log" "$test_session_tmp_log"
