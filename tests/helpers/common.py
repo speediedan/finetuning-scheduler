@@ -53,7 +53,7 @@ unexpected_warns = partial(multiwarn_check, expected_mode=False)
 unmatched_warns = partial(multiwarn_check, expected_mode=True)
 
 class ExpectedResults(NamedTuple):
-    expected_state: Dict
+    expected_state: Optional[Dict] = None
     warns_expected: Optional[Tuple] = None
     exceptions_expected: Optional[Tuple] = None
 

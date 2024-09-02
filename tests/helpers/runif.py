@@ -28,10 +28,12 @@ EXTENDED_VER_PAT = re.compile(r"([0-9]+\.){2}[0-9]+")
 # RunIf aliases
 RUNIF_MAP = {
     "min2_5": {"min_torch": "2.5.0"},
+    "alone": {"standalone": True},
+    "bf16_cuda_alone": {"bf16_cuda": True, "standalone": True},
     "min2_2": {"min_torch": "2.2.0"},
     "max3_12_min2_3": {"max_python": "3.12", "min_torch": "2.3.0"},
     "max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
-    "einsum_exp": {"exp_patch": {ExpPatch.EINSUM_STRATEGIES}, "min_torch": "2.5.0"},
+    "einsum_exp": {"exp_patch": {ExpPatch.EINSUM_STRATEGIES}},
 }
 
 
@@ -59,7 +61,6 @@ class RunIf:
         skip_mac_os: bool = False,
         standalone: bool = False,
         deepspeed: bool = False,
-        slow: bool = False,
         exp_patch: Optional[ExpPatch|Set[ExpPatch]] = None,
         **kwargs,
     ):
@@ -78,8 +79,6 @@ class RunIf:
                 This requires that the ``PL_RUN_STANDALONE_TESTS=1`` environment variable is set.
             deepspeed: Require that microsoft/DeepSpeed is installed.
             exp_patch: Require that a given experimental patch is installed.
-            slow: Mark the test as slow, our CI will run it in a separate job.
-                This requires that the ``PL_RUN_SLOW_TESTS=1`` environment variable is set.
             **kwargs: Any :class:`pytest.mark.skipif` keyword arguments.
         """
         conditions = []
@@ -148,17 +147,19 @@ class RunIf:
             reasons.append("Deepspeed")
 
         if exp_patch:
-            if not isinstance(exp_patch, Set):
-                exp_patch = {exp_patch}
-            conditions.append(not exp_patch.issubset(_ACTIVE_PATCHES))
-            reasons.append(f"Required experimental patch configuration {exp_patch} is not active.")
-
-        if slow:
-            env_flag = os.getenv("PL_RUN_SLOW_TESTS", "0")
-            conditions.append(env_flag != "1")
-            reasons.append("Slow test")
-            # used in tests/conftest.py::pytest_collection_modifyitems
-            kwargs["slow"] = True
+            # since we want to ensure we separate all experimental test combinations from normal unpatched tests, we
+            # gate experimental patches with both an environmental flag and the required subset of active patches
+            env_flag = os.getenv("FTS_EXPERIMENTAL_PATCH_TESTS", "0")
+            if env_exp_flag := (env_flag != "1"):
+                conditions.append(env_exp_flag)
+                reasons.append("Experimental tests not enabled via 'FTS_EXPERIMENTAL_PATCH_TESTS' env variable")
+            else:
+                if not isinstance(exp_patch, Set):
+                    exp_patch = {exp_patch}
+                conditions.append(not exp_patch.issubset(_ACTIVE_PATCHES))
+                reasons.append(f"Required experimental patch configuration {exp_patch} is not active.")
+            # used in conftest.py::pytest_collection_modifyitems
+            kwargs["exp_patch"] = True
 
         reasons = [rs for cond, rs in zip(conditions, reasons) if cond]
         return pytest.mark.skipif(

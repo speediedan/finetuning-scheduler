@@ -208,16 +208,18 @@ class ModelParallelTestFTS(TestFinetuningScheduler):
         super(TestFinetuningScheduler, self).on_train_epoch_start(trainer, pl_module)
         model_parallel_sample = {}
         state_key = trainer.current_epoch
-        target_p_keys = self.expected_state[state_key][0]['p_states'].keys()
-        model_parallel_sample['p_states'] = self._collect_p_states(target_p_keys)
-        if target_mod_keys := self.expected_state[state_key][0].get('fsdp_mod_states', {}).keys():
-            model_parallel_sample['fsdp_mod_states'] = self._collect_fsdp_mod_states(target_mod_keys)
-        current_state = (
-            model_parallel_sample,
-            len(self._fts_state._curr_thawed_params),
-        )
-        lrs_state = None
-        self.inspect_or_assert(current_state, lrs_state, state_key)
+        if expected_epoch_state := self.expected_state.get(state_key):
+            if target_p_keys := expected_epoch_state[0].get('p_states', {}).keys():
+                model_parallel_sample['p_states'] = self._collect_p_states(target_p_keys)
+            if target_mod_keys := expected_epoch_state[0].get('fsdp_mod_states', {}).keys():
+                model_parallel_sample['fsdp_mod_states'] = self._collect_fsdp_mod_states(target_mod_keys)
+            if target_mod_keys or target_p_keys:
+                current_state = (
+                    model_parallel_sample,
+                    len(self._fts_state._curr_thawed_params),
+                )
+                lrs_state = None
+                self.inspect_or_assert(current_state, lrs_state, state_key)
 
     def _collect_p_states(self, tp_keys: KeysView) -> Dict[Any, Dict]:
         p_states = {}
@@ -425,8 +427,12 @@ dp2_tp1 = {"data_parallel_size": 2, "tensor_parallel_size": 1}
 ## Lightning Trainer Configuration Aliases
 trainer_defaults = {"accelerator": "gpu", "devices": 2, 'limit_train_batches': 2, 'limit_val_batches': 2,
                     'num_sanity_val_steps': 0}
-no_sanity_val = {"num_sanity_val_steps": 0}
-max_epoch_4 = {"max_epochs": 4}
+# no_sanity_val = {"num_sanity_val_steps": 0}
+# max_epoch_4 = {"max_epochs": 4}
+
+## Precision Configuration Aliases
+fp16 = {"precision": "16-true"}
+bf16 = {"precision": "bf16-true"}
 
 ## cust ckpt cfg
 no_ckpt_save = {"save_top_k": 0}
@@ -442,7 +448,6 @@ no_restore_best = {"restore_best": False}
 @dataclass
 class ModelParallelTestConfig:
     model_cfg_key: str
-    expected_results: ExpectedResults
     model_cls: Callable
     model_cfg: Dict = field(default_factory=dict)
     trainer_cfg: Dict = field(default_factory=lambda: {'max_epochs': 3})
@@ -457,6 +462,7 @@ class ModelParallelTestConfig:
     es_cfg: Dict = field(default_factory=lambda: {"patience": 1})
     ckpt_cfg: Dict = field(default_factory=lambda: {"save_top_k": 3})
     ckpt_cls: Callable = FTSCheckpoint
+    expected_results: ExpectedResults = ExpectedResults()
     runif_alias: Optional[str] = None
     def __post_init__(self):
         self.default_fts_cfg = {
@@ -473,24 +479,32 @@ def test_torch_greater_equal_2_5():
         ModelParallelStrategyAdapter()
 
 ## Model Parallel Test Definitions
-FTS_MODEL_PARALLEL_TESTS = (
-    ModelParallelTestConfig(model_cfg_key="tt_fsdp_tp", model_cls=tt_mod_parallel,
+FTS_MODEL_PARALLEL_PATH_TESTS = (
+    ModelParallelTestConfig(model_cfg_key="path_tt_fsdp_tp", model_cls=tt_mod_parallel,
                             model_cfg=tt_fsdp_tp, fts_cfg=no_restore_best, ckpt_cfg=no_ckpt_save,
                             strategy_cfg=dp2_tp1, runif_alias="einsum_exp",
                             expected_results=ExpectedResults(expected_state=path_tt_fsdp_tp)),
-    ModelParallelTestConfig(model_cfg_key="tt_fsdp_no_tp", model_cls=tt_mod_parallel,
-                            model_cfg=tt_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="min2_5",
+    ModelParallelTestConfig(model_cfg_key="path_tt_fsdp_no_tp", model_cls=tt_mod_parallel,
+                            model_cfg=tt_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone",
                             expected_results=ExpectedResults(expected_state=path_tt_fsdp_no_tp)),
-    ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_lp", model_cls=tt_mod_parallel,
-                            model_cfg=tt_tp_no_fsdp_lp, strategy_cfg=dp1_tp2, runif_alias="min2_5",
+    ModelParallelTestConfig(model_cfg_key="path_tt_tp_no_fsdp_lp", model_cls=tt_mod_parallel,
+                            model_cfg=tt_tp_no_fsdp_lp, strategy_cfg=dp1_tp2, runif_alias="alone",
                             expected_results=ExpectedResults(expected_state=path_tt_tp_no_fsdp)),
-    ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_no_lp", model_cls=tt_mod_parallel,
-                            model_cfg=tt_tp_no_fsdp_no_lp, strategy_cfg=dp1_tp2, runif_alias="min2_5",
+    ModelParallelTestConfig(model_cfg_key="path_tt_tp_no_fsdp_no_lp", model_cls=tt_mod_parallel,
+                            model_cfg=tt_tp_no_fsdp_no_lp, strategy_cfg=dp1_tp2, runif_alias="alone",
                             expected_results=ExpectedResults(expected_state=path_tt_tp_no_fsdp)),
+    ModelParallelTestConfig(model_cfg_key="tt_fsdp_no_tp_fp16", model_cls=tt_mod_parallel,
+                            fts_cfg=no_restore_best,
+                            precision_opts=fp16,
+                            model_cfg=tt_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone"),
+    # ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_bf16", model_cls=tt_mod_parallel, precision_opts=bf16,
+    #                         model_cfg=tt_tp_no_fsdp_lp, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
+    # ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_fp16", model_cls=tt_mod_parallel, precision_opts=fp16,
+    #                         model_cfg=tt_tp_no_fsdp_no_lp, strategy_cfg=dp1_tp2, runif_alias="alone")
 )
-@RunIf(min_cuda_gpus=2, standalone=True)
-@pytest.mark.parametrize("test_cfg", pytest_param_factory(FTS_MODEL_PARALLEL_TESTS))
-def test_fts_model_parallel(tmpdir, recwarn, model_parallel_ft_schedule, test_cfg):
+@RunIf(min_cuda_gpus=2, min_torch="2.5.0")
+@pytest.mark.parametrize("test_cfg", pytest_param_factory(FTS_MODEL_PARALLEL_PATH_TESTS))
+def test_fts_model_parallel_integration(tmpdir, recwarn, model_parallel_ft_schedule, test_cfg):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp'
     distributed context."""
     seed_everything(42)
@@ -506,8 +520,8 @@ def test_fts_model_parallel(tmpdir, recwarn, model_parallel_ft_schedule, test_cf
     with trainer.init_module(empty_init=True):
         model = test_cfg.model_cls(**test_cfg.model_cfg)  # TODO: verify updated tt_cfg is applied here
     configured_model = torch.compile(model) if use_dynamo else model
-    if test_cfg.expected_results.exceptions_expected:
-        gen_exceptions(trainer, configured_model, test_cfg.model_cfg_key, test_cfg.expected_results.exceptions_expected)
+    if exc_expect := test_cfg.expected_results.exceptions_expected:
+        gen_exceptions(trainer, configured_model, test_cfg.model_cfg_key, exc_expect)
     else:
         trainer.fit(configured_model)
         default_fts_sanity_chk(trainer)
@@ -515,7 +529,6 @@ def test_fts_model_parallel(tmpdir, recwarn, model_parallel_ft_schedule, test_cf
         fts_check_warns(recwarn, expected_warns=MODEL_PARALLEL_BASE_WARNS,
                         warns_expected=test_cfg.expected_results.warns_expected,
                         expected_warns_dynamo=MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS, use_dynamo=use_dynamo)
-
 
 def gen_exceptions(trainer, model, exception_expected):
     with pytest.raises(MisconfigurationException, match=exception_expected):

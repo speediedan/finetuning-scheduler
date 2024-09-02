@@ -313,7 +313,7 @@ class TestFinetuningScheduler(FinetuningScheduler):
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        self.expected_state = expected_state
+        self.expected_state = expected_state or {}
         self.lrs_state = lrs_state
         self.mock_strategy = mock_strategy
         self.state_log_dir = state_log_dir
