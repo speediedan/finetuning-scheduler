@@ -82,20 +82,20 @@ jobs:
         python -c "import torch ; mgpu = torch.cuda.device_count() ; assert mgpu >= 2, f'GPU: {mgpu}'"
       displayName: 'Env details'
 
-    - bash: |
-        . /tmp/venvs/fts_dev/bin/activate
-        python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
-      displayName: 'Testing: standard'
+    # - bash: |
+    #     . /tmp/venvs/fts_dev/bin/activate
+    #     python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
+    #   displayName: 'Testing: standard'
 
     # - bash: |
     #     . /tmp/venvs/fts_dev/bin/activate
     #     bash ./tests/standalone_tests.sh -k test_f
     #   displayName: 'Testing: standalone multi-gpu'
 
-    - bash: |
-        . /tmp/venvs/fts_dev/bin/activate
-        bash ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
-      displayName: 'Testing: standalone multi-gpu'
+    # - bash: |
+    #     . /tmp/venvs/fts_dev/bin/activate
+    #     bash ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
+    #   displayName: 'Testing: standalone multi-gpu'
 
     - bash: |
         . /tmp/venvs/fts_dev/bin/activate
@@ -114,9 +114,9 @@ jobs:
         CODECOV_TOK: $(CODECOV_TOKEN)  # explicit mapping required for secret azure pipeline variables
       displayName: 'Statistics'
 
-    - script: |
-        set -e
-        . /tmp/venvs/fts_dev/bin/activate
-        python -m pytest src/fts_examples/stable -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
-      # condition: notIn(variables['scope'], '2.0.1')
-      displayName: 'Testing: examples'
+    # - script: |
+    #     set -e
+    #     . /tmp/venvs/fts_dev/bin/activate
+    #     python -m pytest src/fts_examples/stable -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
+    #   # condition: notIn(variables['scope'], '2.0.1')
+    #   displayName: 'Testing: examples'

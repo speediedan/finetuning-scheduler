@@ -150,12 +150,14 @@ show_test_results(){
   local test_log="$1"
   local tmp_raw_log="$2"
   if [ -f ${tmp_raw_log} ]; then
+    cp $tmp_raw_log ./lightning_logs/
+    echo -n "##vso[task.uploadfile]"
+    echo "${PWD}/lightning_logs/$tmp_raw_log"
     if grep_errors=($(grep --ignore-case --extended-regexp 'error|exception|traceback|failed' ${tmp_raw_log})); then
       echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $test_log
       printf "Potential errors detected. Uploading ${tmp_raw_log} and grepping exception/error lines below: \n" | tee -a $test_log
       echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $test_log
       printf ": \n" | tee -a $test_log
-      echo "##vso[task.uploadfile]$tmp_raw_log"
       grep --ignore-case --extended-regexp 'error|exception' ${tmp_raw_log} | tee -a $test_log
       printf "\n" | tee -a $test_log
       show_final_summary "$test_log"
