@@ -18,7 +18,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
-- Support for Lightning and PyTorch ``2.4.0``
+- Support for Lightning and PyTorch ``2.4.1``
 - Support for Python ``3.12``
 
 ### Changed
