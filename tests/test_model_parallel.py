@@ -431,8 +431,6 @@ dp2_tp1 = {"data_parallel_size": 2, "tensor_parallel_size": 1}
 ## Lightning Trainer Configuration Aliases
 trainer_defaults = {"accelerator": "gpu", "devices": 2, 'limit_train_batches': 2, 'limit_val_batches': 2,
                     'num_sanity_val_steps': 0}
-# no_sanity_val = {"num_sanity_val_steps": 0}
-# max_epoch_4 = {"max_epochs": 4}
 
 ## Precision Configuration Aliases
 fp16 = {"precision": "16-true"}
@@ -484,31 +482,28 @@ def test_torch_greater_equal_2_5():
 
 ## Model Parallel Test Definitions
 FTS_MODEL_PARALLEL_PATH_TESTS = (
-    ModelParallelTestConfig(model_cfg_key="path_tt_fsdp_tp", model_cls=tt_mod_parallel,
-                            model_cfg=tt_fsdp_tp, fts_cfg=no_restore_best, ckpt_cfg=no_ckpt_save,
-                            strategy_cfg=dp2_tp1, runif_alias="einsum_exp",
-                            expected_results=ExpectedResults(expected_state=path_tt_fsdp_tp)),
+    # FSDP2 tests
     ModelParallelTestConfig(model_cfg_key="path_tt_fsdp_no_tp", model_cls=tt_mod_parallel,
                             model_cfg=tt_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone",
                             expected_results=ExpectedResults(expected_state=path_tt_fsdp_no_tp)),
+    ModelParallelTestConfig(model_cfg_key="tt_fsdp_no_tp_fp16", model_cls=tt_mod_parallel, precision_opts=fp16,
+                            model_cfg=tt_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone"),
+    # TP tests
     ModelParallelTestConfig(model_cfg_key="path_tt_tp_no_fsdp_lp", model_cls=tt_mod_parallel,
                             model_cfg=tt_tp_no_fsdp_lp, strategy_cfg=dp1_tp2, runif_alias="alone",
                             expected_results=ExpectedResults(expected_state=path_tt_tp_no_fsdp)),
     ModelParallelTestConfig(model_cfg_key="path_tt_tp_no_fsdp_no_lp", model_cls=tt_mod_parallel,
                             model_cfg=tt_tp_no_fsdp_no_lp, strategy_cfg=dp1_tp2, runif_alias="alone",
                             expected_results=ExpectedResults(expected_state=path_tt_tp_no_fsdp)),
-    ModelParallelTestConfig(model_cfg_key="tt_fsdp_no_tp_fp16", model_cls=tt_mod_parallel,
-                            fts_cfg=no_restore_best,
-                            precision_opts=fp16,
-                            model_cfg=tt_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone"),
-    ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_bf16", model_cls=tt_mod_parallel,
-                            fts_cfg=no_restore_best,
-                            precision_opts=bf16,
+    ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_fp16", model_cls=tt_mod_parallel, precision_opts=fp16,
+                            model_cfg=tt_tp_no_fsdp_no_lp, strategy_cfg=dp1_tp2, runif_alias="alone"),
+    ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_bf16", model_cls=tt_mod_parallel, precision_opts=bf16,
                             model_cfg=tt_tp_no_fsdp_lp_math_sdp_impl, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
-    ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_fp16", model_cls=tt_mod_parallel,
-                            fts_cfg=no_restore_best,
-                            precision_opts=fp16,
-                            model_cfg=tt_tp_no_fsdp_no_lp, strategy_cfg=dp1_tp2, runif_alias="alone")
+    # FSDP2 + TP (trivial submesh) test
+    ModelParallelTestConfig(model_cfg_key="path_tt_fsdp_tp", model_cls=tt_mod_parallel,
+                            model_cfg=tt_fsdp_tp, strategy_cfg=dp2_tp1, runif_alias="einsum_exp",
+                            expected_results=ExpectedResults(expected_state=path_tt_fsdp_tp)),
+
 )
 @RunIf(min_cuda_gpus=2, min_torch="2.5.0")
 @pytest.mark.parametrize("test_cfg", pytest_param_factory(FTS_MODEL_PARALLEL_PATH_TESTS))
