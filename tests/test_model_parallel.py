@@ -16,6 +16,7 @@ from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from torch import nn, Tensor
+from torch.nn.attention import SDPBackend
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import DeviceMesh
 from lightning.pytorch.utilities.types import STEP_OUTPUT
@@ -412,6 +413,7 @@ shard_tt_basic = {"sharded_mods": ['model.layers.1', 'model.norm', 'model.output
 
 ## toy transformer cfgs
 basic_tt = TestModelArgs()
+sdp_math_impl_tt = TestModelArgs(avail_sdp_backends=[SDPBackend.MATH], use_implicit_replication=True)
 
 ## Model Parallel Model Configuration Aliases
 tt_fsdp_tp = {"fsdp_plan": shard_tt_basic, "tp_plan": tt_tp_plan, "module_cls": FTSToyTransformer, "tt_cfg": basic_tt}
@@ -419,6 +421,8 @@ tt_fsdp_no_tp = {"fsdp_plan": shard_tt_basic, "tp_plan": None, "module_cls": FTS
 tt_tp_no_fsdp = {"fsdp_plan": None, "tp_plan": tt_tp_plan, "module_cls": FTSToyTransformer, "tt_cfg": basic_tt}
 tt_tp_no_fsdp_lp = {**tt_tp_no_fsdp, "loss_parallel": True}
 tt_tp_no_fsdp_no_lp = {**tt_tp_no_fsdp, "loss_parallel": False}
+tt_tp_no_fsdp_lp_math_sdp_impl = {"fsdp_plan": None, "tp_plan": tt_tp_plan, "module_cls": FTSToyTransformer,
+                                  "tt_cfg": sdp_math_impl_tt, "loss_parallel": True}
 
 ## Model Parallel Strategy Aliases
 dp1_tp2 = {"data_parallel_size": 1, "tensor_parallel_size": 2}
@@ -497,8 +501,10 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
                             fts_cfg=no_restore_best,
                             precision_opts=fp16,
                             model_cfg=tt_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone"),
-    # ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_bf16", model_cls=tt_mod_parallel, precision_opts=bf16,
-    #                         model_cfg=tt_tp_no_fsdp_lp, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
+    ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_bf16", model_cls=tt_mod_parallel,
+                            fts_cfg=no_restore_best,
+                            precision_opts=bf16,
+                            model_cfg=tt_tp_no_fsdp_lp_math_sdp_impl, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
     ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_fp16", model_cls=tt_mod_parallel,
                             fts_cfg=no_restore_best,
                             precision_opts=fp16,
