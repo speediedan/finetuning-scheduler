@@ -73,6 +73,7 @@ additional_fsdp_warns = [
     "FSDP.state_dict_type", # temporarily required until Lightning uses new FSDP state dict API with PT 2.4
     "of Tensor.pin_memory",  # required as of PT 2.5 nightly for FSDP1 `_flat_param` internal usage
     "Tensor.is_pinned",  # required as of PT 2.5 nightly for FSDP1 `_flat_param` internal usage
+    "Deallocating Tensor ", # required as of PT 2.5 nightly definitely after 0906, introduced sometime after 0827
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS

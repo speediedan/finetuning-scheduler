@@ -129,7 +129,7 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
 
     base_reqs = "standalone_base.txt" if standalone else "base.txt"
     # install_requires = setup_tools._load_requirements(
-    #     _INSTALL_PATHS["require"], file_name=base_reqs, standalone=standalone
+    # _INSTALL_PATHS["require"], file_name=base_reqs, standalone=standalone
     # )
     install_requires = setup_tools._load_requirements(
         _INSTALL_PATHS["require"],

@@ -234,8 +234,8 @@ class FTSWikiText2(WikiText2):
 class TestModelArgs:
     n_layers: int = 2  # 2
     vocab_size: int = 33278  # 33
-    max_seq_len: int = 200  # 10
-    dim: int = 200  # 10
+    max_seq_len: int = 192  # 10
+    dim: int = 192  # 10
     n_heads: int = 2
     dropout_p: float = 0.0  # 0.2  # 0.1
     use_attn_mask: bool = True

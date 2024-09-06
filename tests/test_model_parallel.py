@@ -499,8 +499,10 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
                             model_cfg=tt_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone"),
     # ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_bf16", model_cls=tt_mod_parallel, precision_opts=bf16,
     #                         model_cfg=tt_tp_no_fsdp_lp, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
-    # ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_fp16", model_cls=tt_mod_parallel, precision_opts=fp16,
-    #                         model_cfg=tt_tp_no_fsdp_no_lp, strategy_cfg=dp1_tp2, runif_alias="alone")
+    ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_fp16", model_cls=tt_mod_parallel,
+                            fts_cfg=no_restore_best,
+                            precision_opts=fp16,
+                            model_cfg=tt_tp_no_fsdp_no_lp, strategy_cfg=dp1_tp2, runif_alias="alone")
 )
 @RunIf(min_cuda_gpus=2, min_torch="2.5.0")
 @pytest.mark.parametrize("test_cfg", pytest_param_factory(FTS_MODEL_PARALLEL_PATH_TESTS))

@@ -29,7 +29,7 @@ EXTENDED_VER_PAT = re.compile(r"([0-9]+\.){2}[0-9]+")
 RUNIF_MAP = {
     "min2_5": {"min_torch": "2.5.0"},
     "alone": {"standalone": True},
-    "bf16_cuda_alone": {"bf16_cuda": True, "standalone": True},
+    "bf16_alone": {"bf16_cuda": True, "standalone": True},
     "min2_2": {"min_torch": "2.2.0"},
     "max3_12_min2_3": {"max_python": "3.12", "min_torch": "2.3.0"},
     "max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
