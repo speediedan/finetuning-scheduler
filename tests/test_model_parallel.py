@@ -1,47 +1,39 @@
 import os
+from typing import Any, Callable, Dict, Optional, Tuple, KeysView
 from copy import deepcopy, copy
 from logging import DEBUG
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple, KeysView
 from unittest import mock
 from functools import partialmethod
 from dataclasses import dataclass, field
+from itertools import chain
 
 import pytest
 import torch
+import torch.nn.functional as F
+from torch import nn, Tensor
+from torch.utils.data import DataLoader
+from torch.nn.attention import SDPBackend
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor.parallel import (ColwiseParallel, PrepareModuleInput, RowwiseParallel, SequenceParallel,
+                                               parallelize_module, loss_parallel)
+from torch.distributed._composable import checkpoint
+from torch.distributed._composable.fsdp import FSDPModule
+from torch.distributed._tensor import DTensor, Replicate, Shard
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.plugins.precision.fsdp import FSDPPrecision
 from lightning.pytorch.strategies import ModelParallelStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
-from torch.utils.data import DataLoader
-import torch.nn.functional as F
-from torch import nn, Tensor
-from torch.nn.attention import SDPBackend
-from torch.distributed._tensor import DTensor
-from torch.distributed.device_mesh import DeviceMesh
 from lightning.pytorch.utilities.types import STEP_OUTPUT
-from torch.distributed.tensor.parallel import loss_parallel
-from torch.distributed._composable.fsdp import FSDPModule
-from torch.distributed._tensor import Replicate, Shard
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    PrepareModuleInput,
-    RowwiseParallel,
-    SequenceParallel,
-    parallelize_module,
-)
 
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from finetuning_scheduler.strategy_adapters import ModelParallelStrategyAdapter
 from tests.helpers.boring_models import FTSToyTransformer, TestModelArgs, FTSWikiText2
 from tests.helpers.common import (ExpectedResults, fts_check_warns, pytest_param_factory, get_fts,
                                   default_fts_sanity_chk, DeviceMeshSummary)
-
-from tests.model_parallel_expected_paths import (path_tt_fsdp_tp,
+from tests.model_parallel_expected_paths import (path_tt_fsdp_tp, path_tt_auto_cm_fsdp_no_tp, path_tt_auto_cm_fsdp_tp,
                                                  path_tt_fsdp_no_tp, path_tt_tp_no_fsdp)
-
 from tests.helpers.runif import RunIf
-
 from tests.test_finetuning_scheduler_callback import (
     EXPECTED_WARNS,
     FinetuningSchedulerBoringModel,
@@ -67,18 +59,93 @@ MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = [
     "Final phase max_transition_epoch",  # still required for PyTorch/Lightning <=2.4
 ]
 
+
+class FSDPStateInspectMixin:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.expected_fsdp2_modules = None
+
+    def on_train_start(self, trainer, pl_module) -> None:
+        if self._uses_fsdp2:
+            self.expected_fsdp2_modules = set(
+                # TODO: change static `model` ref if we apply to self.pl_module instead of the model
+                chain(["model"], getattr(self.pl_module, 'cm_fsdp_plan', {}).keys(),
+                      getattr(self.strategy_adapter, "fsdp_plan", {}).keys()))
+
+    def on_train_epoch_end(self, trainer, pl_module) -> None:
+        if self._uses_fsdp2:
+            self._assert_fsdp_state()
+
+    def on_val_epoch_end(self, trainer, pl_module) -> None:
+        if self._uses_fsdp2:
+            self._assert_fsdp_state()
+
+    @property
+    def _uses_fsdp_name_based_plan(self) -> bool:
+        return any(self.strategy_adapter_cfg.get(k) for k in ("fsdp_plan", "fsdp_default_kwargs"))
+
+    @property
+    def _uses_fsdp2(self) -> bool:
+        return any((self.pl_module.cm_fsdp_plan, self._uses_fsdp_name_based_plan))
+
+    def _assert_fsdp_state(self) -> None:
+        precision = None
+        if self.pl_module.precision_key == "auto_16":
+            assert isinstance(self.pl_module.trainer.strategy.precision_plugin, FSDPPrecision)
+            precision = torch.float16 if self.pl_module.trainer.precision == "16-true" else torch.bfloat16
+        for n, m in self.pl_module.named_modules():
+            if n:  # if m is not self, the lightning module
+                assert getattr(m, '_is_fsdp_managed_module', False)
+            if n in self.expected_fsdp2_modules:
+                self._inspect_composable_fsdp_state(m, precision)
+            else:
+                assert not issubclass(type(m), FSDPModule)  # orig module should not be composed with FSDPModule
+
+    def _inspect_composable_fsdp_state(self, m: nn.Module, precision: Optional[torch.dtype] = None) -> None:
+            assert issubclass(type(m), FSDPModule)  # orig module should be composed with FSDPModule
+            mod_fsdp_state = m._get_fsdp_state()
+            mixed_prec_state = mod_fsdp_state._mp_policy
+            if self.pl_module.precision_key:
+                assert mixed_prec_state.param_dtype == precision
+                assert mixed_prec_state.reduce_dtype == precision
+                assert mixed_prec_state.output_dtype == precision
+                # assert mixed_prec_state.cast_forward_inputs == True  # not currently inspected
+            for fsdp_p in mod_fsdp_state._fsdp_param_group.fsdp_params:
+                # test currently assumes 1D sharding on dim 0
+                dp_dim0 = self.pl_module.trainer.strategy.device_mesh['data_parallel'].shape[0]
+                assert fsdp_p.sharded_size[0] == fsdp_p._orig_size[0] // dp_dim0
+
+    def _collect_fsdp_mod_states(self, fsdp_keys: KeysView) -> Dict[Any, Dict]:
+        fsdp_mod_states = {}
+        if len(fsdp_keys) > 0:
+            for n, m in self.pl_module.named_modules():
+                if n in fsdp_keys:
+                    fsdp_mod_states.setdefault(n, {})
+                    fsdp_mod_states[n]['is_fsdp_managed'] = getattr(m, '_is_fsdp_managed_module', False)
+                    fsdp_mod_states[n]['is_fsdp_composed'] = issubclass(type(m), FSDPModule)
+                    if fsdp_mod_states[n]['is_fsdp_composed']:
+                        mod_fsdp_state = m._get_fsdp_state()
+                        fsdp_mod_states[n]['prec_policy_summ'] = (
+                            mod_fsdp_state._mp_policy.param_dtype, mod_fsdp_state._mp_policy.reduce_dtype,
+                            mod_fsdp_state._mp_policy.output_dtype, mod_fsdp_state._mp_policy.cast_forward_inputs)
+                        fsdp_mod_states[n]['param_group_summ'] = (
+                            [(fsdp_p._param_fqn, fsdp_p._orig_size, fsdp_p.sharded_size) for fsdp_p in \
+                             mod_fsdp_state._fsdp_param_group.fsdp_params])
+        return fsdp_mod_states
+
+
 ################################################################################
 # Model Parallel Test Models
 ################################################################################
 
 class FTSBaseModelParallel(FinetuningSchedulerBoringModel):
-    def __init__(self, fsdp_plan: Dict, tp_plan: Dict | Callable,
+    def __init__(self, cm_fsdp_plan: Dict, cm_tp_plan: Dict | Callable,
                  module_cls: nn.Module = FTSToyTransformer, loss_parallel: bool = True,
                  tt_cfg: Optional[TestModelArgs] = None,
                  precision_key: Optional[str] = None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fsdp_plan = fsdp_plan or {}
-        self.tp_plan = tp_plan or {}
+        self.cm_fsdp_plan = cm_fsdp_plan or {}
+        self.cm_tp_plan = cm_tp_plan or {}
         self.precision_key = precision_key
         self.tt_cfg = tt_cfg
         self.loss_parallel = loss_parallel
@@ -110,12 +177,6 @@ class FTSBaseModelParallel(FinetuningSchedulerBoringModel):
         self.training_step_outputs.append(loss)
         return {"loss": loss}
 
-    def on_train_epoch_end(self) -> None:
-        self._assert_fsdp_state()
-
-    def on_val_epoch_end(self) -> None:
-        self._assert_fsdp_state()
-
     def validation_step(self, batch: Tensor, batch_idx: int) -> Optional[STEP_OUTPUT]:
         inputs, target = batch
         output = self(inputs)
@@ -126,52 +187,6 @@ class FTSBaseModelParallel(FinetuningSchedulerBoringModel):
         # to test FTS transition behavior when the test model is used in a distributed context
         self.log(self.monitor_metric, loss, prog_bar=False)
         return {"x": loss}
-
-    def configure_model(self) -> None:
-        if self.tp_plan:
-            tp_mesh = self.device_mesh["tensor_parallel"]
-            if callable(self.tp_plan):
-                self.model = self.tp_plan(self.model, tp_mesh, self.loss_parallel)
-            else:
-                self.model = parallelize_module(self.model, tp_mesh, self.tp_plan)
-        if self.fsdp_plan:
-            from torch.distributed._composable.fsdp.fully_shard import fully_shard
-            dp_mesh = self.device_mesh["data_parallel"]
-            assert dp_mesh.ndim == 1  # Hybrid-sharding not supported
-
-            for n, m in self.named_modules():
-                if n in self.fsdp_plan["sharded_mods"]:
-                    fully_shard(m, mesh=dp_mesh)
-            fully_shard(self.model, mesh=dp_mesh)
-
-    def _assert_fsdp_state(self) -> None:
-        precision = None
-        if self.precision_key == "auto_16":
-            assert isinstance(self.trainer.strategy.precision_plugin, FSDPPrecision)  # TODO: Or maybe just Precision
-            precision = torch.float16 if self.trainer.precision == "16-true" else torch.bfloat16
-        if self.fsdp_plan:
-            for n, m in self.named_modules():
-                if n:  # if m is not self, the lightning module
-                    # we currently shard the outer user model so all submodules should be fsdp managed if fsdp is used
-                    assert getattr(m, '_is_fsdp_managed_module', False)
-                if n in self.fsdp_plan["sharded_mods"] or n == 'model':
-                    self._inspect_composable_fsdp_state(m, precision)
-                else:
-                    assert not issubclass(type(m), FSDPModule)  # orig module should not be composed with FSDPModule
-
-    def _inspect_composable_fsdp_state(self, m: nn.Module, precision: Optional[torch.dtype] = None) -> None:
-            assert issubclass(type(m), FSDPModule)  # orig module should be composed with FSDPModule
-            mod_fsdp_state = m._get_fsdp_state()
-            mixed_prec_state = mod_fsdp_state._mp_policy
-            if self.precision_key:
-                assert mixed_prec_state.param_dtype == precision
-                assert mixed_prec_state.reduce_dtype == precision
-                assert mixed_prec_state.output_dtype == precision
-                # assert mixed_prec_state.cast_forward_inputs == True  # not currently inspected
-            for fsdp_p in mod_fsdp_state._fsdp_param_group.fsdp_params:
-                # test currently assumes 1D sharding on dim 0
-                dp_dim0 = self.trainer.strategy.device_mesh['data_parallel'].shape[0]
-                assert fsdp_p.sharded_size[0] == fsdp_p._orig_size[0] // dp_dim0
 
     def prepare_data(self) -> None:
         FTSWikiText2(download=True)
@@ -187,12 +202,38 @@ class FTSBaseModelParallel(FinetuningSchedulerBoringModel):
     test_dataloader = partialmethod(get_dataloader, batch_size=2)
     predict_dataloader = partialmethod(get_dataloader, batch_size=2)
 
+class FTSCmModelParallel(FTSBaseModelParallel):
+    def __init__(self, leave_auto_composable: bool = False, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._leave_composable = leave_auto_composable
+
+    def configure_model(self) -> None:
+        if self.cm_tp_plan:
+            tp_mesh = self.device_mesh["tensor_parallel"]
+            if callable(self.cm_tp_plan):
+                self.model = self.cm_tp_plan(self.model, tp_mesh, self.loss_parallel)
+            else:
+                self.model = parallelize_module(self.model, tp_mesh, self.cm_tp_plan)
+
+        if self.cm_fsdp_plan:
+            from torch.distributed._composable.fsdp.fully_shard import fully_shard
+            dp_mesh = self.device_mesh["data_parallel"]
+            assert dp_mesh.ndim == 1  # Hybrid-sharding not supported
+
+            cm_plan_keys = set(self.cm_fsdp_plan.keys())
+            for n, m in self.named_modules():
+                if n in cm_plan_keys:
+                    if self.cm_fsdp_plan[n].pop('act_ckpt', False):
+                        checkpoint(m)
+                    fully_shard(m, mesh=dp_mesh, **self.cm_fsdp_plan[n])
+            if not self._leave_composable:  # using default kwargs for `configure_model` parity scenario
+                fully_shard(self.model, mesh=dp_mesh)
 
 ################################################################################
 # Model Parallel Specially Instrumented FTS Versions
 ################################################################################
 
-class ModelParallelTestFTS(TestFinetuningScheduler):
+class ModelParallelTestFTS(FSDPStateInspectMixin, TestFinetuningScheduler):
 
     def __init__(self, ext_tensor_details: Optional[bool] = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -251,23 +292,6 @@ class ModelParallelTestFTS(TestFinetuningScheduler):
                                                         p.device_mesh.mesh_dim_names, placement_summ)
         return p_states
 
-    def _collect_fsdp_mod_states(self, fsdp_keys: KeysView) -> Dict[Any, Dict]:
-        fsdp_mod_states = {}
-        if len(fsdp_keys) > 0:
-            for n, m in self.pl_module.named_modules():
-                if n in fsdp_keys:
-                    fsdp_mod_states.setdefault(n, {})
-                    fsdp_mod_states[n]['is_fsdp_managed'] = getattr(m, '_is_fsdp_managed_module', False)
-                    fsdp_mod_states[n]['is_fsdp_composed'] = issubclass(type(m), FSDPModule)
-                    if fsdp_mod_states[n]['is_fsdp_composed']:
-                        mod_fsdp_state = m._get_fsdp_state()
-                        fsdp_mod_states[n]['prec_policy_summ'] = (
-                            mod_fsdp_state._mp_policy.param_dtype, mod_fsdp_state._mp_policy.reduce_dtype,
-                            mod_fsdp_state._mp_policy.output_dtype, mod_fsdp_state._mp_policy.cast_forward_inputs)
-                        fsdp_mod_states[n]['param_group_summ'] = (
-                            [(fsdp_p._param_fqn, fsdp_p._orig_size, fsdp_p.sharded_size) for fsdp_p in \
-                             mod_fsdp_state._fsdp_param_group.fsdp_params])
-        return fsdp_mod_states
 
 ################################################################################
 # Model Parallel FTS Test Fixtures
@@ -296,6 +320,7 @@ def model_parallel_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     mp_tp_sched_dict[2]["params"] = [r"model.layers.0.(feed_forward|ffn_norm|attention.w.*|attention_norm).*",
                                      r"model.(pos_embeddings|tok_embeddings).weight"]
     mp_tp_sched_dict.pop(3)
+    # TODO: remove this dbg schedule before initial release
     mp_tp_dbg_req_grad = deepcopy(mp_tp_sched_dict)
     mp_tp_dbg_req_grad[0]["params"] = [r"model.layers.1.attention_norm.*", r"model.layers.1.feed_forward.w2.*",
     ]
@@ -402,27 +427,48 @@ def gen_apply_transformer_tp_plan(model: nn.Module, device_mesh: DeviceMesh, los
 ################################################################################
 
 ## Model Aliases
-tt_mod_parallel = FTSBaseModelParallel
-
-## DTensor Placement Plan Aliases
-# TODO: set tp_plan and model loss_parallel from same config
-tt_tp_plan = gen_apply_transformer_tp_plan
-
-## FSDP2 Model Configuration Aliases
-shard_tt_basic = {"sharded_mods": ['model.layers.1', 'model.norm', 'model.output']}
+tt_mod_parallel = FTSCmModelParallel  # model w/ manual `configure_model` method
+tt_auto_fsdp_plan_mod_parallel = FTSBaseModelParallel
 
 ## toy transformer cfgs
 basic_tt = TestModelArgs()
 sdp_math_impl_tt = TestModelArgs(avail_sdp_backends=[SDPBackend.MATH], use_implicit_replication=True)
 
+## DTensor Placement Plan Aliases
+# TODO: set tp_plan and model loss_parallel from same config
+cm_tt_tp_plan = gen_apply_transformer_tp_plan
+
 ## Model Parallel Model Configuration Aliases
-tt_fsdp_tp = {"fsdp_plan": shard_tt_basic, "tp_plan": tt_tp_plan, "module_cls": FTSToyTransformer, "tt_cfg": basic_tt}
-tt_fsdp_no_tp = {"fsdp_plan": shard_tt_basic, "tp_plan": None, "module_cls": FTSToyTransformer, "tt_cfg": basic_tt}
-tt_tp_no_fsdp = {"fsdp_plan": None, "tp_plan": tt_tp_plan, "module_cls": FTSToyTransformer, "tt_cfg": basic_tt}
+fsdp_cm_shard_tt_basic = {'model.output': {}, 'model.layers.1': {}, 'model.norm': {}}
+fsdp_cm_shard_tt_basic_act = {'model.output': {'act_ckpt': True}, 'model.layers.1': {'act_ckpt': True},
+                              'model.norm': {}}
+fsdp_ap_shard_tt_basic = {'model.output': {}, 'model.layers.1': {}, 'model.norm': {}}
+fsdp_ap_cm_shard_tt = {'^.*model.layers.0$': {}}
+# should warn the second spec cannot be applied and the third spec is a disallowed type
+fsdp_ap_cm_shard_tt_warn = {**fsdp_ap_cm_shard_tt, 'model.layers.1.ffn_norm': {}, 'model.layers': {},
+                            '^.*model.laye.*s$': {}}
+# generate an unmatched auto plan spec misconfiguration exception
+fsdp_ap_cm_shard_tt_err = {**fsdp_ap_cm_shard_tt,'^.*model.nomatch.*s$': {}}
+tt_fsdp_no_tp = {"cm_fsdp_plan": fsdp_cm_shard_tt_basic, "cm_tp_plan": None, "module_cls": FTSToyTransformer,
+                 "tt_cfg": basic_tt}
+tt_fsdp_no_tp_act = {**tt_fsdp_no_tp, "cm_fsdp_plan": fsdp_cm_shard_tt_basic_act}
+tt_fsdp_no_tp_compose = {**tt_fsdp_no_tp, "leave_auto_composable": True}
+tt_tp_no_fsdp = {"cm_fsdp_plan": None, "cm_tp_plan": cm_tt_tp_plan, "module_cls": FTSToyTransformer, "tt_cfg": basic_tt}
 tt_tp_no_fsdp_lp = {**tt_tp_no_fsdp, "loss_parallel": True}
 tt_tp_no_fsdp_no_lp = {**tt_tp_no_fsdp, "loss_parallel": False}
-tt_tp_no_fsdp_lp_math_sdp_impl = {"fsdp_plan": None, "tp_plan": tt_tp_plan, "module_cls": FTSToyTransformer,
+tt_tp_no_fsdp_lp_math_sdp_impl = {"cm_fsdp_plan": None, "cm_tp_plan": cm_tt_tp_plan, "module_cls": FTSToyTransformer,
                                   "tt_cfg": sdp_math_impl_tt, "loss_parallel": True}
+tt_fsdp_tp = {"cm_fsdp_plan": fsdp_cm_shard_tt_basic, "cm_tp_plan": cm_tt_tp_plan, "module_cls": FTSToyTransformer,
+              "tt_cfg": basic_tt}
+tt_fsdp_tp_compose = {**tt_fsdp_tp, "leave_auto_composable": True}
+tt_auto_fsdp_no_tp = {"cm_fsdp_plan": None, "cm_tp_plan": None, "module_cls": FTSToyTransformer, "tt_cfg": basic_tt}
+
+## Model Parallel Strategy Adpater Configuration Aliases
+tt_auto_fsdp = {"fsdp_plan": fsdp_ap_shard_tt_basic, "fsdp_default_kwargs":{}}
+tt_auto_fsdp_act = {"fsdp_plan": fsdp_cm_shard_tt_basic_act, "fsdp_default_kwargs":{}}
+tt_auto_cm_fsdp = {"fsdp_plan": fsdp_ap_cm_shard_tt_warn, "fsdp_default_kwargs":{}}
+tt_auto_cm_fsdp_err = {"fsdp_plan": fsdp_ap_cm_shard_tt_err, "fsdp_default_kwargs":{}}
+tt_auto_cm_fsdp_tp = {"fsdp_plan": fsdp_ap_cm_shard_tt, "fsdp_default_kwargs":{}}
 
 ## Model Parallel Strategy Aliases
 dp1_tp2 = {"data_parallel_size": 1, "tensor_parallel_size": 2}
@@ -435,14 +481,6 @@ trainer_defaults = {"accelerator": "gpu", "devices": 2, 'limit_train_batches': 2
 ## Precision Configuration Aliases
 fp16 = {"precision": "16-true"}
 bf16 = {"precision": "bf16-true"}
-
-## cust ckpt cfg
-no_ckpt_save = {"save_top_k": 0}
-
-## cust FTS configuration aliases
-max_depth_0 = {"max_depth": 0}
-no_restore_best = {"restore_best": False}
-
 
 ## Model Parallel Test Configuration Dataclass
 
@@ -486,6 +524,9 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
     ModelParallelTestConfig(model_cfg_key="path_tt_fsdp_no_tp", model_cls=tt_mod_parallel,
                             model_cfg=tt_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone",
                             expected_results=ExpectedResults(expected_state=path_tt_fsdp_no_tp)),
+    ModelParallelTestConfig(model_cfg_key="path_tt_fsdp_no_tp_act", model_cls=tt_mod_parallel,
+                            model_cfg=tt_fsdp_no_tp_act, strategy_cfg=dp2_tp1, runif_alias="alone",
+                            expected_results=ExpectedResults(expected_state=path_tt_fsdp_no_tp)),
     ModelParallelTestConfig(model_cfg_key="tt_fsdp_no_tp_fp16", model_cls=tt_mod_parallel, precision_opts=fp16,
                             model_cfg=tt_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone"),
     # TP tests
@@ -499,11 +540,38 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
                             model_cfg=tt_tp_no_fsdp_no_lp, strategy_cfg=dp1_tp2, runif_alias="alone"),
     ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_bf16", model_cls=tt_mod_parallel, precision_opts=bf16,
                             model_cfg=tt_tp_no_fsdp_lp_math_sdp_impl, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
-    # FSDP2 + TP (trivial submesh) test
+    # FSDP2 + TP (trivial submesh) tests
     ModelParallelTestConfig(model_cfg_key="path_tt_fsdp_tp", model_cls=tt_mod_parallel,
                             model_cfg=tt_fsdp_tp, strategy_cfg=dp2_tp1, runif_alias="einsum_exp",
                             expected_results=ExpectedResults(expected_state=path_tt_fsdp_tp)),
-
+    ModelParallelTestConfig(model_cfg_key="path_tt_auto_cm_fsdp_tp", model_cls=tt_mod_parallel,
+                            strategy_adapter_cfg=tt_auto_cm_fsdp_tp,
+                            model_cfg=tt_fsdp_tp_compose,
+                            strategy_cfg=dp2_tp1, runif_alias="einsum_exp",
+                            expected_results=ExpectedResults(expected_state=path_tt_auto_cm_fsdp_tp)),
+    # FSDP2 auto plan tests
+    ModelParallelTestConfig(model_cfg_key="path_tt_auto_fsdp_no_tp", model_cls=tt_auto_fsdp_plan_mod_parallel,
+                            strategy_adapter_cfg=tt_auto_fsdp,
+                            model_cfg=tt_auto_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone",
+                            expected_results=ExpectedResults(expected_state=path_tt_fsdp_no_tp)),
+    ModelParallelTestConfig(model_cfg_key="path_tt_auto_fsdp_no_tp_act", model_cls=tt_auto_fsdp_plan_mod_parallel,
+                            strategy_adapter_cfg=tt_auto_fsdp_act,
+                            model_cfg=tt_auto_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone",
+                            expected_results=ExpectedResults(expected_state=path_tt_fsdp_no_tp)),
+    ModelParallelTestConfig(model_cfg_key="path_tt_auto_cm_fsdp_no_tp",
+                            model_cls=tt_mod_parallel,
+                            strategy_adapter_cfg=tt_auto_cm_fsdp,
+                            model_cfg=tt_fsdp_no_tp_compose, strategy_cfg=dp2_tp1, runif_alias="alone",
+                            expected_results=ExpectedResults(
+                                expected_state=path_tt_auto_cm_fsdp_no_tp,
+                                warns_expected=("parents has already registered", "has the unsupported type"))),
+    ModelParallelTestConfig(model_cfg_key="path_tt_auto_cm_fsdp_no_tp_unmatched",
+                            model_cls=tt_mod_parallel,
+                            strategy_adapter_cfg=tt_auto_cm_fsdp_err,
+                            model_cfg=tt_fsdp_no_tp_compose, strategy_cfg=dp2_tp1, runif_alias="alone",
+                            expected_results=ExpectedResults(
+                                expected_state=path_tt_auto_cm_fsdp_no_tp,
+                                exceptions_expected=("did not match any named modules",))),
 )
 @RunIf(min_cuda_gpus=2, min_torch="2.5.0")
 @pytest.mark.parametrize("test_cfg", pytest_param_factory(FTS_MODEL_PARALLEL_PATH_TESTS))
@@ -521,10 +589,10 @@ def test_fts_model_parallel_integration(tmpdir, recwarn, model_parallel_ft_sched
                       **test_cfg.trainer_cfg, **test_cfg.precision_opts}
     trainer = Trainer(**trainer_config)
     with trainer.init_module(empty_init=True):
-        model = test_cfg.model_cls(**test_cfg.model_cfg)  # TODO: verify updated tt_cfg is applied here
+        model = test_cfg.model_cls(**test_cfg.model_cfg)
     configured_model = torch.compile(model) if use_dynamo else model
     if exc_expect := test_cfg.expected_results.exceptions_expected:
-        gen_exceptions(trainer, configured_model, test_cfg.model_cfg_key, exc_expect)
+        gen_exceptions(trainer, configured_model, exc_expect)
     else:
         trainer.fit(configured_model)
         default_fts_sanity_chk(trainer)
@@ -534,13 +602,16 @@ def test_fts_model_parallel_integration(tmpdir, recwarn, model_parallel_ft_sched
                         expected_warns_dynamo=MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS, use_dynamo=use_dynamo)
 
 def gen_exceptions(trainer, model, exception_expected):
+    if isinstance(exception_expected, tuple):
+        exception_expected = "|".join(exception_expected)
     with pytest.raises(MisconfigurationException, match=exception_expected):
             trainer.fit(model)
 
 
 def callbacks_cfg(ft_sched, state_log_dir, test_cfg):
-    active_fts_cfg = {"ft_schedule": ft_sched, "expected_state": test_cfg.expected_results.expected_state,
-                      'state_log_dir': state_log_dir, **test_cfg.fts_cfg}
+    active_fts_cfg = {"ft_schedule": ft_sched, "strategy_adapter_cfg": test_cfg.strategy_adapter_cfg,
+                      "expected_state": test_cfg.expected_results.expected_state, "state_log_dir": state_log_dir,
+                      **test_cfg.fts_cfg, }
     callbacks = [test_cfg.fts_cls(**active_fts_cfg)]
     for tcls, tcfg, subc in zip((test_cfg.es_cls, test_cfg.ckpt_cls), (test_cfg.es_cfg, test_cfg.ckpt_cfg),
                                 (FTSEarlyStopping, FTSCheckpoint)):

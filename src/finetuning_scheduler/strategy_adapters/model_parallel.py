@@ -14,19 +14,29 @@ Fine-Tuning Scheduler Model Parallel Strategy Adapter
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 A :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that extends Fine-Tuning Scheduler's support
-for PyTorch's SPMD style APIs (e.g. DeviceMesh, FSDP2).
+for PyTorch's distributed composable and Tensor Parallel APIs.
 
 """
-from typing import Any, TYPE_CHECKING
-
-from lightning.pytorch.utilities.exceptions import MisconfigurationException
-
-from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
-
+from typing import Any, TYPE_CHECKING, Optional, Callable, Dict
+from functools import wraps
+import re
 # TODO: replace local version once Lightning version available
 # from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_2_5
 import operator
+
+
+
+import torch
+from torch.distributed._composable import checkpoint
+from torch.distributed._composable.fsdp.fully_shard import fully_shard
+
+from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning_utilities.core.imports import compare_version
+from lightning.pytorch.utilities.model_helpers import is_overridden
+from lightning.fabric.utilities import rank_zero_warn
+from lightning.pytorch.utilities.rank_zero import rank_zero_debug
+from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
+
 
 _TORCH_GREATER_EQUAL_2_5 = compare_version("torch", operator.ge, "2.5.0", use_base_version=True)
 
@@ -35,79 +45,204 @@ if TYPE_CHECKING:
 
 
 class ModelParallelStrategyAdapter(StrategyAdapter):
-    """"""
+    r"""
+    A :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that extends
+    :class:`~finetuning_scheduler.fts.FinetuningScheduler` (FTS) to support flexible, multi-phase, scheduled fine-tuning
+    with PyTorch's composable distributed (e.g. `fully_shard`) and Tensor Parallelism APIs.
+    FTS augments Lightning's Model Parallel strategy
+    (:external+pl:class:`~lightning.pytorch.strategies.model_parallel.ModelParallelStrategy`) by allowing users to apply
+    the `fully_shard` API using module name/pattern-based configuration instead of manually inspecting modules and
+    applying the API in `LightningModule.configure_model` (see
+    :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan`). `fsdp_plan`
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """The only user-facing configuration for."""
+    See the :ref:`modelparallel-fine-tuning-example` tutorial for a concrete example and additional guidance.
+
+    .. warning::
+        :class:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter` is in BETA and subject to change.
+        The interface can bring breaking changes and new features with the next release of PyTorch.
+
+    .. note::
+       `fsdp_plan` module name/pattern-based `fully_shard` directives are applied after any preceding Tensor
+       Parallel or explicit `fully_shard` directives in `LightningModule.configure_model`. FTS will only apply
+       `fully_shard` to a specified module if it was not already applied to that module.
+
+    .. note::
+        In addition to all valid `fully_shard` API kwargs, `fsdp_plan` also supports a boolean-valued `act_ckpt`
+            kwarg. If `act_ckpt` is set to `True` for a specified module/pattern, composable checkpointing will be
+            applied to the matching module(s) before `fully_shard`.
+    """
+
+    def __init__(self, fsdp_default_kwargs: Optional[Dict] = None, fsdp_plan: Optional[Dict] = None,
+                 *args: Any, **kwargs: Any) -> None:
+        """The only user-facing configuration for
+        :class:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter` are
+        :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan` and
+        :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_default_kwargs`.
+
+        Args:
+            fsdp_plan (Optional[Dict]): An optional dictionary of module names or regex pattern keys with associated
+                `fully_shard` composable distributed API kwargs to apply to matching modules. Allows users to apply the
+                `fully_shard` API using module name/pattern-based configuration instead of manually inspecting modules
+                and applying the API in `LightningModule.configure_model`. `fsdp_plan` directives can also be composed
+                with explicit`fully_shard` calls in `LightningModule.configure_model`, as the `fsdp_plan` directives
+                will only invoke `fully_shard` on a specified module if it was not already applied to that module.
+                All valid `fully_shard` API kwargs can be supplied. Additionally, a boolean-valued `act_ckpt` kwarg is
+                supported. If `act_ckpt` is `True`, composable checkpointing will be applied to the matching module(s)
+                before `fully_shard`. Defaults to None.
+            fsdp_default_kwargs (Optional[Dict]): An optional dictionary of default `fully_shard` API kwargs to apply to
+                each matching module in `fsdp_plan`. Module-name/pattern specific kwargs will take precedence over
+                these. All valid kwargs for `fully_shard` can be supplied. Additionally, a boolean-valued `act_ckpt`
+                kwarg is supported. If `act_ckpt` is True, composable checkpointing will be applied to the matching
+                module(s) before `fully_shard`. Defaults to None.
+
+        Attributes:
+            fsdp_plan: An optional dictionary of module names or regex pattern keys with associated `fully_shard`
+                composable distributed API kwargs to apply to matching modules.
+            fsdp_default_kwargs: An optional dictionary of default `fully_shard` API kwargs to apply to each
+                matching module in `fsdp_plan`.
+        """
         super().__init__(*args, **kwargs)
+        # note the default plan only applies to modules for which an `fsdp_plan` name/pattern is provided
+        self.fsdp_default_kwargs = fsdp_default_kwargs or {}
+        self.fsdp_plan = fsdp_plan or {}
         if not _TORCH_GREATER_EQUAL_2_5:
             # specifically, depends upon https://github.com/pytorch/pytorch/pull/133502 among other changes
             raise MisconfigurationException(f"{type(self).__name__} requires PyTorch 2.5 or higher.")
 
-    # def on_before_init_fts(self) -> None:
-    #     # TODO: if offering auto-wrap functionality hook `configure_model` here
-    #     pass
+    def on_before_init_fts(self) -> None:
+        """In this hook executed immediately before
+        :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.init_fts`, to accommodate enhanced Model Parallel
+        functionality, we:
 
-    # def on_after_init_fts(self) -> None:
-    #     # TODO: if offering auto-wrap functionality gen module map here
-    #     pass
-    #     # self._gen_ft_sched_module_map()
-    #     # self.scheduled_mod_lists = [list(self._ft_schedule_module_map[d]) for d in
-    #     #                             self._ft_schedule_module_map.keys()]
+        1. Validate the :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan`
+           configuration
+        2. Configure FTS wrapping of the provided :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
+           to either use the provided ``LightningModule.configure_model`` method (if present) or a provided
+           ``fsdp_plan``.
+        """
+        self._validate_fsdp_plan()
+        if is_overridden("configure_model", self.pl_module):
+            rank_zero_debug("Overridden `LightningModule.configure_model` hook identified. Any name-driven distributed "
+                            "API plans will be applied after the configure_model hook.")
+            cm_func = self._wrapped_configure_model(self.pl_module.configure_model)
+            setattr(self.pl_module, "configure_model", cm_func)
+        else:
+            setattr(self.pl_module, "configure_model", self._fts_auto_configure_model)
 
-    # def on_before_fts_fit_start(self) -> None:
-    #     # TODO: if offering auto-wrap functionality, validate config globally here
-    #     pass
+    def _maybe_update_fsdp_plan(self, resolved_modules: Dict, kwargs: Dict, name: str) -> bool:
+        # right now, the only explicitly disallowed types are the container types w/o a forward: `ModuleList``
+        #  and `ModuleDict``
+        # NB there are other `fully_shard` distributed API constraints that the user may need to validate, for instance,
+        # shared parameters must belong to the same `fully_shard` instance (https://bit.ly/fsdp_dapi_shared_constraint)
+        if isinstance(self.pl_module.get_submodule(name), (torch.nn.ModuleList, torch.nn.ModuleDict)):
+            rank_zero_warn(f"Provided FSDP module plan includes a directive to apply the FSDP API to ('{name}') which"
+                           f" has the unsupported type '{type(self.pl_module.get_submodule(name))}'. This"
+                           " directive will be pruned and ignored.")
+            return False
+        resolved_modules[name] = {**self.fsdp_default_kwargs, **kwargs}
+        return True
 
-    # def _suppress_cm_warns(self) -> None:
-    #     # TODO: only required if offering auto-wrap functionality
-    #     pass
+    def _validate_fsdp_plan(self) -> None:
+        """Expand any regex expressions specified in
+        :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan`.
 
-    # def _validate_awp_overrides(self) -> None:
-    #     # TODO: only required if offering auto-wrap functionality
-    #     pass
+        Raises:
+            MisconfigurationException: If a specified module name or regex does not resolve to at least one named
+                module.
+        """
+        if not self.fsdp_plan:
+            return
+        named_modules = dict(self.pl_module.named_modules()).keys()
+        resolved_modules = {}
+        for plan_n, kwargs in self.fsdp_plan.items():
+            module_resolved = False
+            if plan_n in named_modules:
+                module_resolved = True
+                if not self._maybe_update_fsdp_plan(resolved_modules, kwargs, plan_n):
+                    continue  # resolution success, but skipping an unsupported module
+            else:
+                mpat = re.compile(plan_n)
+                for n in named_modules:
+                    if mpat.match(n):
+                        module_resolved = True
+                        if not self._maybe_update_fsdp_plan(resolved_modules, kwargs, n):
+                            continue  # resolution success, but skipping an unsupported module
+            if not module_resolved:
+                raise MisconfigurationException(
+                    f"The module or regex '{plan_n}' specified in `fsdp_plan` did not match any named modules "
+                    "in the provided model."
+                )
+        self.fsdp_plan = resolved_modules
 
-    # def _fts_auto_configure_model(self) -> None:
-    #     # TODO: only required if offering auto-wrap functionality
-    #     pass
+    def _fts_auto_configure_model(self) -> None:
+        """A wrapper for configuration-driven composable distributed API configurations that may be composed with
+        or substitute for explicit directives in a `LightningModule.configure_model` method.
 
-    # def _fts_auto_wrap(self) -> None:
-    #     # TODO: only required if offering auto-wrap functionality
-    #     pass
+        Currently, FTS only supports configuration-driven distributed API plans for `fully_shard`. See :attr:`fsdp_plan`
+        for details.
+        """
+        # TODO: replace directly with `_apply_fsdp_plan` if foregoing `tp_auto_plan` implementation
+        # self._apply_tp_auto_plan()
+        self._apply_fsdp_plan()
 
-    # def _after_configure_model(self) -> None:
-    #     # TODO: only required if offering auto-wrap functionality
-    #     pass
+    def _compose_or_warn(self, module: torch.nn.Module, n: str) -> None:
+        # NB PL does not currently support passing user-created meshes so we unconditionally pass the device mesh
+        if not getattr(module, '_is_fsdp_managed_module', False):
+            if self.fsdp_plan[n].pop('act_ckpt', False):
+                checkpoint(module)
+            fully_shard(module, mesh=self.pls_handle.device_mesh["data_parallel"], **self.fsdp_plan[n])
+        else:
+            rank_zero_warn(
+                f"Module '{n}' or one of its parents has already registered the `fully_shard` composable "
+                f"distributed API. Applying the `fully_shard` API to '{n}' is not supported in this context."
+                f"Please apply `fully_shard` to '{n}' before any of its parents if it is intended to have a "
+                f"distinct `FSDPState`."
+            )
+            del self.fsdp_plan[n]
 
-    # def _wrapped_configure_model(self) -> None:  #csm_func: Callable) -> Callable:
-    #     # TODO: only required if offering auto-wrap functionality
-    #     pass
+    def _apply_fsdp_plan(self) -> None:
+        """Apply the FSDP distributed API according to the name-driven plan provided by the user via
+        :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fsdp_plan`. This method can be used in
+        conjunction with a user-overridden `LightningModule.configure_model` method or without one. Any name-driven
+        FSDP API plan directives will be applied after `configure_model` is executed.
 
-    # @contextmanager
-    # def _enable_name_based_overrides(self) -> Generator:
-        # TODO: only required if offering auto-wrap functionality
-        pass
+        Note: If the provided `fsdp_plan` specifies a module that has already had `fully_shard` applied (e.g.
+        explicitly via `configure_model`), that directive will be skipped with a warning.
+        """
+        auto_plan_keys = set(self.fsdp_plan.keys())
+        has_fsdp_managed = False
+        for n, m in self.pl_module.named_modules():
+            if n in auto_plan_keys:
+                self._compose_or_warn(m, n)
+            if not has_fsdp_managed:
+                has_fsdp_managed = getattr(m, '_is_fsdp_managed_module', False)
+        if has_fsdp_managed and not getattr(self.pl_module.model, '_is_fsdp_managed_module', False):
+            # we always apply the `fully_shard` API to the user's outer-model if it hasn't been applied and any
+            #  FSDP-managed modules are present
+            fully_shard(self.pl_module.model, mesh=self.pls_handle.device_mesh["data_parallel"])
 
-    # TODO: just a stub for testing rn
-    # @override
-    # def _get_target_bn_modules(self, schedule_phase: int) -> List:
-    #     """Enumerate the :external+torch:class:`~torch.nn.modules.batchnorm._BatchNorm` modules for a given
-    #     schedule phase.
+    def _wrapped_configure_model(self, cm_func: Callable) -> Callable:
+        """If the user has overridden ``configure_model`` in their ``LightningModule``, wrap the user's
+        explicit wrapping method with the required
+        :class:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter` methods.
 
-    #     Args:
-    #         schedule_phase (int): The phase of the schedule to evaluate.
+        Args:
+            cm_func (Callable): The user's overridden ``LightningModule.configure_model`` method
 
-    #     Returns:
-    #         List[Tuple[str, torch.nn.modules.batchnorm._BatchNorm]]: A list of tuples containing the names and
-    #           (possibly FSDP wrapped) instances of `BatchNorm` modules associated with a given schedule phase.
-    #     """
-    #     target_bn_modules = []
-    #     # for m_name in self.scheduled_mod_lists[schedule_phase]:
-    #     #     mod = self.pl_module.get_submodule(m_name)
-    #     #     if isinstance(mod, torch.nn.modules.batchnorm._BatchNorm):
-    #     #         target_bn_modules.append((m_name, mod))
-    #     #     # TODO: once 2.0 is no longer supported, switch to using FSDP_WRAPPED_MODULE constant here
-    #     #     elif orig_mod := getattr(mod, '_fsdp_wrapped_module', None):
-    #     #         if isinstance(orig_mod, torch.nn.modules.batchnorm._BatchNorm):
-    #     #             target_bn_modules.append((m_name, orig_mod))
-    #     return target_bn_modules
+        Returns:
+            Callable: The user's overridden ``LightningModule.configure_model`` method wrapped with this
+            adapter's internal implementation methods.
+        """
+
+        @wraps(cm_func)
+        def wrapped_func() -> None:
+            cm_func()
+            self._post_cm_plan_apply()
+
+        return wrapped_func
+
+    def _post_cm_plan_apply(self) -> None:
+        # TODO: determine if we want to provide tp_auto_plan functionality or require manual configure_model for it
+        # self.tp_auto_plan()
+        if self.fsdp_plan:
+            self._apply_fsdp_plan()

@@ -13,7 +13,7 @@ from copy import deepcopy
 from functools import partial
 from logging import DEBUG
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 from unittest import mock
 
 import pytest
@@ -61,7 +61,7 @@ else:
 from torch.distributed.fsdp.wrap import CustomPolicy
 
 DISABLE_USE_ORIG = {"use_orig_params": False}
-_FSDPPolicy = object
+#_FSDPPolicy = object
 
 
 additional_fsdp_warns = [
@@ -571,7 +571,6 @@ wrap_ext_mp = {"fsdp_mask": {"wrapped_mods": list(range(6)) + [7, 8], "unwrapped
 # FTS FSDP Test Policies #
 ##########################
 
-
 def custom_auto_wrap_policy(
     module,
     recurse,
@@ -596,21 +595,9 @@ def warn_custom_auto_wrap_policy(
     return nonwrapped_numel >= 1100
 
 
-class CustomWrapPolicy(_FSDPPolicy):
-    """This is a wrapper around :func:`_module_wrap_policy`."""
-
-    def __init__(self, min_num_params: int):
-        self._policy: Callable = partial(size_based_auto_wrap_policy, min_num_params=min_num_params)
-
-    @property
-    def policy(self):
-        return self._policy
-
-
 # RunIf aliases
 runif_map = {
     "min2_2": {"min_torch": "2.2.0"},
-    #"max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
 }
 
 # auto-wrap policy aliases
@@ -618,8 +605,7 @@ cust_awp = custom_auto_wrap_policy
 cust_ext_awp = custom_auto_wrap_ext_policy
 warn_cust_awp = warn_custom_auto_wrap_policy
 numel_constant = 67
-awp_mwp_2_1_parity = CustomPolicy(lambda_fn=lambda m: sum(p.numel() for p in m.parameters()) >= numel_constant)
-awp_mwp_2_0_parity = None
+awp_mwp_parity = CustomPolicy(lambda_fn=lambda m: sum(p.numel() for p in m.parameters()) >= numel_constant)
 
 # awp_overrides configuration aliases
 awp_5_9 = {"awp_overrides": ["model.9", "model.5"]}
@@ -681,8 +667,8 @@ FTS_FSDP_TESTS = {
         None,
         (path_default_orig_eo_dyn, *nones(3)),
     ),
-    "cust_awp_mwp_2_1_reinitlr_optim_no_use_orig": (
-        (base_model, awp_mwp_2_1_parity, True, 8, unwrap_7_mp, None, opt_inspect, None, DISABLE_USE_ORIG),
+    "cust_awp_mwp_reinitlr_optim_no_use_orig": (
+        (base_model, awp_mwp_parity, True, 8, unwrap_7_mp, None, opt_inspect, None, DISABLE_USE_ORIG),
         None,
         (
             path_optimlr_reinit,
@@ -691,8 +677,8 @@ FTS_FSDP_TESTS = {
             lrs_path_optimlr_reinit,
         ),
     ),
-    "cust_awp_mwp_2_1_parity_no_use_orig": (
-        (base_model, awp_mwp_2_1_parity, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
+    "cust_awp_mwp_parity_no_use_orig": (
+        (base_model, awp_mwp_parity, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
         None,
         (path_default, *nones(3)),
     ),
@@ -792,11 +778,6 @@ FTS_FSDP_TESTS = {
     ),
     "cust_awp_overrides_prec_no_use_orig": (
         (adam_model, cust_awp, True, 0, wrap_all_mp, awp_7, *nones(2), cust_fp16_mp),
-        None,
-        (path_default, *nones(3)),
-    ),
-    "cust_awp_overrides_mwp_prec_no_use_orig": (
-        (base_model, awp_mwp_2_1_parity, True, 0, wrap_all_mp, awp_7, *nones(2), cust_fp16_mp),
         None,
         (path_default, *nones(3)),
     ),
