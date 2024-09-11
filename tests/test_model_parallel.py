@@ -18,7 +18,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel import (ColwiseParallel, PrepareModuleInput, RowwiseParallel, SequenceParallel,
                                                parallelize_module, loss_parallel)
 from torch.distributed._composable import checkpoint
-from torch.distributed._composable.fsdp import FSDPModule
+from torch.distributed._composable.fsdp import FSDPModule, fully_shard, CPUOffloadPolicy
 from torch.distributed._tensor import DTensor, Replicate, Shard
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.plugins.precision.fsdp import FSDPPrecision
@@ -31,8 +31,8 @@ from finetuning_scheduler.strategy_adapters import ModelParallelStrategyAdapter
 from tests.helpers.boring_models import FTSToyTransformer, TestModelArgs, FTSWikiText2
 from tests.helpers.common import (ExpectedResults, fts_check_warns, pytest_param_factory, get_fts,
                                   default_fts_sanity_chk, DeviceMeshSummary)
-from tests.model_parallel_expected_paths import (path_tt_fsdp_tp, path_tt_auto_cm_fsdp_no_tp, path_tt_auto_cm_fsdp_tp,
-                                                 path_tt_fsdp_no_tp, path_tt_tp_no_fsdp)
+from tests.model_parallel_expected_paths import (path_tp_fsdp, path_fsdp_autocm, path_tp_fsdp_autocm,
+                                                 path_fsdp, path_tp)
 from tests.helpers.runif import RunIf
 from tests.test_finetuning_scheduler_callback import (
     EXPECTED_WARNS,
@@ -216,7 +216,6 @@ class FTSCmModelParallel(FTSBaseModelParallel):
                 self.model = parallelize_module(self.model, tp_mesh, self.cm_tp_plan)
 
         if self.cm_fsdp_plan:
-            from torch.distributed._composable.fsdp.fully_shard import fully_shard
             dp_mesh = self.device_mesh["data_parallel"]
             assert dp_mesh.ndim == 1  # Hybrid-sharding not supported
 
@@ -427,8 +426,8 @@ def gen_apply_transformer_tp_plan(model: nn.Module, device_mesh: DeviceMesh, los
 ################################################################################
 
 ## Model Aliases
-tt_mod_parallel = FTSCmModelParallel  # model w/ manual `configure_model` method
-tt_auto_fsdp_plan_mod_parallel = FTSBaseModelParallel
+fsdp_auto_mod_parallel = FTSBaseModelParallel  # model w/ automatic `configure_model` method (for FSDP)
+cm_mod_parallel = FTSCmModelParallel  # model w/ manual `configure_model` method
 
 ## toy transformer cfgs
 basic_tt = TestModelArgs()
@@ -442,33 +441,34 @@ cm_tt_tp_plan = gen_apply_transformer_tp_plan
 fsdp_cm_shard_tt_basic = {'model.output': {}, 'model.layers.1': {}, 'model.norm': {}}
 fsdp_cm_shard_tt_basic_act = {'model.output': {'act_ckpt': True}, 'model.layers.1': {'act_ckpt': True},
                               'model.norm': {}}
-fsdp_ap_shard_tt_basic = {'model.output': {}, 'model.layers.1': {}, 'model.norm': {}}
-fsdp_ap_cm_shard_tt = {'^.*model.layers.0$': {}}
+fsdp_auto_tt_basic = {'model.output': {}, 'model.layers.1': {}, 'model.norm': {}}
+fsdp_autocm_shard_tt = {'^.*model.layers.0$': {}}
 # should warn the second spec cannot be applied and the third spec is a disallowed type
-fsdp_ap_cm_shard_tt_warn = {**fsdp_ap_cm_shard_tt, 'model.layers.1.ffn_norm': {}, 'model.layers': {},
+fsdp_autocm_shard_tt_warn = {**fsdp_autocm_shard_tt, 'model.layers.1.ffn_norm': {}, 'model.layers': {},
                             '^.*model.laye.*s$': {}}
 # generate an unmatched auto plan spec misconfiguration exception
-fsdp_ap_cm_shard_tt_err = {**fsdp_ap_cm_shard_tt,'^.*model.nomatch.*s$': {}}
-tt_fsdp_no_tp = {"cm_fsdp_plan": fsdp_cm_shard_tt_basic, "cm_tp_plan": None, "module_cls": FTSToyTransformer,
+fsdp_autocm_shard_tt_err = {**fsdp_autocm_shard_tt,'^.*model.nomatch.*s$': {}}
+fsdp_cm_only = {"cm_fsdp_plan": fsdp_cm_shard_tt_basic, "cm_tp_plan": None, "module_cls": FTSToyTransformer,
                  "tt_cfg": basic_tt}
-tt_fsdp_no_tp_act = {**tt_fsdp_no_tp, "cm_fsdp_plan": fsdp_cm_shard_tt_basic_act}
-tt_fsdp_no_tp_compose = {**tt_fsdp_no_tp, "leave_auto_composable": True}
-tt_tp_no_fsdp = {"cm_fsdp_plan": None, "cm_tp_plan": cm_tt_tp_plan, "module_cls": FTSToyTransformer, "tt_cfg": basic_tt}
-tt_tp_no_fsdp_lp = {**tt_tp_no_fsdp, "loss_parallel": True}
-tt_tp_no_fsdp_no_lp = {**tt_tp_no_fsdp, "loss_parallel": False}
-tt_tp_no_fsdp_lp_math_sdp_impl = {"cm_fsdp_plan": None, "cm_tp_plan": cm_tt_tp_plan, "module_cls": FTSToyTransformer,
+fsdp_cm_act = {**fsdp_cm_only, "cm_fsdp_plan": fsdp_cm_shard_tt_basic_act}
+fsdp_autocm_compose = {**fsdp_cm_only, "leave_auto_composable": True}
+tp_only = {"cm_fsdp_plan": None, "cm_tp_plan": cm_tt_tp_plan, "module_cls": FTSToyTransformer, "tt_cfg": basic_tt}
+tp_lp = {**tp_only, "loss_parallel": True}
+tp_no_lp = {**tp_only, "loss_parallel": False}
+tp_lp_math_sdp_impl = {"cm_fsdp_plan": None, "cm_tp_plan": cm_tt_tp_plan, "module_cls": FTSToyTransformer,
                                   "tt_cfg": sdp_math_impl_tt, "loss_parallel": True}
-tt_fsdp_tp = {"cm_fsdp_plan": fsdp_cm_shard_tt_basic, "cm_tp_plan": cm_tt_tp_plan, "module_cls": FTSToyTransformer,
+fsdp_tp = {"cm_fsdp_plan": fsdp_cm_shard_tt_basic, "cm_tp_plan": cm_tt_tp_plan, "module_cls": FTSToyTransformer,
               "tt_cfg": basic_tt}
-tt_fsdp_tp_compose = {**tt_fsdp_tp, "leave_auto_composable": True}
-tt_auto_fsdp_no_tp = {"cm_fsdp_plan": None, "cm_tp_plan": None, "module_cls": FTSToyTransformer, "tt_cfg": basic_tt}
+fsdp_tp_compose = {**fsdp_tp, "leave_auto_composable": True}
+fsdp_auto = {"cm_fsdp_plan": None, "cm_tp_plan": None, "module_cls": FTSToyTransformer, "tt_cfg": basic_tt}
 
 ## Model Parallel Strategy Adpater Configuration Aliases
-tt_auto_fsdp = {"fsdp_plan": fsdp_ap_shard_tt_basic, "fsdp_default_kwargs":{}}
-tt_auto_fsdp_act = {"fsdp_plan": fsdp_cm_shard_tt_basic_act, "fsdp_default_kwargs":{}}
-tt_auto_cm_fsdp = {"fsdp_plan": fsdp_ap_cm_shard_tt_warn, "fsdp_default_kwargs":{}}
-tt_auto_cm_fsdp_err = {"fsdp_plan": fsdp_ap_cm_shard_tt_err, "fsdp_default_kwargs":{}}
-tt_auto_cm_fsdp_tp = {"fsdp_plan": fsdp_ap_cm_shard_tt, "fsdp_default_kwargs":{}}
+fsdp_auto_only = {"fsdp_plan": fsdp_auto_tt_basic, "fsdp_default_kwargs":{}}
+fsdp_auto_cpuoffld = {"fsdp_plan": fsdp_auto_tt_basic, "fsdp_default_kwargs":{'offload_policy': CPUOffloadPolicy()}}
+fsdp_auto_act = {"fsdp_plan": fsdp_cm_shard_tt_basic_act, "fsdp_default_kwargs":{}}
+fsdp_autocm = {"fsdp_plan": fsdp_autocm_shard_tt_warn, "fsdp_default_kwargs":{}}
+fsdp_autocm_err = {"fsdp_plan": fsdp_autocm_shard_tt_err, "fsdp_default_kwargs":{}}
+fsdp_autocm_tp = {"fsdp_plan": fsdp_autocm_shard_tt, "fsdp_default_kwargs":{}}
 
 ## Model Parallel Strategy Aliases
 dp1_tp2 = {"data_parallel_size": 1, "tensor_parallel_size": 2}
@@ -486,12 +486,12 @@ bf16 = {"precision": "bf16-true"}
 
 # TODO: update this to use dataclass inheritance once python 3.10 is the minimum supported version of python
 @dataclass
-class ModelParallelTestConfig:
+class ModParallelTestCfg:
     model_cfg_key: str
     model_cls: Callable
     model_cfg: Dict = field(default_factory=dict)
     trainer_cfg: Dict = field(default_factory=lambda: {'max_epochs': 3})
-    strategy_cfg: Dict = field(default_factory=dict)
+    strategy_cfg: Dict = field(default_factory=lambda: dp2_tp1)
     strategy_adapter_cfg: Dict = field(default_factory=dict)
     precision_opts: Dict = field(default_factory=lambda: {'precision': '32-true'})
     auto_wrap_policy: Optional[Callable] = None
@@ -521,57 +521,46 @@ def test_torch_greater_equal_2_5():
 ## Model Parallel Test Definitions
 FTS_MODEL_PARALLEL_PATH_TESTS = (
     # FSDP2 tests
-    ModelParallelTestConfig(model_cfg_key="path_tt_fsdp_no_tp", model_cls=tt_mod_parallel,
-                            model_cfg=tt_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone",
-                            expected_results=ExpectedResults(expected_state=path_tt_fsdp_no_tp)),
-    ModelParallelTestConfig(model_cfg_key="path_tt_fsdp_no_tp_act", model_cls=tt_mod_parallel,
-                            model_cfg=tt_fsdp_no_tp_act, strategy_cfg=dp2_tp1, runif_alias="alone",
-                            expected_results=ExpectedResults(expected_state=path_tt_fsdp_no_tp)),
-    ModelParallelTestConfig(model_cfg_key="tt_fsdp_no_tp_fp16", model_cls=tt_mod_parallel, precision_opts=fp16,
-                            model_cfg=tt_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone"),
-    # TP tests
-    ModelParallelTestConfig(model_cfg_key="path_tt_tp_no_fsdp_lp", model_cls=tt_mod_parallel,
-                            model_cfg=tt_tp_no_fsdp_lp, strategy_cfg=dp1_tp2, runif_alias="alone",
-                            expected_results=ExpectedResults(expected_state=path_tt_tp_no_fsdp)),
-    ModelParallelTestConfig(model_cfg_key="path_tt_tp_no_fsdp_no_lp", model_cls=tt_mod_parallel,
-                            model_cfg=tt_tp_no_fsdp_no_lp, strategy_cfg=dp1_tp2, runif_alias="alone",
-                            expected_results=ExpectedResults(expected_state=path_tt_tp_no_fsdp)),
-    ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_fp16", model_cls=tt_mod_parallel, precision_opts=fp16,
-                            model_cfg=tt_tp_no_fsdp_no_lp, strategy_cfg=dp1_tp2, runif_alias="alone"),
-    ModelParallelTestConfig(model_cfg_key="tt_tp_no_fsdp_bf16", model_cls=tt_mod_parallel, precision_opts=bf16,
-                            model_cfg=tt_tp_no_fsdp_lp_math_sdp_impl, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
-    # FSDP2 + TP (trivial submesh) tests
-    ModelParallelTestConfig(model_cfg_key="path_tt_fsdp_tp", model_cls=tt_mod_parallel,
-                            model_cfg=tt_fsdp_tp, strategy_cfg=dp2_tp1, runif_alias="einsum_exp",
-                            expected_results=ExpectedResults(expected_state=path_tt_fsdp_tp)),
-    ModelParallelTestConfig(model_cfg_key="path_tt_auto_cm_fsdp_tp", model_cls=tt_mod_parallel,
-                            strategy_adapter_cfg=tt_auto_cm_fsdp_tp,
-                            model_cfg=tt_fsdp_tp_compose,
-                            strategy_cfg=dp2_tp1, runif_alias="einsum_exp",
-                            expected_results=ExpectedResults(expected_state=path_tt_auto_cm_fsdp_tp)),
+    ModParallelTestCfg(model_cfg_key="fsdp_cm_only", model_cls=cm_mod_parallel, model_cfg=fsdp_cm_only,
+                       runif_alias="alone", expected_results=ExpectedResults(expected_state=path_fsdp)),
+    ModParallelTestCfg(model_cfg_key="fsdp_cm_act", model_cls=cm_mod_parallel, model_cfg=fsdp_cm_act,
+                       runif_alias="alone", expected_results=ExpectedResults(expected_state=path_fsdp)),
+    ModParallelTestCfg(model_cfg_key="fsdp_cm_fp16", model_cls=cm_mod_parallel, precision_opts=fp16,
+                       model_cfg=fsdp_cm_only, runif_alias="alone"),
     # FSDP2 auto plan tests
-    ModelParallelTestConfig(model_cfg_key="path_tt_auto_fsdp_no_tp", model_cls=tt_auto_fsdp_plan_mod_parallel,
-                            strategy_adapter_cfg=tt_auto_fsdp,
-                            model_cfg=tt_auto_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone",
-                            expected_results=ExpectedResults(expected_state=path_tt_fsdp_no_tp)),
-    ModelParallelTestConfig(model_cfg_key="path_tt_auto_fsdp_no_tp_act", model_cls=tt_auto_fsdp_plan_mod_parallel,
-                            strategy_adapter_cfg=tt_auto_fsdp_act,
-                            model_cfg=tt_auto_fsdp_no_tp, strategy_cfg=dp2_tp1, runif_alias="alone",
-                            expected_results=ExpectedResults(expected_state=path_tt_fsdp_no_tp)),
-    ModelParallelTestConfig(model_cfg_key="path_tt_auto_cm_fsdp_no_tp",
-                            model_cls=tt_mod_parallel,
-                            strategy_adapter_cfg=tt_auto_cm_fsdp,
-                            model_cfg=tt_fsdp_no_tp_compose, strategy_cfg=dp2_tp1, runif_alias="alone",
-                            expected_results=ExpectedResults(
-                                expected_state=path_tt_auto_cm_fsdp_no_tp,
-                                warns_expected=("parents has already registered", "has the unsupported type"))),
-    ModelParallelTestConfig(model_cfg_key="path_tt_auto_cm_fsdp_no_tp_unmatched",
-                            model_cls=tt_mod_parallel,
-                            strategy_adapter_cfg=tt_auto_cm_fsdp_err,
-                            model_cfg=tt_fsdp_no_tp_compose, strategy_cfg=dp2_tp1, runif_alias="alone",
-                            expected_results=ExpectedResults(
-                                expected_state=path_tt_auto_cm_fsdp_no_tp,
-                                exceptions_expected=("did not match any named modules",))),
+    ModParallelTestCfg(model_cfg_key="fsdp_auto", model_cls=fsdp_auto_mod_parallel, model_cfg=fsdp_auto,
+                       strategy_adapter_cfg=fsdp_auto_cpuoffld, runif_alias="alone",
+                       expected_results=ExpectedResults(expected_state=path_fsdp)),
+    # TODO: upstream bug currently preventing use of `fsdp_auto_cpuoffld` here w/ fp16
+    ModParallelTestCfg(model_cfg_key="fsdp_auto_fp16", model_cls=fsdp_auto_mod_parallel, model_cfg=fsdp_auto,
+                       precision_opts=fp16, strategy_adapter_cfg=fsdp_auto_only, runif_alias="alone",
+                       expected_results=ExpectedResults(expected_state=path_fsdp)),
+    ModParallelTestCfg(model_cfg_key="fsdp_auto_act", model_cls=fsdp_auto_mod_parallel,
+                       strategy_adapter_cfg=fsdp_auto_act, model_cfg=fsdp_auto, runif_alias="alone",
+                       expected_results=ExpectedResults(expected_state=path_fsdp)),
+    ModParallelTestCfg(model_cfg_key="fsdp_autocm", model_cls=cm_mod_parallel, strategy_adapter_cfg=fsdp_autocm,
+                       model_cfg=fsdp_autocm_compose, runif_alias="alone", expected_results=ExpectedResults(
+                           expected_state=path_fsdp_autocm,
+                           warns_expected=("parents has already registered", "has the unsupported type"))),
+    ModParallelTestCfg(model_cfg_key="fsdp_autocm_unmatched", model_cls=cm_mod_parallel,
+                       strategy_adapter_cfg=fsdp_autocm_err, model_cfg=fsdp_autocm_compose, runif_alias="alone",
+                       expected_results=ExpectedResults(expected_state=path_fsdp_autocm,
+                                                        exceptions_expected=("did not match any named modules",))),
+    # TP tests
+    ModParallelTestCfg(model_cfg_key="tp_only", model_cls=cm_mod_parallel, model_cfg=tp_no_lp, strategy_cfg=dp1_tp2,
+                       runif_alias="alone", expected_results=ExpectedResults(expected_state=path_tp)),
+    ModParallelTestCfg(model_cfg_key="tp_lp_fp16", model_cls=cm_mod_parallel, precision_opts=fp16, model_cfg=tp_lp,
+                       strategy_cfg=dp1_tp2, runif_alias="alone",
+                       expected_results=ExpectedResults(expected_state=path_tp)),
+    ModParallelTestCfg(model_cfg_key="tp_lp_bf16", model_cls=cm_mod_parallel, precision_opts=bf16,
+                       model_cfg=tp_lp_math_sdp_impl, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
+
+    # FSDP2 + TP (trivial submesh) tests
+    ModParallelTestCfg(model_cfg_key="fsdp_tp", model_cls=cm_mod_parallel, model_cfg=fsdp_tp, runif_alias="einsum_exp",
+                       expected_results=ExpectedResults(expected_state=path_tp_fsdp)),
+    ModParallelTestCfg(model_cfg_key="fsdp_autocm_tp", model_cls=cm_mod_parallel, strategy_adapter_cfg=fsdp_autocm_tp,
+                       model_cfg=fsdp_tp_compose, runif_alias="einsum_exp",
+                       expected_results=ExpectedResults(expected_state=path_tp_fsdp_autocm)),
 )
 @RunIf(min_cuda_gpus=2, min_torch="2.5.0")
 @pytest.mark.parametrize("test_cfg", pytest_param_factory(FTS_MODEL_PARALLEL_PATH_TESTS))
