@@ -436,7 +436,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 explicit_mods = True
                 resolved_modules.append(m)
             else:
-                mpat = re.compile(m)
+                mpat = re.compile(fr"{m}")
                 regex_modules = [m for m in named_modules if mpat.match(m)]
                 resolved_modules.extend(regex_modules)
             if not (regex_modules or explicit_mods):

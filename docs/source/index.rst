@@ -370,7 +370,7 @@ A demonstration of the scheduled fine-tuning callback
 `RTE <https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte>`_ and
 `BoolQ <https://github.com/google-research-datasets/boolean-questions>`_ tasks of the
 `SuperGLUE <https://paperswithcode.com/dataset/superglue>`_ benchmark and the
-:external+pl:class:`~lightning.pytorch.cli.LightningCLI` is available under ``./fts_examples/stable``.
+:external+pl:class:`~lightning.pytorch.cli.LightningCLI` is available under ``./fts_examples``.
 
 Since this CLI-based example requires a few additional packages (e.g. ``transformers``, ``sentencepiece``), you
 should install them using the ``[examples]`` extra:

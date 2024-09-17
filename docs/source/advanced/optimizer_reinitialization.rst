@@ -214,7 +214,7 @@ also be specified in implicit mode.
 Advanced Usage Examples: Explicit and Implicit Mode Concurrent Optimizer and LR Scheduler Reinitialization
 **********************************************************************************************************
 Demonstration optimizer and concurrent lr scheduler reinitialization configurations for both explicit and
-fine-tuning scheduling contexts are available under ``./fts_examples/stable/config/advanced/reinit_optim_lr``.
+fine-tuning scheduling contexts are available under ``./fts_examples/config/advanced/reinit_optim_lr``.
 
 The concurrent optimizer and lr scheduler reinitialization examples use the same code and have the same dependencies as
 the lr scheduler reinitialization-only (with the exception of requiring FTS >= ``2.0.2`` )
@@ -225,7 +225,7 @@ The two different demo schedule configurations are composed with shared defaults
 .. code-block:: bash
 
     # Demo concurrent optimizer and lr scheduler reinitializations...
-    cd ./fts_examples/stable
+    cd ./fts_examples
 
     # with an explicitly defined fine-tuning schedule:
     python fts_superglue.py fit --config config/advanced/reinit_optim_lr/fts_explicit_reinit_optim_lr.yaml
@@ -330,7 +330,7 @@ Effective phase ``0`` config defined in ``./config/advanced/reinit_optim_lr/fts_
 
   ...
   model:
-    class_path: fts_examples.stable.fts_superglue.RteBoolqModule
+    class_path: fts_examples.fts_superglue.RteBoolqModule
     init_args:
       optimizer_init:
         class_path: torch.optim.AdamW

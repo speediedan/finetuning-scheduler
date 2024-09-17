@@ -1,0 +1,13 @@
+0:
+  params:
+  - model.output.weight
+  - model.norm.*
+  max_transition_epoch: 1
+1:
+  params:
+  - model.layers.3.(feed_forward|ffn_norm|attention.w.*|attention_norm).*
+  max_transition_epoch: 2
+2:
+  params:
+  - model.layers.[0-2].(feed_forward|ffn_norm|attention.w.*|attention_norm).*
+  - model.tok_embeddings.weight

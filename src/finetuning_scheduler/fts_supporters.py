@@ -23,6 +23,7 @@ import pathlib
 import inspect
 import re
 import warnings
+import yaml
 from contextlib import contextmanager
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
@@ -36,28 +37,27 @@ from typing_extensions import TypeAlias, override
 
 import lightning.pytorch as pl
 import torch
-import yaml
+from torch import Tensor
+from torch.nn import Module
 from lightning.fabric.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
 from lightning.fabric.utilities.cloud_io import get_filesystem
-from lightning.pytorch.callbacks import Callback
-from lightning.pytorch.callbacks.early_stopping import EarlyStopping
-from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
-from lightning.pytorch.callbacks.model_checkpoint import ModelCheckpoint
+from lightning.pytorch.callbacks import Callback, EarlyStopping, LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.core.optimizer import _MockOptimizer
 from lightning.pytorch.trainer.states import TrainerFn
 from lightning.pytorch.utilities import find_shared_parameters
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 from lightning.pytorch.utilities.types import LRSchedulerConfig
-from torch import Tensor
-from torch.distributed.optim import ZeroRedundancyOptimizer
-from torch.nn import Module
 
-from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
-from finetuning_scheduler.strategy_adapters.fsdp import FSDPStrategyAdapter
-from finetuning_scheduler.strategy_adapters.model_parallel import ModelParallelStrategyAdapter
+from finetuning_scheduler.setup_tools import disable_always_warnings
+from finetuning_scheduler.strategy_adapters import StrategyAdapter, FSDPStrategyAdapter, ModelParallelStrategyAdapter
 from finetuning_scheduler.types import (FTSLRSchedulerType, FTSLRSchedulerTypeTuple, ParamGroupAddable,
                                         BaseCallbackDepType)
+
+
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*functional optimizers is deprecated.*")
+with disable_always_warnings():
+    from torch.distributed.optim import ZeroRedundancyOptimizer
 
 log = logging.getLogger(__name__)
 
@@ -907,7 +907,7 @@ class ScheduleParsingMixin(ABC):
                 explicit_params = True
                 resolved_params.append(p)
             else:
-                ppat = re.compile(p)
+                ppat = re.compile(fr"{p}")
                 regex_params = [n for n in named_params if ppat.match(n)]
                 resolved_params.extend(regex_params)
             if not (regex_params or explicit_params):

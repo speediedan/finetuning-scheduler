@@ -27,7 +27,7 @@ Example: Multi-Phase Scheduled Fine-Tuning with FSDP
 ****************************************************
 
 Demonstration FTS FSDP training/profiling configurations and a DDP baseline for comparison are available under
-``./fts_examples/stable/config/advanced/fsdp``.
+``./fts_examples/config/advanced/fsdp``.
 
 Most of these FTS FSDP training examples have the same dependencies as the basic
 :ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` examples. Running the
@@ -43,7 +43,7 @@ The demo schedule configurations are composed with the basic FTS example's share
 
 .. code-block:: bash
 
-    cd ./fts_examples/stable
+    cd ./fts_examples
 
     # there is an open issue regarding superfluous profiler messages (still as of 2023.04.15)
     # setting the environmental variable below is a workaround to keep the example output clean:
@@ -215,7 +215,7 @@ configuration option to FTS like so:
   :linenos:
   :emphasize-lines: 3, 7, 8
 
-  # in ./fts_examples/stable/config/advanced/fsdp/fts_fsdp_awp_overrides_profile.yaml
+  # in ./fts_examples/config/advanced/fsdp/fts_fsdp_awp_overrides_profile.yaml
   ...
     - class_path: finetuning_scheduler.FinetuningScheduler
     init_args:
@@ -234,7 +234,7 @@ Finally, we configure the FSDP training strategy as desired per usual, for insta
   :linenos:
   :emphasize-lines: 6-8
 
-  # in ./fts_examples/stable/config/advanced/fsdp/fts_fsdp_awp_overrides_profile.yaml
+  # in ./fts_examples/config/advanced/fsdp/fts_fsdp_awp_overrides_profile.yaml
     ...
     strategy:
       class_path: lightning.pytorch.strategies.FSDPStrategy

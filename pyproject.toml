@@ -27,7 +27,7 @@ ignore-init-module-imports = true
 output-format = "pylint"
 
 [tool.ruff.per-file-ignores]
-"src/fts_examples/stable/ipynb_src/fts_superglue_nb.py" = ["E501","F401","F821"]
+"src/fts_examples/ipynb_src/fts_superglue_nb.py" = ["E501","F401","F821"]
 "src/fts_examples/legacy/ipynb_src/fts_superglue_nb.py" = ["E501","F401","F821"]
 
 [tool.ruff.mccabe]

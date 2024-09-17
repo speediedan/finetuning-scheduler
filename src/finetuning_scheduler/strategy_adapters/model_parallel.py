@@ -161,7 +161,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                 if not self._maybe_update_fsdp_plan(resolved_modules, kwargs, plan_n):
                     continue  # resolution success, but skipping an unsupported module
             else:
-                mpat = re.compile(plan_n)
+                mpat = re.compile(fr"{plan_n}")
                 for n in named_modules:
                     if mpat.match(n):
                         module_resolved = True

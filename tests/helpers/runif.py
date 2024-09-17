@@ -21,7 +21,7 @@ from lightning.fabric.accelerators.cuda import num_cuda_devices
 from lightning.pytorch.strategies.deepspeed import _DEEPSPEED_AVAILABLE
 from packaging.version import Version
 from pkg_resources import get_distribution
-from fts_examples.stable.patching.dep_patch_shim import ExpPatch, _ACTIVE_PATCHES
+from fts_examples.patching.dep_patch_shim import ExpPatch, _ACTIVE_PATCHES
 
 EXTENDED_VER_PAT = re.compile(r"([0-9]+\.){2}[0-9]+")
 

@@ -504,6 +504,7 @@ class ModParallelTestCfg:
     ckpt_cls: Callable = FTSCheckpoint
     expected_results: ExpectedResults = ExpectedResults()
     runif_alias: Optional[str] = None
+
     def __post_init__(self):
         self.default_fts_cfg = {
             "logging_level": DEBUG,
