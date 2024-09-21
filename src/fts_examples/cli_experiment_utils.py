@@ -2,10 +2,8 @@ import os
 import sys
 from collections import namedtuple
 from typing import Any, Dict, Optional, Tuple, Union
-from dataclasses import dataclass, field, fields, asdict
 from datetime import datetime
 
-import yaml
 import torch
 from torch.utils import collect_env
 from torch.optim import Optimizer
@@ -19,6 +17,10 @@ from lightning.pytorch.utilities.types import STEP_OUTPUT
 
 from finetuning_scheduler.types import FTSLRSchedulerTypeTuple
 from fts_examples.model_parallel.torchtitan_llama import ModelCfg
+from fts_examples.profiling.memprofiler import MemProfilerCfg, MemProfiler
+from fts_examples.profiling.profiler_hooks_mixin import ProfilerHooksMixin
+from fts_examples.cfg_utils import (LightningLRSCfg, OptimizerCfg, LRSchedulerCfg, ExperimentCfg)
+
 
 class CustLightningCLI(LightningCLI):
     """Customize the :class:`~lightning.pytorch.cli.LightningCLI` to ensure the
@@ -181,50 +183,6 @@ def collect_env_info() -> Dict:
     return sys_dict
 
 
-def _is_overridden(dataclass_instance) -> bool:
-    is_overridden = False
-    for f in fields(dataclass_instance.__class__):
-        if getattr(dataclass_instance, f.name) != f.default:
-            is_overridden = True
-            break
-    return is_overridden
-
-@dataclass
-class ExperimentCfg:
-    loss_parallel: bool = True
-    experiment_tag: str = 'default'
-    log_env_details: bool = True
-    batch_size: int = 4
-    num_workers: int = 2
-
-@dataclass
-class OptimizerCfg:
-    class_fqn: str | None = None
-    args: Dict = field(default_factory=dict)
-
-@dataclass
-class LRSchedulerCfg:
-    class_fqn: str | None = None
-    args: Dict = field(default_factory=dict)
-
-@dataclass
-class LightningLRSOverrideCfg:
-    name: str = 'default'
-    interval: str = 'epoch'
-    frequency: int = 1
-
-    def __post_init__(self):
-        self._overridden = _is_overridden(self)
-
-def optimizer_cfg_mapping_representer(dumper, data):
-    return dumper.represent_mapping('tag:yaml.org,2002:map', asdict(data))
-
-def lr_scheduler_cfg_mapping_representer(dumper, data):
-    return dumper.represent_mapping('tag:yaml.org,2002:map', asdict(data))
-
-yaml.SafeDumper.add_representer(OptimizerCfg, optimizer_cfg_mapping_representer)
-yaml.SafeDumper.add_representer(LRSchedulerCfg, lr_scheduler_cfg_mapping_representer)
-
 class RandomTokenDataset(Dataset):
     def __init__(self, vocab_size: int, seq_length: int):
         self.vocab_size = vocab_size
@@ -243,28 +201,32 @@ class RandomTokenDataset(Dataset):
     def __getitem__(self, item: int):
         return self.tokens[item]
 
-class ExpHarness(L.LightningModule):
+class ExpHarness(ProfilerHooksMixin, L.LightningModule):
     def __init__(self, model_cfg: ModelCfg, exp_cfg: ExperimentCfg,
                  optimizer_cfg: Optional[OptimizerCfg] = None,
                  lr_scheduler_cfg: Optional[LRSchedulerCfg] = None,
-                 lightning_lrs_cfg: Optional[LightningLRSOverrideCfg] = None,
+                 lightning_lrs_cfg: Optional[LightningLRSCfg] = None,
+                 memprofiler_cfg: Optional[MemProfilerCfg] = None,
                  *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(memprofiler_cfg=memprofiler_cfg, *args, **kwargs)
         self.init_hparams = {
             "model_cfg": model_cfg,
+            "exp_cfg": exp_cfg,
             "optimizer_cfg": optimizer_cfg,
             "lr_scheduler_cfg": lr_scheduler_cfg,
             "lightning_lrs_cfg": lightning_lrs_cfg,
+            "memprofiler_cfg": memprofiler_cfg,
             "loss_parallel": exp_cfg.loss_parallel,
-            "exp_cfg": exp_cfg,
             "experiment_id": f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{ExperimentCfg.experiment_tag}",
         }
         self.init_hparams["env_info"] = collect_env_info() if ExperimentCfg.log_env_details else None
         self.save_hyperparameters(self.init_hparams)
 
     def setup(self, stage):
+        super().setup(stage)
         self.dataset = RandomTokenDataset(vocab_size=self.hparams.model_cfg.vocab_size, seq_length=128)
 
+    @MemProfiler.memprofilable
     def training_step(self, batch):
         inputs = batch[:, :-1]
         labels = batch[:, 1:]
@@ -273,6 +235,7 @@ class ExpHarness(L.LightningModule):
         self.log("loss", loss.item(), prog_bar=False, sync_dist=True)
         return loss
 
+    @MemProfiler.memprofilable
     def validation_step(self, batch: torch.Tensor) -> Optional[STEP_OUTPUT]:
         inputs = batch[:, :-1]
         labels = batch[:, 1:]
@@ -295,16 +258,17 @@ class FTSExperimentCLI(LightningCLI):
     def add_arguments_to_parser(self, parser):
         parser.add_optimizer_args((Optimizer,))
         parser.add_lr_scheduler_args(FTSLRSchedulerTypeTuple)
-        self.add_lightning_lrs_to_parser(parser)
+        for nested_key, datacls in [('lightning_lrs_cfg', LightningLRSCfg), ('memprofiler_cfg', MemProfilerCfg)]:
+            self.add_exp_harness_args_to_parser(parser, nested_key, datacls)
         parser.link_arguments("trainer.logger.init_args.name", "model.init_args.experiment_tag")
         # we collect additional optional `lightning_lrs_cfg` arguments in case the user wants to override the
         # `LRSchedulerConfig` default values (requires the user provide a `configure_optimizers`` method, not supported
         # by LightningCLI's auto_configure_optimizers option)
-        parser.link_arguments("lightning_lrs_cfg", "model.init_args.lightning_lrs_cfg")
 
-    def add_lightning_lrs_to_parser(self, parser, nested_key="lightning_lrs_cfg"):
+    def add_exp_harness_args_to_parser(self, parser, nested_key, datacls):
         kwargs: Dict[str, Any] = {"instantiate": False, "fail_untyped": False, 'required': False}
-        parser.add_dataclass_arguments(LightningLRSOverrideCfg, nested_key, **kwargs)
+        parser.add_dataclass_arguments(datacls, nested_key, **kwargs)
+        parser.link_arguments(nested_key, f"model.init_args.{nested_key}")
 
     def _add_configure_optimizers_method_to_model(self, subcommand: Optional[str]) -> None:
         if self.auto_configure_optimizers:
@@ -313,7 +277,7 @@ class FTSExperimentCLI(LightningCLI):
             if lightning_lrs_cfg is not None and getattr(lightning_lrs_cfg, "_overridden", False):
                 rank_zero_warn("It appears you are using LightningCLI's `auto_configure_optimizers` feature which does"
                     " not support providing a `lightning_lrs_cfg`. If you would like to override "
-                    " Lightning's `LRSchedulerConfig` defaults with a `LightningLRSOverrideCfg`, please set"
+                    " Lightning's `LRSchedulerConfig` defaults with a `LightningLRSCfg`, please set"
                     " LightningCLI's `auto_configure_optimizers` to `False` and provide a "
                     " `configure_optimizers` method instead.")
 

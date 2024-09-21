@@ -4,7 +4,6 @@ import warnings
 import torch
 import torch.nn.functional as F
 from torch.distributed.tensor.parallel import loss_parallel
-
 from torch.distributed._tensor import Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel import (
@@ -18,6 +17,14 @@ import lightning as L
 
 from fts_examples.cli_experiment_utils import ExpHarness, FTSExperimentCLI, ExperimentCfg
 from fts_examples.model_parallel.torchtitan_llama import ModelCfg, Transformer
+from finetuning_scheduler.strategy_adapters.model_parallel import _TORCH_GREATER_EQUAL_2_5
+
+if _TORCH_GREATER_EQUAL_2_5:
+    from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
+else:
+    FSDPMemTracker = None
+
+
 
 # Lightning ModelParallel still uses `torch.load` with `weights_only=False`
 warnings.filterwarnings("ignore", ".*uses the default pickle.*")
@@ -76,12 +83,13 @@ def apply_tp_plan(model: Transformer, device_mesh: DeviceMesh, loss_parallel: bo
 class ModParallelExample(ExpHarness, L.LightningModule):
     def __init__(self, model_cfg: ModelCfg, exp_cfg: ExperimentCfg, *args, **kwargs):
         # the ExpHarness mixin just saves our hparams and collects our env info so our experiments can be nicely logged
-        super().__init__(model_cfg, exp_cfg, *args, **kwargs)
+        super().__init__(model_cfg=model_cfg, exp_cfg=exp_cfg, *args, **kwargs)
         with torch.device("meta"):
             self.model = Transformer(self.hparams.model_cfg)
 
     def on_train_start(self) -> None:
         self.model.init_weights()
+        super().on_train_start()
 
     def configure_model(self):
         if self.device_mesh["tensor_parallel"].size() > 1:
@@ -112,6 +120,7 @@ class ModParallelExample(ExpHarness, L.LightningModule):
 def cli_main() -> None:
     torch.set_float32_matmul_precision("high")
     assert torch.cuda.device_count() >= 2, "This example requires at least 2 GPUs"
+    assert _TORCH_GREATER_EQUAL_2_5, "This example requires PyTorch 2.5 or higher"
     # every configuration of this example depends upon a shared set of defaults.
     default_config_file = os.path.join(os.path.dirname(__file__), "config", "defaults", "fts_mp_example_defaults.yaml")
     _ = FTSExperimentCLI(L.LightningModule, subclass_mode_model=True, save_config_kwargs={"overwrite": True},

@@ -45,14 +45,12 @@ trainer:
       save_dir: lightning_logs
       name: fts_fsdp_awp_overrides_offload_profile
   profiler:
-    class_path: fts_examples.extended_profiler.ExtendedPyTorchProfiler
+    class_path: fts_examples.profiling.extended_profiler.ExtendedPyTorchProfiler
     init_args:
       filename: fts_fsdp_awp_text_profile
       max_name_column_width: 100
       sort_by_key: cuda_time_total
       schedule_cfg:
-        # note, there is currently (as of 2023.04.15) an open issue regarding superfluous profiler messages
-        # https://github.com/pytorch/pytorch/issues/91886
         skip_first: 20  # comment if you want to profile the first fine-tuning phase instead of the final one
         wait: 1
         warmup: 1
