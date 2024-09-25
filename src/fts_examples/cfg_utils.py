@@ -1,31 +1,12 @@
-from enum import auto, Enum
+import importlib
+import yaml
 from typing import Dict, List, Any
 from dataclasses import dataclass, field, asdict, fields
-import importlib
 
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 
-import yaml
 
-################################################################################
-# Core Enums
-################################################################################
 
-class AutoStrEnum(Enum):
-    def _generate_next_value_(name, start, count, last_values) -> str:  # type: ignore
-        return name
-
-class CorePhase(AutoStrEnum):
-    train = auto()
-    validation = auto()
-    test = auto()
-    predict = auto()
-
-class CoreSteps(AutoStrEnum):
-    training_step = auto()
-    validation_step = auto()
-    test_step = auto()
-    predict_step = auto()
 
 @dataclass
 class ExperimentCfg:
@@ -34,6 +15,7 @@ class ExperimentCfg:
     log_env_details: bool = True
     batch_size: int = 4
     num_workers: int = 2
+    dataset_length: int = 32
 
 @dataclass
 class OptimizerCfg:

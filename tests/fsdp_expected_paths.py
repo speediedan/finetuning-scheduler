@@ -1,9 +1,6 @@
-from enum import Enum, auto
+from enum import auto
+from finetuning_scheduler.types import AutoStrEnum
 
-
-class AutoStrEnum(Enum):
-    def _generate_next_value_(name, start, count, last_values) -> str:  # type: ignore
-        return name
 
 class ResultEnum(AutoStrEnum):
     """Characterization of an expected result value based on a test sample transformation or approximation."""

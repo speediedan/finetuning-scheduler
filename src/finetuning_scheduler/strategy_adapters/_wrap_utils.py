@@ -9,8 +9,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Iterator, Tuple
+from types import resolve_bases
 
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import _CHECKPOINT_PREFIX
 import torch
 
 if torch.distributed.is_available():
@@ -53,3 +55,27 @@ class NameDrivenCustomPolicy(CustomPolicy):
         return target_module_to_kwargs
 
 NameDrivenPolicy = NameDrivenCustomPolicy
+
+
+class NCACMixin(torch.nn.Module):
+
+    # extracted from https://bit.ly/non_composable_ac_adapt
+    def named_parameters(
+        self,
+        *args,
+        **kwargs,
+    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+        """Override :meth:`named_parameters()` to intercept parameter names.
+
+        remove all occurrences of ``_CHECKPOINT_PREFIX``.
+        """
+        for param_name, param in super().named_parameters(*args, **kwargs):
+            yield param_name.replace(_CHECKPOINT_PREFIX, ""), param
+
+
+def _compose_ncac(m):
+    """Composes a given module with the NCACMixin to accommodate non-composable activation checkpoint (NCAC) API
+    usage."""
+    new_bases = resolve_bases((NCACMixin, m.__class__))
+    patched_cls = type(f'{m.__class__.__name__}_NCACAdapted', new_bases, {})
+    m.__class__ = patched_cls

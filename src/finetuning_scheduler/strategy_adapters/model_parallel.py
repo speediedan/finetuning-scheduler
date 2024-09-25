@@ -17,31 +17,60 @@ A :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that extends 
 for PyTorch's distributed composable and Tensor Parallel APIs.
 
 """
-from typing import Any, TYPE_CHECKING, Optional, Callable, Dict
+from typing import Any, TYPE_CHECKING, Optional, Callable, Dict, Sequence, Tuple
 from functools import wraps
 import re
 # TODO: replace local version once Lightning version available
 # from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_2_5
 import operator
-
-
+from dataclasses import dataclass, field
 
 import torch
 from torch.distributed._composable import checkpoint
-from torch.distributed._composable.fsdp.fully_shard import fully_shard
-
+from torch.distributed._composable.fsdp.fully_shard import fully_shard, FSDPModule
+from torch.distributed._composable.fsdp._fsdp_api import CPUOffloadPolicy
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (checkpoint_wrapper, offload_wrapper,
+                                                                         ActivationWrapper)
+from lightning.fabric.utilities.enums import LightningEnum
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning_utilities.core.imports import compare_version
 from lightning.pytorch.utilities.model_helpers import is_overridden
 from lightning.fabric.utilities import rank_zero_warn
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
+
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
+from finetuning_scheduler.strategy_adapters._wrap_utils import _compose_ncac
 
 
 _TORCH_GREATER_EQUAL_2_5 = compare_version("torch", operator.ge, "2.5.0", use_base_version=True)
 
 if TYPE_CHECKING:
     pass
+
+class ActCkptEnum(LightningEnum):
+    COMPOSABLE = "composable"
+    WRAPPED = "wrapped"
+    WRAPPED_OFFLOAD = "wrapped_offload"
+
+@dataclass
+class ActCkptCfg:
+    mode: ActCkptEnum | str
+    cfg: Optional[Dict[str, Any]] = field(default_factory=dict)
+    _func: Optional[Callable] = None
+
+    def __post_init__(self):
+        if isinstance(self.mode, str):
+            try:
+                self.mode = ActCkptEnum(self.mode)
+            except ValueError:
+                rank_zero_warn(f"Unknown AC mode: {self.mode}. Defaulting to `{ActCkptEnum.COMPOSABLE.value}` mode.")
+                self.mode = ActCkptEnum.COMPOSABLE
+        if self.mode == ActCkptEnum.COMPOSABLE:
+            self._func = checkpoint
+        elif self.mode == ActCkptEnum.WRAPPED_OFFLOAD:
+            self._func = offload_wrapper
+        elif self.mode == ActCkptEnum.WRAPPED:
+            self._func = checkpoint_wrapper
 
 
 class ModelParallelStrategyAdapter(StrategyAdapter):
@@ -67,9 +96,16 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
        `fully_shard` to a specified module if it was not already applied to that module.
 
     .. note::
-        In addition to all valid `fully_shard` API kwargs, `fsdp_plan` also supports a boolean-valued `act_ckpt`
-            kwarg. If `act_ckpt` is set to `True` for a specified module/pattern, composable checkpointing will be
-            applied to the matching module(s) before `fully_shard`.
+        In addition to all valid `fully_shard` API kwargs, `fsdp_plan` also supports a `act_ckpt` and
+        `cpu_offload_policy` kwargs.
+
+        For specified module/patterns (or `fsdp_default_kwargs`), `act_ckpt` allows one
+        to pass a string alias specifying the use of the desired activation checkpointing API (e.g. "composable",
+        "wrapped", "wrapped_offload") as well as an optional `Dict` of activation checkpointing kwargs. The specified
+        checkpointing APIs will be applied to the matching module(s) before `fully_shard`.
+
+        `cpu_offload_policy` is a convenience alias that will apply CPUOffloadPolicy to the matching module(s) along
+        with any provided `Dict` of policy kwargs.
     """
 
     def __init__(self, fsdp_default_kwargs: Optional[Dict] = None, fsdp_plan: Optional[Dict] = None,
@@ -86,14 +122,18 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                 and applying the API in `LightningModule.configure_model`. `fsdp_plan` directives can also be composed
                 with explicit`fully_shard` calls in `LightningModule.configure_model`, as the `fsdp_plan` directives
                 will only invoke `fully_shard` on a specified module if it was not already applied to that module.
-                All valid `fully_shard` API kwargs can be supplied. Additionally, a boolean-valued `act_ckpt` kwarg is
-                supported. If `act_ckpt` is `True`, composable checkpointing will be applied to the matching module(s)
-                before `fully_shard`. Defaults to None.
+                All valid `fully_shard` API kwargs are supported. Additionally, `fsdp_plan` supports `act_ckpt` and
+                `cpu_offload_policy` kwargs.
+                For specified module/patterns (or `fsdp_default_kwargs`):
+                    `act_ckpt` (Sequence[str, Optional[Dict]] | ActCkptCfg) allows one to pass an alias specifying the
+                        use of the desired activation checkpointing API (e.g. "composable", "wrapped",
+                        "wrapped_offload") as well as an optional `Dict` of activation checkpointing kwargs. The
+                        specified checkpointing APIs will be applied to the matching module(s) before `fully_shard`.
+                    `cpu_offload_policy` is a convience alias that will apply CPUOffloadPolicy to the matching module(s)
+                        along with any provided `Dict` of policy kwargs. Defaults to None.
             fsdp_default_kwargs (Optional[Dict]): An optional dictionary of default `fully_shard` API kwargs to apply to
                 each matching module in `fsdp_plan`. Module-name/pattern specific kwargs will take precedence over
-                these. All valid kwargs for `fully_shard` can be supplied. Additionally, a boolean-valued `act_ckpt`
-                kwarg is supported. If `act_ckpt` is True, composable checkpointing will be applied to the matching
-                module(s) before `fully_shard`. Defaults to None.
+                these. All kwargs valid for `fsdp_plan` above are supported. Defaults to None.
 
         Attributes:
             fsdp_plan: An optional dictionary of module names or regex pattern keys with associated `fully_shard`
@@ -139,8 +179,23 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                            f" has the unsupported type '{type(self.pl_module.get_submodule(name))}'. This"
                            " directive will be pruned and ignored.")
             return False
+        kwargs = ModelParallelStrategyAdapter._resolve_cfg_aliases(kwargs)  # default policy aliases already resolved
         resolved_modules[name] = {**self.fsdp_default_kwargs, **kwargs}
         return True
+
+    @staticmethod
+    def _resolve_cfg_aliases(config_dict: Dict) -> Dict:
+        """Resolve any provided convenience FSDP default kwargs."""
+        for k, v in list(config_dict.items()):
+            # currently adding a `cpu_offload_policy` option alias for convenience
+            # open a GitHub issue if you think other poliy alias options would be useful
+            if k == "cpu_offload_policy":
+                config_dict["offload_policy"] = CPUOffloadPolicy(**v)
+                del config_dict[k]
+            elif k == "act_ckpt":
+                if not isinstance(v, ActCkptCfg):
+                    config_dict["act_ckpt"] = ActCkptCfg(*v) if isinstance(v, Sequence) else ActCkptCfg(mode=v)
+        return config_dict
 
     def _validate_fsdp_plan(self) -> None:
         """Expand any regex expressions specified in
@@ -152,6 +207,8 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         """
         if not self.fsdp_plan:
             return
+        if self.fsdp_default_kwargs:
+            self.fsdp_default_kwargs = ModelParallelStrategyAdapter._resolve_cfg_aliases(self.fsdp_default_kwargs)
         named_modules = dict(self.pl_module.named_modules()).keys()
         resolved_modules = {}
         for plan_n, kwargs in self.fsdp_plan.items():
@@ -185,12 +242,14 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         # self._apply_tp_auto_plan()
         self._apply_fsdp_plan()
 
-    def _compose_or_warn(self, module: torch.nn.Module, n: str) -> None:
+    def _compose_or_warn(self, n: str) -> None:
         # NB PL does not currently support passing user-created meshes so we unconditionally pass the device mesh
-        if not getattr(module, '_is_fsdp_managed_module', False):
-            if self.fsdp_plan[n].pop('act_ckpt', False):
-                checkpoint(module)
-            fully_shard(module, mesh=self.pls_handle.device_mesh["data_parallel"], **self.fsdp_plan[n])
+        if not getattr(self.pl_module.get_submodule(n), '_is_fsdp_managed_module', False):
+            if act_ckpt := self.fsdp_plan[n].pop('act_ckpt', None):
+                self._apply_activation_checkpointing(act_ckpt,n)
+            else:
+                fully_shard(self.pl_module.get_submodule(n), mesh=self.pls_handle.device_mesh["data_parallel"],
+                            **self.fsdp_plan[n])
         else:
             rank_zero_warn(
                 f"Module '{n}' or one of its parents has already registered the `fully_shard` composable "
@@ -199,6 +258,25 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                 f"distinct `FSDPState`."
             )
             del self.fsdp_plan[n]
+
+    def _apply_activation_checkpointing(self, act_ckpt: ActCkptCfg, n: str) -> None:
+        if act_ckpt.mode == ActCkptEnum.COMPOSABLE:
+            act_ckpt._func(self.pl_module.get_submodule(n), **act_ckpt.cfg)
+        elif act_ckpt.mode in (ActCkptEnum.WRAPPED, ActCkptEnum.WRAPPED_OFFLOAD):
+            module_prefix, _, module_name = n.rpartition('.')
+            outer_mod = self.pl_module if not module_prefix else self.pl_module.get_submodule(module_prefix)
+            setattr(outer_mod, module_name, act_ckpt._func(self.pl_module.get_submodule(n), **act_ckpt.cfg))
+            assert isinstance(self.pl_module.get_submodule(n), ActivationWrapper)
+        fully_shard(self.pl_module.get_submodule(n), mesh=self.pls_handle.device_mesh["data_parallel"],
+                    **self.fsdp_plan[n])
+
+    def _any_noncomposable_AC(self) -> Optional[Tuple[str, type]]:
+        for n, m in self.pl_module.named_modules():
+            if isinstance(m, ActivationWrapper):
+                for c in type(m).__mro__:
+                    if issubclass(c, ActivationWrapper) and not issubclass(c, FSDPModule):
+                        return n, c
+        return None
 
     def _apply_fsdp_plan(self) -> None:
         """Apply the FSDP distributed API according to the name-driven plan provided by the user via
@@ -213,13 +291,23 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         has_fsdp_managed = False
         for n, m in self.pl_module.named_modules():
             if n in auto_plan_keys:
-                self._compose_or_warn(m, n)
+                self._compose_or_warn(n)
             if not has_fsdp_managed:
                 has_fsdp_managed = getattr(m, '_is_fsdp_managed_module', False)
         if has_fsdp_managed and not getattr(self.pl_module.model, '_is_fsdp_managed_module', False):
             # we always apply the `fully_shard` API to the user's outer-model if it hasn't been applied and any
             #  FSDP-managed modules are present
             fully_shard(self.pl_module.model, mesh=self.pls_handle.device_mesh["data_parallel"])
+        if non_comp_ac := self._any_noncomposable_AC():
+            _compose_ncac(self.pl_module)
+            rank_zero_warn(
+                "Non-composable activation checkpoint (NCAC) APIs are being used (e.g. `{}` is `{}`). To better "
+                "integrate these APIs with the `fully_shard` composable distributed API, FTS has composed the "
+                "provided LightningModule with a simple adapter to filter out AC-specific parameter prefixes. This is "
+                "an experimental feature and may be removed in a future release.\n"
+                "If you don't need specific features of the used non-composable AC APIs, using the composable AC API "
+                "is recommended instead, i.e. `act_ckpt=('composable', ...)`.".format(non_comp_ac[0], non_comp_ac[1])
+            )
 
     def _wrapped_configure_model(self, cm_func: Callable) -> Callable:
         """If the user has overridden ``configure_model`` in their ``LightningModule``, wrap the user's

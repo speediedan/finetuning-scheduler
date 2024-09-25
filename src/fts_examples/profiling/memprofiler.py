@@ -17,7 +17,8 @@ from lightning.fabric.utilities.rank_zero import _get_rank
 from lightning.fabric.utilities.cloud_io import get_filesystem
 
 from finetuning_scheduler.strategy_adapters.model_parallel import _TORCH_GREATER_EQUAL_2_5
-from fts_examples.cfg_utils import resolve_funcs, AutoStrEnum
+from fts_examples.cfg_utils import resolve_funcs
+from finetuning_scheduler.types import AutoStrEnum
 
 if _TORCH_GREATER_EQUAL_2_5:
     from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker

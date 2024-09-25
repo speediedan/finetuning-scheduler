@@ -4,10 +4,10 @@ init_args:
   max_name_column_width: 100
   sort_by_key: cuda_time_total
   schedule_cfg:
-    skip_first: 20  # comment if you want to profile the first fine-tuning phase instead of the final one
+    #skip_first: 20  # comment if you want to profile the first fine-tuning phase instead of the final one
     wait: 1
-    warmup: 1
-    active: 3
+    warmup: 2
+    active: 1
 dict_kwargs:
   with_stack: true
   profile_memory: true

@@ -184,9 +184,10 @@ def collect_env_info() -> Dict:
 
 
 class RandomTokenDataset(Dataset):
-    def __init__(self, vocab_size: int, seq_length: int):
+    def __init__(self, vocab_size: int, seq_length: int, dataset_length: int = 64):
         self.vocab_size = vocab_size
         self.seq_length = seq_length
+        self.dataset_length = dataset_length
         self.tokens = torch.randint(
             self.vocab_size,
             size=(len(self), self.seq_length + 1),
@@ -196,7 +197,7 @@ class RandomTokenDataset(Dataset):
         )
 
     def __len__(self) -> int:
-        return 128
+        return self.dataset_length
 
     def __getitem__(self, item: int):
         return self.tokens[item]
@@ -224,7 +225,8 @@ class ExpHarness(ProfilerHooksMixin, L.LightningModule):
 
     def setup(self, stage):
         super().setup(stage)
-        self.dataset = RandomTokenDataset(vocab_size=self.hparams.model_cfg.vocab_size, seq_length=128)
+        self.dataset = RandomTokenDataset(vocab_size=self.hparams.model_cfg.vocab_size, seq_length=128,
+                                          dataset_length=self.hparams.exp_cfg.dataset_length)
 
     @MemProfiler.memprofilable
     def training_step(self, batch):

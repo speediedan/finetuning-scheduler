@@ -17,8 +17,7 @@ from torch.nn.attention import SDPBackend
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel import (ColwiseParallel, PrepareModuleInput, RowwiseParallel, SequenceParallel,
                                                parallelize_module, loss_parallel)
-from torch.distributed._composable import checkpoint
-from torch.distributed._composable.fsdp import FSDPModule, fully_shard, CPUOffloadPolicy
+from torch.distributed._composable.fsdp import FSDPModule, fully_shard
 from torch.distributed._tensor import DTensor, Replicate, Shard
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.plugins.precision.fsdp import FSDPPrecision
@@ -28,6 +27,7 @@ from lightning.pytorch.utilities.types import STEP_OUTPUT
 
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from finetuning_scheduler.strategy_adapters import ModelParallelStrategyAdapter
+from finetuning_scheduler.strategy_adapters.model_parallel import ActCkptEnum
 from tests.helpers.boring_models import FTSToyTransformer, TestModelArgs, FTSWikiText2
 from tests.helpers.common import (ExpectedResults, fts_check_warns, pytest_param_factory, get_fts,
                                   default_fts_sanity_chk, DeviceMeshSummary)
@@ -216,15 +216,23 @@ class FTSCmModelParallel(FTSBaseModelParallel):
                 self.model = parallelize_module(self.model, tp_mesh, self.cm_tp_plan)
 
         if self.cm_fsdp_plan:
+            fts_cb = [cb for cb in self.trainer.callbacks if isinstance(cb, (FinetuningScheduler))][0]
             dp_mesh = self.device_mesh["data_parallel"]
             assert dp_mesh.ndim == 1  # Hybrid-sharding not supported
 
             cm_plan_keys = set(self.cm_fsdp_plan.keys())
-            for n, m in self.named_modules():
+            for n, _ in self.named_modules():
                 if n in cm_plan_keys:
-                    if self.cm_fsdp_plan[n].pop('act_ckpt', False):
-                        checkpoint(m)
-                    fully_shard(m, mesh=dp_mesh, **self.cm_fsdp_plan[n])
+                    # we use our auto FSDP plan helpers to configure our manual configure_model plan
+                    self.cm_fsdp_plan[n] = fts_cb.strategy_adapter._resolve_cfg_aliases(self.cm_fsdp_plan[n])
+                    if act_ckpt := self.cm_fsdp_plan[n].pop('act_ckpt', None):
+                        if act_ckpt.mode == ActCkptEnum.COMPOSABLE:
+                            act_ckpt._func(self.get_submodule(n), **act_ckpt.cfg)
+                        elif act_ckpt.mode in (ActCkptEnum.WRAPPED, ActCkptEnum.WRAPPED_OFFLOAD):
+                            module_prefix, _, module_name = n.rpartition('.')
+                            outer_mod = self.model if not module_prefix else self.get_submodule(module_prefix)
+                            setattr(outer_mod, module_name, act_ckpt._func(self.get_submodule(n), **act_ckpt.cfg))
+                    fully_shard(self.get_submodule(n), mesh=dp_mesh, **self.cm_fsdp_plan[n])
             if not self._leave_composable:  # using default kwargs for `configure_model` parity scenario
                 fully_shard(self.model, mesh=dp_mesh)
 
@@ -439,9 +447,11 @@ cm_tt_tp_plan = gen_apply_transformer_tp_plan
 
 ## Model Parallel Model Configuration Aliases
 fsdp_cm_shard_tt_basic = {'model.output': {}, 'model.layers.1': {}, 'model.norm': {}}
-fsdp_cm_shard_tt_basic_act = {'model.output': {'act_ckpt': True}, 'model.layers.1': {'act_ckpt': True},
-                              'model.norm': {}}
+fsdp_cm_shard_tt_basic_act = {'model.output': {'act_ckpt': ('composable', {})},
+                              'model.layers.1': {'act_ckpt': ('composable',)}, 'model.norm': {}}
 fsdp_auto_tt_basic = {'model.output': {}, 'model.layers.1': {}, 'model.norm': {}}
+fsdp_auto_tt_basic_act = {'model.output': {'act_ckpt': ('wrapped_offload', {})},
+                          'model.layers.1': {'act_ckpt': ('composableX',)}, 'model.norm': {}}
 fsdp_autocm_shard_tt = {'^.*model.layers.0$': {}}
 # should warn the second spec cannot be applied and the third spec is a disallowed type
 fsdp_autocm_shard_tt_warn = {**fsdp_autocm_shard_tt, 'model.layers.1.ffn_norm': {}, 'model.layers': {},
@@ -464,8 +474,8 @@ fsdp_auto = {"cm_fsdp_plan": None, "cm_tp_plan": None, "module_cls": FTSToyTrans
 
 ## Model Parallel Strategy Adpater Configuration Aliases
 fsdp_auto_only = {"fsdp_plan": fsdp_auto_tt_basic, "fsdp_default_kwargs":{}}
-fsdp_auto_cpuoffld = {"fsdp_plan": fsdp_auto_tt_basic, "fsdp_default_kwargs":{'offload_policy': CPUOffloadPolicy()}}
-fsdp_auto_act = {"fsdp_plan": fsdp_cm_shard_tt_basic_act, "fsdp_default_kwargs":{}}
+fsdp_auto_cpuoffld = {"fsdp_plan": fsdp_auto_tt_basic, "fsdp_default_kwargs":{'cpu_offload_policy': {}}}
+fsdp_auto_act = {"fsdp_plan": fsdp_auto_tt_basic_act, "fsdp_default_kwargs":{}}
 fsdp_autocm = {"fsdp_plan": fsdp_autocm_shard_tt_warn, "fsdp_default_kwargs":{}}
 fsdp_autocm_err = {"fsdp_plan": fsdp_autocm_shard_tt_err, "fsdp_default_kwargs":{}}
 fsdp_autocm_tp = {"fsdp_plan": fsdp_autocm_shard_tt, "fsdp_default_kwargs":{}}
@@ -525,7 +535,7 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
     ModParallelTestCfg(model_cfg_key="fsdp_cm_only", model_cls=cm_mod_parallel, model_cfg=fsdp_cm_only,
                        runif_alias="alone", expected_results=ExpectedResults(expected_state=path_fsdp)),
     ModParallelTestCfg(model_cfg_key="fsdp_cm_act", model_cls=cm_mod_parallel, model_cfg=fsdp_cm_act,
-                       runif_alias="alone", expected_results=ExpectedResults(expected_state=path_fsdp)),
+                       expected_results=ExpectedResults(expected_state=path_fsdp), runif_alias="alone"),
     ModParallelTestCfg(model_cfg_key="fsdp_cm_fp16", model_cls=cm_mod_parallel, precision_opts=fp16,
                        model_cfg=fsdp_cm_only, runif_alias="alone"),
     # FSDP2 auto plan tests
@@ -538,7 +548,8 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
                        expected_results=ExpectedResults(expected_state=path_fsdp)),
     ModParallelTestCfg(model_cfg_key="fsdp_auto_act", model_cls=fsdp_auto_mod_parallel,
                        strategy_adapter_cfg=fsdp_auto_act, model_cfg=fsdp_auto, runif_alias="alone",
-                       expected_results=ExpectedResults(expected_state=path_fsdp)),
+                       expected_results=ExpectedResults(
+                           expected_state=path_fsdp, warns_expected=("Unknown AC mode", "to filter out AC"))),
     ModParallelTestCfg(model_cfg_key="fsdp_autocm", model_cls=cm_mod_parallel, strategy_adapter_cfg=fsdp_autocm,
                        model_cfg=fsdp_autocm_compose, runif_alias="alone", expected_results=ExpectedResults(
                            expected_state=path_fsdp_autocm,
