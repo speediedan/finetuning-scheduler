@@ -451,7 +451,8 @@ fsdp_cm_shard_tt_basic_act = {'model.output': {'act_ckpt': ('composable', {})},
                               'model.layers.1': {'act_ckpt': ('composable',)}, 'model.norm': {}}
 fsdp_auto_tt_basic = {'model.output': {}, 'model.layers.1': {}, 'model.norm': {}}
 fsdp_auto_tt_basic_act = {'model.output': {'act_ckpt': ('wrapped_offload', {})},
-                          'model.layers.1': {'act_ckpt': ('composableX',)}, 'model.norm': {}}
+                          'model.layers.1': {'act_ckpt': ('composableX',)},
+                          'model.norm': {'act_ckpt': ('wrapped', {})}}
 fsdp_autocm_shard_tt = {'^.*model.layers.0$': {}}
 # should warn the second spec cannot be applied and the third spec is a disallowed type
 fsdp_autocm_shard_tt_warn = {**fsdp_autocm_shard_tt, 'model.layers.1.ffn_norm': {}, 'model.layers': {},

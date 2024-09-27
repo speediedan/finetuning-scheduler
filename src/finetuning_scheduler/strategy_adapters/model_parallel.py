@@ -55,7 +55,7 @@ class ActCkptCfg:
     cfg: Optional[Dict[str, Any]] = field(default_factory=dict)
     _func: Optional[Callable] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if isinstance(self.mode, str):
             try:
                 self.mode = ActCkptEnum(self.mode)
@@ -232,7 +232,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         if self.fsdp_default_kwargs:
             self.fsdp_default_kwargs = ModelParallelStrategyAdapter._resolve_cfg_aliases(self.fsdp_default_kwargs)
         named_modules = dict(self.pl_module.named_modules()).keys()
-        resolved_modules = {}
+        resolved_modules: Dict[str, Dict] = {}
         for plan_n, kwargs in self.fsdp_plan.items():
             module_resolved = False
             if plan_n in named_modules:
@@ -282,6 +282,8 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
             del self.fsdp_plan[n]
 
     def _apply_activation_checkpointing(self, act_ckpt: ActCkptCfg, n: str) -> None:
+        assert isinstance(act_ckpt, ActCkptCfg)
+        assert isinstance(act_ckpt.cfg, dict) and callable(act_ckpt._func)
         if act_ckpt.mode == ActCkptEnum.COMPOSABLE:
             act_ckpt._func(self.pl_module.get_submodule(n), **act_ckpt.cfg)
         elif act_ckpt.mode in (ActCkptEnum.WRAPPED, ActCkptEnum.WRAPPED_OFFLOAD):

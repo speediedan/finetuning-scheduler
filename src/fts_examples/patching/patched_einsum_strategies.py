@@ -1,6 +1,6 @@
 from fts_examples.patching._patch_utils import _prepare_module_ctx
 
-globals().update(_prepare_module_ctx('torch.distributed._tensor.ops._einsum_strategy', globals()))
+globals().update(_prepare_module_ctx('torch.distributed.tensor._ops._einsum_strategy', globals()))
 
 # we ignore these for the entire file since we're using our global namespace trickeration to patch
 # ruff: noqa: F821

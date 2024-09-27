@@ -89,9 +89,9 @@ RUN \
         # ... pytorch patch version
         # pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
         # ... pytorch nightly dev version
-        pip install --pre torch==2.5.0.dev20240827  torchvision==0.20.0.dev20240827 --index-url https://download.pytorch.org/whl/nightly/cu124; \
+        #pip install --pre torch==2.5.0.dev20240827  torchvision==0.20.0.dev20240827 --index-url https://download.pytorch.org/whl/nightly/cu124; \
         # ... test channel
-        #pip install --pre torch==2.4.0 torchvision --index-url https://download.pytorch.org/whl/test/cu124; \
+        pip install --pre torch==2.5.0 torchvision --index-url https://download.pytorch.org/whl/test/cu124; \
     fi && \
     # Install all requirements
     pip install -r requirements/devel.txt --no-cache-dir && \

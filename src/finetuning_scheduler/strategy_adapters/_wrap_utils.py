@@ -62,8 +62,8 @@ class NCACMixin(torch.nn.Module):
     # extracted from https://bit.ly/non_composable_ac_adapt
     def named_parameters(
         self,
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
         """Override :meth:`named_parameters()` to intercept parameter names.
 
@@ -73,7 +73,7 @@ class NCACMixin(torch.nn.Module):
             yield param_name.replace(_CHECKPOINT_PREFIX, ""), param
 
 
-def _compose_ncac(m):
+def _compose_ncac(m: torch.nn.Module) -> None:
     """Composes a given module with the NCACMixin to accommodate non-composable activation checkpoint (NCAC) API
     usage."""
     new_bases = resolve_bases((NCACMixin, m.__class__))
