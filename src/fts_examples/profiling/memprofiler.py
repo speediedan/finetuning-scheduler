@@ -135,7 +135,16 @@ class MemProfInternalState:
             self._iter_incremented[(fn_name, iter_ctx)] = False
 
 class MemProfiler:
+    """MemProfiler is a utility that expedites simultaneous configuration and orchestration of numerous
+    complementary profiling methods.
 
+    The following profiling utilities are integrated and simultaneously configured:
+
+    - ``FSDP2MemTracker``
+    - `cuda memory snapshot and allocator history tracking <https://pytorch.org/docs/stable/torch_cuda_memory.html>`_
+    - host-level memory tracking
+    - custom memory hooks (e.g. for activation checkpoint memory tracking via ``saved_tensors_hooks`` etc.)
+    """
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
         self.memory_stats = defaultdict(dict)

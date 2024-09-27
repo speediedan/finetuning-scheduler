@@ -1,4 +1,6 @@
 import os
+if not os.getenv("SHOW_EXAMPLE_CPP_WARNS", "0") == "1":
+    os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
 import warnings
 
 import torch
@@ -18,13 +20,6 @@ import lightning as L
 from fts_examples.cli_experiment_utils import ExpHarness, FTSExperimentCLI, ExperimentCfg
 from fts_examples.model_parallel.torchtitan_llama import ModelCfg, Transformer
 from finetuning_scheduler.strategy_adapters.model_parallel import _TORCH_GREATER_EQUAL_2_5
-
-if _TORCH_GREATER_EQUAL_2_5:
-    from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
-else:
-    FSDPMemTracker = None
-
-
 
 # Lightning ModelParallel still uses `torch.load` with `weights_only=False`
 warnings.filterwarnings("ignore", ".*uses the default pickle.*")

@@ -3,7 +3,7 @@ model:
   init_args:
     model_cfg: torchtitan_llama.yaml
 trainer:
-  max_epochs: 2
+  max_epochs: 4
   devices: 2
   accelerator: gpu
   log_every_n_steps: 16

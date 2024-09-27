@@ -8,8 +8,10 @@
 # Copyright (c) Meta Platforms, Inc. All Rights Reserved.
 
 # This is a slightly modified version of https://bit.ly/torchtitan_llama_d2a4904
-# The only change is that we fix use of `RMSNorm` rather than parameterizing the `norm_type` to avoid the need
-# to import another torchtitan module (`torchtitan.models.norms`: https://bit.ly/torchtitan_norms_module)
+# The only changes are:
+# - we fix use of `RMSNorm` rather than parameterizing the `norm_type` to avoid the need to import another
+#   torchtitan module (`torchtitan.models.norms`: https://bit.ly/torchtitan_norms_module)
+# - we add `reset_parameters` methods that invoke `init_weights` for more convenient deferred materialization
 
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -189,6 +191,9 @@ class Attention(nn.Module):
             model_args.n_heads * self.head_dim, model_args.dim, bias=False
         )
 
+    def reset_parameters(self):
+        self.init_weights()
+
     def init_weights(self, init_std: float):
         for linear in (self.wq, self.wk, self.wv):
             nn.init.trunc_normal_(linear.weight, mean=0.0, std=0.02)
@@ -273,6 +278,9 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
 
+    def reset_parameters(self):
+        self.init_weights()
+
     def init_weights(self, init_std: float):
         nn.init.trunc_normal_(self.w1.weight, mean=0.0, std=0.02)
         for linear in (self.w2, self.w3):
@@ -337,6 +345,9 @@ class TransformerBlock(nn.Module):
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
+    def reset_parameters(self):
+        self.init_weights()
+
     def init_weights(self):
         for norm in (self.attention_norm, self.ffn_norm):
             norm.reset_parameters()
@@ -385,6 +396,9 @@ class Transformer(nn.Module):
         self.norm = RMSNorm(dim=model_args.dim, eps=model_args.norm_eps)
 
         self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
+        self.init_weights()
+
+    def reset_parameters(self):
         self.init_weights()
 
     def init_weights(self):

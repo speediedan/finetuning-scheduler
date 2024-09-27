@@ -1,11 +1,16 @@
 trainer:
+  max_epochs: 4
   callbacks+:
   - class_path: finetuning_scheduler.FinetuningScheduler
     init_args:
-      ft_schedule: ./config/defaults/ModParallelExample_ft_schedule.yaml
+      ft_schedule: ./config/defaults/llama_ft_schedule.yaml
       max_depth: 2
       strategy_adapter_cfg:
-        fsdp_plan: {"model.output": {}, '^.*model.layers.\d*$': {}}
+        fsdp_default_kwargs:
+          reshard_after_forward: True  # default value of a normal ``fully_shard`` kwarg
+          act_ckpt: ['composable']  # use composable AC with default kwargs
+          cpu_offload_policy: {}  # apply default cpu offload policy
+        fsdp_plan: {'model.output': {}, 'model.layers.\d*$': {}}
   strategy:
     init_args:
       data_parallel_size: 2

@@ -2,6 +2,12 @@
 FSDP Scheduled Fine-Tuning
 ##########################
 
+.. important::
+
+  This guide is for PyTorch's original, wrapper-based FSDP API sometimes referred to as FSDP1. Using the newer
+  composable distributed API ``fully_shard`` a.k.a. FSDP2 is likely preferable for most use cases. :doc:`See the
+  FTS guide for using it here <model_parallel_scheduled_fine_tuning>`.
+
 Overview
 ********
 
@@ -330,3 +336,9 @@ As always, if needed, one can alternatively override ``configure_model`` and man
   If you want to extend FTS to use a custom, currently unsupported strategy or override current FTS behavior with a
   given training strategy, subclassing :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is a way to do
   so.
+
+Footnotes
+*********
+
+.. [#] Starting with PyTorch ``2.1.0``, ``FlatParameter`` s constructed in ``use_orig_params`` mode were allowed to
+  contain original params with non-uniform ``requires_grad``.

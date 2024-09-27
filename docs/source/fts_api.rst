@@ -10,3 +10,11 @@ Fine-Tuning Scheduler API
     fts
     fts_supporters
     strategy_adapters
+
+.. currentmodule:: fts_examples.profiling
+
+.. autosummary::
+    :toctree: api
+    :nosignatures:
+
+    memprofiler

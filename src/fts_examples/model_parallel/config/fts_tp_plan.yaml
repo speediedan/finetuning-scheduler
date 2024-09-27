@@ -3,7 +3,7 @@ trainer:
   callbacks+:
   - class_path: finetuning_scheduler.FinetuningScheduler
     init_args:
-      ft_schedule: ./config/defaults/ModParallelExample_ft_schedule.yaml
+      ft_schedule: ./config/defaults/llama_ft_schedule.yaml
       max_depth: 2
   strategy:
     init_args:
