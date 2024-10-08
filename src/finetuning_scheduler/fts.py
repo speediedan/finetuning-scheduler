@@ -31,6 +31,7 @@ from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.trainer.states import TrainerFn
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
+from lightning.pytorch.trainer.connectors.logger_connector.result import _ResultMetric
 
 from finetuning_scheduler.fts_supporters import (
     CallbackDepMixin,
@@ -557,6 +558,24 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             )
         else:
             raise key_error
+
+    def _check_sync_dist(self, monitor: str) -> bool:
+        """Inspect the monitored metric and execution context to determine whether the current monitored metric is
+        a tensor in a distributed context that isn't being synced.
+
+        Returns:
+            bool: Whether whether the monitor metric is a tensor in a distributed context that isn't being synced.
+        """
+        if self.pl_module.trainer._results is None:
+            return False
+        monitor_metric = [m for m in self.pl_module.trainer._results.result_metrics if m.meta.name == monitor]
+        if len(monitor_metric) > 0:
+            assert isinstance(monitor_metric[0], _ResultMetric)
+            monitor_metric_syncing = getattr(monitor_metric[0].meta.sync, "should", False)
+            no_sync = all((torch.distributed.is_available(), torch.distributed.is_initialized(),
+                        monitor_metric[0].is_tensor)) and not monitor_metric_syncing
+            return no_sync
+        return False  # couldn't find the monitor metric in the current context, so by definition ``False``
 
     def _reduce_transition(self, strategy: Strategy, decision: bool) -> bool:
         """Reduce a transition decision across all world processes (effectively a global `any` collective)

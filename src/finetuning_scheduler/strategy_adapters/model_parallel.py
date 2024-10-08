@@ -17,15 +17,19 @@ A :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that extends 
 for PyTorch's distributed composable and Tensor Parallel APIs.
 
 """
-from typing import Any, Optional, Callable, Dict, Sequence, Tuple
+from typing import Any, Optional, Callable, Dict, Sequence, Tuple, List
 from functools import wraps
+from copy import deepcopy
 import re
+import os
+from pprint import pformat
 # TODO: replace local version once Lightning version available
 # from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_2_5
 import operator
 from dataclasses import dataclass, field
 
 import torch
+from torch.distributed.tensor import DTensor
 from torch.distributed._composable import checkpoint
 from torch.distributed._composable.fsdp.fully_shard import fully_shard, FSDPModule
 from torch.distributed._composable.fsdp._fsdp_api import CPUOffloadPolicy
@@ -35,7 +39,7 @@ from lightning.fabric.utilities.enums import LightningEnum
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning_utilities.core.imports import compare_version
 from lightning.pytorch.utilities.model_helpers import is_overridden
-from lightning.fabric.utilities import rank_zero_warn
+from lightning.fabric.utilities import rank_zero_warn, rank_zero_info
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
@@ -105,8 +109,8 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
     with any provided ``Dict`` of policy kwargs.
     """
 
-    def __init__(self, fsdp_default_kwargs: Optional[Dict] = None, fsdp_plan: Optional[Dict] = None,
-                 *args: Any, **kwargs: Any) -> None:
+    def __init__(self, fsdp_default_kwargs: Optional[Dict] = None, fsdp_plan: Optional[Dict] = None, *args: Any,
+                 **kwargs: Any) -> None:
         """The only user-facing configuration for
         :class:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter` are
         :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan` and
@@ -122,6 +126,8 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                   ``LightningModule.configure_model``, as the ``fsdp_plan`` directives will only invoke ``fully_shard``
                   on a specified module if it was not already applied to that module.
                 - All valid ``fully_shard`` API kwargs are supported.
+                - :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan` directives are
+                  applied in the order provided in the ``fsdp_plan`` dictionary.
 
                 Additionally, ``fsdp_plan`` supports ``act_ckpt`` and ``cpu_offload_policy`` kwargs. For specified
                 module/patterns (or ``fsdp_default_kwargs``):
@@ -148,6 +154,8 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                   ``LightningModule.configure_model``, as the ``fsdp_plan`` directives will only invoke ``fully_shard``
                   on a specified module if it was not already applied to that module.
                 - All valid ``fully_shard`` API kwargs are supported.
+                - :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan` directives are
+                  applied in the order provided in the ``fsdp_plan`` dictionary.
 
                 Additionally, ``fsdp_plan`` supports ``act_ckpt`` and ``cpu_offload_policy`` kwargs. For specified
                 module/patterns (or ``fsdp_default_kwargs``):
@@ -189,6 +197,61 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
             setattr(self.pl_module, "configure_model", cm_func)
         else:
             setattr(self.pl_module, "configure_model", self._fts_auto_configure_model)
+
+    def _validate_fsdp_fts_config(self) -> Optional[Tuple]:
+        mixed_param_pgs: dict = {}
+        inspection_map = deepcopy(self.fts_handle.ft_schedule)
+        all_params = dict(self.pl_module.named_parameters())
+        has_mixed_pgs = False
+        for d, pl in inspection_map.items():
+            mixed_param_pgs[d] = {}
+            non_dtensor_params, dtensor_params = [], []
+            for lp in pl["params"]:
+                param = all_params[lp]
+                if isinstance(param, DTensor):
+                    dtensor_params.append(lp)
+                else:
+                    non_dtensor_params.append(lp)
+            if non_dtensor_params and dtensor_params:
+                has_mixed_pgs = True
+                for lp in non_dtensor_params:
+                    p = all_params[lp]
+                    mixed_param_pgs[d][lp] = type(p.data) if isinstance(p, torch.nn.Parameter) else type(p)
+
+        if has_mixed_pgs:
+            ModelParallelStrategyAdapter._provide_mixed_pg_feedback(mixed_param_pgs)
+
+    @staticmethod
+    def _provide_mixed_pg_feedback(mixed_param_pgs: Dict) -> None:
+        phasewise_feedback = ""
+        for d, mixed_params in mixed_param_pgs.items():
+            if mixed_params:
+                phasewise_feedback += (
+                    f"  Phase {d}:  {os.linesep}    {pformat(mixed_params, indent=4)}{os.linesep}"
+                )
+        if phasewise_feedback:
+            summary_msg_base = (
+                "\nThe current fine-tuning schedule and FSDP plan produce mixed DTensor/Non-DTensor parameter group(s)"
+                " in at least one phase.\n"
+                "Be aware some optimizer operations may require you to either:\n"
+                "  1. allow implicit replication (experimental)\n"
+                "  2. add modules with optimized non-DTensor (usually ``torch.Tensor``) parameters to the FSDP plan.\n"
+                "     (HINT: adding your root model to the FSDP plan usually addresses this concern for all phases if"
+                " needed).\n\n"
+                "Found Non-DTensor parameters in mixed parameter groups: \n"
+            )
+            summary_msg = summary_msg_base + phasewise_feedback
+            rank_zero_info(summary_msg)
+
+    def on_before_fts_fit_start(self) -> None:
+        """In this hook executed immediately before the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
+        :meth:`~finetuning_scheduler.fts.FinetuningScheduler.on_fit_start` hook begins, we ensure the provided
+        fine-tuning schedule and FSDP2 composed :external+pl:class:`~lightning.pytorch.core.module.LightningModule` are
+        appropriately aligned. If the fine-tuning schedule and composed modules yield parameter group configurations
+        that may not be supported by some optimizer group operations, detailed feedback on potential remediation is
+        provided to the user.
+        """
+        self._validate_fsdp_fts_config()
 
     def _maybe_update_fsdp_plan(self, resolved_modules: Dict, kwargs: Dict, name: str) -> bool:
         # right now, the only explicitly disallowed types are the container types w/o a forward: `ModuleList``
@@ -264,7 +327,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         # self._apply_tp_auto_plan()
         self._apply_fsdp_plan()
 
-    def _compose_or_warn(self, n: str) -> None:
+    def _compose_or_warn(self, n: str) -> Optional[str]:
         # NB PL does not currently support passing user-created meshes so we unconditionally pass the device mesh
         if not getattr(self.pl_module.get_submodule(n), '_is_fsdp_managed_module', False):
             if act_ckpt := self.fsdp_plan[n].pop('act_ckpt', None):
@@ -279,7 +342,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                 f"Please apply ``fully_shard`` to '{n}' before any of its parents if it is intended to have a "
                 f"distinct `FSDPState`."
             )
-            del self.fsdp_plan[n]
+            return n  # return the uncomposed fqn for subsequent handling
 
     def _apply_activation_checkpointing(self, act_ckpt: ActCkptCfg, n: str) -> None:
         assert isinstance(act_ckpt, ActCkptCfg)
@@ -311,17 +374,19 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         Note: If the provided `fsdp_plan` specifies a module that has already had ``fully_shard`` applied (e.g.
         explicitly via `configure_model`), that directive will be skipped with a warning.
         """
-        auto_plan_keys = set(self.fsdp_plan.keys())
+        auto_plan_keys = self.fsdp_plan.keys()
+        named_modules = dict(self.pl_module.named_modules())
         has_fsdp_managed = False
-        for n, m in self.pl_module.named_modules():
-            if n in auto_plan_keys:
-                self._compose_or_warn(n)
+        unsuccessful_compositions: List[str] = []
+        for n in auto_plan_keys:
+            if n in named_modules:
+                unsuccessful_fqn = self._compose_or_warn(n)  # returns fqn if composition could not be performed
+                if unsuccessful_fqn:
+                    unsuccessful_compositions.append(unsuccessful_fqn)
             if not has_fsdp_managed:
-                has_fsdp_managed = getattr(m, '_is_fsdp_managed_module', False)
-        if has_fsdp_managed and not getattr(self.pl_module.model, '_is_fsdp_managed_module', False):
-            # we always apply the ``fully_shard`` API to the user's outer-model if it hasn't been applied and any
-            #  FSDP-managed modules are present
-            fully_shard(self.pl_module.model, mesh=self.pls_handle.device_mesh["data_parallel"])
+                has_fsdp_managed = getattr(named_modules[n], '_is_fsdp_managed_module', False)
+        for k in unsuccessful_compositions:
+            del self.fsdp_plan[k]  # user has been warned, remove the unsuccessful directives from the active plan
         if non_comp_ac := self._any_noncomposable_AC():
             _compose_ncac(self.pl_module)
             rank_zero_warn(

@@ -17,6 +17,11 @@ name/pattern-based configuration instead of manually inspecting modules and appl
 As the best way to learn how to use this FTS functionality may be by example, feel free to skip the discussion below
 and move directly to :ref:`reviewing/running the examples<model-parallel-fine-tuning-examples>` in this guide.
 
+.. note::
+  FTS supports PyTorch's composable distributed and Tensor Parallelism (TP) APIs via
+  :external+pl:class:`~lightning.pytorch.strategies.model_parallel.ModelParallelStrategy` beginning with PyTorch
+  ``2.5.0`` [#]_.
+
 FTS 'Auto' FSDP2 Plan Configuration
 ***********************************
 
@@ -34,10 +39,12 @@ The desired FSDP2 composition patterns are specified in an optional dictionary o
 
 - The module name/pattern-based keys are associated with a dictionary of ``fully_shard`` API keyword arguments to apply
   to matching modules.
-- ``fsdp_plan`` directives can also be composed with explicit ``fully_shard`` calls in
-  ``LightningModule.configure_model``, as the ``fsdp_plan`` directives will only invoke ``fully_shard`` on a specified
-  module if it was not already applied to that module.
+- :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan` directives can also be composed
+  with explicit ``fully_shard`` calls in ``LightningModule.configure_model``, as the ``fsdp_plan`` directives will only
+  invoke ``fully_shard`` on a specified module if it was not already applied to that module.
 - All valid ``fully_shard`` API keyword arguments are supported.
+- :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan` directives are applied in the
+  order provided in the ``fsdp_plan`` dictionary.
 
 Additionally, ``fsdp_plan`` supports ``act_ckpt`` and ``cpu_offload_policy`` keyword args described below.
 
@@ -60,32 +67,39 @@ with any provided ``Dict`` of policy keyword args.
 **act_ckpt**: For specified module/patterns (or ``fsdp_default_kwargs``), ``act_ckpt`` allows one to pass a string alias
 specifying the use of the desired activation checkpointing (AC) API as well as an optional ``Dict`` of activation
 checkpointing keyword arguments. The specified AC APIs will be applied to the matching module(s) before ``fully_shard``.
-Supported AC APIs are:
+The currently supported AC APIs are listed below. (non-composable API :sup:`*`)
 
-.. list-table::
-    :widths: 25 25 50
-    :header-rows: 1
+.. _model-parallel-supported-ac-apis:
 
-    * - AC API Alias
-      - Torch API
-      - AC Composability
-    * - "composable"
-      - ``torch.distributed._composable.checkpoint_activation.checkpoint``
-      - Composable
-    * - "wrapped"
-      - ``torch.distributed.algorithms._checkpoint.checkpoint_wrapper.checkpoint_wrapper``
-      - Non-Composable
-    * - "wrapped_offload"
-      - ``torch.distributed.algorithms._checkpoint.checkpoint_wrapper.offload_wrapper``
-      -  Non-Composable
+- *composable*: ``torch.distributed._composable.checkpoint_activation.checkpoint``
+- *wrapped* :sup:`*`: ``torch.distributed.algorithms._checkpoint.checkpoint_wrapper.checkpoint_wrapper``
+- *wrapped_offload* :sup:`*`: ``torch.distributed.algorithms._checkpoint.checkpoint_wrapper.offload_wrapper``
+
+.. note::
+
+  If using a non-composable AC API (NCAC API), a user's ``LightningModule`` will be dynamically composed with an
+  adapter that will allow FTS to use the NCAC API while in composition with composable APIs like ``fully_shard``.
+  This is similar to FSDP2's approach to `compositional enrichment <https://bit.ly/fsdp2_dynamic_subclass>`_
+  (via dynamic subclassing).
+
+  .. raw:: html
+
+    <figure class="align-right" id="id3" style="position: relative; left: 55%;">
+      <img alt="FSDP2 and FTS dynamic subclasses, NCAC adapted user module"
+           src="../_static/images/fts/ncac_wrapped_first_tblock.png" style="width: 40%;">
+      <figcaption>
+        <p>
+          <div class="caption-text" style="width: 40%;">FSDP2 and FTS dynamic subclasses, NCAC adapted user module</div>
+        </p>
+      </figcaption>
+    </figure>
 
 .. warning::
-    If using a non-composable AC API (NCAC API), a user's ``LightningModule`` will be dynamically composed with an
-    adapter that will allow FTS to use the NCAC API while in composition with composable APIs like ``fully_shard``.
 
     When specific features of the NCAC APIs aren't required, using the composable AC API is recommended instead.
     Dynamically adapting the NCAC APIs is experimental and not all NCAC API functionality may work as intended in that
     context.
+
 
 .. _model-parallel-fsdp-default-kwargs:
 
@@ -213,6 +227,22 @@ activation checkpointing for all specified FSDP2 instances like so:
 That's it! We've configured composable/distributed/multi-phase/scheduled fine-tuning training and didn't even need to
 override ``LightningModule.configure_model``!
 
+.. list-table:: Resulting Composition
+   :widths: 50 50
+   :header-rows: 0
+
+   *  -
+       .. figure:: ../_static/images/fts/pl_module_first_outer_tformer_noac.png
+          :alt: FSDP2 modules are composed with the provided modules as specified.
+
+          FSDP2 modules are composed with the provided modules as specified.
+      -
+       .. figure:: ../_static/images/fts/last_tblock_output_noac.png
+          :alt: Modules not specified as separate FSDP2 instances remain normal modules.
+
+          Modules not specified as separate FSDP2 instances remain normal modules (e.g. ``norm``, ``feed_forward`` etc.).
+
+
 .. code-block:: bash
 
     cd ./fts_examples/model_parallel
@@ -223,6 +253,27 @@ override ``LightningModule.configure_model``!
     FTS will only apply ``fully_shard`` to a specified module if it was not already applied to that module, so using
     ``fsdp_plan`` (and ``fsdp_default_kwargs``) can be composed with existing ``fully_shard`` (or Tensor Parallel)
     directives in ``LightningModule.configure_model``.
+
+.. note::
+
+    As with manual application of the API,
+    :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan` directives should be
+    applied bottom-up. For instance, one should compose ``self.model.layer`` before ``self.model``, e.g.
+    ``fsdp_plan: {'model.layer': {}, 'model': {}}``
+
+
+.. tip::
+
+    At time of writing, some optimizer operations do not support parameter groups with mixed DTensor/Non-DTensor
+    (usually ``torch.Tensor``) parameters.
+
+    .. raw:: html
+
+        <img alt="FSDP2 and FTS dynamic subclasses, NCAC adapted user module"
+            src="../_static/images/fts/example_mixed_pg_feedback.png" style="width: 90%; position: relative; left: 5%;">
+
+    FTS will inspect the provided fine-tuning schedule and FSDP plan for this condition and if it is detected provide
+    the user ``INFO``-level feedback like the above.
 
 In the next section, we'll cover Tensor Parallel (TP) training with FTS.
 
@@ -259,3 +310,10 @@ As you can observe in (``./mp_examples.py``) our TP plan in this example is appl
 
     cd ./fts_examples/model_parallel
     python mp_examples.py fit --config config/fts_tp_plan.yaml
+
+Footnotes
+*********
+
+.. [#] Specifically, FTS depends upon these two PRs included in PyTorch ``2.5.0``:
+  `#133502 <https://github.com/pytorch/pytorch/pull/133502>`_,
+  `#134146 <https://github.com/pytorch/pytorch/pull/134146>`_

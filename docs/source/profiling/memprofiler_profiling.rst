@@ -71,6 +71,7 @@ Configuration
         track_fsdp_mem: true  # enable FSDP2MemTracker tracking
         fsdp_mem_track_module_depth: 3  # collect up to 3 levels of nested FSDP modules
         fsdp_mem_tracker_tabulate: true  # display FSDP2MemTracker stats in a table
+        fsdp_mem_tracker_root_module: 'model'  # the root FSDP module for FSDP2MemTracker to track
 
 
 Reviewing the Results

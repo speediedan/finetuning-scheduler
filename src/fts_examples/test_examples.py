@@ -12,6 +12,9 @@
 import os.path
 import subprocess
 from unittest import mock
+from copy import copy
+from itertools import chain
+import re
 
 import pytest
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -19,6 +22,8 @@ from packaging.version import Version
 from pkg_resources import get_distribution
 
 from fts_examples import _HF_AVAILABLE
+from tests.test_model_parallel import MODEL_PARALLEL_BASE_WARNS
+
 from tests.helpers.common import unexpected_warns
 from tests.helpers.runif import RunIf, EXTENDED_VER_PAT
 
@@ -32,9 +37,13 @@ ARGS_DEFAULT = (
     "--data.batch_size 32 "
 )
 ARGS_GPU = ARGS_DEFAULT + "--trainer.devices 1 "
-EXPECTED_WARNS = [
-    "does not have many workers",
+ALL_EXAMPLE_EXPECTED = [
+    # required for google protobuf <= 3.20.1 with python 3.12
+    "Use timezone-aware",
     "is smaller than the logging interval",
+    "does not have many workers",
+]
+EXPECTED_WARNS = [
     "sentencepiece tokenizer that you are converting",
     "`resume_download` is deprecated",  # required because of upstream usage as of 2.2.2
     "distutils Version classes are deprecated",  # still required as of PyTorch/Lightning 2.2
@@ -47,16 +56,17 @@ EXPECTED_WARNS = [
     "You are using `torch.load` with `weights_only=False`",
     # required for datasets <= 2.20.0 with python 3.12
     'co_lnotab is deprecated, use co_lines instead.',
-    # required for google protobuf <= 3.20.1 with python 3.12
-    "Use timezone-aware"
-
 ]
-MIN_VERSION_WARNS = "2.0"
-MAX_VERSION_WARNS = "2.4"
+
+EXPECTED_WARNS.extend(ALL_EXAMPLE_EXPECTED)
+
+# min/max versions only applies to base examples, TODO: consider for deprecation
+MIN_VERSION_WARNS = "2.2"
+MAX_VERSION_WARNS = "2.5"
 # torch version-specific warns go here
 EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [],
                           MAX_VERSION_WARNS: [
-                              'PairwiseParallel is deprecated and will be removed soon.',  # temp warning for pt 2.2
+                              'PairwiseParallel is deprecated and will be removed soon.',
                               ]}
 torch_version = get_distribution("torch").version
 extended_torch_ver = EXTENDED_VER_PAT.match(torch_version).group() or torch_version
@@ -66,6 +76,9 @@ else:
     EXPECTED_WARNS.extend(EXPECTED_VERSION_WARNS[MAX_VERSION_WARNS])
 ADV_EXPECTED_WARNS = EXPECTED_WARNS + ["Found an `init_pg_lrs` key"]
 
+# separate set of warnings for model parallel examples
+MODEL_PARALLEL_EXAMPLE_WARNS = copy(MODEL_PARALLEL_BASE_WARNS)
+MODEL_PARALLEL_EXAMPLE_WARNS.extend(ALL_EXAMPLE_EXPECTED)
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 @RunIf(min_cuda_gpus=1, skip_windows=True)
@@ -131,10 +144,48 @@ def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_fi
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
+@RunIf(min_cuda_gpus=2, min_torch="2.5.0", standalone=True)
+@pytest.mark.parametrize(
+    "config_files",
+    [
+        ("fts_fsdp_auto_plan.yaml",),
+        ("fts_tp_plan.yaml",),
+        ("fts_fsdp_profiling.yaml", "profiling/memprofiler_demo.yaml"),
+    ],
+    ids=[
+        "fts_fsdp_auto_plan",
+        "fts_tp_plan",
+        "fts_fsdp_profiling",
+    ],
+)
+def test_model_parallel_examples(tmpdir, config_files):
+    os.environ["MKL_THREADING_LAYER"] = "GNU"  # see https://github.com/pytorch/pytorch/issues/37377
+    mp_example_base = os.path.join(os.path.dirname(__file__), "model_parallel")
+    example_script = os.path.join(mp_example_base, "mp_examples.py")
+    os.chdir(mp_example_base)  # set cwd to that specified in the example
+    config_locs = []
+    for config_file in config_files:
+        config_locs.append("--config")
+        config_locs.append(os.path.join(mp_example_base, "config", config_file))
+
+    cli_args = [
+        f"--trainer.default_root_dir={tmpdir.strpath}", "--trainer.max_epochs=1",  "--trainer.limit_train_batches=2",
+    ]
+    command = ["python", example_script, "fit"] + config_locs + cli_args
+    cp = subprocess.run(command, capture_output=True, text=True)
+    stdout_lines, stderr_lines = cp.stdout.splitlines(), cp.stderr.splitlines()
+    warn_lines = []
+    for line in chain(stdout_lines, stderr_lines):
+        if re.search(r"[^\s]+\.py:\d+", line):
+            warn_lines.append(line)
+    assert cp.returncode == 0
+    unexpected = unexpected_warns(rec_warns=warn_lines, expected_warns=MODEL_PARALLEL_EXAMPLE_WARNS, raw_warns=True)
+    assert not unexpected, unexpected
+
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 @RunIf(min_cuda_gpus=1, skip_windows=True)
 @pytest.mark.parametrize("nb_name", ["fts_superglue_nb"], ids=["fts_superglue_nb"])
-def test_fts_superglue_nb(recwarn, nb_name):
+def test_fts_superglue_nb(nb_name):
     # simple sanity check that the notebook-based version of the example builds and executes successfully
     test_example_base = os.path.join(os.path.dirname(__file__), "ipynb_src")
     example_script = os.path.join(test_example_base, f"{nb_name}.py")

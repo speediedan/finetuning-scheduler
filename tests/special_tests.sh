@@ -18,6 +18,7 @@ unset log_file
 unset filter_pattern
 unset experiments_list
 unset experiment_patch_mask
+unset collect_dir
 unset PL_RUN_STANDALONE_TESTS
 unset FTS_RUN_STANDALONE_TESTS
 unset FTS_EXPERIMENTAL_PATCH_TESTS
@@ -32,12 +33,15 @@ Usage: $0
    [ --filter_pattern input]
    [ --experiments_list input]
    [ --experiment_patch_mask input]
+   [ --collect_dir input]
    [ --help ]
    Examples:
 	# run all standalone tests (but not experimental ones, note --mark_type defaults to 'standalone' ):
 	#   ./tests/special_tests.sh
 	# run all standalone tests following a pattern:
 	#   ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
+	# run all standalone tests following a pattern using a non-default test collection directory:
+	#   ./tests/special_tests.sh --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'
   # run all standalone tests passing a parent process log file to use:
   #   ./tests/special_tests.sh --mark_type=standalone --log_file=/tmp/some_parent_process_file_to_append_to.log
   # run all experimental tests following a pattern that are supported by a given experimental patch mask using the
@@ -49,7 +53,7 @@ EOF
 exit 1
 }
 
-args=$(getopt -o '' --long mark_type:,log_file:,filter_pattern:,experiments_list:,experiment_patch_mask:,help -- "$@")
+args=$(getopt -o '' --long mark_type:,log_file:,filter_pattern:,experiments_list:,experiment_patch_mask:,collect_dir:,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -64,6 +68,7 @@ do
     --filter_pattern)  filter_pattern=$2    ; shift 2  ;;
     --experiments_list)  experiments_list=$2    ; shift 2  ;;
     --experiment_patch_mask) experiment_patch_mask+=($2) ; shift 2  ;;
+    --collect_dir)  collect_dir=$2    ; shift 2  ;;
     --help)    usage      ; shift   ;;
     --) shift; break ;;
     *) >&2 echo Unsupported option: $1
@@ -80,12 +85,13 @@ if [ -s "${experiments_list}" ]; then
     experiment_patch_mask=($(cat tests/.experiments | awk '{for(i=1;i<=NF;i++) print "0"}'))
   fi
 fi
+collect_dir=${collect_dir:-"tests"}
 special_test_session_log=${log_file:-"${tmp_log_dir}/special_tests_${mark_type}_${d}.log"}
 test_session_tmp_log="${tmp_log_dir}/special_tests_raw_${mark_type}_${d}.log"
 
 # default python coverage arguments
 exec_defaults='-m coverage run --source src/finetuning_scheduler --append -m pytest --capture=no --no-header -v -s -rA'
-collect_defaults='-m pytest tests -q --collect-only --pythonwarnings ignore'
+collect_defaults="-m pytest ${collect_dir} -q --collect-only --pythonwarnings ignore"
 start_time=$(date +%s)
 echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $special_test_session_log
 printf "FTS special tests beginning execution at ${d} PT \n" | tee -a $special_test_session_log

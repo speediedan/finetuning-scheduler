@@ -38,9 +38,9 @@ def nones(num_n) -> Tuple:  # to help dedup config
     return (None,) * num_n
 
 def multiwarn_check(
-    rec_warns: List, expected_warns: List, expected_mode: bool = False
+    rec_warns: List, expected_warns: List, expected_mode: bool = False, raw_warns: bool = False
 ) -> List[Optional[WarningMessage]]:
-    msg_search = lambda w1, w2: re.compile(w1).search(w2.message.args[0])  # noqa: E731
+    msg_search = lambda w1, w2: re.compile(w1).search(w2 if raw_warns else w2.message.args[0])  # noqa: E731
     if expected_mode:  # we're directed to check that multiple expected warns are obtained
         return [w_msg for w_msg in expected_warns if not any([msg_search(w_msg, w) for w in rec_warns])]
     else:  # by default we're checking that no unexpected warns are obtained

@@ -36,7 +36,7 @@ def _patch_einsum_strategies():
 
     # In this case fortunately, we only import/call `gen_einsum_strategies` from
     # `torch.distributed._tensor.ops.matrix_ops`, so only need to patch there.
-    target_mod = 'torch.distributed._tensor.ops._matrix_ops'
+    target_mod = 'torch.distributed.tensor._ops._matrix_ops'
     sys.modules.get(target_mod).__dict__['gen_einsum_strategies'] = gen_einsum_strategies
 
 def _patch_unsupported_numpy_arrow_extractor():

@@ -6,8 +6,6 @@ from dataclasses import dataclass, field, asdict, fields
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 
 
-
-
 @dataclass
 class ExperimentCfg:
     loss_parallel: bool = True

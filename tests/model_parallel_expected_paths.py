@@ -5,6 +5,75 @@ import torch
 ## example template result, providing TP weight and FSDP module states you want a test to validate
 # state_key: ({p_states, fsdp_mod_states}, len(self._fts_state._curr_thawed_params))
 
+path_fsdp = {
+    0: ({'p_states': {
+        'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': False},
+        'model.layers.0.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': False},
+        'model.layers.1.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
+        'model.layers.1.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
+        'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
+        'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
+        'model.output.weight': {'requires_grad': True, 'is_DTensor': True},
+    }}, 3),
+    1: ({'p_states': {
+        'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': False},
+        'model.layers.0.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': False},
+        'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
+        'model.layers.1.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
+        'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
+        'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
+        'model.output.weight': {'requires_grad': True, 'is_DTensor': True},
+    }}, 15),
+    2: ({'p_states': {
+        'model.layers.0.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': False},
+        'model.layers.0.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': False},
+        'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
+        'model.layers.1.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
+        'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
+        'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
+        'model.output.weight': {'requires_grad': True, 'is_DTensor': True},
+    }}, 29),
+}
+
+path_fsdp_autocm = {
+    0: (
+        {'p_states': {
+            'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
+            'model.layers.0.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
+            'model.layers.1.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
+            'model.layers.1.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
+            'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
+            'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
+            'model.output.weight': {'requires_grad': True, 'is_DTensor': True},
+        }},
+        3,
+    ),
+    1: (
+        {'p_states': {
+            'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
+            'model.layers.0.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
+            'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
+            'model.layers.1.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
+            'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
+            'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
+            'model.output.weight': {'requires_grad': True, 'is_DTensor': True},
+        }},
+        15,
+    ),
+    2: (
+        {'p_states': {
+            'model.layers.0.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
+            'model.layers.0.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
+            'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
+            'model.layers.1.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
+            'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
+            'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
+            'model.output.weight': {'requires_grad': True, 'is_DTensor': True},
+        }},
+        29,
+    ),
+}
+
 path_tp = {
     0: ({'p_states': {
         'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
@@ -32,55 +101,22 @@ path_tp = {
         'model.output.weight': {'requires_grad': True, 'is_DTensor': True}}}, 29),
 }
 
-path_fsdp = {
-    0: (
-        {'p_states': {
-            'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
-            'model.layers.0.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
-            'model.layers.1.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
-            'model.layers.1.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
-            'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
-            'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.output.weight': {'requires_grad': True, 'is_DTensor': True}
-        }},
-        3),
-    1: (
-        {'p_states': {
-            'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
-            'model.layers.0.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
-            'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
-            'model.layers.1.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
-            'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.output.weight': {'requires_grad': True, 'is_DTensor': True}
-        }},
-        15),
-    2: (
-        {'p_states': {
-            'model.layers.0.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
-            'model.layers.0.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
-            'model.layers.1.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
-            'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.output.weight': {'requires_grad': True, 'is_DTensor': True}
-        }},
-        29),
-}
-
 path_tp_fsdp = {
-    0: ({'p_states': {
+    0: ({
+        'p_states': {
             'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
             'model.layers.0.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
             'model.layers.1.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
             'model.layers.1.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
             'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
             'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.output.weight': {'requires_grad': True, 'is_DTensor': True}},
+            'model.output.weight': {'requires_grad': True, 'is_DTensor': True},
+        },
         'fsdp_mod_states': {
-            'model.layers.0': {'is_fsdp_managed': True, 'is_fsdp_composed': False},
+            'model.layers.0': {'is_fsdp_managed': False, 'is_fsdp_composed': False},
             'model.layers.1': {
-                'is_fsdp_managed': True, 'is_fsdp_composed': True,
+                'is_fsdp_managed': True,
+                'is_fsdp_composed': True,
                 'prec_policy_summ': (None, None, None, True),
                 'param_group_summ': [
                     (None, torch.Size([192]), torch.Size([96])),
@@ -94,112 +130,133 @@ path_tp_fsdp = {
                     (None, torch.Size([768, 192]), torch.Size([384, 192])),
                     (None, torch.Size([768]), torch.Size([384])),
                     (None, torch.Size([192, 768]), torch.Size([96, 768])),
-                    (None, torch.Size([192]), torch.Size([96]))]},
-            'model.norm': {'is_fsdp_managed': True, 'is_fsdp_composed': True,
-                           'prec_policy_summ': (None, None, None, True),
-                           'param_group_summ': [
-                               (None, torch.Size([192]), torch.Size([96])),
-                               (None, torch.Size([192]), torch.Size([96]))]},
-            'model.output': {'is_fsdp_managed': True, 'is_fsdp_composed': True,
-                             'prec_policy_summ': (None, None, None, True),
-                             'param_group_summ': [
-                                 (None, torch.Size([33278, 192]), torch.Size([16639, 192]))]}}},
-        3),
-    1: ({'p_states': {
+                    (None, torch.Size([192]), torch.Size([96])),
+                ],
+            },
+            'model.norm': {
+                'is_fsdp_managed': True,
+                'is_fsdp_composed': True,
+                'prec_policy_summ': (None, None, None, True),
+                'param_group_summ': [
+                    (None, torch.Size([192]), torch.Size([96])),
+                    (None, torch.Size([192]), torch.Size([96])),
+                ],
+            },
+            'model.output': {
+                'is_fsdp_managed': True,
+                'is_fsdp_composed': True,
+                'prec_policy_summ': (None, None, None, True),
+                'param_group_summ': [
+                    (None, torch.Size([33278, 192]), torch.Size([16639, 192])),
+                ],
+            },
+        },
+    }, 3),
+    1: ({
+        'p_states': {
             'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
             'model.layers.0.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
             'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
             'model.layers.1.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
             'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
             'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.output.weight': {'requires_grad': True, 'is_DTensor': True}},
+            'model.output.weight': {'requires_grad': True, 'is_DTensor': True},
+        },
         'fsdp_mod_states': {
-            'model.layers.0': {'is_fsdp_managed': True, 'is_fsdp_composed': False},
+            'model.layers.0': {'is_fsdp_managed': False, 'is_fsdp_composed': False},
             'model.layers.1': {
-                'is_fsdp_managed': True, 'is_fsdp_composed': True,
+                'is_fsdp_managed': True,
+                'is_fsdp_composed': True,
                 'prec_policy_summ': (None, None, None, True),
                 'param_group_summ': [
-                    ('layers.1.attention_norm.weight', torch.Size([192]), torch.Size([96])),
-                    ('layers.1.attention_norm.bias', torch.Size([192]), torch.Size([96])),
-                    ('layers.1.attention.wq.weight', torch.Size([192, 192]), torch.Size([96, 192])),
-                    ('layers.1.attention.wk.weight', torch.Size([192, 192]), torch.Size([96, 192])),
-                    ('layers.1.attention.wv.weight', torch.Size([192, 192]), torch.Size([96, 192])),
-                    ('layers.1.attention.wo.weight', torch.Size([192, 192]), torch.Size([96, 192])),
-                    ('layers.1.ffn_norm.weight', torch.Size([192]), torch.Size([96])),
-                    ('layers.1.ffn_norm.bias', torch.Size([192]), torch.Size([96])),
-                    ('layers.1.feed_forward.w1.weight', torch.Size([768, 192]), torch.Size([384, 192])),
-                    ('layers.1.feed_forward.w1.bias', torch.Size([768]), torch.Size([384])),
-                    ('layers.1.feed_forward.w2.weight', torch.Size([192, 768]), torch.Size([96, 768])),
-                    ('layers.1.feed_forward.w2.bias', torch.Size([192]), torch.Size([96]))]},
-            'model.norm': {'is_fsdp_managed': True, 'is_fsdp_composed': True,
-                           'prec_policy_summ': (None, None, None, True),
-                           'param_group_summ': [
-                               ('norm.weight', torch.Size([192]), torch.Size([96])),
-                               ('norm.bias', torch.Size([192]), torch.Size([96]))]},
-            'model.output': {'is_fsdp_managed': True, 'is_fsdp_composed': True,
-                             'prec_policy_summ': (None, None, None, True),
-                             'param_group_summ': [
-                                 ('output.weight', torch.Size([33278, 192]), torch.Size([16639, 192]))]}}},
-        15),
-    2: (
-        {
-            'p_states': {
-                'model.layers.0.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
-                'model.layers.0.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
-                'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
-                'model.layers.1.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
-                'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
-                'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
-                'model.output.weight': {'requires_grad': True, 'is_DTensor': True},
+                    ('attention_norm.weight', torch.Size([192]), torch.Size([96])),
+                    ('attention_norm.bias', torch.Size([192]), torch.Size([96])),
+                    ('attention.wq.weight', torch.Size([192, 192]), torch.Size([96, 192])),
+                    ('attention.wk.weight', torch.Size([192, 192]), torch.Size([96, 192])),
+                    ('attention.wv.weight', torch.Size([192, 192]), torch.Size([96, 192])),
+                    ('attention.wo.weight', torch.Size([192, 192]), torch.Size([96, 192])),
+                    ('ffn_norm.weight', torch.Size([192]), torch.Size([96])),
+                    ('ffn_norm.bias', torch.Size([192]), torch.Size([96])),
+                    ('feed_forward.w1.weight', torch.Size([768, 192]), torch.Size([384, 192])),
+                    ('feed_forward.w1.bias', torch.Size([768]), torch.Size([384])),
+                    ('feed_forward.w2.weight', torch.Size([192, 768]), torch.Size([96, 768])),
+                    ('feed_forward.w2.bias', torch.Size([192]), torch.Size([96])),
+                ],
             },
-            'fsdp_mod_states': {
-                'model.layers.0': {
-                    'is_fsdp_managed': True,
-                    'is_fsdp_composed': False
-                },
-                'model.layers.1': {
-                    'is_fsdp_managed': True,
-                    'is_fsdp_composed': True,
-                    'prec_policy_summ': (None, None, None, True),
-                    'param_group_summ': [
-                        ('layers.1.attention_norm.weight', torch.Size([192]), torch.Size([96])),
-                        ('layers.1.attention_norm.bias', torch.Size([192]), torch.Size([96])),
-                        ('layers.1.attention.wq.weight', torch.Size([192, 192]), torch.Size([96, 192])),
-                        ('layers.1.attention.wk.weight', torch.Size([192, 192]), torch.Size([96, 192])),
-                        ('layers.1.attention.wv.weight', torch.Size([192, 192]), torch.Size([96, 192])),
-                        ('layers.1.attention.wo.weight', torch.Size([192, 192]), torch.Size([96, 192])),
-                        ('layers.1.ffn_norm.weight', torch.Size([192]), torch.Size([96])),
-                        ('layers.1.ffn_norm.bias', torch.Size([192]), torch.Size([96])),
-                        ('layers.1.feed_forward.w1.weight', torch.Size([768, 192]), torch.Size([384, 192])),
-                        ('layers.1.feed_forward.w1.bias', torch.Size([768]), torch.Size([384])),
-                        ('layers.1.feed_forward.w2.weight', torch.Size([192, 768]), torch.Size([96, 768])),
-                        ('layers.1.feed_forward.w2.bias', torch.Size([192]), torch.Size([96])),
-                    ],
-                },
-                'model.norm': {
-                    'is_fsdp_managed': True,
-                    'is_fsdp_composed': True,
-                    'prec_policy_summ': (None, None, None, True),
-                    'param_group_summ': [
-                        ('norm.weight', torch.Size([192]), torch.Size([96])),
-                        ('norm.bias', torch.Size([192]), torch.Size([96])),
-                    ],
-                },
-                'model.output': {
-                    'is_fsdp_managed': True,
-                    'is_fsdp_composed': True,
-                    'prec_policy_summ': (None, None, None, True),
-                    'param_group_summ': [('output.weight', torch.Size([33278, 192]), torch.Size([16639, 192]))],
-                },
+            'model.norm': {
+                'is_fsdp_managed': True,
+                'is_fsdp_composed': True,
+                'prec_policy_summ': (None, None, None, True),
+                'param_group_summ': [
+                    ('weight', torch.Size([192]), torch.Size([96])),
+                    ('bias', torch.Size([192]), torch.Size([96])),
+                ],
+            },
+            'model.output': {
+                'is_fsdp_managed': True,
+                'is_fsdp_composed': True,
+                'prec_policy_summ': (None, None, None, True),
+                'param_group_summ': [
+                    ('weight', torch.Size([33278, 192]), torch.Size([16639, 192])),
+                ],
             },
         },
-        29,
-    ),
+    }, 15),
+    2: ({
+        'p_states': {
+            'model.layers.0.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
+            'model.layers.0.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
+            'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
+            'model.layers.1.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
+            'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
+            'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
+            'model.output.weight': {'requires_grad': True, 'is_DTensor': True},
+        },
+        'fsdp_mod_states': {
+            'model.layers.0': {'is_fsdp_managed': False, 'is_fsdp_composed': False},
+            'model.layers.1': {
+                'is_fsdp_managed': True,
+                'is_fsdp_composed': True,
+                'prec_policy_summ': (None, None, None, True),
+                'param_group_summ': [
+                    ('attention_norm.weight', torch.Size([192]), torch.Size([96])),
+                    ('attention_norm.bias', torch.Size([192]), torch.Size([96])),
+                    ('attention.wq.weight', torch.Size([192, 192]), torch.Size([96, 192])),
+                    ('attention.wk.weight', torch.Size([192, 192]), torch.Size([96, 192])),
+                    ('attention.wv.weight', torch.Size([192, 192]), torch.Size([96, 192])),
+                    ('attention.wo.weight', torch.Size([192, 192]), torch.Size([96, 192])),
+                    ('ffn_norm.weight', torch.Size([192]), torch.Size([96])),
+                    ('ffn_norm.bias', torch.Size([192]), torch.Size([96])),
+                    ('feed_forward.w1.weight', torch.Size([768, 192]), torch.Size([384, 192])),
+                    ('feed_forward.w1.bias', torch.Size([768]), torch.Size([384])),
+                    ('feed_forward.w2.weight', torch.Size([192, 768]), torch.Size([96, 768])),
+                    ('feed_forward.w2.bias', torch.Size([192]), torch.Size([96])),
+                ],
+            },
+            'model.norm': {
+                'is_fsdp_managed': True,
+                'is_fsdp_composed': True,
+                'prec_policy_summ': (None, None, None, True),
+                'param_group_summ': [
+                    ('weight', torch.Size([192]), torch.Size([96])),
+                    ('bias', torch.Size([192]), torch.Size([96])),
+                ],
+            },
+            'model.output': {
+                'is_fsdp_managed': True,
+                'is_fsdp_composed': True,
+                'prec_policy_summ': (None, None, None, True),
+                'param_group_summ': [
+                    ('weight', torch.Size([33278, 192]), torch.Size([16639, 192])),
+                ],
+            },
+        },
+    }, 29),
 }
 
-path_fsdp_autocm = {
-    0: (
-        {'p_states': {
+path_tp_fsdp_autocm = {
+    0: ({
+        'p_states': {
             'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
             'model.layers.0.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
             'model.layers.1.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
@@ -207,10 +264,47 @@ path_fsdp_autocm = {
             'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
             'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
             'model.output.weight': {'requires_grad': True, 'is_DTensor': True}
-        }},
-        3),
-    1: (
-        {'p_states': {
+        },
+        'fsdp_mod_states': {
+            'model.layers.0': {'is_fsdp_managed': True, 'is_fsdp_composed': True,
+                              'prec_policy_summ': (None, None, None, True),
+                              'param_group_summ': [(None, torch.Size([192]), torch.Size([96])),
+                                                   (None, torch.Size([192]), torch.Size([96])),
+                                                   (None, torch.Size([192, 192]), torch.Size([96, 192])),
+                                                   (None, torch.Size([192, 192]), torch.Size([96, 192])),
+                                                   (None, torch.Size([192, 192]), torch.Size([96, 192])),
+                                                   (None, torch.Size([192, 192]), torch.Size([96, 192])),
+                                                   (None, torch.Size([192]), torch.Size([96])),
+                                                   (None, torch.Size([192]), torch.Size([96])),
+                                                   (None, torch.Size([768, 192]), torch.Size([384, 192])),
+                                                   (None, torch.Size([768]), torch.Size([384])),
+                                                   (None, torch.Size([192, 768]), torch.Size([96, 768])),
+                                                   (None, torch.Size([192]), torch.Size([96]))]},
+            'model.layers.1': {'is_fsdp_managed': True, 'is_fsdp_composed': True,
+                              'prec_policy_summ': (None, None, None, True),
+                              'param_group_summ': [(None, torch.Size([192]), torch.Size([96])),
+                                                   (None, torch.Size([192]), torch.Size([96])),
+                                                   (None, torch.Size([192, 192]), torch.Size([96, 192])),
+                                                   (None, torch.Size([192, 192]), torch.Size([96, 192])),
+                                                   (None, torch.Size([192, 192]), torch.Size([96, 192])),
+                                                   (None, torch.Size([192, 192]), torch.Size([96, 192])),
+                                                   (None, torch.Size([192]), torch.Size([96])),
+                                                   (None, torch.Size([192]), torch.Size([96])),
+                                                   (None, torch.Size([768, 192]), torch.Size([384, 192])),
+                                                   (None, torch.Size([768]), torch.Size([384])),
+                                                   (None, torch.Size([192, 768]), torch.Size([96, 768])),
+                                                   (None, torch.Size([192]), torch.Size([96]))]},
+            'model.norm': {'is_fsdp_managed': True, 'is_fsdp_composed': True,
+                           'prec_policy_summ': (None, None, None, True),
+                           'param_group_summ': [(None, torch.Size([192]), torch.Size([96])),
+                                                (None, torch.Size([192]), torch.Size([96]))]},
+            'model.output': {'is_fsdp_managed': True, 'is_fsdp_composed': True,
+                             'prec_policy_summ': (None, None, None, True),
+                             'param_group_summ': [(None, torch.Size([33278, 192]), torch.Size([16639, 192]))]}
+        }
+    }, 3),
+    1: ({
+        'p_states': {
             'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
             'model.layers.0.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
             'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
@@ -218,99 +312,8 @@ path_fsdp_autocm = {
             'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
             'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
             'model.output.weight': {'requires_grad': True, 'is_DTensor': True}
-        }},
-        15),
-    2: (
-        {'p_states': {
-            'model.layers.0.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
-            'model.layers.0.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
-            'model.layers.1.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
-            'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.output.weight': {'requires_grad': True, 'is_DTensor': True}
-        }},
-        29),
-}
-
-path_tp_fsdp_autocm = {
-        0: ({
-            'p_states': {
-                'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
-                'model.layers.0.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
-                'model.layers.1.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
-                'model.layers.1.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
-                'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
-                'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
-                'model.output.weight': {'requires_grad': True, 'is_DTensor': True}
-            },
-            'fsdp_mod_states': {
-                'model.layers.0': {
-                    'is_fsdp_managed': True,
-                    'is_fsdp_composed': True,
-                    'prec_policy_summ': (None, None, None, True),
-                    'param_group_summ': [
-                        (None, torch.Size([192]), torch.Size([96])),
-                        (None, torch.Size([192]), torch.Size([96])),
-                        (None, torch.Size([192, 192]), torch.Size([96, 192])),
-                        (None, torch.Size([192, 192]), torch.Size([96, 192])),
-                        (None, torch.Size([192, 192]), torch.Size([96, 192])),
-                        (None, torch.Size([192, 192]), torch.Size([96, 192])),
-                        (None, torch.Size([192]), torch.Size([96])),
-                        (None, torch.Size([192]), torch.Size([96])),
-                        (None, torch.Size([768, 192]), torch.Size([384, 192])),
-                        (None, torch.Size([768]), torch.Size([384])),
-                        (None, torch.Size([192, 768]), torch.Size([96, 768])),
-                        (None, torch.Size([192]), torch.Size([96]))
-                    ]
-                },
-                'model.layers.1': {
-                    'is_fsdp_managed': True,
-                    'is_fsdp_composed': True,
-                    'prec_policy_summ': (None, None, None, True),
-                    'param_group_summ': [
-                        (None, torch.Size([192]), torch.Size([96])),
-                        (None, torch.Size([192]), torch.Size([96])),
-                        (None, torch.Size([192, 192]), torch.Size([96, 192])),
-                        (None, torch.Size([192, 192]), torch.Size([96, 192])),
-                        (None, torch.Size([192, 192]), torch.Size([96, 192])),
-                        (None, torch.Size([192, 192]), torch.Size([96, 192])),
-                        (None, torch.Size([192]), torch.Size([96])),
-                        (None, torch.Size([192]), torch.Size([96])),
-                        (None, torch.Size([768, 192]), torch.Size([384, 192])),
-                        (None, torch.Size([768]), torch.Size([384])),
-                        (None, torch.Size([192, 768]), torch.Size([96, 768])),
-                        (None, torch.Size([192]), torch.Size([96]))
-                    ]
-                },
-                'model.norm': {
-                    'is_fsdp_managed': True,
-                    'is_fsdp_composed': True,
-                    'prec_policy_summ': (None, None, None, True),
-                    'param_group_summ': [
-                        (None, torch.Size([192]), torch.Size([96])),
-                        (None, torch.Size([192]), torch.Size([96]))
-                    ]
-                },
-                'model.output': {
-                    'is_fsdp_managed': True,
-                    'is_fsdp_composed': True,
-                    'prec_policy_summ': (None, None, None, True),
-                    'param_group_summ': [
-                        (None, torch.Size([33278, 192]), torch.Size([16639, 192]))
-                    ]
-                }
-            }
-        }, 3),
-        1: ({'p_states': {
-            'model.layers.0.feed_forward.w2.weight': {'requires_grad': False, 'is_DTensor': True},
-            'model.layers.0.feed_forward.w2.bias': {'requires_grad': False, 'is_DTensor': True},
-            'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
-            'model.layers.1.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
-            'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
-            'model.output.weight': {'requires_grad': True, 'is_DTensor': True}
-        }, 'fsdp_mod_states': {
+        },
+        'fsdp_mod_states': {
             'model.layers.0': {
                 'is_fsdp_managed': True,
                 'is_fsdp_composed': True,
@@ -362,12 +365,12 @@ path_tp_fsdp_autocm = {
                 'is_fsdp_managed': True,
                 'is_fsdp_composed': True,
                 'prec_policy_summ': (None, None, None, True),
-                'param_group_summ': [
-                    ('output.weight', torch.Size([33278, 192]), torch.Size([16639, 192]))
-                ]
+                'param_group_summ': [('output.weight', torch.Size([33278, 192]), torch.Size([16639, 192]))]
             }
-        }}, 15),
-        2: ({'p_states': {
+        }
+    }, 15),
+    2: ({
+        'p_states': {
             'model.layers.0.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
             'model.layers.0.feed_forward.w2.bias': {'requires_grad': True, 'is_DTensor': True},
             'model.layers.1.feed_forward.w2.weight': {'requires_grad': True, 'is_DTensor': True},
@@ -375,7 +378,8 @@ path_tp_fsdp_autocm = {
             'model.norm.weight': {'requires_grad': True, 'is_DTensor': True},
             'model.norm.bias': {'requires_grad': True, 'is_DTensor': True},
             'model.output.weight': {'requires_grad': True, 'is_DTensor': True}
-        }, 'fsdp_mod_states': {
+        },
+        'fsdp_mod_states': {
             'model.layers.0': {
                 'is_fsdp_managed': True,
                 'is_fsdp_composed': True,
@@ -427,9 +431,8 @@ path_tp_fsdp_autocm = {
                 'is_fsdp_managed': True,
                 'is_fsdp_composed': True,
                 'prec_policy_summ': (None, None, None, True),
-                'param_group_summ': [
-                    ('output.weight', torch.Size([33278, 192]), torch.Size([16639, 192]))
-                ]
+                'param_group_summ': [('output.weight', torch.Size([33278, 192]), torch.Size([16639, 192]))]
             }
-        }}, 29),
+        }
+    }, 29),
 }

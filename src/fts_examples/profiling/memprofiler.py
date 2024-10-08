@@ -15,6 +15,7 @@ import torch
 from lightning.fabric.utilities import rank_zero_warn
 from lightning.fabric.utilities.rank_zero import _get_rank
 from lightning.fabric.utilities.cloud_io import get_filesystem
+from lightning.pytorch.utilities.exceptions import MisconfigurationException
 
 from finetuning_scheduler.strategy_adapters.model_parallel import _TORCH_GREATER_EQUAL_2_5
 from fts_examples.cfg_utils import resolve_funcs
@@ -22,8 +23,10 @@ from finetuning_scheduler.types import AutoStrEnum
 
 if _TORCH_GREATER_EQUAL_2_5:
     from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
+    from torch.distributed._composable.fsdp import FSDPModule
 else:
     FSDPMemTracker = None
+    FSDPModule = None
 
 
 class DefaultMemHooks(AutoStrEnum):
@@ -63,6 +66,7 @@ class MemProfilerCfg:
     fsdp_mem_track_module_depth: int = 2
     fsdp_mem_tracker_tabulate: bool = False
     fsdp_mem_tracker_units: str = "MiB"
+    fsdp_mem_tracker_root_module: str = ""
     dump_memorystats_pickle: bool = False
     dump_memorystats_yaml: bool = True
     schedule: MemProfilerSchedule = field(default_factory=MemProfilerSchedule)
@@ -164,7 +168,6 @@ class MemProfiler:
         self._state.base_collect_func_set = self._all_base_collect_funcs()
         self.memprofiler_cfg.retain_hooks_for_funcs = self._state.base_collect_func_set  # conservatively wait for all
 
-
     def _all_base_collect_funcs(self) -> Set:
         funcs = self.memprofiler_cfg.collect_funcs
         return set(chain(*[funcs.cuda_allocator_history, funcs.cuda, funcs.cpu]))
@@ -177,6 +180,22 @@ class MemProfiler:
     def schedule(self) -> int:
         return self.module.memprofiler_cfg.schedule
 
+    @property
+    def fsdp_mem_tracker_root_module(self) -> Optional[FSDPModule]:  # type: ignore
+        if not self.memprofiler_cfg.track_fsdp_mem:
+            return None
+        try:
+            fsdp_tracker_root = self.module.get_submodule(self.memprofiler_cfg.fsdp_mem_tracker_root_module)
+            assert issubclass(type(fsdp_tracker_root), FSDPModule), \
+                "MemProfiler requires the root FSDP module to have ``fully_shard`` applied for FSDP2 memory tracking."
+            return fsdp_tracker_root
+        except AttributeError:
+            raise MisconfigurationException(
+                "Could not find the specified ``fsdp_mem_tracker_root_module``: "
+                f"{self.memprofiler_cfg.fsdp_mem_tracker_root_module}. MemProfiler needs to attach to a module that has"
+                " ``fully_shard`` applied for FSDP2 memory tracking."
+            )
+
     def remove_memprofiler_hooks(self) -> None:
         for handle_list in self._state.hook_handles.values():
             for handle in handle_list:
@@ -184,11 +203,13 @@ class MemProfiler:
 
     def exec_reset_state_hooks(self) -> None:
         for hook in self._state.configured_hooks["reset_state_hooks"]:
-            hook(self.module.model, self.memprofiler_cfg.save_hook_attrs)
+            #hook(self.module.model, self.memprofiler_cfg.save_hook_attrs)
+            hook(self.module, self.memprofiler_cfg.save_hook_attrs)
 
     def maybe_init_fsdp_mem_tracker(self) -> None:
         if self.memprofiler_cfg.track_fsdp_mem:
-            self.fsdp_mem_tracker = FSDPMemTracker(self.module.model, self.module.trainer.optimizers[0])
+
+            self.fsdp_mem_tracker = FSDPMemTracker(self.fsdp_mem_tracker_root_module, self.module.trainer.optimizers[0])
 
     def add_memprofiler_hooks(self) -> None:
         # TODO: extend supported hook points (e.g. backward, etc.) and if/once supporting additional hook points,
@@ -198,7 +219,8 @@ class MemProfiler:
             if getattr(memory_hooks_cfg, supported_hooks.name):
                 self._state.configured_hooks[supported_hooks.name] = resolve_funcs(cfg_obj=memory_hooks_cfg,
                                                                              func_type=supported_hooks.name)
-        for module in self.module.model.modules():
+        #for module in self.module.model.modules():
+        for module in self.module.modules():
             module.mem_info_handle = self._state.curr_pid.memory_info
             for hook_func in self._state.configured_hooks["pre_forward_hooks"]:
                 self._state.hook_handles[hook_func].append(module.register_forward_pre_hook(hook_func))
@@ -222,7 +244,8 @@ class MemProfiler:
         if self.memprofiler_cfg.enable_memory_hooks:
             if len(self._state.hook_handles) == 0:
                 self.add_memprofiler_hooks()
-            collected = {attr: getattr(self.module.model, attr, None) for attr in self.memprofiler_cfg.save_hook_attrs}
+            #collected = {attr: getattr(self.module.model, attr, None) for attr in self.memprofiler_cfg.save_hook_attrs}
+            collected = {attr: getattr(self.module, attr, None) for attr in self.memprofiler_cfg.save_hook_attrs}
             self.memory_stats[snap_key].update(collected)
 
     def _collect_snap(self, snap_key, reset_mem_hooks: bool = False) -> None:

@@ -24,7 +24,7 @@ from torch import Tensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LRScheduler
 from torch.nn.attention import SDPBackend, sdpa_kernel
-from torch.distributed._tensor.experimental import implicit_replication
+from torch.distributed.tensor.experimental import implicit_replication
 from torch.utils.data import DataLoader, Dataset, IterableDataset, Subset
 
 from tests import _PATH_DATASETS
@@ -245,7 +245,7 @@ class TestModelArgs:
     weight_tying: bool = False  # True
     checkpoint_activations: bool = False
     avail_sdp_backends: Optional[Union[List[SDPBackend], SDPBackend]] = None
-    use_implicit_replication: bool = False
+    sdp_use_implicit_replication: bool = False
 
 
 class Attention(torch.nn.Module):
@@ -258,7 +258,7 @@ class Attention(torch.nn.Module):
         self.resid_dropout = torch.nn.Dropout(args.dropout_p)
         self.use_attn_mask = args.use_attn_mask
         self.avail_sdp_backends = args.avail_sdp_backends
-        self.use_implicit_replication = args.use_implicit_replication
+        self.sdp_use_implicit_replication = args.sdp_use_implicit_replication
 
         self.wq = torch.nn.Linear(args.dim, args.dim, bias=False)
         self.wk = torch.nn.Linear(args.dim, args.dim, bias=False)
@@ -267,14 +267,14 @@ class Attention(torch.nn.Module):
 
     @staticmethod
     @contextmanager
-    def sdpa_ctx(avail_sdp_backends, use_implicit_replication):
-        if avail_sdp_backends is None and not use_implicit_replication:
+    def sdpa_ctx(avail_sdp_backends, sdp_use_implicit_replication):
+        if avail_sdp_backends is None and not sdp_use_implicit_replication:
             yield
         else:
             ctx_managers = []
             if avail_sdp_backends is not None:
                 ctx_managers.append(sdpa_kernel(avail_sdp_backends))
-            if use_implicit_replication:
+            if sdp_use_implicit_replication:
                 ctx_managers.append(implicit_replication())
             with ExitStack() as stack:
                 for ctx_manager in ctx_managers:
@@ -295,7 +295,7 @@ class Attention(torch.nn.Module):
         keys = keys.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
         values = values.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
         sdpa_args = (queries, keys, values, None, self.dropout_p if self.training else 0, self.use_attn_mask)
-        with Attention.sdpa_ctx(self.avail_sdp_backends, self.use_implicit_replication):
+        with Attention.sdpa_ctx(self.avail_sdp_backends, self.sdp_use_implicit_replication):
             output = torch.nn.functional.scaled_dot_product_attention(*sdpa_args)
         output = output.transpose(1, 2).contiguous().view(bsz, seq_len, -1)
         return self.resid_dropout(self.wo(output))
@@ -346,7 +346,7 @@ class FTSToyTransformer(torch.nn.Module):
             self.output.weight = self.tok_embeddings.weight
         self.checkpoint_activations = args.checkpoint_activations
         self.avail_sdp_backends = args.avail_sdp_backends
-        self.implicit_replication = args.use_implicit_replication
+        self.sdp_use_implicit_replication = args.sdp_use_implicit_replication
 
     def forward(self, tokens, mask: Optional[torch.Tensor] = None):
         # we assume target is already shifted w.r.t. inputs

@@ -43,6 +43,7 @@ collect_tests(){
     printf '\n' | tee -a  $collect_log
   else
     printf "No tests were found with the following collection command: python3 ${collect_def} \n" | tee -a $collect_log
+    printf "If running that command directly works as expected, run special tests with 'bash -x tests/special_tests.sh' to debug potential collection errors." | tee -a $collect_log
     printf "Exiting without running tests. \n" | tee -a $collect_log
     export no_tests_collected=1
     exit 0

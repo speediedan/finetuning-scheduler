@@ -18,6 +18,7 @@ from logging import DEBUG
 from pathlib import Path
 from unittest import mock
 from typing import Any, Dict, List, Optional, Tuple
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 import pytest
@@ -38,20 +39,13 @@ from torch.multiprocessing import ProcessRaisedException
 from torch.utils.data import DataLoader, Dataset
 
 from finetuning_scheduler import CallbackResolverMixin, FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
+from finetuning_scheduler.strategy_adapters import StrategyAdapter
 from tests.helpers import BoringModel
 from tests.helpers.boring_models import (CustomLRScheduler, LinearWarmupLR, RandomDataset)
 from tests.helpers.runif import RunIf
 from tests.helpers.common import get_fts, unexpected_warns, unmatched_warns
-#fts_resolver = CallbackResolverMixin()
 
 
-# def get_fts(trainer: "Trainer") -> Callback:
-#     fts_resolver.connect_callback(trainer, reconnect=True)
-#     return fts_resolver.finetuningscheduler_callback
-
-
-# def nones(num_n) -> Tuple:  # to help dedup config
-#     return (None,) * num_n
 
 DIST_TEST_SYMDIR = Path(gettempdir()) / "current_dist_test"
 
@@ -2240,6 +2234,15 @@ def test_fts_opt_warns():
     with pytest.warns(UserWarning, match="no new optimizer groups will be added"):
         fts.add_optimizer_groups(lm, opt, thawed_pl)
 
+def test_fts_on_validate_monitor_warns():
+    adapter = StrategyAdapter()
+    adapter.fts_handle = FinetuningScheduler()
+    with patch.object(adapter.fts_handle, "_check_sync_dist", return_value=True), \
+    pytest.warns(UserWarning, match="is not being synchronized across"):
+        adapter.on_validate_monitor_metric("x")
+    adapter.fts_handle.pl_module = MagicMock(spec=LightningModule)
+    with patch.object(adapter.fts_handle.pl_module.trainer, "_results", None):
+        assert not adapter.fts_handle._check_sync_dist("x")
 
 class TestConnectWarn(Callback, CallbackResolverMixin):
     """A callback that facilitates configuration testing of the CallbackResolverMixin."""

@@ -9,7 +9,7 @@ trainer:
         fsdp_default_kwargs:
           act_ckpt: ['composable']
           cpu_offload_policy: {}
-        fsdp_plan: {"model.output": {}, 'model.layers.\d*$': {}}
+        fsdp_plan: {'model.output': {}, 'model.layers.\d*$': {}, 'model': {}}
   strategy:
     init_args:
       data_parallel_size: 2

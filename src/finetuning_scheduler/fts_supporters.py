@@ -235,30 +235,9 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
                 :external+pl:class:`~lightning.pytorch.core.module.LightningModule` object
         """
         if trainer.state.fn == TrainerFn.FITTING:
-            self.reduce_transition_decisions = self._check_sync_dist(trainer)
+            self.reduce_transition_decisions = self.finetuningscheduler_callback._check_sync_dist(self.monitor)
         super().on_validation_end(trainer, pl_module)
 
-    def _check_sync_dist(self, trainer: "pl.Trainer") -> bool:
-        """Inspect the monitored metric and execution context to determine whether transition decisions for this
-        callback need to be reduced over all distributed training processes.
-
-        Args:
-            trainer: The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
-
-        Returns:
-            bool: Whether to reduce transition decisions for this callback over all training processes
-        """
-        assert self.finetuningscheduler_callback is not None
-        monitor_metric = [
-            m
-            for m in self.finetuningscheduler_callback.pl_module.trainer._results.result_metrics
-            if m.meta.name == self.monitor
-        ]
-        assert monitor_metric[0] is not None
-        no_sync = (torch.distributed.is_available() and monitor_metric[0].is_tensor) and not monitor_metric[
-            0
-        ].meta.sync.should
-        return no_sync
 
     def _transition_es_phase(self) -> None:
         """Encapsulates updating the :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` internal state
@@ -342,6 +321,7 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
             msg = f"Metric {self.monitor} improved. New best score: {current.item():.3f}"
         return msg
 
+
 class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
     r"""
     Extends/specializes :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` to facilitate
@@ -390,6 +370,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         self.finetuningscheduler_callback = None
         self._prev_best_model_path = ''
         self._has_depth_metadata_lock = False
+        self._monitor_validated = False
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
         """Verify a valid callback configuration is present before beginning training.
@@ -427,6 +408,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         if self._save_on_train_epoch_end is None:
             # post-validation saving/evaluation is the most common fts usage pattern
             self._save_on_train_epoch_end = False
+        # note monitor metric validation must be deferred until first ``monitor_candidates`` access
         super().setup(trainer, pl_module, stage)
 
     def state_dict(self) -> Dict[str, Any]:
@@ -515,7 +497,16 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             self._prev_best_model_path = self.best_model_path
             super()._save_topk_checkpoint(trainer, monitor_candidates)
 
+    @override
+    def _monitor_candidates(self, trainer: "pl.Trainer") -> Dict[str, Tensor]:
+        # invoke relevant FTS strategy adapter monitor metric validation prior to first collection of monitor candidates
+        if not self._monitor_validated and self.monitor:
+            self.finetuningscheduler_callback.strategy_adapter.on_validate_monitor_metric(self.monitor)
+            self._monitor_validated = True
+        return super()._monitor_candidates(trainer)
+
 FTSCallbackDepType: TypeAlias = Union[Type[FTSEarlyStopping], Type[FTSCheckpoint]]
+
 
 class UniqueKeyLoader(yaml.SafeLoader):
     """Alters SafeLoader to enable duplicate key detection by the SafeConstructor."""
@@ -1790,6 +1781,7 @@ class ScheduleImplMixin(ABC):
                         " and training failure in pytorch during a future fine-tuning phase."
                     )
                 rank_zero_warn(w_msg)
+
 
 class CallbackDepMixin(ABC):
     """Functionality for validating/managing callback dependencies."""
