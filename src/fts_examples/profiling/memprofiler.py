@@ -17,16 +17,10 @@ from lightning.fabric.utilities.rank_zero import _get_rank
 from lightning.fabric.utilities.cloud_io import get_filesystem
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 
-from finetuning_scheduler.strategy_adapters.model_parallel import _TORCH_GREATER_EQUAL_2_5
+# conditionally import indirectly to avoid duplicating import logic in several different modules
+from finetuning_scheduler.strategy_adapters._mp_imports import _TORCH_GREATER_EQUAL_2_5, FSDPModule, FSDPMemTracker
 from fts_examples.cfg_utils import resolve_funcs
 from finetuning_scheduler.types import AutoStrEnum
-
-if _TORCH_GREATER_EQUAL_2_5:
-    from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
-    from torch.distributed._composable.fsdp import FSDPModule
-else:
-    FSDPMemTracker = None
-    FSDPModule = None
 
 
 class DefaultMemHooks(AutoStrEnum):

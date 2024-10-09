@@ -13,13 +13,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.utils.data import DataLoader
-from torch.nn.attention import SDPBackend
-from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor import DTensor, Replicate, Shard
-from torch.distributed.tensor.experimental import implicit_replication
-from torch.distributed.tensor.parallel import (ColwiseParallel, PrepareModuleInput, RowwiseParallel, SequenceParallel,
-                                               parallelize_module, loss_parallel)
-from torch.distributed._composable.fsdp import FSDPModule, fully_shard
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.plugins.precision.fsdp import FSDPPrecision
 from lightning.pytorch.strategies import ModelParallelStrategy
@@ -29,6 +22,10 @@ from lightning.pytorch.utilities.types import STEP_OUTPUT
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from finetuning_scheduler.strategy_adapters import ModelParallelStrategyAdapter
 from finetuning_scheduler.strategy_adapters.model_parallel import ActCkptEnum
+# conditionally import indirectly to avoid duplicating import logic in several different modules
+from finetuning_scheduler.strategy_adapters._mp_imports import (SDPBackend, DeviceMesh, DTensor, Replicate, Shard,
+    ColwiseParallel, PrepareModuleInput, RowwiseParallel, SequenceParallel, implicit_replication, parallelize_module,
+    loss_parallel, FSDPModule, fully_shard, _TORCH_GREATER_EQUAL_2_5)
 from tests.helpers.boring_models import FTSToyTransformer, TestModelArgs, FTSWikiText2
 from tests.helpers.common import (ExpectedResults, fts_check_warns, pytest_param_factory, get_fts,
                                   default_fts_sanity_chk, DeviceMeshSummary)
@@ -41,6 +38,7 @@ from tests.test_finetuning_scheduler_callback import (
     TestFinetuningScheduler,
     get_sched_fixture_tmpdir,
 )
+
 
 FTS_GLOBAL_STATE_LOG_MODE = os.environ.get("FTS_GLOBAL_STATE_LOG_MODE", "0") == "1"
 MODEL_PARALLEL_BASE_WARNS = copy(EXPECTED_WARNS)
@@ -415,7 +413,10 @@ cm_mod_parallel = FTSCmModelParallel  # model w/ manual `configure_model` method
 
 ## toy transformer cfgs
 basic_tt = TestModelArgs()
-sdp_math_impl_tt = TestModelArgs(avail_sdp_backends=[SDPBackend.MATH], sdp_use_implicit_replication=True)
+if _TORCH_GREATER_EQUAL_2_5:
+    sdp_math_impl_tt = TestModelArgs(avail_sdp_backends=[SDPBackend.MATH], sdp_use_implicit_replication=True)
+else:
+    sdp_math_impl_tt = None
 
 ## DTensor Placement Plan Aliases
 cm_tt_tp_plan = gen_apply_transformer_tp_plan

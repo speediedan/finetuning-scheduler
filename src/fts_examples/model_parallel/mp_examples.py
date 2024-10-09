@@ -19,7 +19,7 @@ import lightning as L
 
 from fts_examples.cli_experiment_utils import ExpHarness, FTSExperimentCLI, ExperimentCfg
 from fts_examples.model_parallel.torchtitan_llama import ModelCfg, Transformer
-from finetuning_scheduler.strategy_adapters.model_parallel import _TORCH_GREATER_EQUAL_2_5
+from finetuning_scheduler.strategy_adapters._mp_imports import _TORCH_GREATER_EQUAL_2_5
 
 # Lightning ModelParallel still uses `torch.load` with `weights_only=False`
 warnings.filterwarnings("ignore", ".*uses the default pickle.*")

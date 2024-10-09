@@ -23,9 +23,10 @@ from lightning.pytorch.demos.transformer import WikiText2
 from torch import Tensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LRScheduler
-from torch.nn.attention import SDPBackend, sdpa_kernel
-from torch.distributed.tensor.experimental import implicit_replication
 from torch.utils.data import DataLoader, Dataset, IterableDataset, Subset
+
+# conditionally import indirectly to avoid duplicating import logic in several different modules
+from finetuning_scheduler.strategy_adapters._mp_imports import SDPBackend, sdpa_kernel, implicit_replication
 
 from tests import _PATH_DATASETS
 
@@ -232,7 +233,6 @@ class FTSWikiText2(WikiText2):
 # heterogenous set of toy configurable transformer implementations
 ################################################################################
 
-
 @dataclass
 class TestModelArgs:
     n_layers: int = 2  # 2
@@ -330,9 +330,6 @@ class FTSToyTransformer(torch.nn.Module):
         assert args.vocab_size is not None
         assert args.max_seq_len is not None
         self.init_args = args
-        #self.device = args.device
-        #self.dtype = args.dtype
-        #self.tokenizer = args.tokenizer
         self.max_seq_len = args.max_seq_len
         self.tok_embeddings = torch.nn.Embedding(args.vocab_size, args.dim)
         self.pos_embeddings = torch.nn.Embedding(args.max_seq_len, args.dim)
@@ -349,11 +346,6 @@ class FTSToyTransformer(torch.nn.Module):
         self.sdp_use_implicit_replication = args.sdp_use_implicit_replication
 
     def forward(self, tokens, mask: Optional[torch.Tensor] = None):
-        # we assume target is already shifted w.r.t. inputs
-        # _, t = tokens.shape
-        # if mask is None:
-        #     mask = torch.tril(torch.ones(t, t, device=tokens.device)) == 1
-        #     mask = mask.float().masked_fill(mask == 0, float("-inf")).masked_fill(mask == 1, 0.0)
         _bsz, seq_len = tokens.size()
         assert seq_len <= self.max_seq_len
         h = self.tok_embeddings(tokens)
@@ -369,82 +361,3 @@ class FTSToyTransformer(torch.nn.Module):
         h = self.norm(h)
         output = self.output(h)
         return output
-
-    # @torch.inference_mode()
-    # def generate(
-    #     self,
-    #     tokens: Union[str, torch.Tensor] = "",
-    #     max_new_tokens: int = 5,
-    #     eos_token_id: Optional[int] = None,
-    #     output_logits: bool = False,
-    #     verbose: bool = True,
-    #     **kwargs
-    # ) -> Union[SampledOutput, torch.Tensor]:
-    #     """Toy generate function to support non-HF/TransformerLens tests with the same interface.
-
-    #     Args:
-    #         tokens (Union[str, Int[torch.Tensor, "batch pos"])]): A batch of tokens ([batch, pos]).
-    #         max_new_tokens (int): Maximum number of tokens to generate.
-    #         eos_token_id (Optional[Union[int, Sequence]]): The token ID to use for end of sentence.
-    #         output_logits (`bool`, *optional*, defaults to `False`): Whether or not to return the prediction scores.
-    #         verbose (bool): If True, show tqdm progress bars for generation.
-
-    #     Returns:
-    #         outputs (torch.Tensor): [batch, pos + max_new_tokens], generated sequence of new tokens.
-    #     """
-    #     # To enable a broader range of testing contexts, use the configuration context of the parent_handle
-    #     # TODO: update this method to use parent_handle if available for broader range of testing
-    #     out_logits = () if output_logits else None
-
-    #     assert isinstance(tokens, torch.Tensor)
-    #     batch_size, ctx_length = tokens.shape
-    #     gen_device = self.device or tokens.device
-    #     tokens = tokens.to(gen_device)
-
-    #     stop_tokens = []
-    #     eos_token_for_padding = 0
-
-    #     tokenizer_has_eos_token = (self.tokenizer is not None and self.tokenizer.eos_token_id is not None)
-    #     if eos_token_id is None:
-    #         assert (tokenizer_has_eos_token), \
-    #         "Must pass an `eos_token_id` if tokenizer is None or has no eos_token_id"
-    #         eos_token_id = self.tokenizer.eos_token_id
-
-    #     stop_tokens = [eos_token_id]
-    #     eos_token_for_padding = eos_token_id
-
-    #     # An array to track which sequences in the batch have finished.
-    #     finished_sequences = torch.zeros(
-    #         batch_size, dtype=torch.bool, device=gen_device
-    #     )
-
-    #     for index in tqdm.tqdm(range(max_new_tokens), disable=not verbose):
-    #         # While generating, we keep generating logits, throw away all but the final logits,
-    #         # and then use those logits to sample from the distribution We keep adding the
-    #         # sampled tokens to the end of tokens.
-    #         # We input the entire sequence, as a [batch, pos] tensor, since we aren't using
-    #         # the cache.
-    #         logits = self.forward(tokens)
-    #         final_logits = logits[:, -1, :]
-    #         if output_logits:
-    #             out_logits += (final_logits,)
-
-    #         sampled_tokens = final_logits.argmax(-1).to(gen_device)
-
-    #         # For all unfinished sequences, add on the next token. If a sequence was
-    #         # finished, throw away the generated token and add eos_token_for_padding
-    #         # instead.
-    #         sampled_tokens[finished_sequences] = eos_token_for_padding
-    #         finished_sequences.logical_or_(
-    #             torch.isin(sampled_tokens, torch.tensor(stop_tokens).to(gen_device))
-    #         )
-
-    #         tokens = torch.cat([tokens, sampled_tokens.unsqueeze(-1)], dim=-1)
-
-    #         if finished_sequences.all():
-    #             break
-
-    #     if output_logits:
-    #         return SampledOutput(tokens, torch.stack(out_logits, dim=1))
-    #     else:
-    #         return tokens

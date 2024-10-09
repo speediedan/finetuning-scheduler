@@ -23,30 +23,21 @@ from copy import deepcopy
 import re
 import os
 from pprint import pformat
-# TODO: replace local version once Lightning version available
-# from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_2_5
-import operator
 from dataclasses import dataclass, field
 
 import torch
-from torch.distributed.tensor import DTensor
-from torch.distributed._composable import checkpoint
-from torch.distributed._composable.fsdp.fully_shard import fully_shard, FSDPModule
-from torch.distributed._composable.fsdp._fsdp_api import CPUOffloadPolicy
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (checkpoint_wrapper, offload_wrapper,
-                                                                         ActivationWrapper)
 from lightning.fabric.utilities.enums import LightningEnum
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
-from lightning_utilities.core.imports import compare_version
 from lightning.pytorch.utilities.model_helpers import is_overridden
 from lightning.fabric.utilities import rank_zero_warn, rank_zero_info
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 from finetuning_scheduler.strategy_adapters._wrap_utils import _compose_ncac
-
-_TORCH_GREATER_EQUAL_2_5 = compare_version("torch", operator.ge, "2.5.0", use_base_version=True)
-
+# conditionally import indirectly to avoid duplicating import logic in several different modules
+from finetuning_scheduler.strategy_adapters._mp_imports import (_TORCH_GREATER_EQUAL_2_5, DTensor, FSDPModule,
+                                                                fully_shard, CPUOffloadPolicy, checkpoint,
+                                                                checkpoint_wrapper, ActivationWrapper, offload_wrapper)
 
 class ActCkptEnum(LightningEnum):
     COMPOSABLE = "composable"
