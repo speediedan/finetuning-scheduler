@@ -11,8 +11,7 @@
 # limitations under the License.
 import logging
 import os
-
-import numpy as np
+import random
 
 _TEST_ROOT = os.path.dirname(__file__)
 _PROJECT_ROOT = os.path.dirname(_TEST_ROOT)
@@ -26,7 +25,7 @@ if _PROJECT_ROOT not in os.getenv("PYTHONPATH", ""):
     os.environ["PYTHONPATH"] = f'{_PROJECT_ROOT}{splitter}{os.environ.get("PYTHONPATH", "")}'
 
 # generate a list of random seeds for each test
-RANDOM_PORTS = list(np.random.randint(12000, 19000, 1000))
+RANDOM_PORTS = random.sample(range(12000, 19001), 1000)
 
 if not os.path.isdir(_TEMP_PATH):
     os.mkdir(_TEMP_PATH)

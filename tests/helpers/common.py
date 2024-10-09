@@ -12,7 +12,7 @@
 import re
 from copy import copy
 from functools import partial
-from typing import List, Optional, Tuple, NamedTuple, Dict, Iterable
+from typing import List, Optional, Tuple, NamedTuple, Dict, Iterable, Union
 from warnings import WarningMessage
 
 import pytest
@@ -62,7 +62,7 @@ class DeviceMeshSummary(NamedTuple):
     mesh_ndim: int
     mesh_shape: Tuple
     mesh_dim_names: Tuple
-    placement_summary: List[Optional[str | int]]
+    placement_summary: List[Optional[Union[str,int]]]
 
 def pytest_param_factory(test_cfgs: Iterable):
     return [

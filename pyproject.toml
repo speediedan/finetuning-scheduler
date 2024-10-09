@@ -81,7 +81,7 @@ norecursedirs = [
     "build",
     "docs",
 ]
-addopts = "--strict-markers --doctest-modules --color=yes --disable-pytest-warnings --ignore-glob='src/fts_examples/*/ipynb_src/*.py' --ignore='.actions/assistant.py'"
+addopts = "--strict-markers --doctest-modules --color=yes --disable-pytest-warnings --ignore-glob='src/fts_examples/ipynb_src/*.py' --ignore='.actions/assistant.py'"
 junit_duration_report = "call"
 
 [tool.jupytext]

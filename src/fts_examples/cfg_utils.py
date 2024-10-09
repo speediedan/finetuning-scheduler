@@ -1,6 +1,6 @@
 import importlib
 import yaml
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Union
 from dataclasses import dataclass, field, asdict, fields
 
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
@@ -17,12 +17,12 @@ class ExperimentCfg:
 
 @dataclass
 class OptimizerCfg:
-    class_fqn: str | None = None
+    class_fqn: Union[str, None] = None
     args: Dict = field(default_factory=dict)
 
 @dataclass
 class LRSchedulerCfg:
-    class_fqn: str | None = None
+    class_fqn: Union[str, None] = None
     args: Dict = field(default_factory=dict)
 
 @dataclass

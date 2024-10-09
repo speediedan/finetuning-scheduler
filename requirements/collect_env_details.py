@@ -19,18 +19,20 @@ import os
 import platform
 import sys
 
-import numpy
 import torch
 import tqdm
 
 sys.path += [os.path.abspath(".."), os.path.abspath(".")]
 import lightning.pytorch  # noqa: E402
+from lightning.fabric.utilities.imports import _NUMPY_AVAILABLE  # noqa: E402
 
 import finetuning_scheduler  # noqa: E402
 
 LEVEL_OFFSET = "\t"
 KEY_PADDING = 20
 
+if _NUMPY_AVAILABLE:
+    import numpy
 
 def info_system():
     return {
@@ -52,7 +54,7 @@ def info_cuda():
 
 def info_packages():
     return {
-        "numpy": numpy.__version__,
+        "numpy": numpy.__version__ if _NUMPY_AVAILABLE else 'N/A',
         "pyTorch_version": torch.__version__,
         "pyTorch_debug": torch.version.debug,
         "pytorch-lightning": lightning.pytorch.__version__,

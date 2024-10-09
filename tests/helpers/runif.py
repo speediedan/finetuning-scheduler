@@ -13,7 +13,7 @@
 import os
 import re
 import sys
-from typing import Optional, Set
+from typing import Optional, Set, Union
 
 import pytest
 import torch
@@ -61,7 +61,7 @@ class RunIf:
         skip_mac_os: bool = False,
         standalone: bool = False,
         deepspeed: bool = False,
-        exp_patch: Optional[ExpPatch|Set[ExpPatch]] = None,
+        exp_patch: Optional[Union[ExpPatch,Set[ExpPatch]]] = None,
         **kwargs,
     ):
         """

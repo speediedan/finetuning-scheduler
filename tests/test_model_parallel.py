@@ -1,5 +1,5 @@
 import os
-from typing import Any, Callable, Dict, Optional, Tuple, KeysView
+from typing import Any, Callable, Dict, Optional, Tuple, KeysView, Union
 from copy import deepcopy, copy
 from logging import DEBUG
 from pathlib import Path
@@ -136,7 +136,7 @@ class FSDPStateInspectMixin:
 ################################################################################
 
 class FTSBaseModelParallel(FinetuningSchedulerBoringModel):
-    def __init__(self, cm_fsdp_plan: Dict, cm_tp_plan: Dict | Callable,
+    def __init__(self, cm_fsdp_plan: Dict, cm_tp_plan: Union[Dict, Callable],
                  module_cls: nn.Module = FTSToyTransformer, loss_parallel: bool = True,
                  tt_cfg: Optional[TestModelArgs] = None,
                  precision_key: Optional[str] = None,

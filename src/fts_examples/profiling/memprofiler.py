@@ -1,6 +1,6 @@
 import os
 import pickle
-from typing import Any, Dict, Optional, Tuple,  DefaultDict, Callable, List, Set
+from typing import Any, Dict, Optional, Tuple,  DefaultDict, Callable, List, Set, Union
 from dataclasses import dataclass, field, fields, asdict
 from contextlib import redirect_stdout, contextmanager, ExitStack
 from collections import defaultdict
@@ -30,10 +30,10 @@ class DefaultMemHooks(AutoStrEnum):
 
 @dataclass
 class MemProfilerHooks:
-    pre_forward_hooks: List[str | Callable] = field(default_factory=lambda: [DefaultMemHooks.pre_forward.value])
-    post_forward_hooks: List[str| Callable] = field(default_factory=lambda: [DefaultMemHooks.post_forward.value])
+    pre_forward_hooks: List[Union[str, Callable]] = field(default_factory=lambda: [DefaultMemHooks.pre_forward.value])
+    post_forward_hooks: List[Union[str, Callable]] = field(default_factory=lambda: [DefaultMemHooks.post_forward.value])
     # the provided reset_state_hooks will be called with the model and the `save_hook_attrs` list
-    reset_state_hooks: List[str | Callable] = field(default_factory=lambda: [DefaultMemHooks.reset_state.value])
+    reset_state_hooks: List[Union[str, Callable]] = field(default_factory=lambda: [DefaultMemHooks.reset_state.value])
 
 @dataclass
 class MemProfilerFuncs: # can specify arbitrary list of `memprofilable` decorated function names
@@ -64,7 +64,7 @@ class MemProfilerCfg:
     dump_memorystats_pickle: bool = False
     dump_memorystats_yaml: bool = True
     schedule: MemProfilerSchedule = field(default_factory=MemProfilerSchedule)
-    save_dir: Optional[str | Path] = None
+    save_dir: Optional[Union[str, Path]] = None
     enable_memory_hooks: bool = True
     enable_saved_tensors_hooks: bool = True
     memory_hooks: MemProfilerHooks = field(default_factory=MemProfilerHooks)

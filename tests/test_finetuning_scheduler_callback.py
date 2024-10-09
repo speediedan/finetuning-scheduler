@@ -20,7 +20,6 @@ from unittest import mock
 from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import patch, MagicMock
 
-import numpy as np
 import pytest
 import torch
 import torch.nn.functional as F
@@ -33,6 +32,7 @@ from lightning.pytorch.callbacks import (Callback, EarlyStopping, LearningRateFi
 from lightning.pytorch.strategies import StrategyRegistry
 from lightning.pytorch.strategies.single_device import SingleDeviceStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
+from lightning.fabric.utilities.imports import _NUMPY_AVAILABLE
 from torch import nn, Tensor
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.multiprocessing import ProcessRaisedException
@@ -45,6 +45,10 @@ from tests.helpers.boring_models import (CustomLRScheduler, LinearWarmupLR, Rand
 from tests.helpers.runif import RunIf
 from tests.helpers.common import get_fts, unexpected_warns, unmatched_warns
 
+if _NUMPY_AVAILABLE:
+    import numpy as np
+else:
+    np = None
 
 
 DIST_TEST_SYMDIR = Path(gettempdir()) / "current_dist_test"
@@ -2754,6 +2758,7 @@ def test_fts_frozen_bn_track_running_stats(tmpdir, boring_ft_schedule, frozen_bn
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
+@pytest.mark.skipif(not _NUMPY_AVAILABLE, reason="test requires numpy")
 @pytest.mark.parametrize("stop_value", [torch.tensor(np.inf), torch.tensor(np.nan)])
 def test_early_stopping_on_non_finite_monitor(tmpdir, stop_value):
     callbacks = [

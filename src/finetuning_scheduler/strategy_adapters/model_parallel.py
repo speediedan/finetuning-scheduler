@@ -17,7 +17,7 @@ A :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that extends 
 for PyTorch's distributed composable and Tensor Parallel APIs.
 
 """
-from typing import Any, Optional, Callable, Dict, Sequence, Tuple, List
+from typing import Any, Optional, Callable, Dict, Sequence, Tuple, List, Union
 from functools import wraps
 from copy import deepcopy
 import re
@@ -46,7 +46,7 @@ class ActCkptEnum(LightningEnum):
 
 @dataclass
 class ActCkptCfg:
-    mode: ActCkptEnum | str
+    mode: Union[ActCkptEnum, str]
     cfg: Optional[Dict[str, Any]] = field(default_factory=dict)
     _func: Optional[Callable] = None
 

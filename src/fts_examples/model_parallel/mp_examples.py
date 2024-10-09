@@ -5,21 +5,13 @@ import warnings
 
 import torch
 import torch.nn.functional as F
-from torch.distributed.tensor.parallel import loss_parallel
-from torch.distributed._tensor import Replicate, Shard
-from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    PrepareModuleInput,
-    RowwiseParallel,
-    SequenceParallel,
-    parallelize_module,
-)
 import lightning as L
 
 from fts_examples.cli_experiment_utils import ExpHarness, FTSExperimentCLI, ExperimentCfg
 from fts_examples.model_parallel.torchtitan_llama import ModelCfg, Transformer
-from finetuning_scheduler.strategy_adapters._mp_imports import _TORCH_GREATER_EQUAL_2_5
+from finetuning_scheduler.strategy_adapters._mp_imports import (
+    _TORCH_GREATER_EQUAL_2_5, ColwiseParallel, Replicate, loss_parallel, PrepareModuleInput, RowwiseParallel,
+    SequenceParallel, parallelize_module, DeviceMesh, Shard)
 
 # Lightning ModelParallel still uses `torch.load` with `weights_only=False`
 warnings.filterwarnings("ignore", ".*uses the default pickle.*")
