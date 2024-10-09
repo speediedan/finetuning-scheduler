@@ -8,7 +8,13 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
-- Support for Lightning and PyTorch `2.5.0`
+- Support for Lightning and PyTorch ``2.5.0``
+- FTS support for PyTorch's composable distributed (e.g. ``fully_shard``, ``checkpoint``) and Tensor Parallelism (TP) APIs
+- Support for Lightning's ``ModelParallelStrategy``
+- Experimental 'Auto' FSDP2 Plan Configuration feature, allowing application of the ``fully_shard`` API using module
+name/pattern-based configuration instead of manually inspecting modules and applying the API in ``LightningModule.configure_model``
+- FSDP2 'Auto' Plan Convenience Aliases, simplifying use of both composable and non-composable activation checkpointing APIs
+- Flexible orchestration of advanced profiling combining multiple complementary PyTorch profilers with FTS ``MemProfiler``
 
 ### Deprecated
 
