@@ -39,7 +39,7 @@ jobs:
         python -m build
         ls -lh dist/
 
-    - uses: actions/upload-artifact@v2
+    - uses: actions/upload-artifact@v4
       with:
         name: pypi-packages-${{ github.sha }}
         path: dist
