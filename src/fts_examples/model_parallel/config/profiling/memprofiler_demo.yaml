@@ -1,0 +1,29 @@
+trainer.profiler: pytorch_profiler.yaml
+memprofiler_cfg:
+  enabled: true
+  cuda_allocator_history: true
+  track_fsdp_mem: true
+  fsdp_mem_track_module_depth: 3
+  fsdp_mem_tracker_tabulate: true
+  fsdp_mem_tracker_root_module: 'model'
+  #############################################################################
+  # Example Custom MemProfiler Collection Directives
+  #############################################################################
+  # schedule:  # note the default schedule is: [warmup_iters=1, max_iter=2]
+  #   warmup_iters: 2
+  #   max_iter: 4
+  #############################################################################
+  # collect_funcs:  # customize collection functions by memory collection type
+  #   default: []
+  #   cpu: []
+  #   cuda: ['training_step', 'validation_step']
+  #   fsdp: ['training_step', 'validation_step']
+  #   cuda_allocator_history: ['training_step']
+  #############################################################################
+  # collect_funcs:  # collect only fsdp memory stats
+  #   default: []
+  #   fsdp: ['training_step', 'validation_step']
+  #############################################################################
+  # collect_funcs:  # collect custom set of funcs for all collect types
+  #   default: ['training_step', 'validation_step']
+  #############################################################################

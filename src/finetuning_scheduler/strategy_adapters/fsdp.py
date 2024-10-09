@@ -92,11 +92,6 @@ class FSDPStrategyAdapter(StrategyAdapter):
     schedule phases prior to the start of training and provided detailed feedback for the user if a misalignment is
     discovered.
 
-    .. warning::
-
-        :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` is in BETA and subject to change. The
-        interface can bring breaking changes and new features with the next release of PyTorch.
-
     .. note::
 
        The ``no_decay`` attribute that FTS supports on
@@ -441,7 +436,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 explicit_mods = True
                 resolved_modules.append(m)
             else:
-                mpat = re.compile(m)
+                mpat = re.compile(fr"{m}")
                 regex_modules = [m for m in named_modules if mpat.match(m)]
                 resolved_modules.extend(regex_modules)
             if not (regex_modules or explicit_mods):

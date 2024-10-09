@@ -163,9 +163,10 @@ def single_process_pg():
         os.environ.clear()
         os.environ.update(orig_environ)
 
-
 def pytest_collection_modifyitems(items):
-    # filter out special tests
+    # select special tests, all special tests run standalone
+    # note standalone tests take precedence over experimental tests if both env vars are set
+    # tests depending on experimental patches do not run in CI by default
     if os.getenv("PL_RUN_STANDALONE_TESTS", "0") == "1":
         items[:] = [
             item
@@ -174,11 +175,10 @@ def pytest_collection_modifyitems(items):
             # has `@RunIf(standalone=True)`
             if marker.name == "skipif" and marker.kwargs.get("standalone")
         ]
-    elif os.getenv("PL_RUN_SLOW_TESTS", "0") == "1":
+    elif os.getenv("FTS_EXPERIMENTAL_PATCH_TESTS", "0") == "1":
         items[:] = [
             item
             for item in items
             for marker in item.own_markers
-            # has `@RunIf(slow=True)`
-            if marker.name == "skipif" and marker.kwargs.get("slow")
+            if marker.name == "skipif" and marker.kwargs.get("exp_patch")
         ]

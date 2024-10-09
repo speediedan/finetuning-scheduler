@@ -370,7 +370,7 @@ A demonstration of the scheduled fine-tuning callback
 `RTE <https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte>`_ and
 `BoolQ <https://github.com/google-research-datasets/boolean-questions>`_ tasks of the
 `SuperGLUE <https://paperswithcode.com/dataset/superglue>`_ benchmark and the
-:external+pl:class:`~lightning.pytorch.cli.LightningCLI` is available under ``./fts_examples/stable``.
+:external+pl:class:`~lightning.pytorch.cli.LightningCLI` is available under ``./fts_examples``.
 
 Since this CLI-based example requires a few additional packages (e.g. ``transformers``, ``sentencepiece``), you
 should install them using the ``[examples]`` extra:
@@ -498,17 +498,31 @@ Footnotes
 
 .. toctree::
    :maxdepth: 1
+   :name: Enhanced Distributed Strategies
+   :caption: Enhanced Distributed Strategies
+
+   distributed/model_parallel_scheduled_fine_tuning
+   distributed/fsdp_scheduled_fine_tuning
+
+.. toctree::
+   :maxdepth: 1
+   :name: Configurable Profiling
+   :caption: Configurable Profiling
+
+   profiling/memprofiler_profiling
+
+.. toctree::
+   :maxdepth: 1
    :name: Advanced Usage
    :caption: Advanced Usage
 
    advanced/lr_scheduler_reinitialization
    advanced/optimizer_reinitialization
-   advanced/fsdp_scheduled_fine_tuning
 
 .. toctree::
    :maxdepth: 1
-   :name: Examples
-   :caption: Examples
+   :name: Basic Examples
+   :caption: Basic Examples
 
    Notebook-based Fine-Tuning Scheduler tutorial <https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html>
    CLI-based Fine-Tuning Scheduler tutorial <https://finetuning-scheduler.readthedocs.io/en/stable/#example-scheduled-fine-tuning-for-superglue>

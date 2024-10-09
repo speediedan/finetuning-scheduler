@@ -1,0 +1,16 @@
+class_path: fts_examples.profiling.extended_profiler.ExtendedPyTorchProfiler
+init_args:
+  filename: fts_extended_pytorch_profiler
+  max_name_column_width: 100
+  sort_by_key: cuda_time_total
+  schedule_cfg:
+    #skip_first: 20  # comment if you want to profile the first fine-tuning phase instead of the final one
+    wait: 1
+    warmup: 2
+    active: 1
+dict_kwargs:
+  with_stack: true
+  profile_memory: true
+  record_shapes: true
+  row_limit: 50
+  metric: self_cuda_time_total

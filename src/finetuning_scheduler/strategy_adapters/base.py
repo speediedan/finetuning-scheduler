@@ -22,7 +22,7 @@ from typing import Callable, List, Optional, Tuple, Dict
 
 import torch
 
-from lightning.fabric.utilities import rank_zero_info
+from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
 from lightning.fabric.utilities.types import ReduceLROnPlateau
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
@@ -123,6 +123,17 @@ class StrategyAdapter:
         """Hook executed immediately before the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
         :meth:`~finetuning_scheduler.fts.on_fit_start` hook begins.
         """
+
+    def on_validate_monitor_metric(self, monitor: str) -> None:
+        should_warn = self.fts_handle._check_sync_dist(monitor)
+        if should_warn:
+            warn_msg = (
+                f"The FTSCheckpoint quantity you are monitoring (`{monitor}`) is not being synchronized across"
+                " processes. In this context, `best` checkpoint metadata may diverge among processes making checkpoint"
+                " restoration errors possible. For this reason, logging the monitored metric with ``sync_dist`` set to"
+                " ``True`` is recommended."
+            )
+            rank_zero_warn(warn_msg)
 
     def on_before_restore_optimizers_and_lrs(self) -> None:
         """Hook executed immediately before :class:`~finetuning_scheduler.fts.FinetuningScheduler` restores

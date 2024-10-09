@@ -15,5 +15,6 @@ Fine-Tuning Scheduler Strategy Adapters
 """
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 from finetuning_scheduler.strategy_adapters.fsdp import FSDPStrategyAdapter
+from finetuning_scheduler.strategy_adapters.model_parallel import ModelParallelStrategyAdapter
 
-__all__ = ["StrategyAdapter", "FSDPStrategyAdapter"]
+__all__ = ["StrategyAdapter", "FSDPStrategyAdapter", "ModelParallelStrategyAdapter"]

@@ -12,12 +12,13 @@
 # limitations under the License.
 import os
 import re
+import warnings
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Any, Generator
+from contextlib import contextmanager
 
 _PROJECT_ROOT = Path(os.path.dirname(os.path.dirname(__file__))).parent
 _TH = os.path.join(_PROJECT_ROOT, "tests/helpers")
-
 
 def _load_requirements(
     path_dir: str,
@@ -100,3 +101,19 @@ def _load_readme_description(path_dir: str, homepage: str, version: str) -> str:
     skip_end = r"<!-- end skipping PyPI description -->"
     text = re.sub(rf"{skip_begin}.+?{skip_end}", "<!--  -->", text, flags=re.IGNORECASE + re.DOTALL)
     return text
+
+@contextmanager
+def disable_always_warnings() -> Generator[None, None, None]:
+    # can be used to re-enable filterwarnings in cases where `simplefilter('always')` is used to force a warning
+    # which can render normal filterwarnings use ineffective (e.g. https://github.com/pytorch/pytorch/pull/123619)
+    """A context manager that temporarily disables the use of `simplefilter('always')` within its context."""
+    original_simplefilter = warnings.simplefilter
+    def disable_always_simplefilter(*args: Any, **kwargs: Any) -> None:
+        if args[0] == "always":
+            return
+        original_simplefilter(*args, **kwargs)
+    warnings.simplefilter = disable_always_simplefilter
+    try:
+        yield
+    finally:
+        warnings.simplefilter = original_simplefilter

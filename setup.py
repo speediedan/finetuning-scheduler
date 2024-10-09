@@ -82,10 +82,13 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
         packages=setuptools.find_namespace_packages(where="src"),
         package_dir={"": "src"},
         package_data={
-            "fts_examples.stable.config": ["*.yaml"],
-            "fts_examples.stable.config.advanced.fsdp": ["*.yaml"],
-            "fts_examples.stable.config.advanced.reinit_lr": ["*.yaml"],
-            "fts_examples.stable.config.advanced.reinit_optim_lr": ["*.yaml"],
+            "fts_examples.config": ["*.yaml"],
+            "fts_examples.config.advanced.fsdp": ["*.yaml"],
+            "fts_examples.config.advanced.reinit_lr": ["*.yaml"],
+            "fts_examples.config.advanced.reinit_optim_lr": ["*.yaml"],
+            "fts_examples.model_parallel.config": ["*.yaml"],
+            "fts_examples.model_parallel.config.defaults": ["*.yaml"],
+            "fts_examples.model_parallel.config.profiling": ["*.yaml"],
         },
         include_package_data=True,
         long_description=long_description,
@@ -129,7 +132,7 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
 
     base_reqs = "standalone_base.txt" if standalone else "base.txt"
     # install_requires = setup_tools._load_requirements(
-    #     _INSTALL_PATHS["require"], file_name=base_reqs, standalone=standalone
+    # _INSTALL_PATHS["require"], file_name=base_reqs, standalone=standalone
     # )
     install_requires = setup_tools._load_requirements(
         _INSTALL_PATHS["require"],

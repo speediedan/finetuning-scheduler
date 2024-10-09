@@ -11,6 +11,7 @@ trigger:
     include:
       - "main"
       - "release/*"
+      - "model_parallel_exp_support"  # temporarily add for new test infra enhancement validation
       - "refs/tags/*"
   paths:
     include:
@@ -59,7 +60,7 @@ jobs:
       mapDockerSocket: false
       volumes:
       - /var/run/user/998/docker.sock:/var/run/docker.sock
-      options: --gpus all
+      options: --gpus all --shm-size=512m
 
     workspace:
       clean: outputs
@@ -88,8 +89,13 @@ jobs:
 
     - bash: |
         . /tmp/venvs/fts_dev/bin/activate
-        bash ./tests/standalone_tests.sh -k test_f
+        bash ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
       displayName: 'Testing: standalone multi-gpu'
+
+    - bash: |
+        . /tmp/venvs/fts_dev/bin/activate
+        bash ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0"
+      displayName: 'Testing: experimental einsum patch'
 
     - bash: |
         . /tmp/venvs/fts_dev/bin/activate
@@ -103,9 +109,18 @@ jobs:
         CODECOV_TOK: $(CODECOV_TOKEN)  # explicit mapping required for secret azure pipeline variables
       displayName: 'Statistics'
 
-    - script: |
+    - bash: |
         set -e
         . /tmp/venvs/fts_dev/bin/activate
-        python -m pytest src/fts_examples/stable -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
+        python -m pytest src/fts_examples -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
       # condition: notIn(variables['scope'], '2.0.1')
-      displayName: 'Testing: examples'
+      displayName: 'Testing: Examples'
+
+    - bash: |
+        . /tmp/venvs/fts_dev/bin/activate
+        mkdir -p /__w/_temp/kernel_cache
+        bash ./tests/special_tests.sh --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'
+      # condition: notIn(variables['scope'], '2.0.1')
+      env:
+        PYTORCH_KERNEL_CACHE_PATH: "/__w/_temp/kernel_cache"
+      displayName: 'Testing: Multi-GPU Examples'

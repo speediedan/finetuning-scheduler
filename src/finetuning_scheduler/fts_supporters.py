@@ -23,6 +23,7 @@ import pathlib
 import inspect
 import re
 import warnings
+import yaml
 from contextlib import contextmanager
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
@@ -36,33 +37,34 @@ from typing_extensions import TypeAlias, override
 
 import lightning.pytorch as pl
 import torch
-import yaml
+from torch import Tensor
+from torch.nn import Module
 from lightning.fabric.utilities import rank_zero_info, rank_zero_only, rank_zero_warn
 from lightning.fabric.utilities.cloud_io import get_filesystem
-from lightning.pytorch.callbacks import Callback
-from lightning.pytorch.callbacks.early_stopping import EarlyStopping
-from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
-from lightning.pytorch.callbacks.model_checkpoint import ModelCheckpoint
+from lightning.pytorch.callbacks import Callback, EarlyStopping, LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.core.optimizer import _MockOptimizer
 from lightning.pytorch.trainer.states import TrainerFn
 from lightning.pytorch.utilities import find_shared_parameters
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 from lightning.pytorch.utilities.types import LRSchedulerConfig
-from torch import Tensor
-from torch.distributed.optim import ZeroRedundancyOptimizer
-from torch.nn import Module
 
-from finetuning_scheduler.strategy_adapters.fsdp import FSDPStrategyAdapter, StrategyAdapter
+from finetuning_scheduler.setup_tools import disable_always_warnings
+from finetuning_scheduler.strategy_adapters import StrategyAdapter, FSDPStrategyAdapter, ModelParallelStrategyAdapter
 from finetuning_scheduler.types import (FTSLRSchedulerType, FTSLRSchedulerTypeTuple, ParamGroupAddable,
                                         BaseCallbackDepType)
+
+
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=r".*functional optimizers is deprecated.*")
+with disable_always_warnings():
+    from torch.distributed.optim import ZeroRedundancyOptimizer
 
 log = logging.getLogger(__name__)
 
 CALLBACK_DEP_PARENTS = {"ModelCheckpoint": ModelCheckpoint, "EarlyStopping": EarlyStopping}
 CALLBACK_ATTRS = ("ft_schedule", "max_depth")
 TARGET_CALLBACK_REF = "FinetuningScheduler"
-STRATEGY_ADAPTERS = {"fsdp": FSDPStrategyAdapter}
+STRATEGY_ADAPTERS = {"fsdp": FSDPStrategyAdapter, "modelparallelstrategy": ModelParallelStrategyAdapter}
 
 
 @dataclass
@@ -233,30 +235,9 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
                 :external+pl:class:`~lightning.pytorch.core.module.LightningModule` object
         """
         if trainer.state.fn == TrainerFn.FITTING:
-            self.reduce_transition_decisions = self._check_sync_dist(trainer)
+            self.reduce_transition_decisions = self.finetuningscheduler_callback._check_sync_dist(self.monitor)
         super().on_validation_end(trainer, pl_module)
 
-    def _check_sync_dist(self, trainer: "pl.Trainer") -> bool:
-        """Inspect the monitored metric and execution context to determine whether transition decisions for this
-        callback need to be reduced over all distributed training processes.
-
-        Args:
-            trainer: The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
-
-        Returns:
-            bool: Whether to reduce transition decisions for this callback over all training processes
-        """
-        assert self.finetuningscheduler_callback is not None
-        monitor_metric = [
-            m
-            for m in self.finetuningscheduler_callback.pl_module.trainer._results.result_metrics
-            if m.meta.name == self.monitor
-        ]
-        assert monitor_metric[0] is not None
-        no_sync = (torch.distributed.is_available() and monitor_metric[0].is_tensor) and not monitor_metric[
-            0
-        ].meta.sync.should
-        return no_sync
 
     def _transition_es_phase(self) -> None:
         """Encapsulates updating the :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` internal state
@@ -323,11 +304,22 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
                     should_stop = True
                     reason = (
                         f"Monitored metric {self.monitor} did not improve in the last {self.wait_count} records."
-                        f" Best score: {self.best_score:.3f}. Signaling Trainer to stop."
+                        f" Best score: {self.best_score.item():.3f}. Signaling Trainer to stop."
                     )
                 else:
                     self._transition_es_phase()
         return should_stop, reason
+
+    def _improvement_message(self, current: Tensor) -> str:
+        """Override standard EarlyStopping._improvement_message to accommodate loss_parallel/Dtensor."""
+        if torch.isfinite(self.best_score):
+            msg = (
+                f"Metric {self.monitor} improved by {abs(self.best_score - current).item():.3f} >="
+                f" min_delta = {abs(self.min_delta)}. New best score: {current.item():.3f}"
+            )
+        else:
+            msg = f"Metric {self.monitor} improved. New best score: {current.item():.3f}"
+        return msg
 
 
 class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
@@ -378,6 +370,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         self.finetuningscheduler_callback = None
         self._prev_best_model_path = ''
         self._has_depth_metadata_lock = False
+        self._monitor_validated = False
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
         """Verify a valid callback configuration is present before beginning training.
@@ -415,6 +408,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         if self._save_on_train_epoch_end is None:
             # post-validation saving/evaluation is the most common fts usage pattern
             self._save_on_train_epoch_end = False
+        # note monitor metric validation must be deferred until first ``monitor_candidates`` access
         super().setup(trainer, pl_module, stage)
 
     def state_dict(self) -> Dict[str, Any]:
@@ -503,7 +497,16 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             self._prev_best_model_path = self.best_model_path
             super()._save_topk_checkpoint(trainer, monitor_candidates)
 
+    @override
+    def _monitor_candidates(self, trainer: "pl.Trainer") -> Dict[str, Tensor]:
+        # invoke relevant FTS strategy adapter monitor metric validation prior to first collection of monitor candidates
+        if not self._monitor_validated and self.monitor:
+            self.finetuningscheduler_callback.strategy_adapter.on_validate_monitor_metric(self.monitor)
+            self._monitor_validated = True
+        return super()._monitor_candidates(trainer)
+
 FTSCallbackDepType: TypeAlias = Union[Type[FTSEarlyStopping], Type[FTSCheckpoint]]
+
 
 class UniqueKeyLoader(yaml.SafeLoader):
     """Alters SafeLoader to enable duplicate key detection by the SafeConstructor."""
@@ -895,7 +898,7 @@ class ScheduleParsingMixin(ABC):
                 explicit_params = True
                 resolved_params.append(p)
             else:
-                ppat = re.compile(p)
+                ppat = re.compile(fr"{p}")
                 regex_params = [n for n in named_params if ppat.match(n)]
                 resolved_params.extend(regex_params)
             if not (regex_params or explicit_params):
@@ -1778,6 +1781,7 @@ class ScheduleImplMixin(ABC):
                         " and training failure in pytorch during a future fine-tuning phase."
                     )
                 rank_zero_warn(w_msg)
+
 
 class CallbackDepMixin(ABC):
     """Functionality for validating/managing callback dependencies."""

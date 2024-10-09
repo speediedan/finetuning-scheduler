@@ -1,0 +1,58 @@
+trainer:
+  limit_train_batches: 7
+  max_epochs: 4
+  devices: 2
+  callbacks:
+  - class_path: finetuning_scheduler.FinetuningScheduler
+    init_args:
+      ft_schedule: ./config/RteBoolqModule_ft_schedule_deberta_base_fsdp.yaml
+      max_depth: 2
+  - class_path: finetuning_scheduler.FTSCheckpoint
+    init_args:
+      save_top_k: 1
+      monitor: val_loss
+      verbose: true
+  - class_path: finetuning_scheduler.FTSEarlyStopping
+    init_args:
+      monitor: val_loss
+      min_delta: 0.001
+      patience: 2 # limited patience for example
+      verbose: false
+      mode: min
+  strategy:
+    class_path: lightning.pytorch.strategies.FSDPStrategy
+    init_args:
+      cpu_offload: false
+      activation_checkpointing_policy:
+        class_path: torch.distributed.fsdp.wrap.ModuleWrapPolicy
+        init_args:
+          # comment below to generate debugging demo
+          module_classes: !!set
+            ? transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Layer
+      auto_wrap_policy:
+        class_path: torch.distributed.fsdp.wrap.ModuleWrapPolicy
+        init_args:
+          # comment below to generate debugging demo
+          module_classes: !!set
+            ? transformers.models.deberta_v2.modeling_deberta_v2.DebertaV2Layer
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: lightning_logs
+      name: fts_fsdp_basic_profile
+  profiler:
+    class_path: fts_examples.profiling.extended_profiler.ExtendedPyTorchProfiler
+    init_args:
+      filename: fts_fsdp_basic_text_profile
+      max_name_column_width: 100
+      sort_by_key: cuda_time_total
+      schedule_cfg:
+        skip_first: 20  # comment if you want to profile the first fine-tuning phase instead of the final one
+        wait: 1
+        warmup: 1
+        active: 3
+    dict_kwargs:
+      with_stack: true
+      profile_memory: true
+      record_shapes: true
+      row_limit: 50

@@ -1,0 +1,14 @@
+trainer:
+  max_epochs: 4
+  callbacks+:
+  - class_path: finetuning_scheduler.FinetuningScheduler
+    init_args:
+      ft_schedule: ./config/defaults/llama_ft_schedule.yaml
+      max_depth: 2
+  strategy:
+    init_args:
+      data_parallel_size: 1
+      tensor_parallel_size: 2
+  logger:
+    init_args:
+      name: fts_tp_plan

@@ -13,7 +13,7 @@ from copy import deepcopy
 from functools import partial
 from logging import DEBUG
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 from unittest import mock
 
 import pytest
@@ -26,8 +26,9 @@ from torch.utils.data import DataLoader
 
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from finetuning_scheduler.strategy_adapters import FSDPStrategyAdapter
-from tests.helpers.boring_model import RandomDataset, unexpected_warns, unmatched_warns
-from tests.helpers.runif import RunIf
+from tests.helpers.boring_models import RandomDataset
+from tests.helpers.common import get_fts, unexpected_warns, unmatched_warns, nones
+from tests.helpers.runif import RunIf, RUNIF_MAP
 from tests.fsdp_expected_paths import (path_default, path_default_orig, path_default_orig_eo_dyn, path_ignore_p_uo,
                                        path_8_14, path_5_10, path_ext_7_14, path_ext_8_16, path_optimlr_reinit,
                                        lrs_path_optimlr_reinit, path_bn_track_false, path_bn_track_true, ResultEnum)
@@ -36,8 +37,6 @@ from tests.test_finetuning_scheduler_callback import (
     EXPECTED_WARNS,
     ExplicitLossFTSCheckpoint,
     FinetuningSchedulerBoringModel,
-    get_fts,
-    nones,
     TestFinetuningScheduler,
     get_sched_fixture_tmpdir,
 )
@@ -62,7 +61,7 @@ else:
 from torch.distributed.fsdp.wrap import CustomPolicy
 
 DISABLE_USE_ORIG = {"use_orig_params": False}
-_FSDPPolicy = object
+#_FSDPPolicy = object
 
 
 additional_fsdp_warns = [
@@ -74,6 +73,7 @@ additional_fsdp_warns = [
     "FSDP.state_dict_type", # temporarily required until Lightning uses new FSDP state dict API with PT 2.4
     "of Tensor.pin_memory",  # required as of PT 2.5 nightly for FSDP1 `_flat_param` internal usage
     "Tensor.is_pinned",  # required as of PT 2.5 nightly for FSDP1 `_flat_param` internal usage
+    "Deallocating Tensor ", # required as of PT 2.5 nightly definitely after 0906, introduced sometime after 0827
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
@@ -104,13 +104,13 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
     mod_sched_dict[1] = mod_sched_dict.pop(2)
     mod_sched_dict[1]["lr"] = 1e-06
     mod_sched_dict[2] = mod_sched_dict.pop(3)
-    mod_sched_dict[2]["params"] = ["layer.0.*"]
+    mod_sched_dict[2]["params"] = ["model.0.*"]
     fsdp_sched_dict = deepcopy(mod_sched_dict)
-    fsdp_sched_dict[0]["params"] = ["layer.(4|2).*"]
+    fsdp_sched_dict[0]["params"] = ["model.(4|2).*"]
     fsdp_gen_sched_dict = deepcopy(fsdp_sched_dict)
-    fsdp_gen_sched_dict[0]["params"] = ["layer.(7|5).*"]
+    fsdp_gen_sched_dict[0]["params"] = ["model.(7|5).*"]
     fsdp_gen_sched_dict[0]["max_transition_epoch"] = 1
-    fsdp_gen_sched_dict[1]["params"] = ["layer.[1-4].*"]
+    fsdp_gen_sched_dict[1]["params"] = ["model.[1-4].*"]
     fsdp_gen_sched_dict[1]["max_transition_epoch"] = 2
     fsdp_reinit_optim_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_reinitlr_sched_dict = deepcopy(fsdp_gen_sched_dict)
@@ -153,24 +153,24 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
     }
     fsdp_bn_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
-    fsdp_bn_gen_sched_dict[0]["params"] = ["layer.(9|[5-7]).*"]
-    fsdp_bn_gen_sched_dict[1]["params"] = ["layer.[1-4].*"]
+    fsdp_bn_gen_sched_dict[0]["params"] = ["model.(9|[5-7]).*"]
+    fsdp_bn_gen_sched_dict[1]["params"] = ["model.[1-4].*"]
     fsdp_shared_param_sched_dict = deepcopy(fsdp_gen_sched_dict)
-    fsdp_shared_param_sched_dict[0]["params"] = ["layer.(7|4).*", "layer.5.weight", "layer.5.bias"]
-    fsdp_shared_param_sched_dict[1]["params"] = ["layer.2.*", "layer.3.weight", "layer.3.bias"]
-    fsdp_shared_param_sched_dict[2]["params"] = ["layer.[0-1].*"]
+    fsdp_shared_param_sched_dict[0]["params"] = ["model.(7|4).*", "model.5.weight", "model.5.bias"]
+    fsdp_shared_param_sched_dict[1]["params"] = ["model.2.*", "model.3.weight", "model.3.bias"]
+    fsdp_shared_param_sched_dict[2]["params"] = ["model.[0-1].*"]
     fsdp_nondis_mod_sched_dict = deepcopy(fsdp_gen_sched_dict)
-    fsdp_nondis_mod_sched_dict[1]["params"] = ["layer.[1-4].*", "layer.0.bias"]
-    fsdp_nondis_mod_sched_dict[2]["params"] = ["layer.0.weight"]
+    fsdp_nondis_mod_sched_dict[1]["params"] = ["model.[1-4].*", "model.0.bias"]
+    fsdp_nondis_mod_sched_dict[2]["params"] = ["model.0.weight"]
     fsdp_nondis_mod_ex_sched_dict = deepcopy(fsdp_gen_sched_dict)
-    fsdp_nondis_mod_ex_sched_dict[1]["params"] = ["layer.[2-4].*"]
+    fsdp_nondis_mod_ex_sched_dict[1]["params"] = ["model.[2-4].*"]
     del fsdp_nondis_mod_ex_sched_dict[1]["max_transition_epoch"]
     del fsdp_nondis_mod_ex_sched_dict[2]
     fsdp_adam_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
     fsdp_adam_gen_sched_dict[0]["max_transition_epoch"] = 2
     fsdp_adam_gen_sched_dict[1]["max_transition_epoch"] = 4
     fsdp_ext_gen_sched_dict = deepcopy(fsdp_gen_sched_dict)
-    fsdp_ext_gen_sched_dict[0]["params"] = ["layer.(5|[7-8]).*"]
+    fsdp_ext_gen_sched_dict[0]["params"] = ["model.(5|[7-8]).*"]
     fsdp_epoch_only_sched = deepcopy(fsdp_gen_sched_dict)
     fsdp_epoch_only_sched[1]["max_transition_epoch"] = 2
     fsdp_epoch_only_sched[2]["max_transition_epoch"] = 3
@@ -230,7 +230,7 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
         self.outer_is_wrapped = outer_is_wrapped
         self.precision_key = precision_key
 
-        self.layer = torch.nn.Sequential(
+        self.model = torch.nn.Sequential(
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
@@ -277,27 +277,27 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
 
     def _assert_layer_fsdp_instance(self) -> None:
         if self.outer_is_wrapped:
-            assert isinstance(self.layer, FullyShardedDataParallel)
+            assert isinstance(self.model, FullyShardedDataParallel)
         else:
-            assert isinstance(self.layer, torch.nn.Sequential)
+            assert isinstance(self.model, torch.nn.Sequential)
         if self.precision_key == "auto_16":
             assert isinstance(self.trainer.strategy.precision_plugin, FSDPPrecision)
             precision = torch.float16 if self.trainer.precision == "16-true" else torch.bfloat16
         # ensure our ignored module is not wrapped
         for i in self.fsdp_mask["unwrapped_mods"]:
-            assert not isinstance(self.layer[i], FullyShardedDataParallel)
+            assert not isinstance(self.model[i], FullyShardedDataParallel)
         # but that all other modules are wrapped
         for i in self.fsdp_mask["wrapped_mods"]:
-            assert isinstance(self.layer[i], FullyShardedDataParallel)
+            assert isinstance(self.model[i], FullyShardedDataParallel)
             if self.precision_key:
-                if isinstance(self.layer[i].module, torch.nn.modules.batchnorm._BatchNorm):
-                    assert self.layer[i].mixed_precision.param_dtype is None
-                    assert self.layer[i].mixed_precision.reduce_dtype is None
-                    assert self.layer[i].mixed_precision.buffer_dtype is None
+                if isinstance(self.model[i].module, torch.nn.modules.batchnorm._BatchNorm):
+                    assert self.model[i].mixed_precision.param_dtype is None
+                    assert self.model[i].mixed_precision.reduce_dtype is None
+                    assert self.model[i].mixed_precision.buffer_dtype is None
                 else:
-                    assert self.layer[i].mixed_precision.param_dtype == precision
-                    assert self.layer[i].mixed_precision.reduce_dtype == precision
-                    assert self.layer[i].mixed_precision.buffer_dtype == precision
+                    assert self.model[i].mixed_precision.param_dtype == precision
+                    assert self.model[i].mixed_precision.reduce_dtype == precision
+                    assert self.model[i].mixed_precision.buffer_dtype == precision
 
 
 class NonDynamicLossAdamFSDPModel(FTSBaseFSDPModel):
@@ -332,14 +332,14 @@ class FTSCmFSDPModel(FTSBaseFSDPModel):
 
     def configure_model(self) -> None:
         # the model is already wrapped with FSDP: no need to wrap again!
-        if isinstance(self.layer, FullyShardedDataParallel):
+        if isinstance(self.model, FullyShardedDataParallel):
             return
-        for i, layer in enumerate(self.layer):
+        for i, layer in enumerate(self.model):
             if i in self.fsdp_mask["wrapped_mods"]:
-                self.layer[i] = wrap(layer)
-        self.layer = wrap(self.layer)
+                self.model[i] = wrap(layer)
+        self.model = wrap(self.model)
 
-        for param in self.layer._ignored_params:
+        for param in self.model._ignored_params:
             with torch.no_grad():
                 param.data = param.to(self.device)
                 if param.grad is not None:
@@ -351,7 +351,7 @@ class FTSCmFSDPModel(FTSBaseFSDPModel):
             checkpoint_wrapper,
             checkpoint_impl=CheckpointImpl.NO_REENTRANT,
         )
-        apply_activation_checkpointing(self.layer, checkpoint_wrapper_fn=wrapper, check_fn=check_fn)
+        apply_activation_checkpointing(self.model, checkpoint_wrapper_fn=wrapper, check_fn=check_fn)
 
 
 class FTSNoDecayFSDPModel(FTSBaseFSDPModel):
@@ -366,8 +366,8 @@ class AlreadyWrappedFSDPModel(FTSBaseFSDPModel):
 
     def setup(self, stage: str):
         with self._trainer.strategy.model_sharded_context():
-            self.layer[0] = wrap(self.layer[0])
-            assert isinstance(self.layer[0], FullyShardedDataParallel)
+            self.model[0] = wrap(self.model[0])
+            assert isinstance(self.model[0], FullyShardedDataParallel)
 
 
 class FTSEnforceP0FSDPModel(FTSBaseFSDPModel):
@@ -392,12 +392,12 @@ class FTSCmAdamFSDPModel(FTSBaseFSDPModel):
 
     def configure_model(self) -> None:
         # the model is already wrapped with FSDP: no need to wrap again!
-        if isinstance(self.layer, FullyShardedDataParallel):
+        if isinstance(self.model, FullyShardedDataParallel):
             return
-        for i, layer in enumerate(self.layer):
+        for i, layer in enumerate(self.model):
             if i in self.fsdp_mask["wrapped_mods"]:
-                self.layer[i] = wrap(layer)
-        self.layer = wrap(self.layer)
+                self.model[i] = wrap(layer)
+        self.model = wrap(self.model)
 
 
 class FTSAdamFSDPModel(FTSBaseFSDPModel):
@@ -416,7 +416,7 @@ class FTSAdamFSDPModel(FTSBaseFSDPModel):
 class FTSExtFSDPModel(FTSBaseFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.layer = torch.nn.Sequential(
+        self.model = torch.nn.Sequential(
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
@@ -432,7 +432,7 @@ class FTSExtFSDPModel(FTSBaseFSDPModel):
 class FTSBatchNormFSDPModel(FTSBaseFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.layer = torch.nn.Sequential(
+        self.model = torch.nn.Sequential(
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
             torch.nn.BatchNorm1d(32),
@@ -453,7 +453,7 @@ class FTSBatchNormFSDPModel(FTSBaseFSDPModel):
 class FTSSharedParamFSDPModel(FTSBaseFSDPModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.layer = torch.nn.Sequential(
+        self.model = torch.nn.Sequential(
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
             torch.nn.Linear(32, 32),
@@ -463,10 +463,10 @@ class FTSSharedParamFSDPModel(FTSBaseFSDPModel):
             torch.nn.ReLU(),
             torch.nn.Linear(32, 2),
         )
-        self.layer[4].weight = self.layer[5].weight
-        self.layer[4].bias = self.layer[5].bias
-        self.layer[3].weight = self.layer[1].weight
-        self.layer[3].bias = self.layer[1].bias
+        self.model[4].weight = self.model[5].weight
+        self.model[4].bias = self.model[5].bias
+        self.model[3].weight = self.model[1].weight
+        self.model[3].bias = self.model[1].bias
 
 
 class FSDPTestFinetuningScheduler(TestFinetuningScheduler):
@@ -571,7 +571,6 @@ wrap_ext_mp = {"fsdp_mask": {"wrapped_mods": list(range(6)) + [7, 8], "unwrapped
 # FTS FSDP Test Policies #
 ##########################
 
-
 def custom_auto_wrap_policy(
     module,
     recurse,
@@ -596,21 +595,9 @@ def warn_custom_auto_wrap_policy(
     return nonwrapped_numel >= 1100
 
 
-class CustomWrapPolicy(_FSDPPolicy):
-    """This is a wrapper around :func:`_module_wrap_policy`."""
-
-    def __init__(self, min_num_params: int):
-        self._policy: Callable = partial(size_based_auto_wrap_policy, min_num_params=min_num_params)
-
-    @property
-    def policy(self):
-        return self._policy
-
-
 # RunIf aliases
 runif_map = {
-    #"min2_2": {"min_torch": "2.2.0"},
-    #"max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
+    "min2_2": {"min_torch": "2.2.0"},
 }
 
 # auto-wrap policy aliases
@@ -618,20 +605,19 @@ cust_awp = custom_auto_wrap_policy
 cust_ext_awp = custom_auto_wrap_ext_policy
 warn_cust_awp = warn_custom_auto_wrap_policy
 numel_constant = 67
-awp_mwp_2_1_parity = CustomPolicy(lambda_fn=lambda m: sum(p.numel() for p in m.parameters()) >= numel_constant)
-awp_mwp_2_0_parity = None
+awp_mwp_parity = CustomPolicy(lambda_fn=lambda m: sum(p.numel() for p in m.parameters()) >= numel_constant)
 
 # awp_overrides configuration aliases
-awp_5_9 = {"awp_overrides": ["layer.9", "layer.5"]}
-awp_1 = {"awp_overrides": ["l.*yer.1"]}
-awp_7 = {"awp_overrides": ["layer.7"]}
-awp_7_8 = {"awp_overrides": ["l.*yer.8", "layer.7"]}
+awp_5_9 = {"awp_overrides": ["model.9", "model.5"]}
+awp_1 = {"awp_overrides": ["m.*del.1"]}
+awp_7 = {"awp_overrides": ["model.7"]}
+awp_7_8 = {"awp_overrides": ["m.*del.8", "model.7"]}
 
 # FSDP strategy configuration aliases
 act_ckpt_cfg = {"activation_checkpointing_policy": {torch.nn.Linear}, **DISABLE_USE_ORIG}
-ignore_mod_cfg = {"test_ignored_modules_names": ["layer.4"], "cpu_offload": False, **DISABLE_USE_ORIG}
+ignore_mod_cfg = {"test_ignored_modules_names": ["model.4"], "cpu_offload": False, **DISABLE_USE_ORIG}
 ignore_states_cfg = {
-    "test_ignored_parameters_names": ["layer.4.weight", "layer.4.bias"],
+    "test_ignored_parameters_names": ["model.4.weight", "model.4.bias"],
     "cpu_offload": False,
     "use_orig_params": True,
 }
@@ -681,8 +667,8 @@ FTS_FSDP_TESTS = {
         None,
         (path_default_orig_eo_dyn, *nones(3)),
     ),
-    "cust_awp_mwp_2_1_reinitlr_optim_no_use_orig": (
-        (base_model, awp_mwp_2_1_parity, True, 8, unwrap_7_mp, None, opt_inspect, None, DISABLE_USE_ORIG),
+    "cust_awp_mwp_reinitlr_optim_no_use_orig": (
+        (base_model, awp_mwp_parity, True, 8, unwrap_7_mp, None, opt_inspect, None, DISABLE_USE_ORIG),
         None,
         (
             path_optimlr_reinit,
@@ -691,8 +677,8 @@ FTS_FSDP_TESTS = {
             lrs_path_optimlr_reinit,
         ),
     ),
-    "cust_awp_mwp_2_1_parity_no_use_orig": (
-        (base_model, awp_mwp_2_1_parity, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
+    "cust_awp_mwp_parity_no_use_orig": (
+        (base_model, awp_mwp_parity, True, 0, unwrap_7_mp, *nones(3), DISABLE_USE_ORIG),
         None,
         (path_default, *nones(3)),
     ),
@@ -795,11 +781,6 @@ FTS_FSDP_TESTS = {
         None,
         (path_default, *nones(3)),
     ),
-    "cust_awp_overrides_mwp_prec_no_use_orig": (
-        (base_model, awp_mwp_2_1_parity, True, 0, wrap_all_mp, awp_7, *nones(2), cust_fp16_mp),
-        None,
-        (path_default, *nones(3)),
-    ),
     "cust_awp_overrides_mwp_prec_ext_no_use_orig": (
         (ext_model, cust_ext_awp, True, 6, wrap_ext_mp, awp_7_8, *nones(2), cust_fp16_mp),
         None,
@@ -821,7 +802,7 @@ FSDP_TEST_CFGS = [
         k,
         *test_cfg[0],
         id=k,
-        marks=RunIf(**runif_map[test_cfg[1]]) if runif_map.get(test_cfg[1], None) else tuple(),
+        marks=RunIf(**RUNIF_MAP[test_cfg[1]]) if RUNIF_MAP.get(test_cfg[1], None) else tuple(),
     )
     for k, test_cfg in FTS_FSDP_TESTS.items()
 ]

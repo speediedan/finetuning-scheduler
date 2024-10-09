@@ -1,0 +1,53 @@
+model:
+  class_path: fts_examples.model_parallel.mp_examples.ModParallelExample
+  init_args:
+    model_cfg: torchtitan_llama.yaml
+trainer:
+  max_epochs: 4
+  devices: 2
+  accelerator: gpu
+  log_every_n_steps: 16
+  num_sanity_val_steps: 0
+  callbacks:
+  - class_path: finetuning_scheduler.FTSCheckpoint
+    init_args:
+      save_top_k: 1
+      monitor: val_loss
+      verbose: true
+  - class_path: finetuning_scheduler.FTSEarlyStopping
+    init_args:
+      monitor: val_loss
+      min_delta: 0.001
+      patience: 2 # limited patience for example
+      verbose: false
+      mode: min
+  strategy:
+    class_path: lightning.pytorch.strategies.ModelParallelStrategy
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: lightning_logs
+      name: fts_mp_example_default
+seed_everything: 42
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    weight_decay: 1.0e-05
+    eps: 1.0e-07
+    lr: 1.0e-05
+lr_scheduler:
+  class_path: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+  init_args:
+    T_0: 1
+    T_mult: 2
+    eta_min: 1.0e-07
+########################################################################################################################
+# Uncomment `lightning_lrs_cfg` and set LightningCLI's `auto_configure_optimizers` to `False` if you want to override
+# Lightning's  `LRSchedulerConfig` defaults with a `lightning_lrs_cfg` config below. Note that you must provide a
+# `configure_optimizers` method to override `LRSchedulerConfig` since LightningCLI's `auto_configure_optimizers`
+# functionality does not support that configuration option.
+########################################################################################################################
+# lightning_lrs_cfg:
+#   interval: epoch
+#   frequency: 1
+#   name: CosineAnnealingWarmRestarts

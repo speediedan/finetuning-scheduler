@@ -130,7 +130,7 @@ jobs:
 
     # - name: Examples
     #   run: |
-    #     python -m pytest fts_examples/stable -v --durations=3
+    #     python -m pytest fts_examples -v --durations=3
 
     - name: Upload pytest results
       uses: actions/upload-artifact@v3

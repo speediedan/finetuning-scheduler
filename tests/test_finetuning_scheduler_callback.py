@@ -18,6 +18,7 @@ from logging import DEBUG
 from pathlib import Path
 from unittest import mock
 from typing import Any, Dict, List, Optional, Tuple
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 import pytest
@@ -38,21 +39,13 @@ from torch.multiprocessing import ProcessRaisedException
 from torch.utils.data import DataLoader, Dataset
 
 from finetuning_scheduler import CallbackResolverMixin, FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
+from finetuning_scheduler.strategy_adapters import StrategyAdapter
 from tests.helpers import BoringModel
-from tests.helpers.boring_model import (CustomLRScheduler, LinearWarmupLR, unexpected_warns, unmatched_warns,
-                                        RandomDataset)
+from tests.helpers.boring_models import (CustomLRScheduler, LinearWarmupLR, RandomDataset)
 from tests.helpers.runif import RunIf
-
-fts_resolver = CallbackResolverMixin()
-
-
-def get_fts(trainer: "Trainer") -> Callback:
-    fts_resolver.connect_callback(trainer, reconnect=True)
-    return fts_resolver.finetuningscheduler_callback
+from tests.helpers.common import get_fts, unexpected_warns, unmatched_warns
 
 
-def nones(num_n) -> Tuple:  # to help dedup config
-    return (None,) * num_n
 
 DIST_TEST_SYMDIR = Path(gettempdir()) / "current_dist_test"
 
@@ -170,7 +163,7 @@ class FinetuningSchedulerBoringModel(BoringModel):
         monitor_metric: str = None,
     ):
         super().__init__()
-        self.layer = nn.Sequential(nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 2))
+        self.model = nn.Sequential(nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 32), nn.Linear(32, 2))
         self.training_step_outputs = []
         self.validation_step_outputs = []
         self.test_step_outputs = []
@@ -243,7 +236,7 @@ class FinetuningSchedulerBoringModel(BoringModel):
 class BNBoringModel(FinetuningSchedulerBoringModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.layer = nn.Sequential(
+        self.model = nn.Sequential(
             OrderedDict(
                 [("lin_base", nn.Linear(32, 32)), ("bn", nn.BatchNorm1d(32)), ("lin_classif", nn.Linear(32, 2))]
             )
@@ -252,6 +245,43 @@ class BNBoringModel(FinetuningSchedulerBoringModel):
     def train_dataloader(self):
         # when testing BatchNorm layers, we need to ensure there are more than 1 samples per batch
         return DataLoader(RandomDataset(32, 64), batch_size=2)
+
+
+# def _parallelize_model_parallel_tp(model, device_mesh):
+#     from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel, parallelize_module
+
+#     tp_mesh = device_mesh["tensor_parallel"]
+#     tp_plan = {
+#         "w1": ColwiseParallel(),
+#         "w2": ColwiseParallel(),
+#         "w3": RowwiseParallel(),
+#     }
+#     parallelize_module(model, tp_mesh, tp_plan)
+#     return model
+
+# class FeedForward(nn.Module):
+#     def __init__(self):
+#         super().__init__()
+#         self.w1 = nn.Linear(32, 64)
+#         self.w2 = nn.Linear(32, 64)
+#         self.w3 = nn.Linear(64, 2)
+
+#     def forward(self, x):
+#         return self.w3(F.silu(self.w1(x)) * self.w2(x))
+
+# class FTSModelParallelBoringModel(FinetuningSchedulerBoringModel):
+#     def __init__(self, *args, **kwargs):
+#         super().__init__(*args, **kwargs)
+#         self.model = FeedForward()
+
+#     def train_dataloader(self):
+#         return DataLoader(RandomDataset(32, 8), batch_size=2)
+
+#     def configure_model(self):
+#         _parallelize_model_parallel_tp(self.model, device_mesh=self.device_mesh)
+
+#     def forward(self, x: Tensor) -> Tensor:
+#         return self.model(x)
 
 class FTSCustLRModel(FinetuningSchedulerBoringModel):
     """overrides lr_scheduler_step to allow lr scheduler testing."""
@@ -277,7 +307,7 @@ class TestFinetuningScheduler(FinetuningScheduler):
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        self.expected_state = expected_state
+        self.expected_state = expected_state or {}
         self.lrs_state = lrs_state
         self.mock_strategy = mock_strategy
         self.state_log_dir = state_log_dir
@@ -301,12 +331,12 @@ class TestFinetuningScheduler(FinetuningScheduler):
             raise SystemExit(0)
 
     def state_dict(self) -> Dict[str, Any]:
-        self.best_ckpt_test_weight = self.pl_module._modules["layer"]._modules["3"].bias.data.detach().clone()
+        self.best_ckpt_test_weight = self.pl_module._modules["model"]._modules["3"].bias.data.detach().clone()
         return super().state_dict()
 
     def restore_best_ckpt(self) -> None:
         super().restore_best_ckpt()
-        assert torch.equal(self.pl_module._modules["layer"]._modules["3"].bias.data, self.best_ckpt_test_weight)
+        assert torch.equal(self.pl_module._modules["model"]._modules["3"].bias.data, self.best_ckpt_test_weight)
         self.restored_best_cnt += 1
 
     def on_train_epoch_start(self, trainer, pl_module):
@@ -371,13 +401,13 @@ class BNInspectFTS(TestFinetuningScheduler):
     def sample_bn_state(self, trainer, pl_module) -> None:
         phase_subkey = "train" if pl_module.training else "val"
         state_key = f"{trainer.current_epoch}_{phase_subkey}"
-        sample_running_mean = self.pl_module.layer.bn._buffers.get('running_mean', None)
-        sample_running_var = self.pl_module.layer.bn._buffers.get('running_var', None)
-        sample_num_tracked = self.pl_module.layer.bn.num_batches_tracked
+        sample_running_mean = self.pl_module.model.bn._buffers.get('running_mean', None)
+        sample_running_var = self.pl_module.model.bn._buffers.get('running_var', None)
+        sample_num_tracked = self.pl_module.model.bn.num_batches_tracked
         current_state = (
-            self.pl_module.layer.bn.track_running_stats,
-            self.pl_module.layer.bn.weight.requires_grad,
-            self.pl_module.layer.bn.training,
+            self.pl_module.model.bn.track_running_stats,
+            self.pl_module.model.bn.weight.requires_grad,
+            self.pl_module.model.bn.training,
             round(sample_num_tracked.item(), 6) if sample_num_tracked is not None else None,
             round(sample_running_mean.max().item(), 6) if sample_running_mean is not None else None,
             round(sample_running_var.max().item(), 6) if sample_running_var is not None else None,
@@ -620,7 +650,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     mod_sched_dict[1] = mod_sched_dict.pop(2)
     mod_sched_dict[1]["lr"] = 1e-06
     mod_sched_dict[2] = mod_sched_dict.pop(3)
-    mod_sched_dict[2]["params"] = ["layer.0.*"]
+    mod_sched_dict[2]["params"] = ["model.0.*"]
     epoch_only_sched = deepcopy(mod_sched_dict)
     epoch_only_sched[1]["max_transition_epoch"] = 2
     epoch_only_sched[2]["max_transition_epoch"] = 2
@@ -667,7 +697,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     reinitlr_optim_lambdalr_sched = deepcopy(reinitlr_optim_sched_dict)
     reinitlr_optim_lambdalr_sched[1]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
-            "class_path": "tests.helpers.boring_model.LinearWarmupLR",
+            "class_path": "tests.helpers.boring_models.LinearWarmupLR",
             "init_args": {"num_warmup_steps": 100, "num_training_steps": 1000},
         },
         "pl_lrs_cfg": {"interval": "step", "frequency": 1, "name": "Custom_Reinit_LR"},
@@ -684,7 +714,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     }
     lambdalr_sched_dict[1]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
-            "class_path": "tests.helpers.boring_model.LinearWarmupLR",
+            "class_path": "tests.helpers.boring_models.LinearWarmupLR",
             "init_args": {"num_warmup_steps": 100, "num_training_steps": 1000},
         },
         "pl_lrs_cfg": {"interval": "step", "frequency": 1, "name": "Custom_Reinit_LR"},
@@ -692,7 +722,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
     lambdalr_sched_dict[2]["lr"] = 3.0e-06
     lambdalr_sched_dict[2]["new_lr_scheduler"] = {
         "lr_scheduler_init": {
-            "class_path": "tests.helpers.boring_model.LinearWarmupLR",
+            "class_path": "tests.helpers.boring_models.LinearWarmupLR",
             "init_args": {"num_warmup_steps": 100, "num_training_steps": 1000},
         },
         "pl_lrs_cfg": {"interval": "step", "frequency": 1, "name": "Custom_Reinit_LR"},
@@ -718,9 +748,9 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         "pl_lrs_cfg": {"interval": "epoch", "frequency": 1, "name": "Custom_Reinit_LR"},
         "init_pg_lrs": [2.0e-06, 3.0e-06],
     }
-    bn_sched_dict = {0: {'params': ['layer.lin_classif.bias', 'layer.lin_classif.weight']},
-                     1: {'params': ['layer.bn.bias', 'layer.bn.weight']},
-                     2: {'params': ['layer.lin_base.bias', 'layer.lin_base.weight']}}
+    bn_sched_dict = {0: {'params': ['model.lin_classif.bias', 'model.lin_classif.weight']},
+                     1: {'params': ['model.bn.bias', 'model.bn.weight']},
+                     2: {'params': ['model.lin_base.bias', 'model.lin_base.weight']}}
     bn_sched_dict[0]["max_transition_epoch"] = 1
     bn_sched_dict[1]["max_transition_epoch"] = 2
     return (
@@ -736,6 +766,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
         reinitlr_optim_rlrop_sched,
         reinitlr_optim_use_curr_sched_dict,
         bn_sched_dict,
+        #mp_tp_sched_dict
     )
 
 
@@ -745,50 +776,50 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     valid_sched_start = """
 0:
   params:
-  - layer.2.bias
-  - layer.2.weight"""
+  - model.2.bias
+  - model.2.weight"""
     valid_sched_end = """
 2:
   params:
-  - layer.0.bias
-  - layer.0.weight"""
+  - model.0.bias
+  - model.0.weight"""
     non_disjoint = """
 1:
   params:
-  - layer.1.bias
-  - layer.2.weight"""
+  - model.1.bias
+  - model.2.weight"""
     missing_param = """
 1:
   params:
-  - layer.1.bias
-  - layer.missing.weight"""
+  - model.1.bias
+  - model.missing.weight"""
     non_integer_phase = """
 1.1:
   params:
-  - layer.1.bias
-  - layer.1.weight"""
+  - model.1.bias
+  - model.1.weight"""
     non_integer_conv_phase = """
 'b':
   params:
-  - layer.1.bias
-  - layer.1.weight"""
+  - model.1.bias
+  - model.1.weight"""
     invalid_lr = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   lr: not_a_number"""
     lr_phase0 = """
 0:
   params:
-  - layer.2.bias
-  - layer.2.weight
+  - model.2.bias
+  - model.2.weight
   lr: 1e-03"""
     unsupp_reinitlr_scheduler = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.CyclicLR
@@ -796,8 +827,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     invalid_plrs_cfg = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.StepLR
@@ -809,8 +840,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     missing_lrs_init = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     pl_lrs_cfg:
         name: otherwise_okay
@@ -818,8 +849,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     no_lrs_class_path = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
       init_args:
@@ -828,8 +859,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     newlrs_in_phase0 = """
 0:
   params:
-  - layer.2.bias
-  - layer.2.weight
+  - model.2.bias
+  - model.2.weight
   new_lr_scheduler:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.StepLR
@@ -839,8 +870,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     nonfloat_init_pg_lrs = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.StepLR
@@ -851,8 +882,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     lrs_import_fail = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.StepLRWhoops
@@ -862,8 +893,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     lrs_init_fail = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.StepLR
@@ -874,8 +905,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     optim_init_fail = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_optimizer:
     optimizer_init:
       class_path: torch.optim.Adam
@@ -885,8 +916,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     unsupported_optim_reinit = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_optimizer:
     optimizer_init:
       class_path: torch.distributed.optim.ZeroRedundancyOptimizer
@@ -896,8 +927,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     extra_plrs_key = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.StepLR
@@ -909,8 +940,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     rlrop_missing_mon = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.ReduceLROnPlateau
@@ -923,8 +954,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     num_pg_match = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.StepLR
@@ -935,8 +966,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     extra_optimizer_key = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.StepLR
@@ -947,8 +978,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     valid_depth1 = """
 1:
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.StepLR
@@ -958,8 +989,8 @@ def invalid_schedules(tmpdir_factory) -> Dict:
     valid_nonint = """
 '1':
   params:
-  - layer.1.bias
-  - layer.1.weight
+  - model.1.bias
+  - model.1.weight
   new_lr_scheduler:
     lr_scheduler_init:
       class_path: torch.optim.lr_scheduler.StepLR
@@ -1017,7 +1048,7 @@ class ComplexNestedModel(LightningModule):
         return self.test(x)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.SGD(self.layer.parameters(), lr=0.1)
+        optimizer = torch.optim.SGD(self.model.parameters(), lr=0.1)
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
         return [optimizer], [lr_scheduler]
 
@@ -1034,13 +1065,13 @@ class ComplexNestedModel(LightningModule):
         pytest.param(
             FinetuningSchedulerBoringModel(),
             True,
-            (4, ["layer.2.bias", "layer.2.weight"], ["layer.0.bias", "layer.0.weight"]),
+            (4, ["model.2.bias", "model.2.weight"], ["model.0.bias", "model.0.weight"]),
             marks=RunIf(standalone=True, min_cuda_gpus=2),
         ),
         (
             FinetuningSchedulerBoringModel(),
             False,
-            (4, ["layer.2.bias", "layer.2.weight"], ["layer.0.bias", "layer.0.weight"]),
+            (4, ["model.2.bias", "model.2.weight"], ["model.0.bias", "model.0.weight"]),
         ),
         (ParityModuleRNN(), False, (3, ["rnn.bias_hh_l0", "rnn.bias_ih_l0"], ["rnn.weight_hh_l0", "rnn.weight_ih_l0"])),
         (
@@ -1172,7 +1203,7 @@ ENFORCE_P0_LR_STATE = {
 @pytest.mark.parametrize(
     "init_lr_key, p0_params",
     [
-        pytest.param(None, ["layer.0.weight", "layer.0.bias"]),
+        pytest.param(None, ["model.0.weight", "model.0.bias"]),
         ("rlrop", None),
         pytest.param("lr_lambdas", None),
     ],
@@ -1933,7 +1964,7 @@ def test_fts_reinitlr(tmpdir, boring_ft_schedule, explicit_mode: bool):
 
 IMP_REINIT_LAMBDALR_CFG = {
     "lr_scheduler_init": {
-        "class_path": "tests.helpers.boring_model.LinearWarmupLR",
+        "class_path": "tests.helpers.boring_models.LinearWarmupLR",
         "init_args": {"num_warmup_steps": 100, "num_training_steps": 1000},
     },
     "pl_lrs_cfg": {"interval": "step", "frequency": 1, "name": "Custom_Reinit_LR"},
@@ -2203,6 +2234,15 @@ def test_fts_opt_warns():
     with pytest.warns(UserWarning, match="no new optimizer groups will be added"):
         fts.add_optimizer_groups(lm, opt, thawed_pl)
 
+def test_fts_on_validate_monitor_warns():
+    adapter = StrategyAdapter()
+    adapter.fts_handle = FinetuningScheduler()
+    with patch.object(adapter.fts_handle, "_check_sync_dist", return_value=True), \
+    pytest.warns(UserWarning, match="is not being synchronized across"):
+        adapter.on_validate_monitor_metric("x")
+    adapter.fts_handle.pl_module = MagicMock(spec=LightningModule)
+    with patch.object(adapter.fts_handle.pl_module.trainer, "_results", None):
+        assert not adapter.fts_handle._check_sync_dist("x")
 
 class TestConnectWarn(Callback, CallbackResolverMixin):
     """A callback that facilitates configuration testing of the CallbackResolverMixin."""
@@ -2347,7 +2387,7 @@ def test_fts_init_lrs_misconfiguration(tmpdir, callbacks: List[Callback], cust_m
         ("ext_opt_key", ("the existing optimizer and all associated parameter", None)),
         ("non_integer", ("had non-integer keys", None)),
         ("non_conv_int", ("not convertible to", None)),
-        ("non_contiguous", ("non-contiguous or non-zero-indexed keys", "layer.0.bias")),
+        ("non_contiguous", ("non-contiguous or non-zero-indexed keys", "model.0.bias")),
     ],
     ids=[
         "missing_param",
@@ -2533,7 +2573,7 @@ def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, enforce_
     class BNInitBoringModel(FinetuningSchedulerBoringModel):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.layer = nn.Sequential(
+            self.model = nn.Sequential(
                 OrderedDict(
                     [("lin_base", nn.Linear(32, 32)), ("bn", nn.BatchNorm1d(32)), ("lin_classif", nn.Linear(32, 2))]
                 )
@@ -2837,3 +2877,25 @@ def test_fts_multi_ddp_fork(tmpdir):
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_fork", devices=2)
     trainer.fit(model)
     assert trainer.callback_metrics["val_loss"] < 0.1
+
+
+# @RunIf(standalone=False, min_cuda_gpus=2, min_torch="2.4.0")
+# @pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
+# def test_fts_multi_model_parallel(tmpdir, boring_ft_schedule, explicit_mode):
+#     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp'
+#     distributed context."""
+#     seed_everything(42)
+#     ft_schedule = boring_ft_schedule[12] if explicit_mode else None
+#     #expected_depth = 2 if explicit_mode else 3
+#     callbacks = [FinetuningScheduler(ft_schedule=ft_schedule), FTSEarlyStopping(monitor="val_loss", patience=1)]
+#     strategy = ModelParallelStrategy()
+#     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy=strategy, devices=2,
+#                       num_sanity_val_steps=0)
+#     finetuningscheduler_callback = get_fts(trainer)
+#     #with trainer.init_module(empty_init=True):
+#     model = FTSModelParallelBoringModel()
+#     trainer.fit(model)
+#     pass
+    #assert finetuningscheduler_callback.depth_remaining == 0
+    #assert finetuningscheduler_callback.curr_depth == expected_depth
+    #assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
