@@ -5,3 +5,4 @@ scikit-learn
 sentencepiece
 tensorboardX>=2.2
 tabulate
+psutil
