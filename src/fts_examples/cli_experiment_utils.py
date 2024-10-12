@@ -17,9 +17,8 @@ from lightning.pytorch.utilities.types import STEP_OUTPUT
 
 from finetuning_scheduler.types import FTSLRSchedulerTypeTuple
 from fts_examples.model_parallel.torchtitan_llama import ModelCfg
-from fts_examples.profiling.memprofiler import MemProfilerCfg, MemProfiler
-from fts_examples.profiling.profiler_hooks_mixin import ProfilerHooksMixin
-from fts_examples.cfg_utils import (LightningLRSCfg, OptimizerCfg, LRSchedulerCfg, ExperimentCfg)
+from fts_examples.profiling import MemProfiler, MemProfilerCfg, ProfilerHooksMixin
+from fts_examples.cfg_utils import LightningLRSCfg, OptimizerCfg, LRSchedulerCfg, ExperimentCfg
 
 
 class CustLightningCLI(LightningCLI):

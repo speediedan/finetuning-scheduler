@@ -1,7 +1,7 @@
 from typing import Optional
 import torch
 
-from fts_examples.profiling.memprofiler import MemProfiler, MemProfilerCfg
+from fts_examples.profiling import MemProfiler, MemProfilerCfg
 
 
 class ProfilerHooksMixin:

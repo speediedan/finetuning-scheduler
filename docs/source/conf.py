@@ -314,7 +314,6 @@ autodoc_default_options = {
     "methods": True,
     "special-members": "__call__",
     "exclude-members": "_abc_impl",
-    "show-inheritance": True,
 }
 
 # Sphinx will add “permalinks” for each heading and description environment as paragraph signs that

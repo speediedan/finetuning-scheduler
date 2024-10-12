@@ -1,9 +1,9 @@
 # Exclude commonly generated files
 recursive-exclude __pycache__  *.py[cod] *.orig lightning_logs
 # prune testing-only ipynb_src dir
-prune src/fts_examples/*/ipynb_src
+prune src/fts_examples/ipynb_src
 # exclude fts_examples tests
-exclude src/fts_examples/*/test_examples.py
+exclude src/fts_examples/test_examples.py
 # Include the README and CHANGELOG
 include *.md
 # Include the license file

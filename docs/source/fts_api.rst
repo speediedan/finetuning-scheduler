@@ -1,5 +1,5 @@
-Fine-Tuning Scheduler API
-=========================
+Fine-Tuning Scheduler
+=====================
 
 .. currentmodule:: finetuning_scheduler
 
@@ -7,14 +7,9 @@ Fine-Tuning Scheduler API
     :toctree: api
     :nosignatures:
 
-    fts
-    fts_supporters
-    strategy_adapters
+    .. automodule::
+        :show-inheritance:
 
-.. currentmodule:: fts_examples.profiling
-
-.. autosummary::
-    :toctree: api
-    :nosignatures:
-
-    memprofiler
+        fts
+        fts_supporters
+        strategy_adapters

@@ -12,9 +12,9 @@ Composable distributed training (especially at scale) can make profiling resourc
 challenging. To address this need, FTS includes a utility that enables quick, flexible orchestration of advanced
 profiling combining multiple complementary PyTorch profilers.
 
-The :class:`~fts_examples.profiling.memprofiler.MemProfiler` is a utility that expedites simultaneous configuration and
-orchestration of numerous complementary profiling methods. As demonstrated in this example, the following profiling
-utilities are integrated and simultaneously configured:
+The :class:`~fts_examples.profiling.memprofiler.MemProfiler` is a powerful memory profiling utility that synthesizes
+numerous complementary profiling methods. As demonstrated in this example, the following profiling utilities are
+integrated and simultaneously configured:
 
 - ``FSDP2MemTracker``
 - `cuda memory snapshot and allocator history tracking <https://pytorch.org/docs/stable/torch_cuda_memory.html>`_
@@ -73,6 +73,10 @@ Configuration
         fsdp_mem_tracker_tabulate: true  # display FSDP2MemTracker stats in a table
         fsdp_mem_tracker_root_module: 'model'  # the root FSDP module for FSDP2MemTracker to track
 
+.. tip::
+
+    For more advanced usage examples (e.g. non-default schedules, custom collection functions, etc.), see the commented
+    configuration options in ``fts_examples/model_parallel/config/profiling/memprofiler_demo.yaml``.
 
 Reviewing the Results
 *********************
