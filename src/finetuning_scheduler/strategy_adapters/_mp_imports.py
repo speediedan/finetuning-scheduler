@@ -25,4 +25,4 @@ else:
                 "RowwiseParallel", "SequenceParallel", "implicit_replication", "parallelize_module", "loss_parallel",
                 "FSDPModule", "fully_shard", "checkpoint", "checkpoint_wrapper", "offload_wrapper", "ActivationWrapper",
                 "CPUOffloadPolicy", "sdpa_kernel", "FSDPMemTracker"]:
-        globals()[mp_obj] = None
+        globals()[mp_obj] = object

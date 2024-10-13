@@ -14,12 +14,12 @@ import subprocess
 from unittest import mock
 from copy import copy
 from itertools import chain
+from packaging.version import Version
+import importlib.metadata as metadata
 import re
 
 import pytest
 from lightning.pytorch.callbacks import ModelCheckpoint
-from packaging.version import Version
-from pkg_resources import get_distribution
 
 from fts_examples import _HF_AVAILABLE
 from tests.test_model_parallel import MODEL_PARALLEL_BASE_WARNS
@@ -64,11 +64,8 @@ EXPECTED_WARNS.extend(ALL_EXAMPLE_EXPECTED)
 MIN_VERSION_WARNS = "2.2"
 MAX_VERSION_WARNS = "2.5"
 # torch version-specific warns go here
-EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [],
-                          MAX_VERSION_WARNS: [
-                              'PairwiseParallel is deprecated and will be removed soon.',
-                              ]}
-torch_version = get_distribution("torch").version
+EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [], MAX_VERSION_WARNS:[] }
+torch_version = metadata.distribution('torch').version
 extended_torch_ver = EXTENDED_VER_PAT.match(torch_version).group() or torch_version
 if Version(extended_torch_ver) < Version(MAX_VERSION_WARNS):
     EXPECTED_WARNS.extend(EXPECTED_VERSION_WARNS[MIN_VERSION_WARNS])

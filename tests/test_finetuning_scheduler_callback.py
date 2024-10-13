@@ -1248,7 +1248,7 @@ EXPECTED_DYNAMO_P0_INTRAFIT_STATE = {
 }
 
 
-@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.2.0", max_python="3.12")
+@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12")
 def test_fts_dynamo_enforce_p0(tmpdir, boring_ft_schedule):
     """Inspect the scheduled fine-tuning training path in the context of dynamo to ensure thawing schedule phase 0
     is enforced."""
@@ -1354,11 +1354,11 @@ EXPECTED_WARNS = [
     "`max_epochs` was not",  # required for all PyTorch/Lightning versions
     "The dirpath has changed from",  # required for all PyTorch/Lightning versions
     # allowing below until https://github.com/pytorch/pytorch/pull/123619 is resolved wrt `ZeroRedundancyOptimizer`
-    "TorchScript support for functional optimizers is",
+    # "TorchScript support for functional optimizers is", # suppressed, can delete with next push
     # required w/ PT 2.4 (until Lightning changes `weights_only` default value or offers a way to override it)
-    "You are using `torch.load` with `weights_only=False`",
+    # "You are using `torch.load` with `weights_only=False`", # can delete with next push
     # still required for pytorch 2.1
-    "Conversion of an array with ndim > 0"
+    #"Conversion of an array with ndim > 0"  # can delete with next push
 
 ]
 EXPECTED_DIRPATH = "is not empty."
@@ -1440,7 +1440,7 @@ DYNAMO_EXPECTED_WARNS = [
 EXPECTED_CKPT_WARNS = ["Be aware that when using `ckpt_path`, callbacks"]
 
 
-@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.2.0", max_python="3.12")
+@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12")
 def test_fts_dynamo_resume(tmpdir, ckpt_set, boring_ft_schedule, recwarn):
     """Validate scheduled fine-tuning resumption functions as expected with a default dynamo configuration."""
     resume_warns = copy(EXPECTED_WARNS) + copy(DYNAMO_EXPECTED_WARNS) + copy(EXPECTED_CKPT_WARNS) + [EXPECTED_DIRPATH]
@@ -1551,7 +1551,7 @@ EXPECTED_DYNAMO_INTRAFIT_STATE = {
 }
 
 
-@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.2.0", max_python="3.12")
+@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12")
 @pytest.mark.parametrize("restore_best", [True, False], ids=["default", "norestorebest"])
 def test_fts_dynamo_intrafit(tmpdir, boring_ft_schedule, restore_best: bool):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
@@ -2838,7 +2838,7 @@ def test_fts_multi_ddp(tmpdir, boring_ft_schedule, explicit_mode):
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
-@RunIf(standalone=True, min_cuda_gpus=2, skip_windows=True, skip_mac_os=True, min_torch="2.2.0", max_python="3.12")
+@RunIf(standalone=True, min_cuda_gpus=2, skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12")
 def test_fts_multi_ddp_dynamo(tmpdir, boring_ft_schedule):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp'
     distributed context with default dynamo usage."""
@@ -2882,25 +2882,3 @@ def test_fts_multi_ddp_fork(tmpdir):
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_fork", devices=2)
     trainer.fit(model)
     assert trainer.callback_metrics["val_loss"] < 0.1
-
-
-# @RunIf(standalone=False, min_cuda_gpus=2, min_torch="2.4.0")
-# @pytest.mark.parametrize("explicit_mode", [True, False], ids=["explicit", "implicit"])
-# def test_fts_multi_model_parallel(tmpdir, boring_ft_schedule, explicit_mode):
-#     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp'
-#     distributed context."""
-#     seed_everything(42)
-#     ft_schedule = boring_ft_schedule[12] if explicit_mode else None
-#     #expected_depth = 2 if explicit_mode else 3
-#     callbacks = [FinetuningScheduler(ft_schedule=ft_schedule), FTSEarlyStopping(monitor="val_loss", patience=1)]
-#     strategy = ModelParallelStrategy()
-#     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy=strategy, devices=2,
-#                       num_sanity_val_steps=0)
-#     finetuningscheduler_callback = get_fts(trainer)
-#     #with trainer.init_module(empty_init=True):
-#     model = FTSModelParallelBoringModel()
-#     trainer.fit(model)
-#     pass
-    #assert finetuningscheduler_callback.depth_remaining == 0
-    #assert finetuningscheduler_callback.curr_depth == expected_depth
-    #assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth

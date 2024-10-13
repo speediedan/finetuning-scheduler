@@ -147,6 +147,8 @@
 #
 # - ``ddp`` (and aliases ``ddp_find_unused_parameters_false``, ``ddp_find_unused_parameters_true``, ``ddp_spawn``, ``ddp_fork``, ``ddp_notebook``)
 # - ``fsdp`` (and alias ``fsdp_cpu_offload``)
+# - **NEW** ``ModelParallelStrategy`` (enabling use of PyTorch's composable distributed (e.g. ``fully_shard``, ``checkpoint``) and Tensor Parallelism (TP) APIs)
+#   - [See this example](https://finetuning-scheduler.readthedocs.io/en/latest/distributed/model_parallel_scheduled_fine_tuning.html)
 #
 # Custom or officially unsupported strategies can be used by setting [FinetuningScheduler.allow_untested](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html?highlight=allow_untested#finetuning_scheduler.fts.FinetuningScheduler.params.allow_untested) to ``True``.
 # Note that most currently unsupported strategies are so because they require varying degrees of modification to be compatible. For example, ``deepspeed`` will require a [StrategyAdapter](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.strategy_adapters.html#finetuning_scheduler.strategy_adapters.StrategyAdapter) to be written (similar to the one for ``FSDP``, [FSDPStrategyAdapter](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.strategy_adapters.html#finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter)) before support can be added (PRs welcome!),

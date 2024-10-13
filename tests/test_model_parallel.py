@@ -43,21 +43,12 @@ from tests.test_finetuning_scheduler_callback import (
 FTS_GLOBAL_STATE_LOG_MODE = os.environ.get("FTS_GLOBAL_STATE_LOG_MODE", "0") == "1"
 MODEL_PARALLEL_BASE_WARNS = copy(EXPECTED_WARNS)
 additional_model_parallel_warns = [
-    # TODO: Test disabling after revalidation `reset_parameters` for test model
-    "model contains an instance of `UninitializedParameter`",
     "The number of training batches",  # minimizing cost of training for these tests
-    #"Please use torch.distributed.all_gather_into_tensor",  # still required for PyTorch/Lightning <=2.1
-    #"Please use torch.distributed.reduce_scatter_tensor",  # still required for PyTorch/Lightning <=2.1
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
-    "torch.cpu.amp.autocast",  # required as of PT 2.4
-    "FSDP.state_dict_type", # temporarily required until Lightning uses new FSDP state dict API with PT 2.4
-    "Final phase max_transition_epoch",  # required for some experimental dtensor tests with PT 2.4
-    "interactive_bk attribute",  # TODO: remove, only for temporary debugging with torch from source
+    "You are using `torch.load` with `weights_only=False`",  # known required w/ Lightning 2.4
 ]
 MODEL_PARALLEL_BASE_WARNS.extend(additional_model_parallel_warns)
-MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = [
-    "Final phase max_transition_epoch",  # still required for PyTorch/Lightning <=2.4
-]
+MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
 
 
 class FSDPStateInspectMixin:
@@ -477,6 +468,7 @@ class ModParallelTestCfg:
     strategy_cfg: Dict = field(default_factory=lambda: dp2_tp1)
     strategy_adapter_cfg: Dict = field(default_factory=dict)
     precision_opts: Dict = field(default_factory=lambda: {'precision': '32-true'})
+    use_dynamo: bool = False
     use_implicit_replication: bool = False
     fts_cls: Callable = ModelParallelTestFTS
     fts_cfg: Dict = field(default_factory=dict)
@@ -497,15 +489,34 @@ class ModParallelTestCfg:
         self.es_cfg = {**self.es_cfg, **default_dep_cfg}
         self.ckpt_cfg = {**self.ckpt_cfg, **default_dep_cfg}
 
+
+def test_model_parallel_enapsulated_imports():
+    import sys
+    from importlib import reload
+    modules_to_reload = ('finetuning_scheduler.strategy_adapters._mp_imports',)
+    for module_fqn in modules_to_reload:
+        del sys.modules[module_fqn]
+    with mock.patch("lightning_utilities.core.imports.compare_version", return_value=False):
+        from finetuning_scheduler.strategy_adapters._mp_imports import parallelize_module
+        assert parallelize_module.__module__ == 'builtins'
+    if _TORCH_GREATER_EQUAL_2_5:
+        for module_fqn in modules_to_reload:
+            reload(sys.modules[module_fqn])
+        from finetuning_scheduler.strategy_adapters._mp_imports import parallelize_module
+        assert parallelize_module.__module__ == 'torch.distributed.tensor.parallel.api'
+
+
 @mock.patch("finetuning_scheduler.strategy_adapters.model_parallel._TORCH_GREATER_EQUAL_2_5", False)
 def test_torch_greater_equal_2_5():
     with pytest.raises(MisconfigurationException, match="requires PyTorch 2.5 or higher"):
         ModelParallelStrategyAdapter()
 
+
 ## Model Parallel Test Definitions
 FTS_MODEL_PARALLEL_PATH_TESTS = (
     # FSDP2 tests
     ModParallelTestCfg(model_cfg_key="fsdp_cm_only", model_cls=cm_mod_parallel, model_cfg=fsdp_cm_only,
+                       # use_dynamo=True,  # TODO: test with dynamo once Lightning supports it with ModelParallel
                        runif_alias="alone", expected_results=ExpectedResults(expected_state=path_fsdp)),
     ModParallelTestCfg(model_cfg_key="fsdp_cm_act", model_cls=cm_mod_parallel, model_cfg=fsdp_cm_act,
                        expected_results=ExpectedResults(expected_state=path_fsdp), runif_alias="alone"),
@@ -556,7 +567,6 @@ def test_fts_model_parallel_integration(tmpdir, recwarn, model_parallel_ft_sched
     seed_everything(42)
     # one can manually set this to True for a local test override
     state_log_dir = tmpdir if FTS_GLOBAL_STATE_LOG_MODE else None
-    use_dynamo = True if test_cfg.model_cfg.pop("use_dynamo", None) else False
     ft_sched = model_parallel_ft_schedule[test_cfg.ft_sched_idx]
     callbacks = callbacks_cfg(ft_sched, state_log_dir, test_cfg)
     strategy = ModelParallelStrategy(**test_cfg.strategy_cfg)
@@ -565,7 +575,7 @@ def test_fts_model_parallel_integration(tmpdir, recwarn, model_parallel_ft_sched
     trainer = Trainer(**trainer_config)
     with trainer.init_module(empty_init=True):
         model = test_cfg.model_cls(**test_cfg.model_cfg)
-    configured_model = torch.compile(model) if use_dynamo else model
+    configured_model = torch.compile(model) if test_cfg.use_dynamo else model
     if exc_expect := test_cfg.expected_results.exceptions_expected:
         gen_exceptions(trainer, configured_model, exc_expect)
     else:
@@ -578,7 +588,7 @@ def test_fts_model_parallel_integration(tmpdir, recwarn, model_parallel_ft_sched
     if trainer.is_global_zero:
         fts_check_warns(recwarn, expected_warns=MODEL_PARALLEL_BASE_WARNS,
                         warns_expected=test_cfg.expected_results.warns_expected,
-                        expected_warns_dynamo=MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS, use_dynamo=use_dynamo)
+                        expected_warns_dynamo=MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS, use_dynamo=test_cfg.use_dynamo)
 
 def gen_exceptions(trainer, model, exception_expected):
     if isinstance(exception_expected, tuple):

@@ -14,13 +14,14 @@ import os
 import re
 import sys
 from typing import Optional, Set, Union
+from packaging.version import Version
+import importlib.metadata as metadata
 
 import pytest
 import torch
 from lightning.fabric.accelerators.cuda import num_cuda_devices
 from lightning.pytorch.strategies.deepspeed import _DEEPSPEED_AVAILABLE
-from packaging.version import Version
-from pkg_resources import get_distribution
+
 from fts_examples.patching.dep_patch_shim import ExpPatch, _ACTIVE_PATCHES
 
 EXTENDED_VER_PAT = re.compile(r"([0-9]+\.){2}[0-9]+")
@@ -30,9 +31,9 @@ RUNIF_MAP = {
     "min2_5": {"min_torch": "2.5.0"},
     "alone": {"standalone": True},
     "bf16_alone": {"bf16_cuda": True, "standalone": True},
-    "min2_2": {"min_torch": "2.2.0"},
-    "max3_12_min2_3": {"max_python": "3.12", "min_torch": "2.3.0"},
-    "max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
+    #"min2_2": {"min_torch": "2.2.0"},
+    #"max3_12_min2_3": {"max_python": "3.12", "min_torch": "2.3.0"},
+    #"max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
     "einsum_exp": {"exp_patch": {ExpPatch.EINSUM_STRATEGIES}},
 }
 
@@ -92,13 +93,13 @@ class RunIf:
             kwargs["min_cuda_gpus"] = True
 
         if min_torch:
-            torch_version = get_distribution("torch").version
+            torch_version = metadata.distribution('torch').version
             extended_torch_ver = EXTENDED_VER_PAT.match(torch_version).group() or torch_version
             conditions.append(Version(extended_torch_ver) < Version(min_torch))
             reasons.append(f"torch>={min_torch}, {extended_torch_ver} installed.")
 
         if max_torch:
-            torch_version = get_distribution("torch").version
+            torch_version = metadata.distribution('torch').version
             extended_torch_ver = EXTENDED_VER_PAT.match(torch_version).group() or torch_version
             conditions.append(Version(extended_torch_ver) > Version(max_torch))
             reasons.append(f"torch<={max_torch}, {extended_torch_ver} installed.")

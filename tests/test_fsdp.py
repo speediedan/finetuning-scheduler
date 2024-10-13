@@ -49,27 +49,24 @@ if torch.distributed.is_available():
         CheckpointImpl,
     )
     from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload, FullyShardedDataParallel, MixedPrecision
-    from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy, wrap
+    from torch.distributed.fsdp.wrap import wrap
 else:
     FullyShardedDataParallel = None  # type: ignore[misc,assignment]
     MixedPrecision = None  # type: ignore[misc,assignment]
     BackwardPrefetch = None  # type: ignore[misc,assignment]
     CPUOffload = None  # type: ignore[misc,assignment]
-    size_based_auto_wrap_policy = object
     wrap = object
 
 from torch.distributed.fsdp.wrap import CustomPolicy
 
 DISABLE_USE_ORIG = {"use_orig_params": False}
-#_FSDPPolicy = object
-
 
 additional_fsdp_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
-    "Please use torch.distributed.all_gather_into_tensor",  # still required for PyTorch/Lightning <=2.1
-    "Please use torch.distributed.reduce_scatter_tensor",  # still required for PyTorch/Lightning <=2.1
+    # "Please use torch.distributed.all_gather_into_tensor",  # can delete with next push
+    # "Please use torch.distributed.reduce_scatter_tensor",  # can delete with next push
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
-    "torch.cpu.amp.autocast",  # required as of PT 2.4
+    # "torch.cpu.amp.autocast",    # can delete with next push
     "FSDP.state_dict_type", # temporarily required until Lightning uses new FSDP state dict API with PT 2.4
     "of Tensor.pin_memory",  # required as of PT 2.5 nightly for FSDP1 `_flat_param` internal usage
     "Tensor.is_pinned",  # required as of PT 2.5 nightly for FSDP1 `_flat_param` internal usage
@@ -596,9 +593,7 @@ def warn_custom_auto_wrap_policy(
 
 
 # RunIf aliases
-runif_map = {
-    "min2_2": {"min_torch": "2.2.0"},
-}
+runif_map = {}  # none currently necessary
 
 # auto-wrap policy aliases
 cust_awp = custom_auto_wrap_policy
