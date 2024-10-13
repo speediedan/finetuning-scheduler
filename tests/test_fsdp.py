@@ -63,19 +63,16 @@ DISABLE_USE_ORIG = {"use_orig_params": False}
 
 additional_fsdp_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
-    # "Please use torch.distributed.all_gather_into_tensor",  # can delete with next push
-    # "Please use torch.distributed.reduce_scatter_tensor",  # can delete with next push
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
-    # "torch.cpu.amp.autocast",    # can delete with next push
-    "FSDP.state_dict_type", # temporarily required until Lightning uses new FSDP state dict API with PT 2.4
-    "of Tensor.pin_memory",  # required as of PT 2.5 nightly for FSDP1 `_flat_param` internal usage
-    "Tensor.is_pinned",  # required as of PT 2.5 nightly for FSDP1 `_flat_param` internal usage
-    "Deallocating Tensor ", # required as of PT 2.5 nightly definitely after 0906, introduced sometime after 0827
+    "FSDP.state_dict_type", # required until Lightning uses new FSDP state dict API
+    "of Tensor.pin_memory",  # required with PT 2.5 for FSDP1 `_flat_param` internal usage
+    "Tensor.is_pinned",  # required with PT 2.5 for FSDP1 `_flat_param` internal usage
+    "Deallocating Tensor ", # required with PT 2.5
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
 FSDP_DYNAMO_EXPECTED_WARNS = [
-    "Final phase max_transition_epoch",  # still required for PyTorch/Lightning <=2.4
+    "Final phase max_transition_epoch",  # required for PyTorch/Lightning 2.5
 ]
 
 ##########################
