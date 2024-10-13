@@ -1358,7 +1358,7 @@ EXPECTED_WARNS = [
     # required w/ PT 2.4 (until Lightning changes `weights_only` default value or offers a way to override it)
     # "You are using `torch.load` with `weights_only=False`", # can delete with next push
     # still required for pytorch 2.1
-    #"Conversion of an array with ndim > 0"  # can delete with next push
+    "Conversion of an array with ndim > 0"  # required for PyTorch 2.2
 
 ]
 EXPECTED_DIRPATH = "is not empty."
