@@ -54,6 +54,7 @@ def _patch_triton():
     sys.modules.get(target_mod).__dict__.get('JITFunction').__init__ = _new_init
 
 
+# required for `torch==2.5.x`, TBD wrt subsequent versions
 einsum_strategies_patch = DependencyPatch(
     condition=(lwt_compare_version("torch", operator.le, "2.5.1"),
                lwt_compare_version("torch", operator.ge, "2.5.0"),),
@@ -61,14 +62,16 @@ einsum_strategies_patch = DependencyPatch(
     function=_patch_einsum_strategies, patched_package='torch',
     description='Address trivial tp submesh limitation until PyTorch provides upstream fix')
 
+# TODO: remove once `datasets==2.21.0` is minimum
 datasets_numpy_extractor_patch = DependencyPatch(
     condition=(lwt_compare_version("numpy", operator.ge, "2.0.0"),
-               lwt_compare_version("datasets", operator.le, "2.19.1")),
+               lwt_compare_version("datasets", operator.lt, "2.21.0")),
                env_flag=OSEnvToggle("ENABLE_FTS_NUMPY_EXTRACTOR_PATCH", default="1"),
                function=_patch_unsupported_numpy_arrow_extractor,
                patched_package='datasets',
                description='Adjust `NumpyArrowExtractor` to properly use `numpy` 2.0 copy semantics')
 
+# only required for `torch==2.4.x`
 triton_codgen_patch = DependencyPatch(
     condition=(lwt_compare_version("pytorch-triton", operator.eq, "3.0.0", "45fff310c8"),),
     env_flag=OSEnvToggle("ENABLE_FTS_TRITON_CODEGEN_PATCH", default="1"),
@@ -80,12 +83,11 @@ class ExpPatch(Enum):
     NUMPY_EXTRACTOR = datasets_numpy_extractor_patch
     TRITON_CODEGEN = triton_codgen_patch
 
-#_DEFINED_PATCHES = {einsum_strategies_patch, datasets_numpy_extractor_patch, triton_codgen_patch}
 _DEFINED_PATCHES = set(ExpPatch)
 _ACTIVE_PATCHES = set()
 
 for defined_patch in _DEFINED_PATCHES:
     if all(defined_patch.value.condition) and os.environ.get(defined_patch.value.env_flag.env_var_name,
-                                                       defined_patch.value.env_flag.default) == "1":
+                                                             defined_patch.value.env_flag.default) == "1":
         defined_patch.value.function()
         _ACTIVE_PATCHES.add(defined_patch)

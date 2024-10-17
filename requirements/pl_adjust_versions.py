@@ -5,16 +5,14 @@ from typing import Dict, Optional
 
 # IMPORTANT: this list needs to be sorted in reverse
 VERSIONS = [
-    dict(torch="2.5.0", torchvision="0.20.0"),  # nightly
-    dict(torch="2.4.0", torchvision="0.19.0"),  # stable
+    dict(torch="2.6.0", torchvision="0.21.0"),  # nightly
+    dict(torch="2.5.0", torchvision="0.20.0"),  # stable
+    dict(torch="2.4.0", torchvision="0.19.0"),
     dict(torch="2.3.1", torchvision="0.18.1"),
     dict(torch="2.3.0", torchvision="0.18.0"),
     dict(torch="2.2.2", torchvision="0.17.2"),
     dict(torch="2.2.1", torchvision="0.17.1"),
     dict(torch="2.2.0", torchvision="0.17.0"),
-    dict(torch="2.1.2", torchvision="0.16.2"),
-    dict(torch="2.1.1", torchvision="0.16.1"),
-    dict(torch="2.1.0", torchvision="0.16.0"),
 ]
 
 

@@ -792,6 +792,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             if self.depth_remaining > 0
             else trainer.fit_loop.max_epochs
         )
+        assert isinstance(curr_max_epoch, (int, float)), (
+            f"Expected max_transition_epoch/max_epochs to be an int or float, but got {type(curr_max_epoch)}"
+        )
         if not self.epoch_transitions_only:  # if we're considering FTSEarlyStopping criteria
             assert early_stopping_callback is not None
             # in the edge case where transition decisions diverge among distributed processes because the user is
