@@ -56,10 +56,10 @@ jobs:
     timeout-minutes: 90
     env:
       # workaround for macos tokenizers https://github.com/neonbjb/tortoise-tts/issues/728#issuecomment-1962438240
-      RUSTFLAGS: ${{ matrix.os == 'macOS-14' && '-A invalid_reference_casting' || '' }}
+      RUSTFLAGS: ${{ (matrix.os == 'macOS-14' && '-A invalid_reference_casting') || '' }}
       # TODO: Remove this and enable running MPS tests the macos runners support it:
       # https://github.com/actions/runner-images/issues/9918#issuecomment-2149336099
-      DISABLE_MPS: ${{ matrix.os == 'macOS-14' && '1' || '0' }}
+      DISABLE_MPS: ${{ (matrix.os == 'macOS-14' && '1') || '0' }}
     steps:
     - uses: actions/checkout@v4
 

@@ -1545,7 +1545,7 @@ EXPECTED_DYNAMO_INTRAFIT_STATE = {
 }
 
 
-@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12")
+@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12", standalone=True)
 @pytest.mark.parametrize("restore_best", [True, False], ids=["default", "norestorebest"])
 def test_fts_dynamo_intrafit(tmpdir, boring_ft_schedule, restore_best: bool):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
