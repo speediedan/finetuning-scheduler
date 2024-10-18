@@ -61,10 +61,10 @@ jobs:
       # https://github.com/actions/runner-images/issues/9918#issuecomment-2149336099
       DISABLE_MPS: ${{ matrix.os == 'macOS-14' && '1' || '0' }}
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -85,7 +85,7 @@ jobs:
     # https://github.com/actions/cache/blob/master/examples.md#multiple-oss-in-a-workflow
     - name: Get pip cache dir
       id: pip-cache
-      run: echo "::set-output name=dir::$(pip cache dir)"
+      run: echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
 
     - name: pip cache
       uses: actions/cache@v4
@@ -146,6 +146,8 @@ jobs:
         coverage xml
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       with:
         file: coverage.xml
         flags: cpu,pytest,python${{ matrix.python-version }}
