@@ -55,8 +55,6 @@ jobs:
 
     timeout-minutes: 90
     env:
-      # workaround for macos tokenizers https://github.com/neonbjb/tortoise-tts/issues/728#issuecomment-1962438240
-      RUSTFLAGS: ${{ (matrix.os == 'macOS-14' && '-A invalid_reference_casting') || '' }}
       # TODO: Remove this and enable running MPS tests the macos runners support it:
       # https://github.com/actions/runner-images/issues/9918#issuecomment-2149336099
       DISABLE_MPS: ${{ (matrix.os == 'macOS-14' && '1') || '0' }}
@@ -83,14 +81,17 @@ jobs:
 
     # Note: This uses an internal pip API and may not always work
     # https://github.com/actions/cache/blob/master/examples.md#multiple-oss-in-a-workflow
-    - name: Get pip cache dir
+    # sadly, this env var is not properly abstracted over OS platforms so we set it twice, the second time for windows
+    - name: Get pip cache dir windows
       id: pip-cache
-      run: echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
+      run: |
+        echo "PIP_CACHE_DIR=$(pip cache dir)" >> $GITHUB_OUTPUT
+        echo "PIP_CACHE_DIR=$(pip cache dir)" >> $env:GITHUB_OUTPUT
 
     - name: pip cache
       uses: actions/cache@v4
       with:
-        path: ${{ steps.pip-cache.outputs.dir }}
+        path: ${{ steps.pip-cache.outputs.PIP_CACHE_DIR }}
         key: ${{ runner.os }}-pip-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-${{ hashFiles('requirements/base.txt') }}-${{ hashFiles('requirements/extra.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-
