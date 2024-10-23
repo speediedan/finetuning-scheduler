@@ -45,12 +45,12 @@ repos:
         args: [--py37-plus]
         name: Upgrade code
 
-  # temporarily disabling this pre-commit hook until https://github.com/PyCQA/docformatter/pull/287 is merged
-  # - repo: https://github.com/myint/docformatter
-  #   rev: v1.4
-  #   hooks:
-  #     - id: docformatter
-  #       args: [--in-place, --wrap-summaries=115, --wrap-descriptions=120]
+  # update rev for docformatter after 1.7.6 available, using below commit on master branch until then
+  - repo: https://github.com/myint/docformatter
+    rev: 06907d0267368b49b9180eed423fae5697c1e909
+    hooks:
+      - id: docformatter
+        args: [--in-place, --wrap-summaries=115, --wrap-descriptions=120]
 
   - repo: https://github.com/asottile/yesqa
     rev: v1.5.0
