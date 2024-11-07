@@ -56,7 +56,7 @@ def _patch_triton():
 
 # required for `torch==2.5.x`, TBD wrt subsequent versions
 einsum_strategies_patch = DependencyPatch(
-    condition=(lwt_compare_version("torch", operator.le, "2.5.1"),
+    condition=(lwt_compare_version("torch", operator.le, "2.5.2"),
                lwt_compare_version("torch", operator.ge, "2.5.0"),),
     env_flag=OSEnvToggle("ENABLE_FTS_EINSUM_STRATEGY_PATCH", default="0"),
     function=_patch_einsum_strategies, patched_package='torch',
