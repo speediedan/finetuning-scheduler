@@ -49,6 +49,7 @@ jobs:
           - {os: ubuntu-22.04, python-version: "3.12", requires: "oldest"}
           - {os: windows-2022, python-version: "3.12", requires: "oldest"}
           - {os: macOS-14, python-version: "3.12", requires: "oldest"}
+          - {os: macOS-14, python-version: "3.9", requires: "oldest"}  # exclude until 2.6 due to tokenizers build error
         # include:
         #   # adding when using a release candidate
         #   # - {os: ubuntu-22.04, python-version: "3.12", requires: "latest", release: "pre"}
