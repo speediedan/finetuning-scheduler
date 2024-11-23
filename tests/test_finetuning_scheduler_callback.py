@@ -154,8 +154,8 @@ StrategyRegistry.register(
 
 class FinetuningSchedulerBoringModel(BoringModel):
     """Extend :class:`~tests.helpers.BoringModel` to facilitate testing of
-    :class:`~finetuning_scheduler.FinetuningScheduler` by ensuring deterministic divergence
-    and accommodating no_decay list configuration"""
+    :class:`~finetuning_scheduler.FinetuningScheduler` by ensuring deterministic divergence and accommodating
+    no_decay list configuration."""
 
     def __init__(
         self,
@@ -288,7 +288,7 @@ class BNBoringModel(FinetuningSchedulerBoringModel):
 #         return self.model(x)
 
 class FTSCustLRModel(FinetuningSchedulerBoringModel):
-    """overrides lr_scheduler_step to allow lr scheduler testing."""
+    """Overrides lr_scheduler_step to allow lr scheduler testing."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1356,6 +1356,7 @@ EXPECTED_WARNS = [
     "Conversion of an array with ndim > 0"  # required for PyTorch 2.2
 ]
 EXPECTED_DIRPATH = "is not empty."
+EXPECTED_TRAINCHK = "could not find the monitored key in the returned"
 
 def ckpt_resume_launch(ckpt_set_fixture: object, diff_dirpath: bool, ckpt: str, max_depth: int, tmpdir: Path,
                        save_on_train_epoch_end: Optional[bool] = None) -> None:
@@ -1420,6 +1421,8 @@ def test_fts_callback_resume(tmpdir, ckpt_set, recwarn, diff_dirpath: bool, trai
     assert fts_callback.curr_depth == fts_callback.max_depth
     if not diff_dirpath:
         resume_warns.append(EXPECTED_DIRPATH)
+    if train_chk_mode:
+        resume_warns.append(EXPECTED_TRAINCHK)
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=resume_warns)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
@@ -2213,7 +2216,7 @@ def test_fts_callback_warns(
     tmpdir, recwarn, callbacks: List[Callback], cust_monitor: Optional[str], dist_mode: str, expected: Tuple[str]
 ):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` warnings that require a
-    :class:`~pytorch_lighting.trainer.Trainer` to be defined are properly issued"""
+    :class:`~pytorch_lighting.trainer.Trainer` to be defined are properly issued."""
     model = FinetuningSchedulerBoringModel(monitor_metric=cust_monitor)
     dist_args = {"strategy": dist_mode, "accelerator": "cpu", "devices": "auto"} if dist_mode else {"devices": 1}
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, **dist_args)

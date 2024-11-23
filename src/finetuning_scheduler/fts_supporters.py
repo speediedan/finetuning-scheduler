@@ -69,8 +69,7 @@ STRATEGY_ADAPTERS = {"fsdp": FSDPStrategyAdapter, "modelparallelstrategy": Model
 
 @dataclass
 class FTSState:
-    """Dataclass to encapsulate the
-    :class:`~finetuning_scheduler.fts.FinetuningScheduler` internal state."""
+    """Dataclass to encapsulate the :class:`~finetuning_scheduler.fts.FinetuningScheduler` internal state."""
 
     _resume_fit_from_ckpt: bool = False
     _ft_epoch: int = 0
@@ -164,9 +163,8 @@ class CallbackResolverMixin(ABC):
 
 
 class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
-    r"""
-    Extends/specializes :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` to facilitate
-    multi-phase scheduled fine-tuning.
+    r"""Extends/specializes :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` to
+    facilitate multi-phase scheduled fine-tuning.
 
     Adds :attr:`es_phase_complete`, :attr:`final_phase` and :attr:`finetuningscheduler_callback` attributes and modifies
     ``EarlyStopping._evaluate_stopping_criteria`` to enable multi-phase behavior. Usage of
@@ -186,7 +184,6 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
 
        Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the use of one
        :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` callback instance at a time.
-
     """
     _check_on_train_epoch_end: Optional[bool]
     best_score: Tensor
@@ -323,13 +320,11 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
 
 
 class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
-    r"""
-    Extends/specializes :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` to facilitate
-    multi-phase scheduled fine-tuning. Overrides the
-    ``state_dict`` and ``load_state_dict`` hooks to maintain additional state (:attr:`current_ckpt_depth`,
-    :attr:`best_ckpt_depth`, :attr:`finetuningscheduler_callback`). Usage of
-    :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is identical to
-    :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` and
+    r"""Extends/specializes :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` to
+    facilitate multi-phase scheduled fine-tuning. Overrides the ``state_dict`` and ``load_state_dict`` hooks to
+    maintain additional state (:attr:`current_ckpt_depth`, :attr:`best_ckpt_depth`,
+    :attr:`finetuningscheduler_callback`). Usage of :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is
+    identical to :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` and
     :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` will automatically be used if a
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is detected.
 
@@ -1365,8 +1360,10 @@ class ScheduleImplMixin(ABC):
 
     def init_ft_sched(self) -> None:
         """Generate the default fine-tuning schedule and/or load it into
-        :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.ft_schedule`. Broadcast the
-        schedule to ensure it is available for use in a distributed context."""
+        :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.ft_schedule`.
+
+        Broadcast the schedule to ensure it is available for use in a distributed context.
+        """
         self.gen_or_load_sched()
         assert isinstance(self.ft_schedule, Dict)
         if self.max_depth == -1:
@@ -1495,9 +1492,8 @@ class ScheduleImplMixin(ABC):
         return schedule_dict
 
     def thaw_to_depth(self, depth: Optional[int] = None) -> None:
-        """Thaw/unfreeze the current
-        :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.pl_module` to the specified
-        fine-tuning depth (aka level)
+        """Thaw/unfreeze the current :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.pl_module` to the
+        specified fine-tuning depth (aka level)
 
         Args:
             depth: The depth/level to which the
@@ -1671,20 +1667,6 @@ class ScheduleImplMixin(ABC):
             agg = reduce(agg_func, [reduce(getattr, a.split(sep="."), o) for o, a in zip(objs, attrs)])
             for o, a in zip(objs, attrs):
                 setattr(o, a, agg)
-
-    def _maybe_sync_loops(self) -> None:
-        """Synchronize total and current progress loops for the restart of a multi-phase training session."""
-        assert self.pl_module._trainer is not None
-        fit_loop = self.pl_module._trainer.fit_loop
-        if fit_loop.epoch_loop.restarting:  # if ``True``, we haven't completed resetting state
-            # since we're restoring from a checkpoint saved prior to processed and completed incrementing
-            fit_loop.epoch_progress.increment_processed()
-            fit_loop.epoch_progress.increment_completed()
-            # ensure current and total are synchronized for the continuation of our multi-phase fine-tuning session
-            fit_loop.epoch_progress.current = copy(fit_loop.epoch_progress.total)
-            # restarting outside of epoch end is not supported so the assumption here is to start with a fresh epoch
-            fit_loop.epoch_loop.restarting = False
-            fit_loop.epoch_loop.val_loop._restarting = False
 
     def _inspect_fts_opt_state(self) -> Tuple:
         """Distills relevant initialized optimizer state for validation prior to fit start.
