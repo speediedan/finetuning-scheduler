@@ -21,7 +21,7 @@ ci:
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v5.0.0
     hooks:
       - id: end-of-file-fixer
       - id: trailing-whitespace
@@ -39,33 +39,34 @@ repos:
       - id: detect-private-key
 
   - repo: https://github.com/asottile/pyupgrade
-    rev: v3.3.1
+    rev: v3.17.0
     hooks:
       - id: pyupgrade
         args: [--py37-plus]
         name: Upgrade code
 
+  # update rev for docformatter after 1.7.6 available, using below commit on master branch until then
   - repo: https://github.com/myint/docformatter
-    rev: v1.4
+    rev: 06907d0267368b49b9180eed423fae5697c1e909
     hooks:
       - id: docformatter
         args: [--in-place, --wrap-summaries=115, --wrap-descriptions=120]
 
   - repo: https://github.com/asottile/yesqa
-    rev: v1.4.0
+    rev: v1.5.0
     hooks:
       - id: yesqa
         name: Unused noqa
 
   - repo: https://github.com/asottile/blacken-docs
-    rev: 1.13.0
+    rev: 1.19.0
     hooks:
       - id: blacken-docs
         args: [--line-length=120]
         additional_dependencies: [black==22.12]
 
   - repo: https://github.com/executablebooks/mdformat
-    rev: 0.7.16
+    rev: 0.7.17
     hooks:
       - id: mdformat
         additional_dependencies:
@@ -75,7 +76,7 @@ repos:
         exclude: CHANGELOG.md
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: 'v0.1.15'
+    rev: 'v0.6.9'
     hooks:
       - id: ruff
         # Respect `exclude` and `extend-exclude` settings.

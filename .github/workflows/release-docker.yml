@@ -36,7 +36,7 @@ jobs:
         pl_version: ["2.4"]
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v1
@@ -46,7 +46,7 @@ jobs:
 
       - name: Get release version
         id: get_version
-        run: echo "::set-output name=RELEASE_VERSION::$(echo ${GITHUB_REF##*/v})"
+        run: echo "::set-output name=RELEASE_VERSION::$(echo ${GITHUB_REF##*/v})" >> $GITHUB_OUTPUT
 
       - name: Publish Latest to Docker
         uses: docker/build-push-action@v2
