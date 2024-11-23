@@ -47,10 +47,9 @@ log = logging.getLogger(__name__)
 
 
 class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMixin, BaseFinetuning):
-    r"""
-    This callback enables flexible, multi-phase, scheduled fine-tuning of foundation models. Gradual
-    unfreezing/thawing can help maximize foundation model knowledge retention while allowing (typically upper layers
-    of) the model to optimally adapt to new tasks during transfer learning.
+    r"""This callback enables flexible, multi-phase, scheduled fine-tuning of foundation models. Gradual
+    unfreezing/thawing can help maximize foundation model knowledge retention while allowing (typically upper
+    layers of) the model to optimally adapt to new tasks during transfer learning.
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` orchestrates the gradual unfreezing of models via a
     fine-tuning schedule that is either implicitly generated (the default) or explicitly provided by the user (more
     computationally efficient).
@@ -381,8 +380,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
     ) -> None:
         """Configure optimizer parameter groups for the next scheduled fine-tuning level, adding parameter groups
         beyond the restored optimizer state up to
-        :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.current_depth` and reinitializing the optimizer and/or
-        learning rate scheduler as configured.
+        :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.current_depth` and reinitializing the optimizer
+        and/or learning rate scheduler as configured.
 
         Args:
             optimizer (:class:`~finetuning_scheduler.types.ParamGroupAddable`): The supported optimizer instance to
@@ -612,8 +611,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 compatible with the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback.
         """
         strategy = trainer.strategy
-        connector_flag = getattr(trainer._accelerator_connector, "_strategy_flag", None)
-        strategy_flag = connector_flag.strategy_name if isinstance(connector_flag, Strategy) else connector_flag
+        connect_flg = getattr(trainer._accelerator_connector, "_strategy_flag", "")
+        strategy_flag = getattr(connect_flg, "strategy_name", connect_flg.__class__.__name__.lower()) if \
+            isinstance(connect_flg, Strategy) else connect_flg
         supported = [t.lower() for t in self._supported_strategy_flags()]
         if strategy_flag and strategy_flag not in supported:  # type: ignore[attr-defined]
             if not self.allow_untested:
@@ -710,8 +710,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         super().on_fit_start(trainer, pl_module)
 
     def state_dict(self) -> Dict[str, Any]:
-        """Before saving a checkpoint, add the
-        :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state to be saved.
+        """Before saving a checkpoint, add the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback
+        state to be saved.
 
         Returns:
             Dict[str, Any]: The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state dictionary
@@ -735,9 +735,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         }
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        """After loading a checkpoint, load the saved
-        :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state and update the
-        current callback state accordingly.
+        """After loading a checkpoint, load the saved :class:`~finetuning_scheduler.fts.FinetuningScheduler`
+        callback state and update the current callback state accordingly.
 
         Args:
             state_dict: The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state dictionary that will
@@ -754,10 +753,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
 
     def should_transition(self, trainer: "pl.Trainer") -> bool:
         """Phase transition logic is contingent on whether we are composing
-        :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria with
-        epoch-driven transition constraints or exclusively using epoch-driven transition scheduling. (i.e.,
-        :attr:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is
-        ``True``)
+        :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria with epoch-driven transition
+        constraints or exclusively using epoch-driven transition scheduling. (i.e.,
+        :attr:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is ``True``)
 
         Args:
             trainer (:external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
@@ -770,6 +768,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             self.ft_schedule[self.curr_depth]["max_transition_epoch"]
             if self.depth_remaining > 0
             else trainer.fit_loop.max_epochs
+        )
+        assert isinstance(curr_max_epoch, (int, float)), (
+            f"Expected max_transition_epoch/max_epochs to be an int or float, but got {type(curr_max_epoch)}"
         )
         if not self.epoch_transitions_only:  # if we're considering FTSEarlyStopping criteria
             assert early_stopping_callback is not None
@@ -792,8 +793,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
 
     def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
         """Before beginning a training epoch, configure the internal
-        :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`, prepare the next
-        scheduled fine-tuning level and store the updated optimizer configuration before continuing training
+        :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`, prepare the next scheduled fine-tuning
+        level and store the updated optimizer configuration before continuing training.
 
         Args:
             trainer (:external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
@@ -842,8 +843,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         optimizer: ParamGroupAddable,  # type: ignore[override]
     ) -> None:
         """Afer the latest optimizer step, update the
-        :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`, incrementing the
-        global fine-tuning steps taken
+        :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`, incrementing the global fine-tuning steps
+        taken.
 
         Args:
             trainer (:external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
