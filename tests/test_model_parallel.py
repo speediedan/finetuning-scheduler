@@ -46,6 +46,8 @@ additional_model_parallel_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
     "You are using `torch.load` with `weights_only=False`",  # known required w/ Lightning 2.4
+    "of Tensor.pin_memory",  # required with PT 2.6 nightly 2024.11.21
+    "of Tensor.is_pinned"  # required with PT 2.6 nightly 2024.11.21
 ]
 MODEL_PARALLEL_BASE_WARNS.extend(additional_model_parallel_warns)
 MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
@@ -362,7 +364,6 @@ def gen_apply_transformer_tp_plan(model: nn.Module, device_mesh: DeviceMesh, los
                 desired_input_layouts=Replicate(),
             ),
             "attention_norm": SequenceParallel(),
-
             "attention.wq": ColwiseParallel(use_local_output=False),
             "attention.wk": ColwiseParallel(use_local_output=False),
             "attention.wv": ColwiseParallel(use_local_output=False),

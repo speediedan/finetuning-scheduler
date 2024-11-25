@@ -19,3 +19,9 @@ build_version(){
 	  --build-arg PYTORCH_VERSION=${iv_ref["pytorch"]} --no-cache . >> $docker_build_log
 	docker tag ${azpl_name} ${registry_name}:${azpl_name} >> $docker_build_log
 }
+
+maybe_deactivate(){
+    if [ -n "$VIRTUAL_ENV" ]; then
+        deactivate
+    fi
+}

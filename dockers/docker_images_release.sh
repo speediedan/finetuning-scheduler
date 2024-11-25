@@ -12,10 +12,7 @@ registry_name=$2
 build_new="${3:-1}"
 push_remote="${4:-1}"
 
-# setup shell functions for conda, uses conda's .bashrc resident defined hook to execute conda init setup to enable
-#   subsequent conda command usage
-eval "$(conda shell.bash hook)"
-conda deactivate
+maybe_deactivate
 
 d=`date +%Y%m%d%H%M%S`
 tmp_docker_build_log_dir="/tmp"
@@ -44,7 +41,7 @@ maybe_build(){
 
 build_eval(){
 	# latest PyTorch image supported by release
-	declare -A iv=(["cuda"]="12.4.0" ["python"]="3.12" ["pytorch"]="2.5.1" ["lightning"]="2.5" ["cust_build"]="0")
+	declare -A iv=(["cuda"]="12.6.2" ["python"]="3.12" ["pytorch"]="2.6.0" ["lightning"]="2.6" ["cust_build"]="0")
 	export latest_pt="base-cu${iv["cuda"]}-py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}"
 	export latest_azpl="py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}-azpl-init"
 	maybe_build iv "${latest_pt}" "${latest_azpl}"

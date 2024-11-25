@@ -39,14 +39,14 @@ python collect_env_details.py
 You can also fill out the list below manually.
 -->
 
-- Fine-Tuning Scheduler Version (e.g., 2.5.0):
-- Lightning Version (e.g., 2.5.0):
-- PyTorch Version (e.g., 2.5.1):
+- Fine-Tuning Scheduler Version (e.g., 2.6.0):
+- Lightning Version (e.g., 2.6.0):
+- PyTorch Version (e.g., 2.6.0):
 - Python version (e.g., 3.12):
 - OS (e.g., Linux):
 - CUDA/cuDNN version:
 - GPU models and configuration:
-- How you installed PyTorch (`conda`, `pip`, source):
+- How you installed PyTorch (`pip`, source):
 - If compiling from source, the output of `torch.__config__.show()`:
 - Any other relevant information:
 

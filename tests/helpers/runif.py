@@ -13,7 +13,7 @@
 import os
 import re
 import sys
-from typing import Optional, Set, Union
+from typing import Optional, Set, Union, Dict
 from packaging.version import Version
 import importlib.metadata as metadata
 
@@ -26,15 +26,26 @@ from fts_examples.patching.dep_patch_shim import ExpPatch, _ACTIVE_PATCHES
 
 EXTENDED_VER_PAT = re.compile(r"([0-9]+\.){2}[0-9]+")
 
+def maybe_mark_exp(exp_patch_set: Set[ExpPatch], mark_if_false: Optional[Dict] = None):
+    """This allows us to evaluate whether an experimental patch set that is conditionally required for a given test
+    is required in the current execution context.
+
+    If the experimental patch set is not required, we mark the
+    test with the provided `mark_if_false` dictionary directive (or an empty dictionary).
+    """
+
+    exp_patch_set = {ep for ep in exp_patch_set if all(ep.value.condition)}
+    if any(exp_patch_set):
+        return {"exp_patch": exp_patch_set}
+    else:
+        return mark_if_false or {}
+
 # RunIf aliases
 RUNIF_MAP = {
     "min2_5": {"min_torch": "2.5.0"},
     "alone": {"standalone": True},
     "bf16_alone": {"bf16_cuda": True, "standalone": True},
-    #"min2_2": {"min_torch": "2.2.0"},
-    #"max3_12_min2_3": {"max_python": "3.12", "min_torch": "2.3.0"},
-    #"max3_12_min2_2": {"max_python": "3.12", "min_torch": "2.2.0"},
-    "einsum_exp": {"exp_patch": {ExpPatch.EINSUM_STRATEGIES}},
+    "einsum_exp": maybe_mark_exp({ExpPatch.EINSUM_STRATEGIES}, {"standalone": True}),
 }
 
 
@@ -62,7 +73,7 @@ class RunIf:
         skip_mac_os: bool = False,
         standalone: bool = False,
         deepspeed: bool = False,
-        exp_patch: Optional[Union[ExpPatch,Set[ExpPatch]]] = None,
+        exp_patch: Optional[Union[ExpPatch, Set[ExpPatch]]] = None,
         **kwargs,
     ):
         """

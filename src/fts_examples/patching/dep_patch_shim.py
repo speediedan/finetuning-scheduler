@@ -54,7 +54,7 @@ def _patch_triton():
     sys.modules.get(target_mod).__dict__.get('JITFunction').__init__ = _new_init
 
 
-# required for `torch==2.5.x`, TBD wrt subsequent versions
+# remove once `torch==2.6.x` is minimum (only required for `torch==2.5.x`)
 einsum_strategies_patch = DependencyPatch(
     condition=(lwt_compare_version("torch", operator.le, "2.5.2"),
                lwt_compare_version("torch", operator.ge, "2.5.0"),),
@@ -71,12 +71,13 @@ datasets_numpy_extractor_patch = DependencyPatch(
                patched_package='datasets',
                description='Adjust `NumpyArrowExtractor` to properly use `numpy` 2.0 copy semantics')
 
-# only required for `torch==2.4.x`
+# TODO: remove once `torch==2.5.x` is minimum (only required for `torch==2.4.x`)
 triton_codgen_patch = DependencyPatch(
     condition=(lwt_compare_version("pytorch-triton", operator.eq, "3.0.0", "45fff310c8"),),
     env_flag=OSEnvToggle("ENABLE_FTS_TRITON_CODEGEN_PATCH", default="1"),
     function=_patch_triton, patched_package='pytorch-triton',
     description='Address `triton` #3564 until PyTorch pins the upstream fix')
+
 
 class ExpPatch(Enum):
     EINSUM_STRATEGIES = einsum_strategies_patch

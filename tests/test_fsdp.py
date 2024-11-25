@@ -68,6 +68,7 @@ additional_fsdp_warns = [
     "of Tensor.pin_memory",  # required with PT 2.5 for FSDP1 `_flat_param` internal usage
     "Tensor.is_pinned",  # required with PT 2.5 for FSDP1 `_flat_param` internal usage
     "Deallocating Tensor ", # required with PT 2.5
+    "`_get_pg_default_device` will be deprecated",  # required with PT 2.6 20241121 nightly
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS

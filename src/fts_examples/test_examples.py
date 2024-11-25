@@ -61,8 +61,8 @@ EXPECTED_WARNS = [
 EXPECTED_WARNS.extend(ALL_EXAMPLE_EXPECTED)
 
 # min/max versions only applies to base examples, TODO: consider for deprecation
-MIN_VERSION_WARNS = "2.2"
-MAX_VERSION_WARNS = "2.5"
+MIN_VERSION_WARNS = "2.3"
+MAX_VERSION_WARNS = "2.6"
 # torch version-specific warns go here
 EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [], MAX_VERSION_WARNS:[] }
 torch_version = metadata.distribution('torch').version

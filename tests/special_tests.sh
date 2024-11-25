@@ -108,7 +108,7 @@ define_configuration(){
       export PL_RUN_STANDALONE_TESTS=1
       ;;
     exp_patch)
-      echo "Collecting and running only experimental patch tests supported w/ provided patch mask (${experiment_patch_mask[@]})." | tee -a $special_test_session_log
+      echo "Collecting and running only experimental patch tests that currently require the provided patch mask (${experiment_patch_mask[@]})." | tee -a $special_test_session_log
       export FTS_EXPERIMENTAL_PATCH_TESTS=1
       ;;
     *)

@@ -6,4 +6,4 @@ sentencepiece
 tensorboardX>=2.2
 tabulate
 psutil
-numpy<2.0  # to avoid issues with oldest supported pytorch (2.2)
+#numpy<2.0  # to avoid issues with oldest supported pytorch (2.3)

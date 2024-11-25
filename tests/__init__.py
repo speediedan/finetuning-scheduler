@@ -19,7 +19,7 @@ _TEMP_PATH = os.path.join(_PROJECT_ROOT, "test_temp")
 _PATH_DATASETS = os.path.join(_PROJECT_ROOT, "datasets")
 _PATH_LEGACY = os.path.join(_PROJECT_ROOT, "legacy")
 
-# TODO: this setting `PYTHONPATH` may not be used by other evns like Conda for import packages
+# TODO: this setting `PYTHONPATH` may not be used by other envs like Conda for import packages
 if _PROJECT_ROOT not in os.getenv("PYTHONPATH", ""):
     splitter = ":" if os.environ.get("PYTHONPATH", "") else ""
     os.environ["PYTHONPATH"] = f'{_PROJECT_ROOT}{splitter}{os.environ.get("PYTHONPATH", "")}'

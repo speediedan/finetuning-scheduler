@@ -5,7 +5,7 @@ from fts_examples.patching._patch_utils import _prepare_module_ctx, lwt_compare_
 # ruff: noqa: F821
 # pyright: reportUndefinedVariable=false
 
-if lwt_compare_version("torch", operator.ge, "2.5.0"):
+if lwt_compare_version("torch", operator.ge, "2.5.0") and lwt_compare_version("torch", operator.le, "2.5.2"):
     globals().update(_prepare_module_ctx('torch.distributed.tensor._ops._einsum_strategy', globals()))
 
 

@@ -11,7 +11,7 @@ trigger:
     include:
       - "main"
       - "release/*"
-      - "model_parallel_exp_support"  # temporarily add for new test infra enhancement validation
+      # - "model_parallel_exp_support"  # temporarily add for specific feature branch validation
       - "refs/tags/*"
   paths:
     include:
@@ -46,7 +46,7 @@ jobs:
     strategy:
       matrix:
         'PyTorch | latest':
-          image: "speediedan/finetuning-scheduler:py3.12-pt2.5.1-pl2.5-azpl-init"
+          image: "speediedan/finetuning-scheduler:py3.12-pt2.6.0-pl2.6-azpl-init"
           scope: ""
     # how long to run the job before automatically cancelling
     timeoutInMinutes: "100"

@@ -65,13 +65,9 @@ def instantiate_class(init: Dict[str, Any], args: Optional[Union[Any, Tuple[Any,
 # override PyTorch default, extending it to capture additional salient packages for reproducability
 # https://github.com/pytorch/pytorch/blob/7c2489bdae5a96dc122c3bb7b42c18528bcfdc86/torch/utils/collect_env.py#L271
 def get_pip_packages(run_lambda):
-    """Returns `pip list` output.
-
-    Note: will also find conda-installed pytorch
-    and numpy packages.
-    """
+    """Returns `pip list` output."""
     # People generally have `pip` as `pip` or `pip3`
-    # But here it is incoved as `python -mpip`
+    # But here it is invoked as `python -mpip`
     def run_with_pip(pip):
         if collect_env.get_platform() == "win32":
             system_root = os.environ.get("SYSTEMROOT", "C:\\Windows")
@@ -126,7 +122,6 @@ def get_env_info():
         "miopen_runtime_version": miopen_runtime_version,
         "pip_version": pip_version,
         "pip_packages": pip_list_output,
-        "conda_packages": collect_env.get_conda_packages(run_lambda),
         "os": collect_env.get_os(run_lambda),
         "libc_version": collect_env.get_libc_version(),
         "gcc_version": collect_env.get_gcc_version(run_lambda),
@@ -167,7 +162,6 @@ def collect_env_info() -> Dict:
             "cudnn_version",
             "pip_version",  # 'pip' or 'pip3'
             "pip_packages",
-            "conda_packages",
             "hip_compiled_version",
             "hip_runtime_version",
             "miopen_runtime_version",
