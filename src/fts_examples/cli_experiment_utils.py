@@ -122,6 +122,7 @@ def get_env_info():
         "miopen_runtime_version": miopen_runtime_version,
         "pip_version": pip_version,
         "pip_packages": pip_list_output,
+        "conda_packages": collect_env.get_conda_packages(run_lambda),
         "os": collect_env.get_os(run_lambda),
         "libc_version": collect_env.get_libc_version(),
         "gcc_version": collect_env.get_gcc_version(run_lambda),
@@ -162,6 +163,7 @@ def collect_env_info() -> Dict:
             "cudnn_version",
             "pip_version",  # 'pip' or 'pip3'
             "pip_packages",
+            "conda_packages",
             "hip_compiled_version",
             "hip_runtime_version",
             "miopen_runtime_version",
