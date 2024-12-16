@@ -277,7 +277,7 @@ class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
             assert isinstance(self.model, torch.nn.Sequential)
         if self.precision_key == "auto_16":
             assert isinstance(self.trainer.strategy.precision_plugin, FSDPPrecision)
-            precision = torch.float16 if self.trainer.precision == "16-true" else torch.bfloat16
+            precision = torch.bfloat16
         # ensure our ignored module is not wrapped
         for i in self.fsdp_mask["unwrapped_mods"]:
             assert not isinstance(self.model[i], FullyShardedDataParallel)
@@ -559,6 +559,7 @@ outer_wrap_only = {"fsdp_mask": {"wrapped_mods": [], "unwrapped_mods": list(rang
 unwrap_7_diverge = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, "diverge_on_epoch": 1}
 unwrap_7_mp = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}, **fp16_cfg}
 unwrap_8_mp = {"fsdp_mask": {"wrapped_mods": list(range(7)), "unwrapped_mods": [8]}, **fp16_cfg}
+unwrap_8_no_prec = {"fsdp_mask": {"wrapped_mods": list(range(7)), "unwrapped_mods": [8]}}
 wrap_all_mp = {"fsdp_mask": {"wrapped_mods": list(range(6)) + [7], "unwrapped_mods": []}, **fp16_cfg}
 wrap_ext_mp = {"fsdp_mask": {"wrapped_mods": list(range(6)) + [7, 8], "unwrapped_mods": []}, **fp16_cfg}
 
@@ -615,7 +616,7 @@ ignore_states_cfg = {
     "use_orig_params": True,
 }
 
-cust_mp_args = {"param_dtype": torch.float16, "reduce_dtype": torch.float16, "buffer_dtype": torch.float16}
+cust_mp_args = {"param_dtype": torch.bfloat16, "reduce_dtype": torch.bfloat16, "buffer_dtype": torch.bfloat16}
 cust_fp16_mp = {"mixed_precision": MixedPrecision(**cust_mp_args), **DISABLE_USE_ORIG}
 
 # trainer configuration alias
@@ -665,7 +666,7 @@ FTS_FSDP_TESTS = {
         None,
         (
             path_optimlr_reinit,
-            None,  #("Incompatible check",),
+            ("Incompatible check",),
             None,
             lrs_path_optimlr_reinit,
         ),
@@ -745,13 +746,13 @@ FTS_FSDP_TESTS = {
         None,
         (path_default, *nones(3)),
     ),
-    "batch_norm_auto_prec_no_use_orig_track_false": (
-        (BN_model, cust_awp, True, 2, unwrap_8_mp, None, bn_track_false, max_epoch_4, DISABLE_USE_ORIG),
+    "batch_norm_no_prec_no_use_orig_track_false": (
+        (BN_model, cust_awp, False, 2, unwrap_8_no_prec, None, bn_track_false, max_epoch_4, DISABLE_USE_ORIG),
         None,
         (path_bn_track_false, ("Both mixed precision",), *nones(2)),
     ),
-    "batch_norm_auto_prec_no_use_orig_track_true": (
-        (BN_model, cust_awp, True, 2, unwrap_8_mp, None, bn_track_true, max_epoch_4, DISABLE_USE_ORIG),
+    "batch_norm_no_prec_no_use_orig_track_true": (
+        (BN_model, cust_awp, False, 2, unwrap_8_no_prec, None, bn_track_true, max_epoch_4, DISABLE_USE_ORIG),
         None,
         (path_bn_track_true, ("Both mixed precision",), *nones(2)),
     ),
@@ -925,7 +926,7 @@ def map_component_cfgs(model_cfg, fts_cfg, trainer_cfg, strategy_cfg, use_precis
     model_cfg = model_cfg or {}
     fts_cfg = fts_cfg or {}
     strategy_cfg = strategy_cfg or {"cpu_offload": True}
-    precision_opts = {"precision": "16-true"} if use_precision else {}
+    precision_opts = {"precision": "bf16-true"} if use_precision else {}
     return model_cfg, fts_cfg, trainer_cfg, strategy_cfg, precision_opts
 
 
