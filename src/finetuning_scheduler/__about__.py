@@ -1,7 +1,7 @@
 import time
 
 _this_year = time.strftime("%Y")
-__version__ = "2.5.0.dev0"
+__version__ = "2.5.0.rc0"
 __author__ = "Dan Dale"
 __author_email__ = "danny.dale@gmail.com"
 __license__ = "Apache-2.0"
