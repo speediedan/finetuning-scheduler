@@ -51,7 +51,7 @@ jobs:
     if: github.event_name == 'release'
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: pypi-packages-${{ github.sha }}
         path: dist
@@ -72,7 +72,7 @@ jobs:
     if: startsWith(github.event.ref, 'refs/tags') || github.event_name == 'release'
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: pypi-packages-${{ github.sha }}
         path: dist
@@ -86,11 +86,6 @@ jobs:
 
     - name: Publish to Test PyPI
       uses: pypa/gh-action-pypi-publish@v1.8.14
-      # with:
-      #   user: __token__
-      #   password: ${{ secrets.test_pypi_password }}
-      #   repository_url: https://test.pypi.org/legacy/
-      #   verbose: true
 
   publish-package-pypi:
     runs-on: ubuntu-22.04
@@ -101,7 +96,7 @@ jobs:
     if: startsWith(github.event.ref, 'refs/tags') || github.event_name == 'release'
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: pypi-packages-${{ github.sha }}
         path: dist
@@ -115,6 +110,3 @@ jobs:
 
     - name: Publish distribution 📦 to PyPI
       uses: pypa/gh-action-pypi-publish@v1.8.14
-      # with:
-      #   user: __token__
-      #   password: ${{ secrets.pypi_password }}
