@@ -49,7 +49,6 @@ RUN apt-get update -qq --fix-missing  && \
     add-apt-repository ppa:deadsnakes/ppa && \
     apt-get install -y \
         python${PYTHON_VERSION} \
-        python${PYTHON_VERSION}-distutils \
         python${PYTHON_VERSION}-dev \
         python3-pip \
     && \

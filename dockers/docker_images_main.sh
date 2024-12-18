@@ -12,9 +12,6 @@ registry_name=$2
 build_new="${3:-1}"
 push_remote="${4:-1}"
 
-eval "$(conda shell.bash hook)"  # setup shell functions for conda, uses conda's .bashrc resident defined hook to execute conda init setup to enable subsequent conda command usage
-conda deactivate
-
 d=`date +%Y%m%d%H%M%S`
 tmp_docker_build_log_dir="/tmp"
 docker_build_log="${tmp_docker_build_log_dir}/fts_update_docker_main_images_${d}.log"
