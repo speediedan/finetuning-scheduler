@@ -18,6 +18,7 @@ d=`date +%Y%m%d%H%M%S`
 tmp_docker_build_log_dir="/tmp"
 docker_build_log="${tmp_docker_build_log_dir}/fts_update_docker_main_images_${d}.log"
 
+
 maybe_push(){
     if [[ $push_remote -ne 0 ]]; then
         echo "Beginning upload of built images..." >> $docker_build_log
