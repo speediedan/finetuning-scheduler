@@ -53,14 +53,30 @@ def _patch_triton():
     target_mod = 'triton.runtime.jit'
     sys.modules.get(target_mod).__dict__.get('JITFunction').__init__ = _new_init
 
+def _patch_lightning_jsonargparse():
+    from fts_examples.patching.patched_lightning_jsonargparse import _updated_parse_known_args_patch
+    target_mod = 'lightning.pytorch.cli'
+    sys.modules.get(target_mod).__dict__.get('ArgumentParser')._parse_known_args = _updated_parse_known_args_patch
 
-# required for `torch==2.5.x`, TBD wrt subsequent versions
+# TODO: remove once `2.6.0` is minimum
+# required for `torch==2.5.x`, TBD wrt subsequent versions though appears fixed in torch `2.6.0` nightlies
 einsum_strategies_patch = DependencyPatch(
     condition=(lwt_compare_version("torch", operator.le, "2.5.2"),
                lwt_compare_version("torch", operator.ge, "2.5.0"),),
     env_flag=OSEnvToggle("ENABLE_FTS_EINSUM_STRATEGY_PATCH", default="0"),
     function=_patch_einsum_strategies, patched_package='torch',
     description='Address trivial tp submesh limitation until PyTorch provides upstream fix')
+
+# TODO: remove if lightning fixes `2.5.0` with a post or `2.6.0` is minimum
+lightning_jsonargparse_patch = DependencyPatch(
+    condition=(lwt_compare_version("lightning", operator.eq, "2.5.0"), sys.version_info >= (3, 12, 8),
+               lwt_compare_version("jsonargparse", operator.ge, "4.35.0") ),
+               env_flag=OSEnvToggle("ENABLE_FTS_LIGHTNING_JSONARGPARSE_PATCH", default="1"),
+               function=_patch_lightning_jsonargparse,
+               patched_package='lightning',
+               description=('For the edge case where `lightning` patches `jsonargparse` in a manner that breaks '
+                            'certain versions of `jsonargparse`')
+)
 
 # TODO: remove once `datasets==2.21.0` is minimum
 datasets_numpy_extractor_patch = DependencyPatch(
@@ -71,7 +87,7 @@ datasets_numpy_extractor_patch = DependencyPatch(
                patched_package='datasets',
                description='Adjust `NumpyArrowExtractor` to properly use `numpy` 2.0 copy semantics')
 
-# only required for `torch==2.4.x`
+# TODO: remove once `torch 2.5.0` is minimum, only required for `torch==2.4.x`
 triton_codgen_patch = DependencyPatch(
     condition=(lwt_compare_version("pytorch-triton", operator.eq, "3.0.0", "45fff310c8"),),
     env_flag=OSEnvToggle("ENABLE_FTS_TRITON_CODEGEN_PATCH", default="1"),
@@ -82,6 +98,7 @@ class ExpPatch(Enum):
     EINSUM_STRATEGIES = einsum_strategies_patch
     NUMPY_EXTRACTOR = datasets_numpy_extractor_patch
     TRITON_CODEGEN = triton_codgen_patch
+    LIGHTNING_JSONARGPARSE = lightning_jsonargparse_patch
 
 _DEFINED_PATCHES = set(ExpPatch)
 _ACTIVE_PATCHES = set()

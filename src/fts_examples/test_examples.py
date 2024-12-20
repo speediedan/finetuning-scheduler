@@ -56,6 +56,7 @@ EXPECTED_WARNS = [
     "You are using `torch.load` with `weights_only=False`",
     # required for datasets <= 2.20.0 with python 3.12
     'co_lnotab is deprecated, use co_lines instead.',
+    "is multi-threaded, use of fork",  # expected with some tests that use fork and python >= 3.12.8
 ]
 
 EXPECTED_WARNS.extend(ALL_EXAMPLE_EXPECTED)
