@@ -15,7 +15,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - removed support for PyTorch `2.2`
 - removed use of conda builds (aligning with upstream PyTorch)
 
-## [2.5.0] - 2024-XX-XX
+## [2.5.0] - 2024-12-20
 
 ### Added
 
@@ -27,30 +27,14 @@ name/pattern-based configuration instead of manually inspecting modules and appl
 - FSDP2 'Auto' Plan Convenience Aliases, simplifying use of both composable and non-composable activation checkpointing APIs
 - Flexible orchestration of advanced profiling combining multiple complementary PyTorch profilers with FTS ``MemProfiler``
 
+### Fixed
+
+- Added logic to more robustly condition depth-aligned checkpoint metadata updates to address edge-cases where `current_score` precisely equaled the `best_model_score` at multiple different depths. Resolved [#15](https://github.com/speediedan/finetuning-scheduler/issues/15).
+
 ### Deprecated
 
+- As upstream PyTorch [has deprecated](https://github.com/pytorch/pytorch/issues/138506) official Anaconda channel builds, `finetuning-scheduler` will no longer be releasing conda builds. Installation of FTS via pip (irrespective of the virtual environment used) is the recommended installation approach.
 - removed support for PyTorch `2.1`
-
-## [2.4.1] - 2024-XX-XX
-
-### Added
-
-- Support for Lightning and PyTorch ``2.4.1``
-
-### Fixed
-
-- Added logic to more robustly condition depth-aligned checkpoint metadata updates to address edge-cases where `current_score` precisely equaled the `best_model_score` at multiple different depths. Resolved [#15](https://github.com/speediedan/finetuning-scheduler/issues/15).
-
-## [2.4.1] - 2024-XX-XX
-
-### Added
-
-- Support for Lightning and PyTorch ``2.4.1``
-
-### Fixed
-
-- Added logic to more robustly condition depth-aligned checkpoint metadata updates to address edge-cases where `current_score` precisely equaled the `best_model_score` at multiple different depths. Resolved [#15](https://github.com/speediedan/finetuning-scheduler/issues/15).
-
 
 ## [2.4.0] - 2024-08-15
 

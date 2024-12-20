@@ -4,7 +4,7 @@ import os
 from enum import Enum
 from typing import NamedTuple, Tuple, Callable
 from fts_examples.patching._patch_utils import lwt_compare_version
-
+from lightning.pytorch.cli import _JSONARGPARSE_SIGNATURES_AVAILABLE
 
 class OSEnvToggle(NamedTuple):
     env_var_name: str
@@ -70,7 +70,7 @@ einsum_strategies_patch = DependencyPatch(
 # TODO: remove if lightning fixes `2.5.0` with a post or `2.6.0` is minimum
 lightning_jsonargparse_patch = DependencyPatch(
     condition=(lwt_compare_version("lightning", operator.eq, "2.5.0"), sys.version_info >= (3, 12, 8),
-               lwt_compare_version("jsonargparse", operator.ge, "4.35.0") ),
+               lwt_compare_version("jsonargparse", operator.ge, "4.35.0"), _JSONARGPARSE_SIGNATURES_AVAILABLE),
                env_flag=OSEnvToggle("ENABLE_FTS_LIGHTNING_JSONARGPARSE_PATCH", default="1"),
                function=_patch_lightning_jsonargparse,
                patched_package='lightning',
