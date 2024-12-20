@@ -46,9 +46,9 @@ Usage: $0
   #   ./tests/special_tests.sh --mark_type=standalone --log_file=/tmp/some_parent_process_file_to_append_to.log
   # run all experimental tests following a pattern that are supported by a given experimental patch mask using the
   # default `tests/.experiments` experiments definition location:
-	#   ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0"
+	#   ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0 1"
   # same as above, but use a custom experiments definition location:
-  #   ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='model_parallel' --experiments_list=tests/.my_experiments --experiment_patch_mask="1 0 0"
+  #   ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='model_parallel' --experiments_list=tests/.my_experiments --experiment_patch_mask="1 0 0 1"
 EOF
 exit 1
 }
