@@ -67,15 +67,15 @@ einsum_strategies_patch = DependencyPatch(
     function=_patch_einsum_strategies, patched_package='torch',
     description='Address trivial tp submesh limitation until PyTorch provides upstream fix')
 
-# TODO: remove if lightning fixes `2.5.0` with a post or `2.6.0` is minimum
+# TODO: remove when min jsonargparse is `4.35.0` or another `2.5.0.postN` lightning release fixes
 lightning_jsonargparse_patch = DependencyPatch(
-    condition=(lwt_compare_version("lightning", operator.eq, "2.5.0"), sys.version_info >= (3, 12, 8),
-               lwt_compare_version("jsonargparse", operator.ge, "4.35.0"), _JSONARGPARSE_SIGNATURES_AVAILABLE),
+    condition=(sys.version_info >= (3, 12, 8), lwt_compare_version("jsonargparse", operator.lt, "4.35.0"),
+               _JSONARGPARSE_SIGNATURES_AVAILABLE),
                env_flag=OSEnvToggle("ENABLE_FTS_LIGHTNING_JSONARGPARSE_PATCH", default="1"),
                function=_patch_lightning_jsonargparse,
                patched_package='lightning',
-               description=('For the edge case where `lightning` patches `jsonargparse` in a manner that breaks '
-                            'certain versions of `jsonargparse`')
+               description=("For the edge case where `lightning` allows a `jsonargparse` version that doesn't support"
+                            " python versions >= `3.12.8`.")
 )
 
 # TODO: remove once `datasets==2.21.0` is minimum
