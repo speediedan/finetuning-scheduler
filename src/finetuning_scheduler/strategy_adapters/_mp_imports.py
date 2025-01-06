@@ -7,19 +7,19 @@ _TORCH_GREATER_EQUAL_2_5 = compare_version("torch", operator.ge, "2.5.0", use_ba
 # ruff: noqa: F401
 # we require torch 2.5 or higher for composable distributed API support so until torch 2.5.0 is the minimum version,
 # supported, we conditionally import indirectly to avoid duplicating import logic in several different modules
+
 if _TORCH_GREATER_EQUAL_2_5:
-    from torch.distributed._composable import checkpoint
-    from torch.distributed._composable.fsdp._fsdp_api import CPUOffloadPolicy
-    from torch.nn.attention import SDPBackend, sdpa_kernel
     from torch.distributed.device_mesh import DeviceMesh
     from torch.distributed.tensor import DTensor, Replicate, Shard
-    from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
     from torch.distributed.tensor.experimental import implicit_replication
-    from torch.distributed._composable.fsdp import FSDPModule, fully_shard
-    from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (checkpoint_wrapper, offload_wrapper,
-                                                                             ActivationWrapper)
     from torch.distributed.tensor.parallel import (ColwiseParallel, PrepareModuleInput, RowwiseParallel,
                                                    SequenceParallel, parallelize_module, loss_parallel)
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+    from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (checkpoint_wrapper, offload_wrapper,
+                                                                             ActivationWrapper)
+    from torch.distributed._composable import checkpoint
+    from torch.distributed._composable.fsdp import CPUOffloadPolicy, FSDPModule, fully_shard
+    from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
 else:
     for mp_obj in ["SDPBackend", "DeviceMesh", "DTensor", "Replicate", "Shard", "ColwiseParallel", "PrepareModuleInput",
                 "RowwiseParallel", "SequenceParallel", "implicit_replication", "parallelize_module", "loss_parallel",
