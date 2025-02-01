@@ -4,7 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [2.6.0] - 2024-XX-XX
+## [2.7.0] - 2025-XX-XX
+
+### Added
+
+- Support for Lightning and PyTorch ``2.7.0``
+
+### Deprecated
+
+- removed support for PyTorch `2.3`
+
+
+## [2.6.0] - 2025-XX-XX
 
 ### Added
 

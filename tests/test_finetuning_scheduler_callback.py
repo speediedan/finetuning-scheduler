@@ -1248,7 +1248,7 @@ EXPECTED_DYNAMO_P0_INTRAFIT_STATE = {
 }
 
 
-@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12")
+@RunIf(skip_windows=True, skip_mac_os=True, min_python="3.12")
 def test_fts_dynamo_enforce_p0(tmpdir, boring_ft_schedule):
     """Inspect the scheduled fine-tuning training path in the context of dynamo to ensure thawing schedule phase 0
     is enforced."""
@@ -1437,7 +1437,7 @@ DYNAMO_EXPECTED_WARNS = [
 EXPECTED_CKPT_WARNS = ["Be aware that when using `ckpt_path`, callbacks"]
 
 
-@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12")
+@RunIf(skip_windows=True, skip_mac_os=True, min_python="3.12")
 def test_fts_dynamo_resume(tmpdir, ckpt_set, boring_ft_schedule, recwarn):
     """Validate scheduled fine-tuning resumption functions as expected with a default dynamo configuration."""
     resume_warns = copy(EXPECTED_WARNS) + copy(DYNAMO_EXPECTED_WARNS) + copy(EXPECTED_CKPT_WARNS) + [EXPECTED_DIRPATH]
@@ -1548,7 +1548,7 @@ EXPECTED_DYNAMO_INTRAFIT_STATE = {
 }
 
 
-@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12", standalone=True)
+@RunIf(skip_windows=True, skip_mac_os=True, min_python="3.12", standalone=True)
 @pytest.mark.parametrize("restore_best", [True, False], ids=["default", "norestorebest"])
 def test_fts_dynamo_intrafit(tmpdir, boring_ft_schedule, restore_best: bool):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
@@ -2835,7 +2835,7 @@ def test_fts_multi_ddp(tmpdir, boring_ft_schedule, explicit_mode):
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
-@RunIf(standalone=True, min_cuda_gpus=2, skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12")
+@RunIf(standalone=True, min_cuda_gpus=2, skip_windows=True, skip_mac_os=True, min_python="3.12")
 def test_fts_multi_ddp_dynamo(tmpdir, boring_ft_schedule):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp'
     distributed context with default dynamo usage."""
