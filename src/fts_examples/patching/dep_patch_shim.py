@@ -47,7 +47,6 @@ def _patch_unsupported_numpy_arrow_extractor():
         target_mod = f'datasets.formatting.{old_mod}'
         sys.modules.get(target_mod).__dict__.get(stale_ref).numpy_arrow_extractor = NumpyArrowExtractor
 
-
 def _patch_triton():
     from fts_examples.patching.patched_triton_jit_fn_init import _new_init
     target_mod = 'triton.runtime.jit'
