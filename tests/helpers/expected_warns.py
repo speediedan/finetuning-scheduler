@@ -21,7 +21,7 @@ BASE_WARNINGS = [
     "GPU available but",
     "`max_epochs` was not",
     "The dirpath has changed from",
-    #"Conversion of an array with ndim > 0",
+    "Conversion of an array with ndim > 0",  # still needed with python 3.9 and torch 2.4.0
     WORKER_WARNING,
 ]
 
