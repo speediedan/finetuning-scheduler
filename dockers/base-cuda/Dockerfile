@@ -11,7 +11,7 @@
 # limitations under the License.
 # initially based on https://bit.ly/3pdAf1G
 
-ARG CUDA_VERSION=12.6.2
+ARG CUDA_VERSION=12.8.0
 ARG OS_VER=ubuntu22.04
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
@@ -84,11 +84,13 @@ RUN \
     else \
         # or target a specific cuda build, by specifying a particular index url w/...
         # ... default channel
-        #pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126; \
+        #pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128; \
         # ... pytorch patch version
         # pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
         # ... pytorch nightly dev version
-        pip install --pre torch==2.7.0.dev20250201 torchvision==0.22.0.dev20250201 --index-url https://download.pytorch.org/whl/nightly/cu126; \
+        #pip install --pre torch==2.7.0.dev20250201 torchvision==0.22.0.dev20250201 --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        # temporarily remove torchvision from the nightly build until it supports cu128 in nightlies
+        pip install --pre torch==2.7.0.dev20250201 --index-url https://download.pytorch.org/whl/nightly/cu128; \
         # ... test channel
         #pip install --pre torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/test/cu128; \
     fi && \

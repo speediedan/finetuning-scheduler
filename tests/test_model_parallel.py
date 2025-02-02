@@ -1,6 +1,6 @@
 import os
 from typing import Any, Callable, Dict, Optional, Tuple, KeysView, Union
-from copy import deepcopy, copy
+from copy import deepcopy
 from logging import DEBUG
 from pathlib import Path
 from unittest import mock
@@ -32,25 +32,14 @@ from tests.helpers.common import (ExpectedResults, fts_check_warns, pytest_param
 from tests.model_parallel_expected_paths import (path_tp_fsdp, path_fsdp_autocm, path_tp_fsdp_autocm,
                                                  path_fsdp, path_tp)
 from tests.helpers.runif import RunIf
+from tests.helpers.expected_warns import MODEL_PARALLEL_BASE_WARNS, MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS
 from tests.test_finetuning_scheduler_callback import (
-    EXPECTED_WARNS,
     FinetuningSchedulerBoringModel,
     TestFinetuningScheduler,
     get_sched_fixture_tmpdir,
 )
 
-
 FTS_GLOBAL_STATE_LOG_MODE = os.environ.get("FTS_GLOBAL_STATE_LOG_MODE", "0") == "1"
-MODEL_PARALLEL_BASE_WARNS = copy(EXPECTED_WARNS)
-additional_model_parallel_warns = [
-    "The number of training batches",  # minimizing cost of training for these tests
-    "when logging on epoch level in distributed",  # validating FTS handling in this scenario
-    "You are using `torch.load` with `weights_only=False`",  # known required w/ Lightning 2.4
-    "of Tensor.pin_memory",  # required with PT 2.6 nightly 2024.11.21
-    "of Tensor.is_pinned"  # required with PT 2.6 nightly 2024.11.21
-]
-MODEL_PARALLEL_BASE_WARNS.extend(additional_model_parallel_warns)
-MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
 
 
 class FSDPStateInspectMixin:

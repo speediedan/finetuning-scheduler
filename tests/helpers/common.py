@@ -10,6 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import re
+import os
 from copy import copy
 from functools import partial
 from typing import List, Optional, Tuple, NamedTuple, Dict, Iterable, Union
@@ -37,9 +38,18 @@ def default_fts_sanity_chk(trainer):
 def nones(num_n) -> Tuple:  # to help dedup config
     return (None,) * num_n
 
-def multiwarn_check(
-    rec_warns: List, expected_warns: List, expected_mode: bool = False, raw_warns: bool = False
-) -> List[Optional[WarningMessage]]:
+def multiwarn_check(rec_warns: List, expected_warns: List, expected_mode: bool = False, raw_warns: bool = False
+                    ) -> List[Optional[WarningMessage]]:
+
+    # Print warning details if FTS_WARN_DETAILS environment variable is set
+    if os.environ.get('FTS_WARN_DETAILS'):
+        print("====================================")
+        print("pytest warnings recorded:")
+        print("====================================")
+        for warn in rec_warns:
+            warn_msg = warn if raw_warns else warn.message.args[0]
+            print(f"{warn_msg}{os.linesep}")
+
     msg_search = lambda w1, w2: re.compile(w1).search(w2 if raw_warns else w2.message.args[0])  # noqa: E731
     if expected_mode:  # we're directed to check that multiple expected warns are obtained
         return [w_msg for w_msg in expected_warns if not any([msg_search(w_msg, w) for w in rec_warns])]
@@ -48,7 +58,6 @@ def multiwarn_check(
 
 
 unexpected_warns = partial(multiwarn_check, expected_mode=False)
-
 
 unmatched_warns = partial(multiwarn_check, expected_mode=True)
 

@@ -42,6 +42,8 @@ from finetuning_scheduler import CallbackResolverMixin, FinetuningScheduler, FTS
 from finetuning_scheduler.strategy_adapters import StrategyAdapter
 from tests.helpers import BoringModel
 from tests.helpers.boring_models import (CustomLRScheduler, LinearWarmupLR, RandomDataset)
+from tests.helpers.expected_warns import (BASE_EXPECTED_WARNS, BASE_DYNAMO_EXPECTED_WARNS, EXPECTED_CKPT_WARNS,
+                                          EXPECTED_DIRPATH_WARN, EXPECTED_TRAINCHK_WARN, OPTIMIZER_INIT_WARNS)
 from tests.helpers.runif import RunIf
 from tests.helpers.common import get_fts, unexpected_warns, unmatched_warns
 
@@ -1348,15 +1350,7 @@ EXPECTED_RESUME_RESULTS = {
     (False, True, "kth", -1): (0, 0, 3),
     (False, True, "kth", 1): (0, 0, 1),
 }
-EXPECTED_WARNS = [
-    "does not have many workers",  # required for all PyTorch/Lightning versions
-    "GPU available but",  # required for all PyTorch/Lightning versions
-    "`max_epochs` was not",  # required for all PyTorch/Lightning versions
-    "The dirpath has changed from",  # required for all PyTorch/Lightning versions
-    "Conversion of an array with ndim > 0"  # required for PyTorch 2.2
-]
-EXPECTED_DIRPATH = "is not empty."
-EXPECTED_TRAINCHK = "could not find the monitored key in the returned"
+
 
 def ckpt_resume_launch(ckpt_set_fixture: object, diff_dirpath: bool, ckpt: str, max_depth: int, tmpdir: Path,
                        save_on_train_epoch_end: Optional[bool] = None) -> None:
@@ -1383,12 +1377,12 @@ def ckpt_resume_launch(ckpt_set_fixture: object, diff_dirpath: bool, ckpt: str, 
 def test_fts_callback_resume_last(tmpdir, ckpt_set_last, recwarn, diff_dirpath: bool, ckpt: str):
     """Validate scheduled fine-tuning resumption functions as expected from both 'best' and 'kth'(not-best)
     checkpoints in both train/val stage check modes with and without max_depth specified."""
-    resume_warns = copy(EXPECTED_WARNS)
+    resume_warns = copy(BASE_EXPECTED_WARNS)
     fts_callback, *_ = ckpt_resume_launch(ckpt_set_fixture=ckpt_set_last, diff_dirpath=diff_dirpath, ckpt=ckpt,
                                           max_depth=1, tmpdir=tmpdir)
     assert fts_callback.curr_depth == fts_callback.max_depth
     if not diff_dirpath:
-        resume_warns.append(EXPECTED_DIRPATH)
+        resume_warns.append(EXPECTED_DIRPATH_WARN)
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=resume_warns)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
@@ -1402,7 +1396,7 @@ def test_fts_callback_resume(tmpdir, ckpt_set, recwarn, diff_dirpath: bool, trai
                              max_depth: int):
     """Validate scheduled fine-tuning resumption functions as expected from both 'best' and 'kth'(not-best)
     checkpoints in both train/val stage check modes with and without max_depth specified."""
-    resume_warns = copy(EXPECTED_WARNS)
+    resume_warns = copy(BASE_EXPECTED_WARNS)
     fts_callback, resume_callbacks, trainer = ckpt_resume_launch(ckpt_set_fixture=ckpt_set, diff_dirpath=diff_dirpath,
                                                                  ckpt=ckpt, save_on_train_epoch_end=train_chk_mode,
                                                                  max_depth=max_depth, tmpdir=tmpdir)
@@ -1420,27 +1414,19 @@ def test_fts_callback_resume(tmpdir, ckpt_set, recwarn, diff_dirpath: bool, trai
     assert fts_callback.curr_depth == expected_state[2]
     assert fts_callback.curr_depth == fts_callback.max_depth
     if not diff_dirpath:
-        resume_warns.append(EXPECTED_DIRPATH)
+        resume_warns.append(EXPECTED_DIRPATH_WARN)
     if train_chk_mode:
-        resume_warns.append(EXPECTED_TRAINCHK)
+        resume_warns.append(EXPECTED_TRAINCHK_WARN)
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=resume_warns)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
-DYNAMO_EXPECTED_WARNS = [
-    "Final phase max_transition_epoch",
-    "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
-]
-
-# this warn is expected when we use the ckpt_set fixture with a different callback configuration
-EXPECTED_CKPT_WARNS = ["Be aware that when using `ckpt_path`, callbacks"]
-
-
 @RunIf(skip_windows=True, skip_mac_os=True, min_python="3.12")
 def test_fts_dynamo_resume(tmpdir, ckpt_set, boring_ft_schedule, recwarn):
     """Validate scheduled fine-tuning resumption functions as expected with a default dynamo configuration."""
-    resume_warns = copy(EXPECTED_WARNS) + copy(DYNAMO_EXPECTED_WARNS) + copy(EXPECTED_CKPT_WARNS) + [EXPECTED_DIRPATH]
+    resume_warns = copy(BASE_EXPECTED_WARNS) + copy(BASE_DYNAMO_EXPECTED_WARNS) \
+        + copy(EXPECTED_CKPT_WARNS) + [EXPECTED_DIRPATH_WARN]
     dirpath = Path(ckpt_set["best"]).parent
     callbacks = [
         FinetuningScheduler(ft_schedule=boring_ft_schedule[2], epoch_transitions_only=True, logging_level=DEBUG),
@@ -2599,7 +2585,7 @@ def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, enforce_
         else:
             with pytest.warns(Warning, match=warn_expected):
                 trainer.fit(model)
-    init_warns = copy(EXPECTED_WARNS) + ["currently depends upon"] + ["No monitor metric specified"]
+    init_warns = copy(BASE_EXPECTED_WARNS) + OPTIMIZER_INIT_WARNS
     if warn_expected:
         init_warns.extend(warn_expected)
     # ensure no unexpected warnings detected
