@@ -116,7 +116,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         logging_level: int = logging.INFO,
         enforce_phase0_params: bool = True,
         frozen_bn_track_running_stats: bool = True,
-        log_dir: Optional[str, os.PathLike] = None,
+        log_dir: Optional[Union[str, os.PathLike]] = None,
     ):
         r"""
         Arguments used to define and configure a scheduled fine-tuning training session:
