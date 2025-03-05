@@ -17,6 +17,7 @@ Used to implement flexible fine-tuning training schedules
 
 """
 import logging
+import os
 from copy import deepcopy
 from pprint import pformat
 from typing import Any, Dict, Optional, Sequence, Tuple, Union
@@ -115,6 +116,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         logging_level: int = logging.INFO,
         enforce_phase0_params: bool = True,
         frozen_bn_track_running_stats: bool = True,
+        log_dir: Optional[str, os.PathLike] = None,
     ):
         r"""
         Arguments used to define and configure a scheduled fine-tuning training session:
@@ -138,8 +140,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             restore_best: If ``True``, restore the best available (defined by the
                 :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint`) checkpoint
                 before fine-tuning depth transitions. Defaults to ``True``.
-            gen_ft_sched_only: If ``True``, generate the default fine-tuning schedule to ``Trainer.log_dir`` (it will be
-                named after your :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass with
+            gen_ft_sched_only: If ``True``, generate the default fine-tuning schedule to log_dir
+                (defaults to ``Trainer.log_dir``) (it will be named after your
+                :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass with
                 the suffix ``_ft_schedule.yaml``) and exit without training. Typically used to generate a default
                 schedule that will be adjusted by the user before training. Defaults to ``False``.
             epoch_transitions_only: If ``True``, use epoch-driven stopping criteria exclusively (rather than composing
@@ -242,6 +245,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 to ``True``. Setting this to ``True`` overrides the default Lightning behavior that sets
                 ``BatchNorm`` ``track_running_stats`` to ``False`` when freezing ``BatchNorm`` layers. Defaults to
                 ``True``.
+            log_dir: Directory to use for loading and saving fine-tuning config files. Defaults to trainer.log_dir
 
         Attributes:
             _fts_state: The internal :class:`~finetuning_scheduler.fts.FinetuningScheduler` state.
@@ -270,6 +274,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.enforce_phase0_params = enforce_phase0_params
         self.frozen_bn_track_running_stats = frozen_bn_track_running_stats
         self._has_reinit_schedule = False
+        self.log_dir = log_dir
         self._msg_cache = set()
         rz_logger = logging.getLogger("lightning.pytorch.utilities.rank_zero")
         rz_logger.setLevel(logging_level)
@@ -682,8 +687,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self._strategy_setup(trainer)
         if self.gen_ft_sched_only:
             if trainer.is_global_zero:
-                assert trainer.log_dir is not None
-                _ = ScheduleImplMixin.gen_ft_schedule(pl_module, trainer.log_dir)
+                if not self.log_dir:
+                    self.log_dir = trainer.log_dir
+                assert self.log_dir is not None
+                _ = ScheduleImplMixin.gen_ft_schedule(pl_module, self.log_dir)
                 log.info("Bypassing training, generating fine-tuning schedule for review and subsequent fine-tuning")
             raise SystemExit(0)
         if not self.epoch_transitions_only:
