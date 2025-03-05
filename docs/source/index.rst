@@ -100,7 +100,7 @@ thawed/unfrozen parameter groups associated with each fine-tuning phase as desir
 and executed in ascending order. In addition to being zero-indexed, fine-tuning phase keys should be contiguous and
 either integers or convertible to integers via ``int()``.
 
-1. First, generate the default schedule to ``Trainer.log_dir``. It will be named after your
+1. First, generate the default schedule to the specified ``log_dir`` (defaults to ``Trainer.log_dir``). It will be named after your
    :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass with the suffix
    ``_ft_schedule.yaml``.
 
