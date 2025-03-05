@@ -533,7 +533,7 @@ class ScheduleParsingMixin(ABC):
     ft_schedule: Optional[Union[str, dict]]
     reinit_optim_cfg: Optional[Dict]
     reinit_lr_cfg: Optional[Dict]
-    log_dir: Union[str, os.PathLike]
+    log_dir: Optional[Union[str, os.PathLike]]
 
     def _validate_ft_sched(self) -> Tuple[int, int]:
         """Ensure the explicitly specified fine-tuning schedule has a valid configuration.
@@ -1306,7 +1306,7 @@ class ScheduleImplMixin(ABC):
         "After executing the provided `configure_optimizers` method, the optimizer state differs from the configuration"
         " FinetuningScheduler expected at the beginning of scheduled fine-tuning (phase 0).\n"
     )
-    log_dir: Union[str, os.PathLike]
+    log_dir: Optional[Union[str, os.PathLike]]
 
     @property
     @abstractmethod
