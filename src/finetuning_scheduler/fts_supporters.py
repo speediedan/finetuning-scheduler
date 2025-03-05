@@ -533,6 +533,7 @@ class ScheduleParsingMixin(ABC):
     ft_schedule: Optional[Union[str, dict]]
     reinit_optim_cfg: Optional[Dict]
     reinit_lr_cfg: Optional[Dict]
+    log_dir: Union[str, os.PathLike]
 
     def _validate_ft_sched(self) -> Tuple[int, int]:
         """Ensure the explicitly specified fine-tuning schedule has a valid configuration.
@@ -745,7 +746,7 @@ class ScheduleParsingMixin(ABC):
             return  # no further validation needed since there is no reinitialization configuration
         self._has_reinit_schedule = True  # schedules that reinitialize require special handling in some contexts
         assert self.pl_module.trainer is not None
-        assert self.pl_module.trainer.log_dir is not None
+        assert self.log_dir is not None
         for rk, rp in reinit_cfg.items():
             if isinstance(rp, dict) and 0 in rp.keys():
                 raise MisconfigurationException(
@@ -778,7 +779,7 @@ class ScheduleParsingMixin(ABC):
             )
 
     def _rewrite_schedule(self, err_msg: Optional[str] = None) -> None:
-        """Saves a reconfigured schedule to ``Trainer.log_dir`` and optionally raises an error message if
+        """Saves a reconfigured schedule to ``self.log_dir`` and optionally raises an error message if
         specified.
 
         Args:
@@ -789,14 +790,15 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: Provides the specified error message if the caller specifies one. e.g. if the
                 schedule contains (non-convertible) non-integer keys and/or non-zero-based and contiguous keys.
         """
-        assert self.pl_module.trainer is not None and self.pl_module.trainer.log_dir is not None
+        assert self.pl_module.trainer is not None
+        assert self.log_dir is not None
         assert isinstance(self.ft_schedule, Dict)
         rewrite_dest = None
         # write the reconfigured schedule to our log directory to allow user validation
         rewrite_dest = ScheduleImplMixin.save_schedule(
             f"{self.pl_module.__class__.__name__}_ft_schedule_valid.yaml",
             self.ft_schedule,
-            self.pl_module.trainer.log_dir,
+            self.log_dir if self.log_dir else self.pl_module.trainer.log_dir,
         )
         if err_msg:
             raise MisconfigurationException(
@@ -810,7 +812,8 @@ class ScheduleParsingMixin(ABC):
         If the schedule does not meet these requirements, attempts to transform the passed schedule to meet them and
         writes the candidate schedule out for subsequent user validation.
         """
-        assert self.pl_module.trainer is not None and self.pl_module.trainer.log_dir is not None
+        assert self.pl_module.trainer is not None
+        assert (self.pl_module.trainer.log_dir is not None or self.log_dir is not None)
         assert isinstance(self.ft_schedule, Dict)
         self._convert_phase_keys()
         contiguous = len(self.ft_schedule.keys()) == (max(self.ft_schedule.keys()) + 1)
@@ -1303,6 +1306,7 @@ class ScheduleImplMixin(ABC):
         "After executing the provided `configure_optimizers` method, the optimizer state differs from the configuration"
         " FinetuningScheduler expected at the beginning of scheduled fine-tuning (phase 0).\n"
     )
+    log_dir: Union[str, os.PathLike]
 
     @property
     @abstractmethod
@@ -1330,7 +1334,7 @@ class ScheduleImplMixin(ABC):
         assert self.pl_module.trainer is not None
         if not self.ft_schedule and self.max_depth == -1:
             rank_zero_info("No fine-tuning schedule provided, max_depth set to -1 so iteratively thawing entire model")
-        assert self.pl_module.trainer.log_dir is not None
+        assert (self.pl_module.trainer.log_dir is not None or self.log_dir is not None)
         if self.ft_schedule and self.reinit_lr_cfg:
             error_msg = (
                 "Specifying both `ft_schedule` and `reinit_lr_cfg` is an invalid configuration. `reinit_lr_cfg` "
@@ -1352,10 +1356,10 @@ class ScheduleImplMixin(ABC):
             ScheduleImplMixin.save_schedule(
                 f"{self.pl_module.__class__.__name__}_ft_schedule.yaml",
                 self.ft_schedule,
-                self.pl_module.trainer.log_dir,
+                self.log_dir if self.log_dir else self.pl_module.trainer.log_dir,
             )
         else:
-            self.gen_implicit_schedule(self.pl_module.trainer.log_dir)
+            self.gen_implicit_schedule(self.log_dir if self.log_dir else self.pl_module.trainer.log_dir)
             self.ft_schedule = self.pl_module.trainer.strategy.broadcast(self.ft_schedule)
 
     def init_ft_sched(self) -> None:
