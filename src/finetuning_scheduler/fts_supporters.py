@@ -1348,7 +1348,7 @@ class ScheduleImplMixin(ABC):
                 if not isinstance(self.ft_schedule, Dict)
                 else self.ft_schedule
             )
-            # save the parsed schedule to our log directory to ensure reproducability
+            # save the parsed schedule to our log directory to ensure reproducibility
             ScheduleImplMixin.save_schedule(
                 f"{self.pl_module.__class__.__name__}_ft_schedule.yaml",
                 self.ft_schedule,
