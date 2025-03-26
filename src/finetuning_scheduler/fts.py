@@ -97,6 +97,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
        ``True`` is not supported because that optimizer mode only supports a single parameter group.
     """
     pl_module: pl.LightningModule
+    trainer: pl.Trainer
     strategy_adapter: StrategyAdapter
 
     def __init__(
@@ -245,7 +246,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 to ``True``. Setting this to ``True`` overrides the default Lightning behavior that sets
                 ``BatchNorm`` ``track_running_stats`` to ``False`` when freezing ``BatchNorm`` layers. Defaults to
                 ``True``.
-            log_dir: Directory to use for loading and saving fine-tuning config files. Defaults to trainer.log_dir
+            log_dir: Directory to use for :class:`~finetuning_scheduler.fts.FinetuningScheduler` artifacts. Defaults to
+                ``trainer.log_dir`` if ``None`` or ``trainer.default_root_dir`` if ``trainer.log_dir`` is also ``None``.
 
         Attributes:
             _fts_state: The internal :class:`~finetuning_scheduler.fts.FinetuningScheduler` state.
@@ -274,10 +276,27 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.enforce_phase0_params = enforce_phase0_params
         self.frozen_bn_track_running_stats = frozen_bn_track_running_stats
         self._has_reinit_schedule = False
-        self.log_dir = log_dir
+        self._log_dir = log_dir
         self._msg_cache = set()
         rz_logger = logging.getLogger("lightning.pytorch.utilities.rank_zero")
         rz_logger.setLevel(logging_level)
+
+    @property
+    def log_dir(self) -> Optional[Union[str, os.PathLike]]:
+        """Directory to used for :class:`~finetuning_scheduler.fts.FinetuningScheduler` artifacts.
+
+        Returns:
+            Optional[Union[str, os.PathLike]]: The directory to use, falling back to ``trainer.log_dir`` if ``_log_dir``
+            is not set, and ``trainer.default_root_dir`` if ``trainer.log_dir`` is also ``None``.
+        """
+        if self._log_dir is not None:  # short-circuit for explicit log_dir
+            return self._log_dir
+
+        log_dir, trainer = None, getattr(self, 'trainer', None)
+        if trainer:
+            # Use trainer.log_dir if available, otherwise fall back to trainer.default_root_dir
+            log_dir = trainer.log_dir if getattr(trainer, 'log_dir', None) is not None else trainer.default_root_dir
+        return log_dir
 
     @property
     def curr_depth(self) -> int:
@@ -685,23 +704,21 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         """
         self._callback_dep_setup(trainer, pl_module, stage)
         self._strategy_setup(trainer)
+        self.pl_module, self.trainer = pl_module, trainer  # save pl_module/trainer refs for downstream convenience
         if self.gen_ft_sched_only:
             if trainer.is_global_zero:
-                if not self.log_dir:
-                    self.log_dir = trainer.log_dir
-                assert self.log_dir is not None
-                _ = ScheduleImplMixin.gen_ft_schedule(pl_module, self.log_dir)
+                assert self.log_dir is not None, "log_dir must be set to generate a fine-tuning schedule"
+                _ = ScheduleImplMixin.gen_ft_schedule(self.pl_module, self.log_dir)
                 log.info("Bypassing training, generating fine-tuning schedule for review and subsequent fine-tuning")
             raise SystemExit(0)
         if not self.epoch_transitions_only:
             assert isinstance(trainer.early_stopping_callback, FTSEarlyStopping)
             trainer.early_stopping_callback.final_phase = False
             trainer.early_stopping_callback.es_phase_complete = False
-        self._fts_state._ft_sync_objects = pl_module.trainer.fit_loop, self._fts_state
+        self._fts_state._ft_sync_objects = self.pl_module.trainer.fit_loop, self._fts_state
         if trainer.ckpt_path:
             self._fts_state._resume_fit_from_ckpt = True
-        self.freeze_before_training(pl_module)
-        self.pl_module = pl_module  # save pl_module ref for downstream configuration convenience
+        self.freeze_before_training(self.pl_module)
         self.init_fts()
 
     def on_fit_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
