@@ -96,6 +96,8 @@ extensions = [
     "sphinx_togglebutton",
 ]
 
+autodoc_typehints = "none"
+
 # Suppress warnings about duplicate labels (needed for PL tutorials)
 suppress_warnings = [
     "autosectionlabel.*",

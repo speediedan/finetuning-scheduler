@@ -90,9 +90,9 @@ RUN \
         # ... pytorch nightly dev version
         #pip install --pre torch==2.7.0.dev20250201 torchvision==0.22.0.dev20250201 --index-url https://download.pytorch.org/whl/nightly/cu128; \
         # temporarily remove torchvision from the nightly build until it supports cu128 in nightlies
-        pip install --pre torch==2.7.0.dev20250201 --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        #pip install --pre torch==2.7.0.dev20250201 --index-url https://download.pytorch.org/whl/nightly/cu128; \
         # ... test channel
-        #pip install --pre torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/test/cu128; \
+        pip install --pre torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/test/cu128; \
     fi && \
     # Install all requirements
     pip install -r requirements/devel.txt --no-cache-dir && \

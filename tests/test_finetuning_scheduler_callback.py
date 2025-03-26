@@ -2022,8 +2022,8 @@ def test_fts_unallowed_key_error():
     basic_ke = KeyError("Unallowed key error")
     test_fts = FinetuningScheduler()
     test_fts._has_reinit_schedule = False
-    test_fts.pl_module = mock.MagicMock()
-    test_fts.pl_module.trainer._checkpoint_connector.resume_start = mock.MagicMock(side_effect=basic_ke)
+    test_fts.pl_module, test_fts.trainer = mock.MagicMock(), mock.MagicMock()
+    test_fts.trainer._checkpoint_connector.resume_start = mock.MagicMock(side_effect=basic_ke)
     with pytest.raises(KeyError, match="Unallowed key"):
         test_fts.restore_best_ckpt()
 
@@ -2250,8 +2250,8 @@ def test_fts_on_validate_monitor_warns():
     with patch.object(adapter.fts_handle, "_check_sync_dist", return_value=True), \
     pytest.warns(UserWarning, match="is not being synchronized across"):
         adapter.on_validate_monitor_metric("x")
-    adapter.fts_handle.pl_module = MagicMock(spec=LightningModule)
-    with patch.object(adapter.fts_handle.pl_module.trainer, "_results", None):
+    adapter.fts_handle.trainer = MagicMock(spec=Trainer)
+    with patch.object(adapter.fts_handle.trainer, "_results", None):
         assert not adapter.fts_handle._check_sync_dist("x")
 
 class TestConnectWarn(Callback, CallbackResolverMixin):

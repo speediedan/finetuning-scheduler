@@ -72,8 +72,8 @@ class FSDPStateInspectMixin:
     def _assert_fsdp_state(self) -> None:
         precision = None
         if self.pl_module.precision_key == "auto_16":
-            assert isinstance(self.pl_module.trainer.strategy.precision_plugin, FSDPPrecision)
-            precision = torch.float16 if self.pl_module.trainer.precision == "16-true" else torch.bfloat16
+            assert isinstance(self.trainer.strategy.precision_plugin, FSDPPrecision)
+            precision = torch.float16 if self.trainer.precision == "16-true" else torch.bfloat16
         for n, m in self.pl_module.named_modules():
             if n in self.expected_fsdp2_modules:
                 self._inspect_composable_fsdp_state(m, precision)
@@ -91,7 +91,7 @@ class FSDPStateInspectMixin:
                 # assert mixed_prec_state.cast_forward_inputs == True  # not currently inspected
             for fsdp_p in mod_fsdp_state._fsdp_param_group.fsdp_params:
                 # test currently assumes 1D sharding on dim 0
-                dp_dim0 = self.pl_module.trainer.strategy.device_mesh['data_parallel'].shape[0]
+                dp_dim0 = self.trainer.strategy.device_mesh['data_parallel'].shape[0]
                 assert fsdp_p.sharded_size[0] == fsdp_p._orig_size[0] // dp_dim0
 
     def _collect_fsdp_mod_states(self, fsdp_keys: KeysView) -> Dict[Any, Dict]:

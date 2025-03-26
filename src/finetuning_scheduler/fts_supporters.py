@@ -745,7 +745,7 @@ class ScheduleParsingMixin(ABC):
         if not any(reinit_cfg.values()):
             return  # no further validation needed since there is no reinitialization configuration
         self._has_reinit_schedule = True  # schedules that reinitialize require special handling in some contexts
-        assert self.pl_module.trainer is not None
+        assert self.trainer is not None
         assert self.log_dir is not None
         for rk, rp in reinit_cfg.items():
             if isinstance(rp, dict) and 0 in rp.keys():
@@ -789,7 +789,7 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: Provides the specified error message if the caller specifies one. e.g. if the
                 schedule contains (non-convertible) non-integer keys and/or non-zero-based and contiguous keys.
         """
-        assert self.pl_module.trainer is not None
+        assert self.trainer is not None
         assert self.log_dir is not None
         assert isinstance(self.ft_schedule, Dict)
         rewrite_dest = None
@@ -811,7 +811,7 @@ class ScheduleParsingMixin(ABC):
         If the schedule does not meet these requirements, attempts to transform the passed schedule to meet them and
         writes the candidate schedule out for subsequent user validation.
         """
-        assert self.pl_module.trainer is not None
+        assert self.trainer is not None
         assert self.log_dir is not None
         assert isinstance(self.ft_schedule, Dict)
         self._convert_phase_keys()
@@ -1324,13 +1324,13 @@ class ScheduleImplMixin(ABC):
         """
         self.strategy_adapter.on_before_init_fts()
         if not self._fts_state._ft_init_epoch:
-            self._fts_state._ft_init_epoch = max(self.pl_module.trainer.current_epoch, 0)
+            self._fts_state._ft_init_epoch = max(self.trainer.current_epoch, 0)
         self.init_ft_sched()
         self.strategy_adapter.on_after_init_fts()
 
     def gen_or_load_sched(self) -> None:
         """Load an explicitly specified fine-tuning schedule if one provided, otherwise generate a default one."""
-        assert self.pl_module.trainer is not None
+        assert self.trainer is not None
         if not self.ft_schedule and self.max_depth == -1:
             rank_zero_info("No fine-tuning schedule provided, max_depth set to -1 so iteratively thawing entire model")
         assert self.log_dir is not None
@@ -1359,7 +1359,7 @@ class ScheduleImplMixin(ABC):
             )
         else:
             self.gen_implicit_schedule(self.log_dir)
-            self.ft_schedule = self.pl_module.trainer.strategy.broadcast(self.ft_schedule)
+            self.ft_schedule = self.trainer.strategy.broadcast(self.ft_schedule)
 
     def init_ft_sched(self) -> None:
         """Generate the default fine-tuning schedule and/or load it into
@@ -1376,14 +1376,14 @@ class ScheduleImplMixin(ABC):
         max_phase, max_epoch_wm = self._validate_ft_sched()  # type: ignore[attr-defined]
         # if the final phase is not using EarlyStopping, apply the maximum phase-specified epoch to global max_epochs
         if self.ft_schedule[max_phase]["max_transition_epoch"] >= 0:
-            assert self.pl_module.trainer is not None
+            assert self.trainer is not None
             rank_zero_warn(
                 "Final phase max_transition_epoch"
                 f" ({self.ft_schedule[max_phase]['max_transition_epoch']})"
-                f" will be overidden by the greater of max_epochs ({self.pl_module.trainer.max_epochs}) and"
+                f" will be overidden by the greater of max_epochs ({self.trainer.max_epochs}) and"
                 f" the maximum phase-specified epoch ({max_epoch_wm})."
             )
-            self.pl_module.trainer.fit_loop.max_epochs = max(max_epoch_wm, self.pl_module.trainer.max_epochs)
+            self.trainer.fit_loop.max_epochs = max(max_epoch_wm, self.trainer.max_epochs)
 
     @rank_zero_only
     def gen_implicit_schedule(self, sched_dir: Union[str, os.PathLike]) -> None:
@@ -1542,7 +1542,7 @@ class ScheduleImplMixin(ABC):
             associated with adding groups to the new optimizer)
             prev_optimizer_lrs (List): The most recent `lr`s for parameter groups associated with the previous optimizer
         """
-        trainer = self.pl_module.trainer
+        trainer = self.trainer
         if trainer.lr_scheduler_configs:  # type: ignore[union-attr]
             for lrs_cfg in trainer.lr_scheduler_configs:  # type: ignore[union-attr]
                 lrs_cfg.scheduler.load_state_dict(curr_lr_state)
@@ -1678,7 +1678,7 @@ class ScheduleImplMixin(ABC):
             Tuple: Distilled optimizer state to be validated.
         """
         assert isinstance(self.ft_schedule, Dict)
-        opt = self.pl_module.trainer.optimizers[0]
+        opt = self.trainer.optimizers[0]
         sched = self.ft_schedule
         no_grad_cnt = len([p for pg in opt.param_groups for p in pg["params"] if not p.requires_grad])
         init_ft_cnt = len(self.strategy_adapter.fts_optim_inspect(sched[0]["params"]))
