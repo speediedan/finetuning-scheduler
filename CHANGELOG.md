@@ -15,6 +15,14 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - removed support for PyTorch `2.2`
 - removed use of conda builds (aligning with upstream PyTorch)
 
+## [2.5.1] - 2025-03-27
+
+### Added
+
+- Support for Lightning ``2.5.1``
+- added (multi)representer for ``PretrainedConfig`` object types
+
+
 ## [2.5.0] - 2024-12-20
 
 ### Added

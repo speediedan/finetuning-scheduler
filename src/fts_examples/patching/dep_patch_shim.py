@@ -58,7 +58,7 @@ def _patch_lightning_jsonargparse():
     sys.modules.get(target_mod).__dict__.get('ArgumentParser')._parse_known_args = _updated_parse_known_args_patch
 
 # TODO: remove once `2.6.0` is minimum
-# required for `torch==2.5.x`, TBD wrt subsequent versions though appears fixed in torch `2.6.0` nightlies
+# required for `torch==2.5.x`, TBD wrt subsequent versions though appears fixed in torch `2.6.0`
 einsum_strategies_patch = DependencyPatch(
     condition=(lwt_compare_version("torch", operator.le, "2.5.2"),
                lwt_compare_version("torch", operator.ge, "2.5.0"),),

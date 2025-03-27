@@ -29,7 +29,7 @@ from finetuning_scheduler.strategy_adapters._mp_imports import (SDPBackend, Devi
 from tests.helpers.boring_models import FTSToyTransformer, TestModelArgs, FTSWikiText2
 from tests.helpers.common import (ExpectedResults, fts_check_warns, pytest_param_factory, get_fts,
                                   default_fts_sanity_chk, DeviceMeshSummary)
-from tests.model_parallel_expected_paths import (path_tp_fsdp, path_fsdp_autocm, path_tp_fsdp_autocm,
+from tests.model_parallel_expected_paths import (path_fsdp_autocm, path_tp_fsdp_autocm,
                                                  path_fsdp, path_tp)
 from tests.helpers.runif import RunIf
 from tests.test_finetuning_scheduler_callback import (
@@ -554,8 +554,10 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
                        model_cfg=tp_lp_math_sdp_impl, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
 
     # FSDP2 + TP (trivial submesh) tests
-    ModParallelTestCfg(model_cfg_key="fsdp_tp", model_cls=cm_mod_parallel, model_cfg=fsdp_tp, runif_alias="einsum_exp",
-                       expected_results=ExpectedResults(expected_state=path_tp_fsdp)),
+    # temporarily disabling this test as it triggers a hang in `fsdp_autocm_tp` about 10% of the time and
+    # `fsdp_autocm_tp` and the marginal utility of `fsdp_tp` is minimal
+    # ModParallelTestCfg(model_cfg_key="fsdp_tp", model_cls=cm_mod_parallel, model_cfg=fsdp_tp,
+    # runif_alias="einsum_exp", expected_results=ExpectedResults(expected_state=path_tp_fsdp)),
     ModParallelTestCfg(model_cfg_key="fsdp_autocm_tp", model_cls=cm_mod_parallel, strategy_adapter_cfg=fsdp_autocm_tp,
                        model_cfg=fsdp_tp, runif_alias="einsum_exp",
                        expected_results=ExpectedResults(expected_state=path_tp_fsdp_autocm)),

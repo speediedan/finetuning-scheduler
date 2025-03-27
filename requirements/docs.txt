@@ -3,8 +3,8 @@ myst-parser==0.18.1
 nbsphinx>=0.8.5
 pandoc>=1.0
 docutils>=0.16
-sphinxcontrib-fulltoc>=1.0
-sphinxcontrib-mockautodoc
+# sphinxcontrib-fulltoc>=1.0
+# sphinxcontrib-mockautodoc
 sphinx-autodoc-typehints>=1.16
 sphinx-paramlinks>=0.5.1
 sphinx-togglebutton>=0.2
