@@ -3,6 +3,7 @@ import yaml
 from typing import Dict, List, Any, Union
 from dataclasses import dataclass, field, asdict, fields
 
+from transformers import PretrainedConfig
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 
 
@@ -40,8 +41,19 @@ def optimizer_cfg_mapping_representer(dumper, data):
 def lr_scheduler_cfg_mapping_representer(dumper, data):
     return dumper.represent_mapping('tag:yaml.org,2002:map', asdict(data))
 
-yaml.SafeDumper.add_representer(OptimizerCfg, optimizer_cfg_mapping_representer)
-yaml.SafeDumper.add_representer(LRSchedulerCfg, lr_scheduler_cfg_mapping_representer)
+def pretrained_cfg_mapping_representer(dumper, data):
+    return dumper.represent_mapping('tag:yaml.org,2002:map', data.to_dict())
+
+# Register all custom representers to both base dumper classes
+representers = {
+    PretrainedConfig: pretrained_cfg_mapping_representer,
+    OptimizerCfg: optimizer_cfg_mapping_representer,
+    LRSchedulerCfg: lr_scheduler_cfg_mapping_representer
+}
+
+for dumper_cls in [yaml.Dumper, yaml.SafeDumper]:
+    for cls, representer in representers.items():
+        dumper_cls.add_multi_representer(cls, representer)
 
 def _is_overridden(dataclass_instance) -> bool:
     is_overridden = False

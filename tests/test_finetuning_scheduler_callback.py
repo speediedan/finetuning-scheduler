@@ -30,6 +30,7 @@ from lightning.pytorch import LightningModule, seed_everything, Trainer
 from lightning.pytorch.callbacks import (Callback, EarlyStopping, LearningRateFinder, LearningRateMonitor,
                                          ModelCheckpoint)
 from lightning.pytorch.strategies import StrategyRegistry
+from lightning.pytorch.loggers.mlflow import MLFlowLogger, _MLFLOW_AVAILABLE
 from lightning.pytorch.strategies.single_device import SingleDeviceStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.fabric.utilities.imports import _NUMPY_AVAILABLE
@@ -1110,6 +1111,28 @@ def test_fts_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, 
         assert test_schedule[1]["params"] == expected[1]
         assert test_schedule[next(reversed(list(test_schedule.keys())))]["params"] == expected[2]
 
+@pytest.mark.skipif(not _MLFLOW_AVAILABLE, reason="test requires MLflow")
+@pytest.mark.parametrize("use_fts_log_dir", [True, False], ids=["fts_log_dir", "no_fts_log_dir"])
+def test_fts_log_dir(tmpdir, use_fts_log_dir):
+    """Validate that FinetuningScheduler works with/without a specified log_dir when a logger without a save_dir is
+    provided."""
+    seed_everything(42)
+    model = FinetuningSchedulerBoringModel()
+    nosavedir_logger = MLFlowLogger(tracking_uri=f"sqlite:///{tmpdir}/test.db", experiment_name="test")
+    fts_opts = {"gen_ft_sched_only": True}
+    if use_fts_log_dir:
+        fts_opts['log_dir'] = tmpdir
+    callbacks = [FinetuningScheduler(**fts_opts)]
+    trainer_opts = {"callbacks": callbacks, "devices": 1, "logger": nosavedir_logger}
+    if not use_fts_log_dir:
+        trainer_opts["default_root_dir"] = tmpdir
+    trainer = Trainer(**trainer_opts)
+    with pytest.raises(SystemExit):
+        trainer.fit(model)
+    finetuningscheduler_callback = get_fts(trainer)
+    ft_schedule = Path(finetuningscheduler_callback.log_dir) /  f"{model.__class__.__name__}_ft_schedule.yaml"
+    assert os.path.isfile(ft_schedule)
+
 
 EXPECTED_EXPIMP_RESULTS = {
     (True, -1): (5, 0, 2, 6, 8, 3, 3, (0.001, 1e-06, 1e-05)),
@@ -1999,8 +2022,8 @@ def test_fts_unallowed_key_error():
     basic_ke = KeyError("Unallowed key error")
     test_fts = FinetuningScheduler()
     test_fts._has_reinit_schedule = False
-    test_fts.pl_module = mock.MagicMock()
-    test_fts.pl_module.trainer._checkpoint_connector.resume_start = mock.MagicMock(side_effect=basic_ke)
+    test_fts.pl_module, test_fts.trainer = mock.MagicMock(), mock.MagicMock()
+    test_fts.trainer._checkpoint_connector.resume_start = mock.MagicMock(side_effect=basic_ke)
     with pytest.raises(KeyError, match="Unallowed key"):
         test_fts.restore_best_ckpt()
 
@@ -2227,8 +2250,8 @@ def test_fts_on_validate_monitor_warns():
     with patch.object(adapter.fts_handle, "_check_sync_dist", return_value=True), \
     pytest.warns(UserWarning, match="is not being synchronized across"):
         adapter.on_validate_monitor_metric("x")
-    adapter.fts_handle.pl_module = MagicMock(spec=LightningModule)
-    with patch.object(adapter.fts_handle.pl_module.trainer, "_results", None):
+    adapter.fts_handle.trainer = MagicMock(spec=Trainer)
+    with patch.object(adapter.fts_handle.trainer, "_results", None):
         assert not adapter.fts_handle._check_sync_dist("x")
 
 class TestConnectWarn(Callback, CallbackResolverMixin):

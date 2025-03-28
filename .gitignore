@@ -9,6 +9,9 @@ lightning_logs/
 # ignore ipynb files themselves since we want to only store the source *.py
 *.ipynb
 
+# SQLite database files
+*.db
+
 # Test-tube
 test_tube_*/
 

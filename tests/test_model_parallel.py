@@ -29,7 +29,7 @@ from finetuning_scheduler.strategy_adapters._mp_imports import (SDPBackend, Devi
 from tests.helpers.boring_models import FTSToyTransformer, TestModelArgs, FTSWikiText2
 from tests.helpers.common import (ExpectedResults, fts_check_warns, pytest_param_factory, get_fts,
                                   default_fts_sanity_chk, DeviceMeshSummary)
-from tests.model_parallel_expected_paths import (path_tp_fsdp, path_fsdp_autocm, path_tp_fsdp_autocm,
+from tests.model_parallel_expected_paths import (path_fsdp_autocm, path_tp_fsdp_autocm,
                                                  path_fsdp, path_tp)
 from tests.helpers.runif import RunIf
 from tests.helpers.expected_warns import MODEL_PARALLEL_BASE_WARNS, MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS
@@ -72,8 +72,8 @@ class FSDPStateInspectMixin:
     def _assert_fsdp_state(self) -> None:
         precision = None
         if self.pl_module.precision_key == "auto_16":
-            assert isinstance(self.pl_module.trainer.strategy.precision_plugin, FSDPPrecision)
-            precision = torch.float16 if self.pl_module.trainer.precision == "16-true" else torch.bfloat16
+            assert isinstance(self.trainer.strategy.precision_plugin, FSDPPrecision)
+            precision = torch.float16 if self.trainer.precision == "16-true" else torch.bfloat16
         for n, m in self.pl_module.named_modules():
             if n in self.expected_fsdp2_modules:
                 self._inspect_composable_fsdp_state(m, precision)
@@ -91,7 +91,7 @@ class FSDPStateInspectMixin:
                 # assert mixed_prec_state.cast_forward_inputs == True  # not currently inspected
             for fsdp_p in mod_fsdp_state._fsdp_param_group.fsdp_params:
                 # test currently assumes 1D sharding on dim 0
-                dp_dim0 = self.pl_module.trainer.strategy.device_mesh['data_parallel'].shape[0]
+                dp_dim0 = self.trainer.strategy.device_mesh['data_parallel'].shape[0]
                 assert fsdp_p.sharded_size[0] == fsdp_p._orig_size[0] // dp_dim0
 
     def _collect_fsdp_mod_states(self, fsdp_keys: KeysView) -> Dict[Any, Dict]:
@@ -543,8 +543,10 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
                        model_cfg=tp_lp_math_sdp_impl, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
 
     # FSDP2 + TP (trivial submesh) tests
-    ModParallelTestCfg(model_cfg_key="fsdp_tp", model_cls=cm_mod_parallel, model_cfg=fsdp_tp, runif_alias="einsum_exp",
-                       expected_results=ExpectedResults(expected_state=path_tp_fsdp)),
+    # temporarily disabling this test as it triggers a hang in `fsdp_autocm_tp` about 10% of the time and
+    # `fsdp_autocm_tp` and the marginal utility of `fsdp_tp` is minimal
+    # ModParallelTestCfg(model_cfg_key="fsdp_tp", model_cls=cm_mod_parallel, model_cfg=fsdp_tp,
+    # runif_alias="einsum_exp", expected_results=ExpectedResults(expected_state=path_tp_fsdp)),
     ModParallelTestCfg(model_cfg_key="fsdp_autocm_tp", model_cls=cm_mod_parallel, strategy_adapter_cfg=fsdp_autocm_tp,
                        model_cfg=fsdp_tp, runif_alias="einsum_exp",
                        expected_results=ExpectedResults(expected_state=path_tp_fsdp_autocm)),

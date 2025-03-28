@@ -49,7 +49,6 @@ class StrategyAdapter:
         the context of a given training strategy, subclassing
         :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is a way to do so. See
         :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` for an example implementation.
-
     """
 
     fts_handle: Callback
@@ -58,7 +57,9 @@ class StrategyAdapter:
 
     def __init__(self) -> None:
         """The default fine-tuning phase execution function is set on
-        :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` initialization. This can be overridden by
+        :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` initialization.
+
+        This can be overridden by
         :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` subclasses to adapt fine-tuning phase
         execution to meet strategy-specific requirements.
         """
@@ -83,6 +84,15 @@ class StrategyAdapter:
         return self.fts_handle.pl_module
 
     @property
+    def trainer(self) -> Trainer:
+        """Convenient access to the :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` instance.
+
+        Returns:
+            Trainer: The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` instance
+        """
+        return self.fts_handle.trainer
+
+    @property
     def pls_handle(self) -> Strategy:
         """Convenient access to the current :external+pl:class:`~lightning.pytorch.strategies.Strategy` in use.
 
@@ -99,17 +109,15 @@ class StrategyAdapter:
         Returns:
             bool: Returns ``True`` if the current optimizer is a supported sharded optimizer.
         """
-        return hasattr(self.pl_module.trainer.optimizers[0], "consolidate_state_dict")
+        return hasattr(self.trainer.optimizers[0], "consolidate_state_dict")
 
     def on_before_init_fts(self) -> None:
         """Hook executed in :class:`~finetuning_scheduler.fts.FinetuningScheduler` setup immediately before
-        :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.init_fts`
-        """
+        :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.init_fts`"""
 
     def on_after_init_fts(self) -> None:
         """Hook executed in :class:`~finetuning_scheduler.fts.FinetuningScheduler` setup immediately after
-        :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.init_fts`.
-        """
+        :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.init_fts`."""
         self._gen_ft_sched_module_map()
         self.scheduled_mod_lists = [list(self._ft_schedule_module_map[d]) for d in self._ft_schedule_module_map.keys()]
         self._maybe_set_bn_track_running_stats(0)
@@ -121,8 +129,7 @@ class StrategyAdapter:
 
     def on_before_fts_fit_start(self) -> None:
         """Hook executed immediately before the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
-        :meth:`~finetuning_scheduler.fts.on_fit_start` hook begins.
-        """
+        :meth:`~finetuning_scheduler.fts.on_fit_start` hook begins."""
 
     def on_validate_monitor_metric(self, monitor: str) -> None:
         should_warn = self.fts_handle._check_sync_dist(monitor)
@@ -163,8 +170,8 @@ class StrategyAdapter:
         """Effectively the reverse transformation of
         :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.fts_optim_transform`. Can be overridden by a
         :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` if a
-        :external+pl:class:`~lightning.pytorch.strategies.Strategy` performs parameter transformations that cause the
-        original user view of parameter names to diverge from the current optimizer's view. By default, no
+        :external+pl:class:`~lightning.pytorch.strategies.Strategy` performs parameter transformations that cause
+        the original user view of parameter names to diverge from the current optimizer's view. By default, no
         transformation of optimizer parameter names is required.
 
         Args:
@@ -269,7 +276,7 @@ class StrategyAdapter:
         in the optimizer differs from the parameters specified in phase 0. Only the parameters included in the optimizer
         are affected; the choice of optimizer, lr_scheduler etc. remains unaltered.
         """
-        trainer = self.pl_module.trainer
+        trainer = self.trainer
         orig_num_pgs = StrategyAdapter._clean_optim_lr_pgs(trainer)
         # refreeze in case user has thawed parameters not present in phase 0
         self.fts_handle.freeze_before_training(self.pl_module)
