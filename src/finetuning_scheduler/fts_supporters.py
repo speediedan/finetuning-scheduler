@@ -533,7 +533,6 @@ class ScheduleParsingMixin(ABC):
     ft_schedule: Optional[Union[str, dict]]
     reinit_optim_cfg: Optional[Dict]
     reinit_lr_cfg: Optional[Dict]
-    #log_dir: Optional[Union[str, os.PathLike]]
 
     def _validate_ft_sched(self) -> Tuple[int, int]:
         """Ensure the explicitly specified fine-tuning schedule has a valid configuration.
