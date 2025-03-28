@@ -2491,7 +2491,7 @@ MOCK_STRATEGY_MAPPING = {
     "strategy, devices, accelerator, strategy_conf, results_key",
     [
         pytest.param("test_strategy", 1, "auto", "stgy_allow_untest", "allow_untest"),
-        pytest.param("ddp", 1, "auto", "stgy_disallow_untest", "disallow_untest", marks=RunIf(skip_windows=True)),
+        pytest.param("ddp", 1, "cpu", "stgy_disallow_untest", "disallow_untest", marks=RunIf(skip_windows=True)),
         pytest.param("test_strategy", 1, "cpu", "cust_stgy_adapter_found", "cust_stgy_adapter_found"),
         pytest.param("test_strategy", 1, "cpu", "cust_stgy_adapter_not_found", "cust_stgy_adapter_not_found"),
         pytest.param("test_strategy", 1, "cpu", "cust_stgy_adapter_not_importable", "cust_stgy_adapter_not_importable"),
