@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 import torch
-#from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_2_4
+from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_2_4
 from lightning.fabric.accelerators.cuda import is_cuda_available
 from lightning.fabric.utilities import rank_zero_info
 from lightning.pytorch.profilers.pytorch import _KINETO_AVAILABLE, PyTorchProfiler
@@ -62,6 +62,16 @@ class ExtendedPyTorchProfiler(PyTorchProfiler):
         activities: List["ProfilerActivity"] = []
         if not _KINETO_AVAILABLE:
             return activities
+        if _TORCH_GREATER_EQUAL_2_4:
+            activities.append(ProfilerActivity.CPU)
+            if is_cuda_available():
+                activities.append(ProfilerActivity.CUDA)
+        else:
+            # `use_cpu` and `use_cuda` are deprecated in PyTorch >= 2.4
+            if kwargs.get("use_cpu", True):
+                activities.append(ProfilerActivity.CPU)
+            if kwargs.get("use_cuda", is_cuda_available()):
+                activities.append(ProfilerActivity.CUDA)
         activities.append(ProfilerActivity.CPU)
         if is_cuda_available():
             activities.append(ProfilerActivity.CUDA)

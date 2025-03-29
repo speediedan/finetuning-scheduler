@@ -1297,7 +1297,6 @@ class ScheduleImplMixin(ABC):
     ft_schedule: Optional[Union[str, dict]]
     reinit_optim_cfg: Optional[Dict]
     reinit_lr_cfg: Optional[Dict]
-    #log_dir: Optional[Union[str, os.PathLike]]
     max_depth: int
     _msg_cache: Set
     _fts_state: FTSState
