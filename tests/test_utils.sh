@@ -2,6 +2,8 @@
 # Test infra utility functions
 # Note we use local variables for many of these to allow more usage flexibility in different contexts
 
+source $(dirname "$0")/../scripts/infra_utils.sh
+
 toggle_experimental_patches() {
     # Function to encapsulate toggling of the current FTS experimental patch flags on and off. Usage example:
     #    toggle_experimental_patches /path/to/.experiments 1 0 1
@@ -175,20 +177,4 @@ show_test_results(){
       exit 1
     fi
   fi
-}
-
-show_elapsed_time(){
-  local test_log="$1"
-  script_name=${2:-$(basename "$0")}
-  ## write elapsed time in user-friendly fashion
-  end_time=$(date +%s)
-  elapsed_seconds=$(($end_time-$start_time))
-  if (( $elapsed_seconds/60 == 0 )); then
-      printf "${script_name} completed in $elapsed_seconds seconds \n" | tee -a $test_log
-  elif (( $elapsed_seconds%60 == 0 )); then
-      printf  "${script_name} completed in $(($elapsed_seconds/60)) minutes \n" | tee -a $test_log
-  else
-      printf "${script_name} completed in $(($elapsed_seconds/60)) minutes and $(($elapsed_seconds%60)) seconds \n" | tee -a $test_log
-  fi
-  printf "\n" | tee -a $test_log
 }

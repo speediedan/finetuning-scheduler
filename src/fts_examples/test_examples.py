@@ -12,20 +12,18 @@
 import os.path
 import subprocess
 from unittest import mock
-from copy import copy
 from itertools import chain
-from packaging.version import Version
-import importlib.metadata as metadata
 import re
 
 import pytest
 from lightning.pytorch.callbacks import ModelCheckpoint
 
 from fts_examples import _HF_AVAILABLE
-from tests.test_model_parallel import MODEL_PARALLEL_BASE_WARNS
 
 from tests.helpers.common import unexpected_warns
-from tests.helpers.runif import RunIf, EXTENDED_VER_PAT
+from tests.helpers.runif import RunIf
+from tests.helpers.expected_warns import (EXAMPLE_EXPECTED_WARNS, MODEL_PARALLEL_EXAMPLE_WARNS,
+                                          ADV_EXAMPLE_EXPECTED_WARNS)
 
 ARGS_DEFAULT = (
     "--trainer.default_root_dir %(tmpdir)s "
@@ -37,46 +35,6 @@ ARGS_DEFAULT = (
     "--data.batch_size 32 "
 )
 ARGS_GPU = ARGS_DEFAULT + "--trainer.devices 1 "
-ALL_EXAMPLE_EXPECTED = [
-    # required for google protobuf <= 3.20.1 with python 3.12
-    "Use timezone-aware",
-    "is smaller than the logging interval",
-    "does not have many workers",
-]
-EXPECTED_WARNS = [
-    "sentencepiece tokenizer that you are converting",
-    "`resume_download` is deprecated",  # required because of upstream usage as of 2.2.2
-    "distutils Version classes are deprecated",  # still required as of PyTorch/Lightning 2.2
-    "Please use torch.utils._pytree.register_pytree_node",  # temp allow deprecated behavior of transformers
-    "We are importing from `pydantic",  # temp pydantic import migration warning
-    # allowing below until https://github.com/pytorch/pytorch/pull/123619 is resolved wrt `ZeroRedundancyOptimizer`
-    "`TorchScript` support for functional optimizers is",  # required with pt 2.4 nightly 20240601
-    "`is_compiling` is deprecated",  # required with pt 2.4 nightly 20240601 and `transformers` 4.41.2
-    # required w/ PT 2.4 (until Lightning changes `weights_only` default value or offers a way to override it)
-    "You are using `torch.load` with `weights_only=False`",
-    # required for datasets <= 2.20.0 with python 3.12
-    'co_lnotab is deprecated, use co_lines instead.',
-    "is multi-threaded, use of fork",  # expected with some tests that use fork and python >= 3.12.8
-]
-
-EXPECTED_WARNS.extend(ALL_EXAMPLE_EXPECTED)
-
-# min/max versions only applies to base examples, TODO: consider for deprecation
-MIN_VERSION_WARNS = "2.3"
-MAX_VERSION_WARNS = "2.6"
-# torch version-specific warns go here
-EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [], MAX_VERSION_WARNS:[] }
-torch_version = metadata.distribution('torch').version
-extended_torch_ver = EXTENDED_VER_PAT.match(torch_version).group() or torch_version
-if Version(extended_torch_ver) < Version(MAX_VERSION_WARNS):
-    EXPECTED_WARNS.extend(EXPECTED_VERSION_WARNS[MIN_VERSION_WARNS])
-else:
-    EXPECTED_WARNS.extend(EXPECTED_VERSION_WARNS[MAX_VERSION_WARNS])
-ADV_EXPECTED_WARNS = EXPECTED_WARNS + ["Found an `init_pg_lrs` key"]
-
-# separate set of warnings for model parallel examples
-MODEL_PARALLEL_EXAMPLE_WARNS = copy(MODEL_PARALLEL_BASE_WARNS)
-MODEL_PARALLEL_EXAMPLE_WARNS.extend(ALL_EXAMPLE_EXPECTED)
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 @RunIf(min_cuda_gpus=1, skip_windows=True)
@@ -100,7 +58,7 @@ def test_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_file):
     with mock.patch.object(ModelCheckpoint, "_save_checkpoint"):  # do not save checkpoints for example tests
         cli_main()
     # ensure no unexpected warnings detected
-    unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=EXPECTED_WARNS)
+    unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=EXAMPLE_EXPECTED_WARNS)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
@@ -138,7 +96,7 @@ def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_fi
     with mock.patch.object(ModelCheckpoint, "_save_checkpoint"):  # do not save checkpoints for example tests
         cli_main()
     # ensure no unexpected warnings detected
-    unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=ADV_EXPECTED_WARNS)
+    unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=ADV_EXAMPLE_EXPECTED_WARNS)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 

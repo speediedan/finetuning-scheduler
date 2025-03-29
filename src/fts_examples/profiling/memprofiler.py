@@ -40,7 +40,8 @@ from fts_examples.profiling.config import MemProfilerCfg
 
 
 class MemProfiler:
-    """MemProfiler is a powerful memory profiling utility that synthesizes numerous complementary profiling methods.
+    """MemProfiler is a powerful memory profiling utility that synthesizes numerous complementary profiling
+    methods.
 
     The following profiling utilities are integrated and simultaneously configured:
 
@@ -54,8 +55,7 @@ class MemProfiler:
         The interface can bring breaking changes and new features with the next release of Finetuning Scheduler.
     """
     def __init__(self, *args, **kwargs) -> None:
-        """
-        The MemProfiler is a powerful memory profiling utility that synthesizes numerous complementary profiling
+        """The MemProfiler is a powerful memory profiling utility that synthesizes numerous complementary profiling
         methods.
 
         The following profiling utilities are integrated and simultaneously configured:
@@ -94,8 +94,7 @@ class MemProfiler:
         self._state = _MemProfInternalState()
 
     def connect(self, obj_ref: Any) -> None:
-        """
-        Connects the MemProfiler to the given target module.
+        """Connects the MemProfiler to the given target module.
 
         Args:
             obj_ref: The module to be profiled.
@@ -121,8 +120,8 @@ class MemProfiler:
 
     @property
     def fsdp_mem_tracker_root_module(self) -> Optional[FSDPModule]:  # type: ignore
-        """
-        If ``track_fsdp_mem`` is enabled, this is the root FSDP module used for FSDP2 memory tracking.
+        """If ``track_fsdp_mem`` is enabled, this is the root FSDP module used for FSDP2 memory tracking.
+
         The root module must have ``fully_shard`` applied for FSDP2 memory tracking.
         If ``track_fsdp_mem`` is disabled, this is ``None``.
         """
@@ -147,8 +146,7 @@ class MemProfiler:
                 handle.remove()
 
     def exec_reset_state_hooks(self) -> None:
-        """
-        Executes all hooks registered for resetting memory tracking state.
+        """Executes all hooks registered for resetting memory tracking state.
 
         These hooks are responsible for resetting state (e.g. saved tensor sizes, RSS, etc.) tracked by the hooks
         registered in :meth:`add_memprofiler_hooks`.
@@ -162,8 +160,7 @@ class MemProfiler:
             self.fsdp_mem_tracker = FSDPMemTracker(self.fsdp_mem_tracker_root_module, self.module.trainer.optimizers[0])
 
     def add_memprofiler_hooks(self) -> None:
-        """
-        Adds all hooks registered for memory tracking.
+        """Adds all hooks registered for memory tracking.
 
         Currently, hooks are registered for the `pre_forward` and `post_forward` points. Hooks are added to the
         `modules` of the provided `module` and are responsible for tracking memory usage. Supported hooks are
@@ -187,8 +184,7 @@ class MemProfiler:
         self.exec_reset_state_hooks()
 
     def init_memprof_log_dir(self) -> None:
-        """
-        Initializes the directory where MemProfiler will save profiling artifacts.
+        """Initializes the directory where MemProfiler will save profiling artifacts.
 
         The directory is determined by the following logic:
 
@@ -196,13 +192,13 @@ class MemProfiler:
         2. Otherwise, use a directory named ``memprofiler`` in the current
            Lightning ``log_dir``.
         """
-        self.memprof_log_dir = self.memprofiler_cfg.save_dir or Path(self.module._trainer.log_dir) / "memprofiler"
+        base_log_dir = self.module._trainer.log_dir or self.module._trainer.default_root_dir
+        self.memprof_log_dir = self.memprofiler_cfg.save_dir or Path(base_log_dir) / "memprofiler"
         self.memprof_log_dir = Path(self.memprof_log_dir)  # ensure the dir is a Path
         self.memprof_log_dir.mkdir(exist_ok=True, parents=True)
 
     def cuda_allocator_history_snap(self, snap_key: Tuple) -> None:
-        """
-        Dumps a snapshot of the CUDA memory allocator history.
+        """Dumps a snapshot of the CUDA memory allocator history.
 
         The snapshot is saved to a file named ``cuda_alloc_rank_<snap_key>.pickle`` in the directory specified by
         ``memprof_log_dir``.
@@ -214,8 +210,7 @@ class MemProfiler:
         torch.cuda.memory._dump_snapshot(cuda_snapshot_file)
 
     def done(self, iter_idx: int) -> bool:
-        """
-        Checks if the profiling is done.
+        """Checks if the profiling is done.
 
         Args:
             iter_idx: The current iteration index.
@@ -233,8 +228,7 @@ class MemProfiler:
             self.memory_stats[snap_key].update(collected)
 
     def _collect_snap(self, snap_key, reset_mem_hooks: bool = False) -> None:
-        """
-        Collects a snapshot of the current memory statistics.
+        """Collects a snapshot of the current memory statistics.
 
         Args:
             snap_key: A tuple of strings identifying the snapshot.
@@ -262,8 +256,7 @@ class MemProfiler:
         return all(func in self._state.done_prof_funcs for func in self.memprofiler_cfg.retain_hooks_for_funcs)
 
     def teardown_prof(self, fn_name: str, iter_ctx: str) -> None:
-        """
-        Tears down profiling state for a function.
+        """Tears down profiling state for a function.
 
         This method is responsible for:
 
@@ -284,8 +277,7 @@ class MemProfiler:
             self.memprofiler_cfg.enable_memory_hooks = False
 
     def gen_snap_keys(self, fn_name: str, iter_ctx: str, iter_idx: Optional[int] = None) -> Tuple[int, int, Tuple]:
-        """
-        Generates the MemProfiler snapshot key for a given function and iteration context.
+        """Generates the MemProfiler snapshot key for a given function and iteration context.
 
         Args:
             fn_name (str): The name of the function to generate a snapshot key for.
@@ -309,8 +301,7 @@ class MemProfiler:
         return iter_idx, (self.rank, fn_name, iter_idx, iter_ctx)
 
     def update_collect_state(self, fn_name: str, iter_ctx: str, iter_idx: Optional[int] = None) -> None:
-        """
-        Updates the MemProfiler state for a given function and iteration context.
+        """Updates the MemProfiler state for a given function and iteration context.
 
         Args:
             fn_name (str): The name of the function to update the state for.
@@ -326,8 +317,7 @@ class MemProfiler:
             curr._iter_idx, curr._snap_key = self.gen_snap_keys(fn_name, iter_ctx, iter_idx)
 
     def snap(self, fn_name: str, iter_ctx: str, reset_mem_hooks: bool = False) -> None:
-        """
-        Collects a memory snapshot for the given function and iteration context.
+        """Collects a memory snapshot for the given function and iteration context.
 
         If the current iteration index is greater than the number of warmup iterations,
         then this function will check if the iteration index is within the profiling
@@ -347,8 +337,7 @@ class MemProfiler:
                 self.teardown_prof(fn_name, iter_ctx)
 
     def dump_memory_stats(self) -> None:
-        """
-        Dumps the collected memory statistics to a pickle file and/or a yaml file.
+        """Dumps the collected memory statistics to a pickle file and/or a yaml file.
 
         If `dump_memorystats_pickle` is True, the memory statistics will be saved to a pickle file
         at `memprof_log_dir / f"rank_{self.rank}_memory_stats.pickle"`.
@@ -372,8 +361,7 @@ class MemProfiler:
             self.save_fsdp_mem_reports()
 
     def save_fsdp_mem_reports(self) -> None:
-        """
-        Saves the collected FSDP memory statistics to a yaml file.
+        """Saves the collected FSDP memory statistics to a yaml file.
 
         For each function name and iteration in the collected FSDP memory statistics, a log file is created
         at `memprof_log_dir / f"fsdp_mem_rank_{self.rank}_{fn_name}_{iter}.log"` containing the FSDP memory
@@ -422,8 +410,7 @@ class MemProfiler:
     @contextmanager
     @staticmethod
     def memprofile_snap_ctx(memprofiler, fn_name: str):
-        """
-        Context manager for taking memory snapshots at the start and end of a method.
+        """Context manager for taking memory snapshots at the start and end of a method.
 
         This context manager takes care of calling the `snap` method of the `MemProfiler` instance
         at the start and end of the context. It also handles the case where we are only collecting

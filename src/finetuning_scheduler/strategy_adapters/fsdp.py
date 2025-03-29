@@ -125,8 +125,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides`, an optional list of
         module names that should be wrapped in separate FSDP instances, complementing the modules that would be
         individually wrapped by ``auto_wrap_policy`` provided in the
-        :external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy` strategy
-        configuration.
+        :external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy` strategy configuration.
 
         Args:
             awp_overrides (Optional[List]): A list of module names to wrap in separate FSDP instances (i.e.,
@@ -197,10 +196,10 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def on_before_fts_fit_start(self) -> None:
         """In this hook executed immediately before the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
         :meth:`~finetuning_scheduler.fts.FinetuningScheduler.on_fit_start` hook begins, we ensure the provided
-        fine-tuning schedule and FSDP wrapped :external+pl:class:`~lightning.pytorch.core.module.LightningModule` are
-        appropriately aligned and valid. If the fine-tuning schedule and wrapped module are detected to be incompatible,
-        detailed feedback is provided to the user (which is why multiple checks are aggregated before returning any
-        alignment exceptions).
+        fine-tuning schedule and FSDP wrapped :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
+        are appropriately aligned and valid. If the fine-tuning schedule and wrapped module are detected to be
+        incompatible, detailed feedback is provided to the user (which is why multiple checks are aggregated before
+        returning any alignment exceptions).
 
         Raises:
             MisconfigurationException: If any FTS FSDP fine-tuning schedule/module wrapping alignment exceptions are
@@ -231,7 +230,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         This is necessary so we can allow FSDP to manage the movement of restored optimizer states to the relevant
         devices.
         """
-        checkpoint_connector = self.pl_module.trainer._checkpoint_connector
+        checkpoint_connector = self.trainer._checkpoint_connector
 
         # Restore the optimizer states from the pre-loaded checkpoint.
         self.load_optimizer_state_dict(checkpoint_connector)
@@ -306,8 +305,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
     def fsdp_param_transform(self, orig_thaw_pl: List, inspect_only: bool) -> List:
         """The parameter transformation function currently used by
-        :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_transform` to transform original
-        parameter lists for optimizer operations.
+        :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_transform` to transform
+        original parameter lists for optimizer operations.
 
         Args:
             orig_thaw_pl (List): The original parameter name list before FSDP's transformation of them.
@@ -745,9 +744,9 @@ class FSDPStrategyAdapter(StrategyAdapter):
         }
 
     def _wrapped_configure_model(self, csm_func: Callable) -> Callable:
-        """If the user has overridden ``configure_model`` in their ``LightningModule``, wrap the user's
-        explicit wrapping method with the required
-        :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` methods.
+        """If the user has overridden ``configure_model`` in their ``LightningModule``, wrap the user's explicit
+        wrapping method with the required :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter`
+        methods.
 
         Args:
             csm_func (Callable): The user's overridden ``LightningModule.configure_model`` method

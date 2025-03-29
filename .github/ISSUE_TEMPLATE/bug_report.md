@@ -39,9 +39,9 @@ python collect_env_details.py
 You can also fill out the list below manually.
 -->
 
-- Fine-Tuning Scheduler Version (e.g., 2.6.0):
-- Lightning Version (e.g., 2.6.0):
-- PyTorch Version (e.g., 2.6.0):
+- Fine-Tuning Scheduler Version (e.g., 2.7.0):
+- Lightning Version (e.g., 2.7.0):
+- PyTorch Version (e.g., 2.7.0):
 - Python version (e.g., 3.12):
 - OS (e.g., Linux):
 - CUDA/cuDNN version:

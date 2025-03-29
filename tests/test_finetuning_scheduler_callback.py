@@ -30,6 +30,7 @@ from lightning.pytorch import LightningModule, seed_everything, Trainer
 from lightning.pytorch.callbacks import (Callback, EarlyStopping, LearningRateFinder, LearningRateMonitor,
                                          ModelCheckpoint)
 from lightning.pytorch.strategies import StrategyRegistry
+from lightning.pytorch.loggers.mlflow import MLFlowLogger, _MLFLOW_AVAILABLE
 from lightning.pytorch.strategies.single_device import SingleDeviceStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.fabric.utilities.imports import _NUMPY_AVAILABLE
@@ -42,6 +43,8 @@ from finetuning_scheduler import CallbackResolverMixin, FinetuningScheduler, FTS
 from finetuning_scheduler.strategy_adapters import StrategyAdapter
 from tests.helpers import BoringModel
 from tests.helpers.boring_models import (CustomLRScheduler, LinearWarmupLR, RandomDataset)
+from tests.helpers.expected_warns import (BASE_EXPECTED_WARNS, BASE_DYNAMO_EXPECTED_WARNS, EXPECTED_CKPT_WARNS,
+                                          EXPECTED_DIRPATH_WARN, EXPECTED_TRAINCHK_WARN, OPTIMIZER_INIT_WARNS)
 from tests.helpers.runif import RunIf
 from tests.helpers.common import get_fts, unexpected_warns, unmatched_warns
 
@@ -1108,6 +1111,28 @@ def test_fts_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, 
         assert test_schedule[1]["params"] == expected[1]
         assert test_schedule[next(reversed(list(test_schedule.keys())))]["params"] == expected[2]
 
+@pytest.mark.skipif(not _MLFLOW_AVAILABLE, reason="test requires MLflow")
+@pytest.mark.parametrize("use_fts_log_dir", [True, False], ids=["fts_log_dir", "no_fts_log_dir"])
+def test_fts_log_dir(tmpdir, use_fts_log_dir):
+    """Validate that FinetuningScheduler works with/without a specified log_dir when a logger without a save_dir is
+    provided."""
+    seed_everything(42)
+    model = FinetuningSchedulerBoringModel()
+    nosavedir_logger = MLFlowLogger(tracking_uri=f"sqlite:///{tmpdir}/test.db", experiment_name="test")
+    fts_opts = {"gen_ft_sched_only": True}
+    if use_fts_log_dir:
+        fts_opts['log_dir'] = tmpdir
+    callbacks = [FinetuningScheduler(**fts_opts)]
+    trainer_opts = {"callbacks": callbacks, "devices": 1, "logger": nosavedir_logger}
+    if not use_fts_log_dir:
+        trainer_opts["default_root_dir"] = tmpdir
+    trainer = Trainer(**trainer_opts)
+    with pytest.raises(SystemExit):
+        trainer.fit(model)
+    finetuningscheduler_callback = get_fts(trainer)
+    ft_schedule = Path(finetuningscheduler_callback.log_dir) /  f"{model.__class__.__name__}_ft_schedule.yaml"
+    assert os.path.isfile(ft_schedule)
+
 
 EXPECTED_EXPIMP_RESULTS = {
     (True, -1): (5, 0, 2, 6, 8, 3, 3, (0.001, 1e-06, 1e-05)),
@@ -1248,7 +1273,7 @@ EXPECTED_DYNAMO_P0_INTRAFIT_STATE = {
 }
 
 
-@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12")
+@RunIf(skip_windows=True, skip_mac_os=True, min_python="3.12")
 def test_fts_dynamo_enforce_p0(tmpdir, boring_ft_schedule):
     """Inspect the scheduled fine-tuning training path in the context of dynamo to ensure thawing schedule phase 0
     is enforced."""
@@ -1348,15 +1373,7 @@ EXPECTED_RESUME_RESULTS = {
     (False, True, "kth", -1): (0, 0, 3),
     (False, True, "kth", 1): (0, 0, 1),
 }
-EXPECTED_WARNS = [
-    "does not have many workers",  # required for all PyTorch/Lightning versions
-    "GPU available but",  # required for all PyTorch/Lightning versions
-    "`max_epochs` was not",  # required for all PyTorch/Lightning versions
-    "The dirpath has changed from",  # required for all PyTorch/Lightning versions
-    "Conversion of an array with ndim > 0"  # required for PyTorch 2.2
-]
-EXPECTED_DIRPATH = "is not empty."
-EXPECTED_TRAINCHK = "could not find the monitored key in the returned"
+
 
 def ckpt_resume_launch(ckpt_set_fixture: object, diff_dirpath: bool, ckpt: str, max_depth: int, tmpdir: Path,
                        save_on_train_epoch_end: Optional[bool] = None) -> None:
@@ -1383,12 +1400,12 @@ def ckpt_resume_launch(ckpt_set_fixture: object, diff_dirpath: bool, ckpt: str, 
 def test_fts_callback_resume_last(tmpdir, ckpt_set_last, recwarn, diff_dirpath: bool, ckpt: str):
     """Validate scheduled fine-tuning resumption functions as expected from both 'best' and 'kth'(not-best)
     checkpoints in both train/val stage check modes with and without max_depth specified."""
-    resume_warns = copy(EXPECTED_WARNS)
+    resume_warns = copy(BASE_EXPECTED_WARNS)
     fts_callback, *_ = ckpt_resume_launch(ckpt_set_fixture=ckpt_set_last, diff_dirpath=diff_dirpath, ckpt=ckpt,
                                           max_depth=1, tmpdir=tmpdir)
     assert fts_callback.curr_depth == fts_callback.max_depth
     if not diff_dirpath:
-        resume_warns.append(EXPECTED_DIRPATH)
+        resume_warns.append(EXPECTED_DIRPATH_WARN)
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=resume_warns)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
@@ -1402,7 +1419,7 @@ def test_fts_callback_resume(tmpdir, ckpt_set, recwarn, diff_dirpath: bool, trai
                              max_depth: int):
     """Validate scheduled fine-tuning resumption functions as expected from both 'best' and 'kth'(not-best)
     checkpoints in both train/val stage check modes with and without max_depth specified."""
-    resume_warns = copy(EXPECTED_WARNS)
+    resume_warns = copy(BASE_EXPECTED_WARNS)
     fts_callback, resume_callbacks, trainer = ckpt_resume_launch(ckpt_set_fixture=ckpt_set, diff_dirpath=diff_dirpath,
                                                                  ckpt=ckpt, save_on_train_epoch_end=train_chk_mode,
                                                                  max_depth=max_depth, tmpdir=tmpdir)
@@ -1420,27 +1437,19 @@ def test_fts_callback_resume(tmpdir, ckpt_set, recwarn, diff_dirpath: bool, trai
     assert fts_callback.curr_depth == expected_state[2]
     assert fts_callback.curr_depth == fts_callback.max_depth
     if not diff_dirpath:
-        resume_warns.append(EXPECTED_DIRPATH)
+        resume_warns.append(EXPECTED_DIRPATH_WARN)
     if train_chk_mode:
-        resume_warns.append(EXPECTED_TRAINCHK)
+        resume_warns.append(EXPECTED_TRAINCHK_WARN)
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=resume_warns)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
-DYNAMO_EXPECTED_WARNS = [
-    "Final phase max_transition_epoch",
-    "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
-]
-
-# this warn is expected when we use the ckpt_set fixture with a different callback configuration
-EXPECTED_CKPT_WARNS = ["Be aware that when using `ckpt_path`, callbacks"]
-
-
-@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12")
+@RunIf(skip_windows=True, skip_mac_os=True, min_python="3.12")
 def test_fts_dynamo_resume(tmpdir, ckpt_set, boring_ft_schedule, recwarn):
     """Validate scheduled fine-tuning resumption functions as expected with a default dynamo configuration."""
-    resume_warns = copy(EXPECTED_WARNS) + copy(DYNAMO_EXPECTED_WARNS) + copy(EXPECTED_CKPT_WARNS) + [EXPECTED_DIRPATH]
+    resume_warns = copy(BASE_EXPECTED_WARNS) + copy(BASE_DYNAMO_EXPECTED_WARNS) \
+        + copy(EXPECTED_CKPT_WARNS) + [EXPECTED_DIRPATH_WARN]
     dirpath = Path(ckpt_set["best"]).parent
     callbacks = [
         FinetuningScheduler(ft_schedule=boring_ft_schedule[2], epoch_transitions_only=True, logging_level=DEBUG),
@@ -1548,7 +1557,7 @@ EXPECTED_DYNAMO_INTRAFIT_STATE = {
 }
 
 
-@RunIf(skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12", standalone=True)
+@RunIf(skip_windows=True, skip_mac_os=True, min_python="3.12", standalone=True)
 @pytest.mark.parametrize("restore_best", [True, False], ids=["default", "norestorebest"])
 def test_fts_dynamo_intrafit(tmpdir, boring_ft_schedule, restore_best: bool):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
@@ -2013,8 +2022,8 @@ def test_fts_unallowed_key_error():
     basic_ke = KeyError("Unallowed key error")
     test_fts = FinetuningScheduler()
     test_fts._has_reinit_schedule = False
-    test_fts.pl_module = mock.MagicMock()
-    test_fts.pl_module.trainer._checkpoint_connector.resume_start = mock.MagicMock(side_effect=basic_ke)
+    test_fts.pl_module, test_fts.trainer = mock.MagicMock(), mock.MagicMock()
+    test_fts.trainer._checkpoint_connector.resume_start = mock.MagicMock(side_effect=basic_ke)
     with pytest.raises(KeyError, match="Unallowed key"):
         test_fts.restore_best_ckpt()
 
@@ -2241,8 +2250,8 @@ def test_fts_on_validate_monitor_warns():
     with patch.object(adapter.fts_handle, "_check_sync_dist", return_value=True), \
     pytest.warns(UserWarning, match="is not being synchronized across"):
         adapter.on_validate_monitor_metric("x")
-    adapter.fts_handle.pl_module = MagicMock(spec=LightningModule)
-    with patch.object(adapter.fts_handle.pl_module.trainer, "_results", None):
+    adapter.fts_handle.trainer = MagicMock(spec=Trainer)
+    with patch.object(adapter.fts_handle.trainer, "_results", None):
         assert not adapter.fts_handle._check_sync_dist("x")
 
 class TestConnectWarn(Callback, CallbackResolverMixin):
@@ -2482,7 +2491,7 @@ MOCK_STRATEGY_MAPPING = {
     "strategy, devices, accelerator, strategy_conf, results_key",
     [
         pytest.param("test_strategy", 1, "auto", "stgy_allow_untest", "allow_untest"),
-        pytest.param("ddp", 1, "auto", "stgy_disallow_untest", "disallow_untest", marks=RunIf(skip_windows=True)),
+        pytest.param("ddp", 1, "cpu", "stgy_disallow_untest", "disallow_untest", marks=RunIf(skip_windows=True)),
         pytest.param("test_strategy", 1, "cpu", "cust_stgy_adapter_found", "cust_stgy_adapter_found"),
         pytest.param("test_strategy", 1, "cpu", "cust_stgy_adapter_not_found", "cust_stgy_adapter_not_found"),
         pytest.param("test_strategy", 1, "cpu", "cust_stgy_adapter_not_importable", "cust_stgy_adapter_not_importable"),
@@ -2599,7 +2608,7 @@ def test_fts_optimizer_init_params(tmpdir, recwarn, param_cfg_key: str, enforce_
         else:
             with pytest.warns(Warning, match=warn_expected):
                 trainer.fit(model)
-    init_warns = copy(EXPECTED_WARNS) + ["currently depends upon"] + ["No monitor metric specified"]
+    init_warns = copy(BASE_EXPECTED_WARNS) + OPTIMIZER_INIT_WARNS
     if warn_expected:
         init_warns.extend(warn_expected)
     # ensure no unexpected warnings detected
@@ -2835,7 +2844,7 @@ def test_fts_multi_ddp(tmpdir, boring_ft_schedule, explicit_mode):
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
 
-@RunIf(standalone=True, min_cuda_gpus=2, skip_windows=True, skip_mac_os=True, min_torch="2.4.0", min_python="3.12")
+@RunIf(standalone=True, min_cuda_gpus=2, skip_windows=True, skip_mac_os=True, min_python="3.12")
 def test_fts_multi_ddp_dynamo(tmpdir, boring_ft_schedule):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp'
     distributed context with default dynamo usage."""

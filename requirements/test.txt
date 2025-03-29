@@ -5,3 +5,5 @@ twine==3.2
 mypy>=0.920
 pre-commit>=1.0
 protobuf<=3.20.1 # strict
+# optional dependencies used in base fts coverage
+mlflow>=1.0.0

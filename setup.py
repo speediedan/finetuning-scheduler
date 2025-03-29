@@ -138,7 +138,7 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
         _INSTALL_PATHS["require"],
         file_name=base_reqs,
         standalone=standalone,
-        pl_commit="df5dee674243e124a2bf34d9975dd586ff008d4b",
+        pl_commit="ca13f77eab5d8b85ee84eb9fd7484c324ba198b1",
     )
     base_setup["install_requires"] = install_requires
     return base_setup

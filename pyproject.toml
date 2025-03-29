@@ -82,13 +82,8 @@ norecursedirs = [
     "docs",
 ]
 
-# two sets of default options to allow periodic warnings pruning
-################################################################
-addopts = """--strict-markers --doctest-modules --color=yes --ignore-glob='src/fts_examples/ipynb_src/*.py'
---ignore='.actions/assistant.py' --disable-pytest-warnings""" # comment during warnings pruning, otherwise uncomment
-# addopts = """--strict-markers --doctest-modules --color=yes --ignore-glob='src/fts_examples/ipynb_src/*.py'
-# --ignore='.actions/assistant.py'""" # uncomment during warnings pruning, otherwise comment
-################################################################
+addopts = """--strict-markers --doctest-modules --color=yes --ignore-glob='src/fts_examples/ipynb_src/*.py' \
+--ignore='.actions/assistant.py' --disable-pytest-warnings"""
 
 junit_duration_report = "call"
 
