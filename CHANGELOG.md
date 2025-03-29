@@ -9,6 +9,20 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 ### Added
 
 - Support for Lightning and PyTorch ``2.6.0``
+- Added YAML (multi)representer for ``PretrainedConfig`` object types
+- Introduced a `log_dir` parameter to allow specifying a custom directory for artifacts, defaulting to `trainer.log_dir` or `trainer.default_root_dir` [#17](https://github.com/speediedan/finetuning-scheduler/pull/17/).
+- Added trainer convenience reference to FTS for a cleaner interface and enable future improved encapsulation
+- Improved testing infrastructure with centralized test warnings and coverage/environment build management scripts
+
+### Fixed
+
+- Addressed upstream issue [#20615](https://github.com/Lightning-AI/pytorch-lightning/issues/20615) where `trainer.log_dir` resolution logic does not accommodate artifact persistence via `trainer.log_dir` for loggers that do not have a `save_dir` set (using `trainer.default_root_dir`) by refactoring and enhancing FTS `log_dir` handling in [#17](https://github.com/speediedan/finetuning-scheduler/pull/17/).
+
+### Changed
+
+- Updated documentation and improved type annotations
+- Updated Docker images to use latest CUDA versions
+- einsum patch no longer required for PyTorch >= 2.6 for FTS to leverage 2D mesh parallelism
 
 ### Deprecated
 
