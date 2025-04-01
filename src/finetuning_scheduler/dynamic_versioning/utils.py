@@ -115,8 +115,11 @@ def _retrieve_files(directory: str, *ext: str, exclude_files: Optional[List[str]
             file_path = os.path.join(root, fname)
             relative_path = os.path.relpath(file_path, directory)
 
-            # Check if any excluded path is contained in the file path
-            if any(exclude_path in relative_path for exclude_path in exclude_files):
+            # Normalize path separators to handle both Windows and Unix paths
+            norm_relative_path = relative_path.replace('\\', '/')
+
+            # Check if any excluded path is contained in the normalized file path
+            if any(exclude_path in norm_relative_path for exclude_path in exclude_files):
                 print(f"Skipping {file_path} to prevent self-modification")
                 continue
 

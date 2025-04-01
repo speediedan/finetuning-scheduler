@@ -83,7 +83,7 @@ def test_retrieve_files(tmp_path):
 
     # Test with filename exclusions
     py_files_with_exclusion = _retrieve_files(str(test_dir), ".py", exclude_files=["utils.py"])
-    assert len(py_files_with_exclusion) == 3
+    assert len(py_files_with_exclusion) == 3  # Expects 3 files (excluding both utils.py files)
     assert str(exclude_file) not in py_files_with_exclusion
     assert str(path_exclude_file) not in py_files_with_exclusion
 
@@ -268,26 +268,32 @@ from {"lightning.pytorch" if source_format == "unified" else "pytorch_lightning"
 
     # Test with debug=True to check debug output
     with patch('builtins.print') as mock_print:
-        use_function({src_dir}, debug=True)
+        # Use normalized forward slash path for exclusion consistently across platforms
+        with patch('finetuning_scheduler.dynamic_versioning.utils.EXCLUDE_FILES_FROM_CONVERSION',
+                   ["dynamic_versioning/utils.py"]):
+            use_function({src_dir}, debug=True)
 
-        # Verify the conversion happened correctly
-        with open(py_file1) as f:
-            content = f.read()
-            if target_format == "standalone":
-                assert "from pytorch_lightning import Trainer" in content
-            else:
-                assert "from lightning.pytorch import Trainer" in content
+            # Verify the conversion happened correctly for non-excluded files
+            with open(py_file1) as f:
+                content = f.read()
+                if target_format == "standalone":
+                    assert "from pytorch_lightning import Trainer" in content
+                else:
+                    assert "from lightning.pytorch import Trainer" in content
 
-        # Excluded file should remain unchanged
-        with open(exclude_file) as f:
-            content = f.read()
-            pkg_name = "lightning.pytorch" if source_format == "unified" else "pytorch_lightning"
-            assert f"from {pkg_name} import Trainer" in content
+            # Excluded file should remain unchanged
+            with open(exclude_file) as f:
+                content = f.read()
+                # Check that file still has the original import format
+                if source_format == "unified":
+                    assert "from lightning.pytorch import Trainer" in content
+                else:
+                    assert "from pytorch_lightning import Trainer" in content
 
-        # Check that prints happened correctly
-        assert any("Updated imports in" in call_args[0][0] for call_args in mock_print.call_args_list)
-        assert any("Skipping" in call_args[0][0] and "prevent self-modification" in call_args[0][0]
-                   for call_args in mock_print.call_args_list)
+            # Check that prints happened correctly
+            assert any("Updated imports in" in call_args[0][0] for call_args in mock_print.call_args_list)
+            assert any("Skipping" in call_args[0][0] and "prevent self-modification" in call_args[0][0]
+                       for call_args in mock_print.call_args_list)
 
 
 @pytest.mark.parametrize("use_function,target_format,already_converted_content", [
