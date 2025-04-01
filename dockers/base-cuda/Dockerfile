@@ -64,12 +64,13 @@ COPY ./requirements.txt requirements.txt
 COPY ./requirements/ ./requirements/
 
 ENV PYTHONPATH=/usr/lib/python${PYTHON_VERSION}/site-packages
+ENV USE_CI_COMMIT_PIN="1"
 
 RUN \
     wget https://bootstrap.pypa.io/get-pip.py --progress=bar:force:noscroll --no-check-certificate | python${PYTHON_VERSION} && \
     python${PYTHON_VERSION} get-pip.py && \
     rm get-pip.py && \
-    python${PYTHON_VERSION} -m pip install --upgrade pip  && \
+    python${PYTHON_VERSION} -m pip install --upgrade pip setuptools && \
     # Disable cache
     pip config set global.cache-dir false && \
     pip install virtualenv && \
@@ -94,22 +95,37 @@ RUN \
         # ... test channel
         pip install --pre torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/test/cu128; \
     fi && \
+    # We avoid installing Lightning and other dependencies here as they are usually upgraded anyway later in
+    # CI but we may re-enable in the future.
+    # LIGHTNING_COMMIT=$(cat ./requirements/lightning_pin.txt) && \
+    # pip install "lightning @ git+https://github.com/Lightning-AI/lightning.git@${LIGHTNING_COMMIT}#egg=lightning" --no-cache-dir && \
     # Install all requirements
-    pip install -r requirements/devel.txt --no-cache-dir && \
+    # pip install -r requirements/devel.txt --no-cache-dir && \
     # Update six
     pip install -U six --no-cache-dir && \
     chmod -R 777 /tmp/venvs/fts_dev && \
     rm -rf requirements.* requirements/
 
 RUN \
+    set -x && \
     . /tmp/venvs/fts_dev/bin/activate && \
+    echo "Checking CUDA version:" && \
     CUDA_VERSION_MAJOR=$(python -c "import torch; print(torch.version.cuda.split('.')[0])") && \
-    py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.12'.split('.')))")
+    echo "CUDA Version Major: ${CUDA_VERSION_MAJOR}" && \
+    echo "Checking Python version compatibility:" && \
+    py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.12'.split('.')))") && \
+    echo "Python version check result: ${py_ver}"
 
 RUN \
-    # Show what we have
+    set -x && \
+    echo "============= Environment Information =============" && \
     . /tmp/venvs/fts_dev/bin/activate && \
+    echo "Pip version:" && \
     pip --version && \
+    echo "Installed packages:" && \
     pip list && \
-    python -c "import sys; ver = sys.version_info ; assert f'{ver.major}.{ver.minor}' == '$PYTHON_VERSION', ver" && \
-    python -c "import torch; assert torch.__version__.startswith('$PYTORCH_VERSION'), torch.__version__"
+    echo "Verifying Python version:" && \
+    python -c "import sys; ver = sys.version_info; print(f'Python {ver.major}.{ver.minor} detected'); assert f'{ver.major}.{ver.minor}' == '$PYTHON_VERSION', ver" && \
+    echo "Verifying PyTorch version:" && \
+    python -c "import torch; print(f'PyTorch {torch.__version__} detected'); assert torch.__version__.startswith('$PYTORCH_VERSION'), torch.__version__" && \
+    echo "============= Environment Verification Complete ============="

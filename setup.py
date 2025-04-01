@@ -19,14 +19,14 @@ from types import ModuleType
 from typing import Any, Dict
 
 import setuptools
-import setuptools.command.egg_info
+#import setuptools.command.egg_info
 
 _PACKAGE_NAME = os.environ.get("PACKAGE_NAME")
 _PACKAGE_MODES = ("pytorch", "lightning")
-_PACKAGE_MAPPING = {
-    "lightning.pytorch": "pytorch_lightning",
-    "lightning.fabric": "lightning_fabric",
-}
+# _PACKAGE_MAPPING = {
+#     "lightning.pytorch": "pytorch_lightning",
+#     "lightning.fabric": "lightning_fabric",
+# }
 
 _PATH_ROOT = Path(os.path.abspath(os.path.dirname(__file__)))
 _INSTALL_PATHS = {}
@@ -34,6 +34,7 @@ for p, d in zip(["source", "tests", "require"], ["src", "tests", "requirements"]
     _INSTALL_PATHS[p] = _PATH_ROOT / d
 
 _CORE_FTS_LOC = _INSTALL_PATHS["source"] / "finetuning_scheduler"
+_DYNAMIC_VERSIONING_LOC = _CORE_FTS_LOC / "dynamic_versioning"
 
 
 def _load_py_module(name: str, location: str) -> ModuleType:
@@ -48,7 +49,7 @@ def _load_py_module(name: str, location: str) -> ModuleType:
 
 
 setup_tools = _load_py_module(name="setup_tools.py", location=_CORE_FTS_LOC)
-
+dynamic_versioning_utils = _load_py_module(name="utils.py", location=_DYNAMIC_VERSIONING_LOC)
 
 def _prepare_extras() -> Dict[str, Any]:
     extras = {
@@ -70,6 +71,7 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
     long_description = setup_tools._load_readme_description(
         _PATH_ROOT, homepage=about.__homepage__, version=about.__version__
     )
+    # Only include dynamic metadata that can't be defined in pyproject.toml
     base_setup = dict(
         name="finetuning-scheduler",
         version=about.__version__,
@@ -93,73 +95,49 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
         include_package_data=True,
         long_description=long_description,
         long_description_content_type="text/markdown",
-        zip_safe=False,
-        keywords=[
-            "deep learning",
-            "pytorch",
-            "AI",
-            "machine learning",
-            "pytorch-lightning",
-            "lightning",
-            "fine-tuning",
-            "finetuning",
-        ],
-        python_requires=">=3.9",
-        setup_requires=[],
-        extras_require=_prepare_extras(),
-        project_urls={
-            "Bug Tracker": "https://github.com/speediedan/finetuning-scheduler/issues",
-            "Documentation": "https://finetuning-scheduler.readthedocs.io/en/latest/",
-            "Source Code": "https://github.com/speediedan/finetuning-scheduler",
+        # Define entry points explicitly to ensure they're included in the wheel
+        entry_points={
+            "console_scripts": [
+                "toggle-lightning-mode=finetuning_scheduler.dynamic_versioning.toggle_lightning_mode:main",
+            ],
         },
-        classifiers=[
-            "Environment :: Console",
-            "Natural Language :: English",
-            "Development Status :: 5 - Production/Stable",
-            "Intended Audience :: Developers",
-            "Topic :: Scientific/Engineering :: Artificial Intelligence",
-            "Topic :: Scientific/Engineering :: Image Recognition",
-            "Topic :: Scientific/Engineering :: Information Analysis",
-            "License :: OSI Approved :: Apache Software License",
-            "Operating System :: OS Independent",
-            "Programming Language :: Python :: 3",
-            "Programming Language :: Python :: 3.9",
-            "Programming Language :: Python :: 3.10",
-            "Programming Language :: Python :: 3.11",
-            "Programming Language :: Python :: 3.12",
-        ],
     )
 
-    base_reqs = "standalone_base.txt" if standalone else "base.txt"
-    # install_requires = setup_tools._load_requirements(
-    # _INSTALL_PATHS["require"], file_name=base_reqs, standalone=standalone
-    # )
-    install_requires = setup_tools._load_requirements(
-        _INSTALL_PATHS["require"],
-        file_name=base_reqs,
-        standalone=standalone,
-        pl_commit="669486afdd524fb66c1afc36bf93955384ac1224",
-    )
+    # Use the dynamic requirements function
+    install_requires = dynamic_versioning_utils.get_requirement_files(standalone)
+
     base_setup["install_requires"] = install_requires
+    base_setup["extras_require"] = _prepare_extras()
     return base_setup
 
 
 if __name__ == "__main__":
-    assistant = _load_py_module(name="assistant.py", location=_PATH_ROOT / ".actions")
+    # No need to load assistant.py since we now have the functions in setup_tools
     use_standalone = _PACKAGE_NAME is not None and _PACKAGE_NAME == "pytorch"
     if _PACKAGE_NAME is not None and _PACKAGE_NAME not in _PACKAGE_MODES:
         raise ValueError(f"Unexpected package name: {_PACKAGE_NAME}. Possible choices are: {list(_PACKAGE_MODES)}")
     install_msg = "Installing finetuning-scheduler to depend upon"
+
+    # Toggle to appropriate import style based on package mode using setup_tools directly
     if use_standalone:
-        # install standalone
-        mapping = _PACKAGE_MAPPING.copy()
-        assistant.use_standalone_pl(mapping, _INSTALL_PATHS.values())
+        # Convert to standalone imports (lightning.pytorch -> pytorch_lightning)
+        dynamic_versioning_utils.use_standalone_pl(_INSTALL_PATHS.values())
         lightning_dep = "pytorch_lightning"
         install_msg += " the standalone version of Lightning: pytorch-lightning."
     else:
+        # Convert to unified imports (pytorch_lightning -> lightning.pytorch) if necessary
+        dynamic_versioning_utils.use_unified_pl(_INSTALL_PATHS.values())
         lightning_dep = "lightning"
         install_msg += " the default Lightning unified package: lightning."
     print(install_msg)
+
+    # Print additional info about Lightning installation method
+    use_commit = os.environ.get("USE_CI_COMMIT_PIN", "").lower() in ("1", "true", "yes")
+    if use_commit:
+        print("Using Lightning from specific commit (dev mode)")
+    else:
+        print("Using Lightning from PyPI")
+
     setup_args = _setup_args(use_standalone)
     setuptools.setup(**setup_args)
     print("Finished setup configuration.")

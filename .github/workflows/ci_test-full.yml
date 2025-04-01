@@ -71,6 +71,8 @@ jobs:
       run: python -c "import time; days = time.time() / 60 / 60 / 24; print(f'TIME_PERIOD=d{int(days / 2) * 2}')" >> $GITHUB_ENV
 
     - name: basic setup
+      env:
+        USE_CI_COMMIT_PIN: "1"
       run: |
         pip --version
         pip install --requirement requirements/cli.txt --upgrade
@@ -79,6 +81,23 @@ jobs:
       if: matrix.requires == 'oldest'
       run: |
         python .actions/assistant.py replace_oldest_ver
+
+    # - name: Install Lightning from pin
+    #   env:
+    #     USE_CI_COMMIT_PIN: "1"
+    #   run: |
+    #     # Install Lightning from the pinned commit
+    #     python -c "from src.finetuning_scheduler.dynamic_versioning.utils import get_lightning_requirement; print(f'Installing {get_lightning_requirement(\"unified\", True)}')"
+    #     pip install $(python -c "from src.finetuning_scheduler.dynamic_versioning.utils import get_lightning_requirement; print(get_lightning_requirement(\"unified\", True))")
+    #     pip list | grep -i lightning
+
+    - name: Install package with dependencies
+      env:
+        USE_CI_COMMIT_PIN: "1"
+      run: |
+        # Install the package with all dependencies (including pinned Lightning)
+        pip install '.[all]'
+        # pip list | grep -i lightning
 
     # Note: This uses an internal pip API and may not always work
     # https://github.com/actions/cache/blob/master/examples.md#multiple-oss-in-a-workflow
@@ -97,13 +116,13 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-
 
-    - name: Install extra dependencies
-      run: |
-        pip install --requirement requirements/base.txt --upgrade
-        pip install --requirement requirements/examples.txt --upgrade
-        pip install --requirement requirements/test.txt --upgrade
-        pip list
-      shell: bash
+    # - name: Install extra dependencies
+    #   run: |
+    #     pip install --requirement requirements/base.txt --upgrade
+    #     pip install --requirement requirements/examples.txt --upgrade
+    #     pip install --requirement requirements/test.txt --upgrade
+    #     pip list
+    #   shell: bash
 
     - name: Cache datasets
       uses: actions/cache@v4
