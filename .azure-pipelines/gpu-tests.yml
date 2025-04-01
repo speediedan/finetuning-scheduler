@@ -71,15 +71,15 @@ jobs:
         . /tmp/venvs/fts_dev/bin/activate
         pip install --upgrade pip requests setuptools
         pip install -e . --no-warn-script-location --requirement requirements/devel.txt
-        pip install lightning --upgrade
-      #env:
-        #PACKAGE_NAME: "pytorch"
+        # pip install lightning --upgrade
+      env:
+        USE_CI_COMMIT_PIN: "1"
       displayName: 'Install dependencies'
 
     - bash: |
         . /tmp/venvs/fts_dev/bin/activate
         python requirements/collect_env_details.py
-        python -c "import torch ; mgpu = torch.cuda.device_count() ; assert mgpu >= 2, f'GPU: {mgpu}'"
+        python -c "import torch ; print(f'PyTorch CUDA version: {torch.version.cuda}') ; mgpu = torch.cuda.device_count() ; assert mgpu >= 2, f'GPU: {mgpu}'"
       displayName: 'Env details'
 
     - bash: |

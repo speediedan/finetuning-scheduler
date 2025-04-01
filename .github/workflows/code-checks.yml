@@ -6,8 +6,8 @@ on:  # Trigger the workflow on push or pull request, but only for the main branc
   pull_request:
     branches: [main, "release/*"]
 
-# env:
-#   PACKAGE_NAME: "pytorch"
+env:
+  USE_CI_COMMIT_PIN: "1"
 
 jobs:
   mypy:
@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # - name: Set environment variables for debugging
+      #   run: echo "USE_CI_COMMIT_PIN=1" >> $GITHUB_ENV
       - name: Install dependencies
         run: |
           pip install '.[dev]'

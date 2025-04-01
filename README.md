@@ -122,6 +122,26 @@ wget https://github.com/speediedan/finetuning-scheduler/releases/download/v${FTS
 pip install finetuning-scheduler-${FTS_VERSION}.tar.gz
 ```
 
+### Toggling Between Unified and Standalone Lightning Imports
+
+FTS provides a command-line tool to easily toggle between unified and standalone imports in your codebase:
+
+```bash
+# Toggle from unified to standalone Lightning imports
+toggle-lightning-mode --mode standalone
+
+# Toggle from standalone to unified Lightning imports (default)
+toggle-lightning-mode --mode unified
+# Or simply
+toggle-lightning-mode
+```
+
+This can be useful when:
+
+- You need to adapt existing code to work with a different Lightning package
+- You're switching between projects using different Lightning import styles
+- You want to test compatibility with both import styles
+
 ______________________________________________________________________
 
 ## Examples

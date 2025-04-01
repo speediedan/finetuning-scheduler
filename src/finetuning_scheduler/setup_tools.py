@@ -14,43 +14,26 @@ import os
 import re
 import warnings
 from pathlib import Path
-from typing import List, Optional, Any, Generator
+from typing import List, Any, Generator
 from contextlib import contextmanager
 
 _PROJECT_ROOT = Path(os.path.dirname(os.path.dirname(__file__))).parent
 _TH = os.path.join(_PROJECT_ROOT, "tests/helpers")
 
-def _load_requirements(
-    path_dir: str,
-    file_name: str = "base.txt",
-    standalone: bool = False,
-    comment_char: str = "#",
-    pl_commit: Optional[str] = None,
-) -> List[str]:
+
+def _load_requirements(path_dir: str, file_name: str = "base.txt", comment_char: str = "#") -> List[str]:
     """Load requirements from a file.
 
     >>> _load_requirements(_TH, file_name="req.txt")  # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
     direct dependency req 'git+https://github.com/t/test.git@test' has been pruned from the provided requirements
     direct dependency req 'http://github.com/user/repo/tarball/master' has been pruned from the provided requirements
     ['ok']
-
-    >>> _load_requirements(_TH, file_name="req.txt", pl_commit='ok')  # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
-    direct dependency req 'git+https://github.com/t/test.git@test' has been pruned from the provided requirements
-    direct dependency req 'http://github.com/user/repo/tarball/master' has been pruned from the provided requirements
-    attempting dev setup with specific lightning commit: ok
-    ['ok', 'lightning @ git+https://github.com/Lightning-AI/lightning.git@ok#egg=lightning']
-
-    >>> _load_requirements(_TH, file_name="req.txt", standalone=True, pl_commit='ok')  # doctest: +NORMALIZE_WHITESPACE
-    direct dependency req 'git+https://github.com/t/test.git@test' has been pruned from the provided requirements
-    direct dependency req 'http://github.com/user/repo/tarball/master' has been pruned from the provided requirements
-    attempting dev setup with specific lightning commit: ok
-    ['ok', 'pytorch-lightning @ git+https://github.com/Lightning-AI/pytorch-lightning.git@ok#egg=pytorch-lightning']
     """
     with open(os.path.join(path_dir, file_name)) as file:
         lines = [ln.strip() for ln in file.readlines()]
     reqs = []
     for ln in lines:
-        # filer all comments
+        # filter all comments
         if comment_char in ln:
             ln = ln[: ln.index(comment_char)].strip()
         # skip directly installed dependencies
@@ -59,13 +42,6 @@ def _load_requirements(
             continue
         if ln:  # if requirement is not empty
             reqs.append(ln)
-    if pl_commit:
-        repo_name = "pytorch-lightning" if standalone else "lightning"
-        print(f"attempting dev setup with specific lightning commit: {pl_commit}")
-        pldev_base = f"{repo_name} @ git+https://github.com/Lightning-AI/{repo_name}.git@"
-        pldev_egg = f"#egg={repo_name}"
-        pldev_setup_req = pldev_base + pl_commit + pldev_egg
-        reqs.append(pldev_setup_req)
     return reqs
 
 
@@ -79,10 +55,10 @@ def _load_readme_description(path_dir: str, homepage: str, version: str) -> str:
     version_prefix = "v"  # standard prefix used for tagging versions
     text = open(path_readme, encoding="utf-8").read()
 
-    github_source_url = os.path.join(homepage, "raw", version_prefix + version)
+    github_source_url = f"{homepage}/raw/{version_prefix}{version}"
     # replace relative repository path to absolute link to the release
-    #  do not replace all "docs" as in the readme we reger some other sources with particular path to docs
-    text = text.replace("docs/source/_static/", f"{os.path.join(github_source_url, 'docs/source/_static/')}")
+    # do not replace all "docs" as in the readme we refer to some other sources with particular path to docs
+    text = text.replace("docs/source/_static/", f"{github_source_url}/docs/source/_static/")
 
     # readthedocs badge
     text = text.replace("badge/?version=stable", f"badge/?version={version}")
@@ -106,7 +82,14 @@ def _load_readme_description(path_dir: str, homepage: str, version: str) -> str:
 def disable_always_warnings() -> Generator[None, None, None]:
     # can be used to re-enable filterwarnings in cases where `simplefilter('always')` is used to force a warning
     # which can render normal filterwarnings use ineffective (e.g. https://github.com/pytorch/pytorch/pull/123619)
-    """A context manager that temporarily disables the use of `simplefilter('always')` within its context."""
+    """A context manager that temporarily disables the use of `simplefilter('always')` within its context.
+
+    >>> import warnings
+    >>> with disable_always_warnings():
+    ...     # This would normally show a warning with 'always'
+    ...     warnings.simplefilter('always')
+    ...     warnings.warn("Test warning", UserWarning)
+    """
     original_simplefilter = warnings.simplefilter
     def disable_always_simplefilter(*args: Any, **kwargs: Any) -> None:
         if args[0] == "always":
