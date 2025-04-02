@@ -142,6 +142,8 @@ toggle-lightning-mode --mode standalone
 toggle-lightning-mode --mode unified
 ```
 
+> **Note:** If you have the standalone package (`pytorch-lightning`) installed but not the unified package (`lightning`), toggling to unified mode will be prevented. You must install the `lightning` package first before toggling.
+
 This can be useful when:
 
 - You need to adapt existing code to work with a different Lightning package

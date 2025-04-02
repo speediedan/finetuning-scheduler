@@ -100,6 +100,13 @@ def get_lightning_requirement(package_type: str = "unified", use_commit: bool = 
 
     project_root = Path(__file__).parent.parent.parent.parent
     LIGHTNING_COMMIT_FILE = os.path.join(project_root, "requirements/lightning_pin.txt")
+
+    # Check if the commit file exists
+    if not os.path.exists(LIGHTNING_COMMIT_FILE):
+        print(f"Warning: USE_CI_COMMIT_PIN is set but {LIGHTNING_COMMIT_FILE} does not exist.")
+        print(f"Falling back to release-based installation: {package_name}{pkg_info['version']}")
+        return f"{package_name}{pkg_info['version']}"
+
     with open(LIGHTNING_COMMIT_FILE) as f:
         LIGHTNING_COMMIT = f.read().strip()
 
