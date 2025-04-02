@@ -35,6 +35,34 @@ def test_get_lightning_requirement():
         assert "abc123" in req
 
 
+def test_get_lightning_requirement_missing_pin_file():
+    """Test getting the Lightning requirement string when commit pin file is missing."""
+    # Mock os.path.exists to return False for the lightning_pin.txt file
+    with patch('os.path.exists', return_value=False), \
+         patch('builtins.print') as mock_print:
+
+        # Test with use_commit=True but missing pin file
+        req = get_lightning_requirement("unified", True)
+
+        # Should fall back to release-based installation
+        assert "lightning>=" in req
+        assert "@" not in req
+
+        # Should print warning messages
+        assert any("Warning: USE_CI_COMMIT_PIN is set but" in call_args[0][0]
+                  for call_args in mock_print.call_args_list)
+        assert any("Falling back to release-based installation" in call_args[0][0]
+                  for call_args in mock_print.call_args_list)
+
+        # Reset mock
+        mock_print.reset_mock()
+
+        # Same for standalone package
+        req = get_lightning_requirement("standalone", True)
+        assert "pytorch-lightning>=" in req
+        assert "@" not in req
+
+
 def test_lightning_package_mapping():
     """Test Lightning package mapping constants."""
     assert "lightning.pytorch" in LIGHTNING_PACKAGE_MAPPING

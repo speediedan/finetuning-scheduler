@@ -22,12 +22,10 @@ import setuptools
 
 _PACKAGE_NAME = os.environ.get("PACKAGE_NAME")
 _PACKAGE_MODES = ("pytorch", "lightning")
-
 _PATH_ROOT = Path(os.path.abspath(os.path.dirname(__file__)))
 _INSTALL_PATHS = {}
 for p, d in zip(["source", "tests", "require"], ["src", "tests", "requirements"]):
     _INSTALL_PATHS[p] = _PATH_ROOT / d
-
 _CORE_FTS_LOC = _INSTALL_PATHS["source"] / "finetuning_scheduler"
 _DYNAMIC_VERSIONING_LOC = _CORE_FTS_LOC / "dynamic_versioning"
 
@@ -101,7 +99,7 @@ if __name__ == "__main__":
     # Print additional info about Lightning installation method
     use_commit = os.environ.get("USE_CI_COMMIT_PIN", "").lower() in ("1", "true", "yes")
     if use_commit:
-        print("Using Lightning from specific commit (dev mode)")
+        print("Using Lightning from specific commit (dev/ci mode)")
     else:
         print("Using Lightning from PyPI")
 
