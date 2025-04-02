@@ -69,6 +69,10 @@ pip install finetuning-scheduler['all']
 #### To install from (editable) source (includes docs as well):
 
 ```bash
+# FTS pins Lightning to a specific commit for CI and development
+# This is similar to PyTorch's approach with Triton.
+export USE_CI_COMMIT_PIN="1"
+
 git clone https://github.com/speediedan/finetuning-scheduler.git
 cd finetuning-scheduler
 python -m pip install -e ".[all]" -r requirements/docs.txt
@@ -77,7 +81,7 @@ python -m pip install -e ".[all]" -r requirements/docs.txt
 #### Install a specific FTS version from source using the standalone `pytorch-lighting` package:
 
 ```bash
-export FTS_VERSION=2.0.0
+export FTS_VERSION=2.6.0
 export PACKAGE_NAME=pytorch
 git clone -b v${FTS_VERSION} https://github.com/speediedan/finetuning-scheduler
 cd finetuning-scheduler
@@ -122,9 +126,13 @@ wget https://github.com/speediedan/finetuning-scheduler/releases/download/v${FTS
 pip install finetuning-scheduler-${FTS_VERSION}.tar.gz
 ```
 
-### Toggling Between Unified and Standalone Lightning Imports
+### Dynamic Versioning
 
-FTS provides a command-line tool to easily toggle between unified and standalone imports in your codebase:
+FTS (as of version `2.6.0`) now enables dynamic versioning both at installation time and via CLI post-installation. Initially, the dynamic versioning system allows toggling between Lightning unified and standalone imports. The two conversion operations are individually idempotent and mutually reversible.
+
+#### Toggling Between Unified and Standalone Lightning Imports
+
+FTS provides a simple CLI tool to easily toggle between unified and standalone import installation versions post-installation:
 
 ```bash
 # Toggle from unified to standalone Lightning imports
@@ -132,8 +140,6 @@ toggle-lightning-mode --mode standalone
 
 # Toggle from standalone to unified Lightning imports (default)
 toggle-lightning-mode --mode unified
-# Or simply
-toggle-lightning-mode
 ```
 
 This can be useful when:

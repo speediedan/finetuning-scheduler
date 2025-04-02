@@ -24,6 +24,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Introduced a `log_dir` parameter to allow specifying a custom directory for artifacts, defaulting to `trainer.log_dir` or `trainer.default_root_dir` [#17](https://github.com/speediedan/finetuning-scheduler/pull/17/).
 - Added trainer convenience reference to FTS for a cleaner interface and enable future improved encapsulation
 - Improved testing infrastructure with centralized test warnings and coverage/environment build management scripts
+- Added dynamic versioning system with CLI tool `toggle-lightning-mode` for switching between unified (`lightning.pytorch`) and standalone (`pytorch_lightning`) imports. Resolves [#10](https://github.com/speediedan/finetuning-scheduler/issues/10).
+- Added support for Lightning CI commit pinning via `USE_CI_COMMIT_PIN` environment variable
+- Modernized build system using pyproject.toml with setuptools PEP 639 support
 
 ### Fixed
 
@@ -32,8 +35,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 ### Changed
 
 - Updated documentation and improved type annotations
-- Updated Docker images to use latest CUDA versions
 - einsum patch no longer required for PyTorch >= 2.6 for FTS to leverage 2D mesh parallelism
+- Improved CI configuration with automatic Lightning commit pinning
 
 ### Deprecated
 

@@ -11,6 +11,7 @@ unset torch_test_channel
 unset no_rebuild_base
 unset include_experimental
 unset pip_install_flags
+unset no_commit_pin
 
 usage(){
 >&2 cat << EOF
@@ -23,6 +24,7 @@ Usage: $0
    [ --no_rebuild_base ]
    [ --include_experimental ]
    [ --pip_install_flags "flags" ]
+   [ --no_commit_pin ]
    [ --help ]
    Examples:
 	# generate fts_latest coverage without rebuilding the fts_latest base environment:
@@ -37,11 +39,13 @@ Usage: $0
 	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release --torch_test_channel
 	# generate fts_latest coverage with no pip cache:
 	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --pip_install_flags="--no-cache-dir"
+	# generate fts_release coverage without using CI commit pinning:
+	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release --no_commit_pin
 EOF
 exit 1
 }
 
-args=$(getopt -o '' --long repo_home:,target_env_name:,torch_dev_ver:,torchvision_dev_ver:,torch_test_channel,no_rebuild_base,include_experimental,pip_install_flags:,help -- "$@")
+args=$(getopt -o '' --long repo_home:,target_env_name:,torch_dev_ver:,torchvision_dev_ver:,torch_test_channel,no_rebuild_base,include_experimental,pip_install_flags:,no_commit_pin,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -58,6 +62,7 @@ do
     --no_rebuild_base)   no_rebuild_base=1 ; shift  ;;
     --include_experimental)   include_experimental=1 ; shift  ;;
     --pip_install_flags)   pip_install_flags=$2 ; shift 2 ;;
+    --no_commit_pin)   no_commit_pin=1 ; shift  ;;
     --help)    usage      ; shift   ;;
     --) shift; break ;;
     *) >&2 echo Unsupported option: $1
@@ -76,28 +81,34 @@ env_rebuild(){
         pip_flags_param="--pip_install_flags=\"${pip_install_flags}\""
     fi
 
+    # Add no_commit_pin flag if specified
+    no_commit_pin_param=""
+    if [[ $no_commit_pin -eq 1 ]]; then
+        no_commit_pin_param="--no_commit_pin"
+    fi
+
     case $1 in
         fts_latest)
             if [[ -n ${torch_dev_ver} ]]; then
                 if [[ -n ${torchvision_dev_ver} ]]; then
                     torchvision_dev_ver=${torch_dev_ver}
                 fi
-                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 --torch_dev_ver=${torch_dev_ver} --torchvision_dev_ver=${torchvision_dev_ver} ${pip_flags_param}
+                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 --torch_dev_ver=${torch_dev_ver} --torchvision_dev_ver=${torchvision_dev_ver} ${pip_flags_param} ${no_commit_pin_param}
 			elif [[ $torch_test_channel -eq 1 ]]; then
-                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 --torch_test_channel ${pip_flags_param}
+                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 --torch_test_channel ${pip_flags_param} ${no_commit_pin_param}
             else
-                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param}
+                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param} ${no_commit_pin_param}
             fi
             ;;
         fts_release)
             if [[ $torch_test_channel -eq 1 ]]; then
-                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 --torch_test_channel ${pip_flags_param}
+                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 --torch_test_channel ${pip_flags_param} ${no_commit_pin_param}
             else
-                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param}
+                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param} ${no_commit_pin_param}
             fi
             ;;
         fts_latest_pt2_5_x | fts_release_pt2_5_x)  # previous release still actively updated
-            ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param}
+            ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param} ${no_commit_pin_param}
             ;;
         *)
             echo "no matching environment found, exiting..." >> $coverage_session_log
