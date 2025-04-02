@@ -18,6 +18,7 @@ unset torch_dev_ver
 unset torchvision_dev_ver
 unset torch_test_channel
 unset pip_install_flags
+unset no_commit_pin
 
 usage(){
 >&2 cat << EOF
@@ -28,6 +29,7 @@ Usage: $0
    [ --torchvision_dev_ver input ]
    [ --torch_test_channel ]
    [ --pip_install_flags "flags" ]
+   [ --no_commit_pin ]
    [ --help ]
    Examples:
     # build latest:
@@ -42,11 +44,13 @@ Usage: $0
     #    ./build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_test_channel
     # build latest with no cache directory:
     #    ./build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --pip_install_flags="--no-cache-dir"
+    # build latest without using CI commit pinning:
+    #    ./build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --no_commit_pin
 EOF
 exit 1
 }
 
-args=$(getopt -o '' --long repo_home:,target_env_name:,torch_dev_ver:,torchvision_dev_ver:,torch_test_channel,pip_install_flags:,help -- "$@")
+args=$(getopt -o '' --long repo_home:,target_env_name:,torch_dev_ver:,torchvision_dev_ver:,torch_test_channel,pip_install_flags:,no_commit_pin,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -61,6 +65,7 @@ do
     --torchvision_dev_ver)   torchvision_dev_ver=$2   ; shift 2 ;;
     --torch_test_channel)   torch_test_channel=1 ; shift  ;;
     --pip_install_flags)   pip_install_flags=$2 ; shift 2 ;;
+    --no_commit_pin)   no_commit_pin=1 ; shift  ;;
     --help)    usage      ; shift   ;;
     # -- means the end of the arguments; drop this, and break out of the while loop
     --) shift; break ;;
@@ -138,6 +143,14 @@ fts_install(){
     source ~/.venvs/${target_env_name}/bin/activate
     unset PACKAGE_NAME
     cd ${repo_home}
+
+    # Set USE_CI_COMMIT_PIN by default, unless --no_commit_pin is specified
+    if [[ -z ${no_commit_pin} ]]; then
+        export USE_CI_COMMIT_PIN="1"
+    else
+        unset USE_CI_COMMIT_PIN
+    fi
+
     python -m pip install ${pip_install_flags} -e ".[all]" -r requirements/docs.txt
     rm -rf .mypy_cache
     mypy --install-types --non-interactive

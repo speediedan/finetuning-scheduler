@@ -71,7 +71,7 @@ jobs:
         . /tmp/venvs/fts_dev/bin/activate
         pip install --upgrade pip requests setuptools
         pip install -e . --no-warn-script-location --requirement requirements/devel.txt
-        # pip install lightning --upgrade
+        # pip install lightning --upgrade # rather than upgrade, we now use the relevant pin
       env:
         USE_CI_COMMIT_PIN: "1"
       displayName: 'Install dependencies'

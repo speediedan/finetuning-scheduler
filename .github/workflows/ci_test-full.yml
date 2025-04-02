@@ -82,15 +82,6 @@ jobs:
       run: |
         python .actions/assistant.py replace_oldest_ver
 
-    # - name: Install Lightning from pin
-    #   env:
-    #     USE_CI_COMMIT_PIN: "1"
-    #   run: |
-    #     # Install Lightning from the pinned commit
-    #     python -c "from src.finetuning_scheduler.dynamic_versioning.utils import get_lightning_requirement; print(f'Installing {get_lightning_requirement(\"unified\", True)}')"
-    #     pip install $(python -c "from src.finetuning_scheduler.dynamic_versioning.utils import get_lightning_requirement; print(get_lightning_requirement(\"unified\", True))")
-    #     pip list | grep -i lightning
-
     - name: Install package with dependencies
       env:
         USE_CI_COMMIT_PIN: "1"
@@ -115,14 +106,6 @@ jobs:
         key: ${{ runner.os }}-pip-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-${{ hashFiles('requirements/base.txt') }}-${{ hashFiles('requirements/extra.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-
-
-    # - name: Install extra dependencies
-    #   run: |
-    #     pip install --requirement requirements/base.txt --upgrade
-    #     pip install --requirement requirements/examples.txt --upgrade
-    #     pip install --requirement requirements/test.txt --upgrade
-    #     pip list
-    #   shell: bash
 
     - name: Cache datasets
       uses: actions/cache@v4

@@ -19,14 +19,9 @@ from types import ModuleType
 from typing import Any, Dict
 
 import setuptools
-#import setuptools.command.egg_info
 
 _PACKAGE_NAME = os.environ.get("PACKAGE_NAME")
 _PACKAGE_MODES = ("pytorch", "lightning")
-# _PACKAGE_MAPPING = {
-#     "lightning.pytorch": "pytorch_lightning",
-#     "lightning.fabric": "lightning_fabric",
-# }
 
 _PATH_ROOT = Path(os.path.abspath(os.path.dirname(__file__)))
 _INSTALL_PATHS = {}
@@ -38,7 +33,6 @@ _DYNAMIC_VERSIONING_LOC = _CORE_FTS_LOC / "dynamic_versioning"
 
 
 def _load_py_module(name: str, location: str) -> ModuleType:
-    # location = os.path.join(location, name)
     location = location / name
     spec = spec_from_file_location(name, location)
     assert spec, f"Failed to load module {name} from {location}"
@@ -72,38 +66,11 @@ def _setup_args(standalone: bool = False) -> Dict[str, Any]:
         _PATH_ROOT, homepage=about.__homepage__, version=about.__version__
     )
     # Only include dynamic metadata that can't be defined in pyproject.toml
-    base_setup = dict(
-        name="finetuning-scheduler",
-        version=about.__version__,
-        description=about.__docs__,
-        author=about.__author__,
-        author_email=about.__author_email__,
-        url=about.__homepage__,
-        download_url="https://github.com/speediedan/finetuning-scheduler",
-        license=about.__license__,
-        packages=setuptools.find_namespace_packages(where="src"),
-        package_dir={"": "src"},
-        package_data={
-            "fts_examples.config": ["*.yaml"],
-            "fts_examples.config.advanced.fsdp": ["*.yaml"],
-            "fts_examples.config.advanced.reinit_lr": ["*.yaml"],
-            "fts_examples.config.advanced.reinit_optim_lr": ["*.yaml"],
-            "fts_examples.model_parallel.config": ["*.yaml"],
-            "fts_examples.model_parallel.config.defaults": ["*.yaml"],
-            "fts_examples.model_parallel.config.profiling": ["*.yaml"],
-        },
-        include_package_data=True,
-        long_description=long_description,
-        long_description_content_type="text/markdown",
-        # Define entry points explicitly to ensure they're included in the wheel
-        entry_points={
-            "console_scripts": [
-                "toggle-lightning-mode=finetuning_scheduler.dynamic_versioning.toggle_lightning_mode:main",
-            ],
-        },
+    base_setup = dict(version=about.__version__, description=about.__docs__, long_description=long_description,
+                      long_description_content_type="text/markdown",
     )
 
-    # Use the dynamic requirements function
+    # Load our dynamic requirements
     install_requires = dynamic_versioning_utils.get_requirement_files(standalone)
 
     base_setup["install_requires"] = install_requires
