@@ -56,6 +56,7 @@ def info_packages():
     return {
         "numpy": numpy.__version__ if _NUMPY_AVAILABLE else 'N/A',
         "pyTorch_version": torch.__version__,
+        "pyTorch_git_version": torch.version.git_version,
         "pyTorch_debug": torch.version.debug,
         "pytorch-lightning": lightning.pytorch.__version__,
         "finetuning-scheduler": finetuning_scheduler.__version__,
