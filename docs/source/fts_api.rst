@@ -13,3 +13,4 @@ Fine-Tuning Scheduler
         fts
         fts_supporters
         strategy_adapters
+        dynamic_versioning

@@ -528,6 +528,13 @@ Footnotes
 
 .. toctree::
    :maxdepth: 2
+   :name: Advanced Installation Options
+   :caption: Advanced Installation Options
+
+   install/dynamic_versioning
+
+.. toctree::
+   :maxdepth: 2
    :name: api
    :caption: APIs
 

@@ -1,4 +1,5 @@
-"""Dynamic versioning utilities for switching between Lightning package imports."""
+"""Dynamic versioning utilities that allow for constrained finetuning-scheduler self-modification (e.g. toggling
+between different Lightning package imports)."""
 
 from finetuning_scheduler.dynamic_versioning.utils import toggle_lightning_imports
 
