@@ -99,7 +99,7 @@ base_env_build(){
                     torchvision_dev_ver=${torch_dev_ver}
                 fi
                 # temporarily remove torchvision until it supports cu128 in nightly binary
-                pip install ${pip_install_flags} --pre torch==2.7.0.${torch_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu128
+                pip install ${pip_install_flags} --pre torch==2.8.0.${torch_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu128
                 #pip install ${pip_install_flags} --pre torch==2.7.0.${torch_dev_ver} torchvision==0.22.0.${torchvision_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu128
             elif [[ $torch_test_channel -eq 1 ]]; then
                 pip install ${pip_install_flags} --pre torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/test/cu128
@@ -130,6 +130,10 @@ base_env_build(){
         fts_latest_pt2_6_x | fts_release_pt2_6_x)
             clear_activate_env python3.12
             pip install ${pip_install_flags} torch==2.6.0 torchvision --index-url https://download.pytorch.org/whl/cu126
+            ;;
+        fts_latest_pt2_7_x | fts_release_pt2_7_x)
+            clear_activate_env python3.12
+            pip install ${pip_install_flags} torch==2.7.1 torchvision --index-url https://download.pytorch.org/whl/cu128
             ;;
         *)
             echo "no matching environment found, exiting..."

@@ -49,28 +49,30 @@ BASE_DYNAMO_EXPECTED_WARNS = [
     # DYNAMO_TENSOR_WARNING
 ]
 
+distributed_warnings = [
+        "Using the current device set by the user",  # required starting with PT 2.7
+        "of Tensor.pin_memory",
+        "Tensor.is_pinned",
+        "when logging on epoch level in distributed",
+        "The number of training batches",
+]
+
 # FSDP specific warnings
 additional_fsdp_warns = [
-    "The number of training batches",
-    "when logging on epoch level in distributed",
     "FSDP.state_dict_type",
-    "of Tensor.pin_memory",
-    "Tensor.is_pinned",
     "Deallocating Tensor ",
-    "`_get_pg_default_device` will be deprecated"
+    "`_get_pg_default_device` will be deprecated",
+
 ]
-FSDP_BASE_WARNS = extend_warns(BASE_EXPECTED_WARNS, additional_fsdp_warns)
+
+DISTRIBUTED_WARNS = extend_warns(BASE_EXPECTED_WARNS, distributed_warnings)
+
+FSDP_BASE_WARNS = extend_warns(DISTRIBUTED_WARNS, additional_fsdp_warns)
 FSDP_DYNAMO_EXPECTED_WARNS = [DYNAMO_PHASE_WARNING]
 
 # Model parallel warnings
-additional_model_parallel_warns = [
-    "The number of training batches",
-    "when logging on epoch level in distributed",
-    #"You are using `torch.load` with `weights_only=False`",
-    "of Tensor.pin_memory",
-    "of Tensor.is_pinned"
-]
-MODEL_PARALLEL_BASE_WARNS = extend_warns(BASE_EXPECTED_WARNS, additional_model_parallel_warns)
+additional_model_parallel_warns = []  # for future use, currently empty
+MODEL_PARALLEL_BASE_WARNS = extend_warns(DISTRIBUTED_WARNS, additional_model_parallel_warns)
 MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
 
 # Example warnings
