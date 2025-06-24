@@ -133,7 +133,7 @@ base_env_build(){
             ;;
         fts_latest_pt2_7_x | fts_release_pt2_7_x)
             clear_activate_env python3.12
-            pip install ${pip_install_flags} torch==2.7.1 torchvision --index-url https://download.pytorch.org/whl/cu128
+            pip install ${pip_install_flags} torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
             ;;
         *)
             echo "no matching environment found, exiting..."

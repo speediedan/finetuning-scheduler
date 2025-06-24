@@ -107,7 +107,8 @@ env_rebuild(){
                 ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param} ${no_commit_pin_param}
             fi
             ;;
-        fts_latest_pt2_5_x | fts_release_pt2_5_x)  # previous release still actively updated
+        # fts_release_ptx_y_z)  # minor versions eligible for patch releases
+        fts_latest_pt2_5_x | fts_release_pt2_5_x | fts_latest_pt2_6_x | fts_release_pt2_6_x | fts_latest_pt2_7_x | fts_release_pt2_7_x)
             ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param} ${no_commit_pin_param}
             ;;
         *)
@@ -127,7 +128,7 @@ collect_env_coverage(){
 	cd ${repo_home}
     source ./scripts/infra_utils.sh
 	case $1 in
-	    fts_latest | fts_release | fts_release_pt2_5_x)
+	    fts_latest | fts_release | fts_release_pt2_5_x | fts_release_pt2_6_x | fts_release_pt2_7_x)
 			python -m coverage erase
 			python -m coverage run --append --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v 2>&1 >> $coverage_session_log
             (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f' --log_file=${coverage_session_log} 2>&1 >> ${temp_special_log}) > /dev/null
@@ -170,7 +171,7 @@ case ${target_env_name} in
     fts_latest)
         echo "No env-specific additional coverage currently required for ${target_env_name}" >> $coverage_session_log
         ;;
-    fts_release | fts_release_pt2_5_x)
+    fts_release | fts_release_pt2_5_x | fts_release_pt2_5_x | fts_release_pt2_6_x | fts_release_pt2_7_x)
         echo "No env-specific additional coverage currently required for ${target_env_name}" >> $coverage_session_log
         ;;
     # fts_release_ptx_y_z)  # special path to be used when releasing a previous patch version after a new minor version available
