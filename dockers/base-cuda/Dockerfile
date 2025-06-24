@@ -17,7 +17,7 @@ ARG OS_VER=ubuntu22.04
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
 ARG PYTHON_VERSION=3.12
-ARG PYTORCH_VERSION=2.7.0
+ARG PYTORCH_VERSION=2.7.1
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
 
@@ -79,9 +79,11 @@ RUN \
     . /tmp/venvs/fts_dev/bin/activate && \
     # set particular PyTorch version by default
     if [[ "${CUST_BUILD}" -eq 0 ]]; then \
-        python ./requirements/pl_adjust_versions.py requirements/base.txt ${PYTORCH_VERSION}; \
-        python ./requirements/pl_adjust_versions.py requirements/extra.txt ${PYTORCH_VERSION}; \
-        python ./requirements/pl_adjust_versions.py requirements/examples.txt ${PYTORCH_VERSION}; \
+        CUDA_VERSION_MM=${CUDA_VERSION%.*}; \
+        pip install torch --no-cache-dir \
+        --find-links="https://download.pytorch.org/whl/cu${CUDA_VERSION_MM//'.'/''}/torch_stable.html" \
+        --find-links="https://download.pytorch.org/whl/test/cu${CUDA_VERSION_MM//'.'/''}/torch" \
+        --find-links="https://download.pytorch.org/whl/test/cu${CUDA_VERSION_MM//'.'/''}/pytorch-triton"; \
     else \
         # or target a specific cuda build, by specifying a particular index url w/...
         # ... default channel
@@ -90,10 +92,8 @@ RUN \
         # pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
         # ... pytorch nightly dev version
         #pip install --pre torch==2.7.0.dev20250201 torchvision==0.22.0.dev20250201 --index-url https://download.pytorch.org/whl/nightly/cu128; \
-        # temporarily remove torchvision from the nightly build until it supports cu128 in nightlies
-        #pip install --pre torch==2.7.0.dev20250201 --index-url https://download.pytorch.org/whl/nightly/cu128; \
         # ... test channel
-        pip install --pre torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/test/cu128; \
+        pip install --pre torch==2.8.0 --index-url https://download.pytorch.org/whl/test/cu128; \
     fi && \
     # We avoid installing Lightning and other dependencies here as they are usually upgraded anyway later in
     # CI but we may re-enable in the future.

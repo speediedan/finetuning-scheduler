@@ -100,9 +100,9 @@ base_env_build(){
                 fi
                 # temporarily remove torchvision until it supports cu128 in nightly binary
                 pip install ${pip_install_flags} --pre torch==2.8.0.${torch_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu128
-                #pip install ${pip_install_flags} --pre torch==2.7.0.${torch_dev_ver} torchvision==0.22.0.${torchvision_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu128
+                #pip install ${pip_install_flags} --pre torch==2.7.1.${torch_dev_ver} torchvision==0.22.0.${torchvision_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu128
             elif [[ $torch_test_channel -eq 1 ]]; then
-                pip install ${pip_install_flags} --pre torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/test/cu128
+                pip install ${pip_install_flags} --pre torch==2.8.0 --index-url https://download.pytorch.org/whl/test/cu128
             else
                 pip install ${pip_install_flags} torch torchvision --index-url https://download.pytorch.org/whl/cu128
             fi
