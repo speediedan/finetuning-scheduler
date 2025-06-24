@@ -6,3 +6,4 @@ sentencepiece
 tensorboardX>=2.2
 tabulate
 psutil
+fsspec[http]<=2025.3.0  # pin for now to avoid https://github.com/huggingface/datasets/issues/7588

@@ -77,6 +77,7 @@ MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
 
 # Example warnings
 EXAMPLE_BASE_WARNS = [
+    "Using the current device set by the user",  # required starting with PT 2.7
     "sentencepiece tokenizer that you are converting",
     "co_lnotab is deprecated, use co_lines instead.",
     #"`resume_download` is deprecated",
