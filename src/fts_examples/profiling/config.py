@@ -22,9 +22,6 @@ from pathlib import Path
 import torch
 from lightning.fabric.utilities import rank_zero_warn
 
-# conditionally import indirectly to avoid duplicating import logic in several different modules
-from finetuning_scheduler.strategy_adapters._mp_imports import _TORCH_GREATER_EQUAL_2_5
-
 
 @dataclass
 class MemProfilerHooks:
@@ -53,8 +50,7 @@ class MemProfilerSchedule:
 
 @dataclass
 class MemProfilerCfg:
-    """
-    Configuration dataclass for the MemProfiler.
+    """Configuration dataclass for the MemProfiler.
 
     :param enabled: Whether to enable memory profiling.
     :param collect_funcs: A MemProfilerFuncs instance specifying the functions to collect per memory collection type.
@@ -110,9 +106,6 @@ class MemProfilerCfg:
             rank_zero_warn("Disabling CUDA memory profiling functionality since no CUDA device detected.")
             self.collect_funcs.cuda, self.collect_funcs.cuda_allocator_history = set(), set()
             self.cuda_allocator_history = False
-        if self.track_fsdp_mem and not _TORCH_GREATER_EQUAL_2_5:
-            rank_zero_warn("Disabling FSDP memory profiling functionality since PyTorch version < 2.5.")
-            self.track_fsdp_mem = False
         has_hooks = any(getattr(self.memory_hooks, ht.name) for ht in fields(self.memory_hooks))
         if not has_hooks:
             rank_zero_warn("MemProfilerCfg is configured to enable memory hooks but MemProfilerHooks does not have"

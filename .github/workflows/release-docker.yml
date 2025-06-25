@@ -31,9 +31,9 @@ jobs:
       matrix:
         # initially building only the latest supported configuration
         python_version: ["3.12"]
-        pytorch_version: ["2.7.1"]
-        cust_base: ["cu12.8.0-"]
-        pl_version: ["2.7"]
+        pytorch_version: ["2.8.0"]
+        cust_base: ["cu12.8.1-"]
+        pl_version: ["2.8"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -88,14 +88,14 @@ exclude = [
 # lint.ignore-init-module-imports = true
 output-format = "pylint"
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "src/fts_examples/ipynb_src/fts_superglue_nb.py" = ["E501","F401","F821"]
 
-[tool.ruff.mccabe]
+[tool.ruff.lint.mccabe]
 # Unlike Flake8, default to a complexity level of 10.
 max-complexity = 10
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["docs","fts_examples","finetuning_scheduler","tests"]
 force-sort-within-sections = false
 order-by-type = false

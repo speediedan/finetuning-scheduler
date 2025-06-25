@@ -1,2 +1,2 @@
-# lightning or pytorch-lightning ">=2.7.0,<2.7.1"
-torch>=2.4.0
+# lightning or pytorch-lightning ">=2.8.0,<2.9.0"
+torch>=2.5.0

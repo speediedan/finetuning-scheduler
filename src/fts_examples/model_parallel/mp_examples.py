@@ -5,16 +5,18 @@ import warnings
 
 import torch
 import torch.nn.functional as F
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import Replicate, Shard
+from torch.distributed.tensor.parallel import (ColwiseParallel, PrepareModuleInput, RowwiseParallel,
+                                                SequenceParallel, parallelize_module, loss_parallel)
 import lightning as L
 
 from fts_examples.cli_experiment_utils import ExpHarness, FTSExperimentCLI, ExperimentCfg
 from fts_examples.model_parallel.torchtitan_llama import ModelCfg, Transformer
-from finetuning_scheduler.strategy_adapters._mp_imports import (
-    _TORCH_GREATER_EQUAL_2_5, ColwiseParallel, Replicate, loss_parallel, PrepareModuleInput, RowwiseParallel,
-    SequenceParallel, parallelize_module, DeviceMesh, Shard)
 
 # Lightning ModelParallel still uses `torch.load` with `weights_only=False`
 warnings.filterwarnings("ignore", ".*uses the default pickle.*")
+
 
 # modified version of https://bit.ly/torchtitan_transformer_tp_plan
 def apply_tp_plan(model: Transformer, device_mesh: DeviceMesh, loss_parallel: bool) -> Transformer:
@@ -107,7 +109,6 @@ class ModParallelExample(ExpHarness, L.LightningModule):
 def cli_main() -> None:
     torch.set_float32_matmul_precision("high")
     assert torch.cuda.device_count() >= 2, "This example requires at least 2 GPUs"
-    assert _TORCH_GREATER_EQUAL_2_5, "This example requires PyTorch 2.5 or higher"
     # every configuration of this example depends upon a shared set of defaults.
     default_config_file = os.path.join(os.path.dirname(__file__), "config", "defaults", "fts_mp_example_defaults.yaml")
     _ = FTSExperimentCLI(L.LightningModule, subclass_mode_model=True, save_config_kwargs={"overwrite": True},

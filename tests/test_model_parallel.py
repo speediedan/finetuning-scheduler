@@ -3,7 +3,6 @@ from typing import Any, Callable, Dict, Optional, Tuple, KeysView, Union
 from copy import deepcopy
 from logging import DEBUG
 from pathlib import Path
-from unittest import mock
 from functools import partialmethod
 from dataclasses import dataclass, field
 from itertools import chain
@@ -13,6 +12,14 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.utils.data import DataLoader
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor.experimental import implicit_replication
+from torch.nn.attention import SDPBackend
+from torch.distributed._composable.fsdp import FSDPModule, fully_shard
+from torch.distributed.tensor.parallel import (ColwiseParallel, PrepareModuleInput, RowwiseParallel,
+                                                SequenceParallel, parallelize_module, loss_parallel)
+
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.plugins.precision.fsdp import FSDPPrecision
 from lightning.pytorch.strategies import ModelParallelStrategy
@@ -20,12 +27,7 @@ from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
-from finetuning_scheduler.strategy_adapters import ModelParallelStrategyAdapter
 from finetuning_scheduler.strategy_adapters.model_parallel import ActCkptEnum
-# conditionally import indirectly to avoid duplicating import logic in several different modules
-from finetuning_scheduler.strategy_adapters._mp_imports import (SDPBackend, DeviceMesh, DTensor, Replicate, Shard,
-    ColwiseParallel, PrepareModuleInput, RowwiseParallel, SequenceParallel, implicit_replication, parallelize_module,
-    loss_parallel, FSDPModule, fully_shard, _TORCH_GREATER_EQUAL_2_5)
 from tests.helpers.boring_models import FTSToyTransformer, TestModelArgs, FTSWikiText2
 from tests.helpers.common import (ExpectedResults, fts_check_warns, pytest_param_factory, get_fts,
                                   default_fts_sanity_chk, DeviceMeshSummary)
@@ -394,10 +396,7 @@ cm_mod_parallel = FTSCmModelParallel  # model w/ manual `configure_model` method
 
 ## toy transformer cfgs
 basic_tt = TestModelArgs()
-if _TORCH_GREATER_EQUAL_2_5:
-    sdp_math_impl_tt = TestModelArgs(avail_sdp_backends=[SDPBackend.MATH], sdp_use_implicit_replication=True)
-else:
-    sdp_math_impl_tt = None
+sdp_math_impl_tt = TestModelArgs(avail_sdp_backends=[SDPBackend.MATH], sdp_use_implicit_replication=True)
 
 ## DTensor Placement Plan Aliases
 cm_tt_tp_plan = gen_apply_transformer_tp_plan
@@ -480,28 +479,6 @@ class ModParallelTestCfg:
         self.ckpt_cfg = {**self.ckpt_cfg, **default_dep_cfg}
 
 
-def test_model_parallel_enapsulated_imports():
-    import sys
-    from importlib import reload
-    modules_to_reload = ('finetuning_scheduler.strategy_adapters._mp_imports',)
-    for module_fqn in modules_to_reload:
-        del sys.modules[module_fqn]
-    with mock.patch("lightning_utilities.core.imports.compare_version", return_value=False):
-        from finetuning_scheduler.strategy_adapters._mp_imports import parallelize_module
-        assert parallelize_module.__module__ == 'builtins'
-    if _TORCH_GREATER_EQUAL_2_5:
-        for module_fqn in modules_to_reload:
-            reload(sys.modules[module_fqn])
-        from finetuning_scheduler.strategy_adapters._mp_imports import parallelize_module
-        assert parallelize_module.__module__ == 'torch.distributed.tensor.parallel.api'
-
-
-@mock.patch("finetuning_scheduler.strategy_adapters.model_parallel._TORCH_GREATER_EQUAL_2_5", False)
-def test_torch_greater_equal_2_5():
-    with pytest.raises(MisconfigurationException, match="requires PyTorch 2.5 or higher"):
-        ModelParallelStrategyAdapter()
-
-
 ## Model Parallel Test Definitions
 FTS_MODEL_PARALLEL_PATH_TESTS = (
     # FSDP2 tests
@@ -551,7 +528,7 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
                        model_cfg=fsdp_tp, runif_alias="einsum_exp",
                        expected_results=ExpectedResults(expected_state=path_tp_fsdp_autocm)),
 )
-@RunIf(min_cuda_gpus=2, min_torch="2.5.0")
+@RunIf(min_cuda_gpus=2)
 @pytest.mark.parametrize("test_cfg", pytest_param_factory(FTS_MODEL_PARALLEL_PATH_TESTS))
 def test_fts_model_parallel_integration(tmpdir, recwarn, model_parallel_ft_schedule, test_cfg):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` functions properly in a supported 'ddp'

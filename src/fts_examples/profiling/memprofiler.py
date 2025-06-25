@@ -29,12 +29,12 @@ from pathlib import Path
 
 import yaml
 import torch
+from torch.distributed._composable.fsdp import FSDPModule
+from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
 from lightning.fabric.utilities.rank_zero import _get_rank
 from lightning.fabric.utilities.cloud_io import get_filesystem
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 
-# conditionally import indirectly to avoid duplicating import logic in several different modules
-from finetuning_scheduler.strategy_adapters._mp_imports import FSDPModule, FSDPMemTracker
 from fts_examples.cfg_utils import resolve_funcs
 from fts_examples.profiling.config import MemProfilerCfg
 

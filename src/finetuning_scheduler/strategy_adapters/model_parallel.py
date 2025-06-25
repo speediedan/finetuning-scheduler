@@ -26,6 +26,11 @@ from pprint import pformat
 from dataclasses import dataclass, field
 
 import torch
+from torch.distributed.tensor import DTensor
+from torch.distributed._composable import checkpoint
+from torch.distributed._composable.fsdp import CPUOffloadPolicy, FSDPModule, fully_shard
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (checkpoint_wrapper, offload_wrapper,
+                                                                         ActivationWrapper)
 from lightning.fabric.utilities.enums import LightningEnum
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.model_helpers import is_overridden
@@ -34,10 +39,7 @@ from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 from finetuning_scheduler.strategy_adapters._wrap_utils import _compose_ncac
-# conditionally import indirectly to avoid duplicating import logic in several different modules
-from finetuning_scheduler.strategy_adapters._mp_imports import (_TORCH_GREATER_EQUAL_2_5, DTensor, FSDPModule,
-                                                                fully_shard, CPUOffloadPolicy, checkpoint,
-                                                                checkpoint_wrapper, ActivationWrapper, offload_wrapper)
+
 
 class ActCkptEnum(LightningEnum):
     COMPOSABLE = "composable"
@@ -165,14 +167,11 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         super().__init__(*args, **kwargs)
         self.fsdp_default_kwargs = fsdp_default_kwargs or {}
         self.fsdp_plan = fsdp_plan or {}
-        if not _TORCH_GREATER_EQUAL_2_5:
-            # specifically, depends upon https://github.com/pytorch/pytorch/pull/133502 among other changes
-            raise MisconfigurationException(f"{type(self).__name__} requires PyTorch 2.5 or higher.")
 
     def on_before_init_fts(self) -> None:
         """In this hook executed immediately before
-        :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.init_fts`, to accommodate enhanced Model Parallel
-        functionality, we:
+        :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.init_fts`, to accommodate enhanced Model
+        Parallel functionality, we:
 
         1. Validate the :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan`
            configuration
@@ -237,10 +236,11 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
     def on_before_fts_fit_start(self) -> None:
         """In this hook executed immediately before the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
         :meth:`~finetuning_scheduler.fts.FinetuningScheduler.on_fit_start` hook begins, we ensure the provided
-        fine-tuning schedule and FSDP2 composed :external+pl:class:`~lightning.pytorch.core.module.LightningModule` are
-        appropriately aligned. If the fine-tuning schedule and composed modules yield parameter group configurations
-        that may not be supported by some optimizer group operations, detailed feedback on potential remediation is
-        provided to the user.
+        fine-tuning schedule and FSDP2 composed :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
+        are appropriately aligned.
+
+        If the fine-tuning schedule and composed modules yield parameter group configurations that may not be supported
+        by some optimizer group operations, detailed feedback on potential remediation is provided to the user.
         """
         self._validate_fsdp_fts_config()
 
@@ -390,8 +390,8 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
             )
 
     def _wrapped_configure_model(self, cm_func: Callable) -> Callable:
-        """If the user has overridden ``configure_model`` in their ``LightningModule``, wrap the user's
-        explicit wrapping method with the required
+        """If the user has overridden ``configure_model`` in their ``LightningModule``, wrap the user's explicit
+        wrapping method with the required
         :class:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter` methods.
 
         Args:

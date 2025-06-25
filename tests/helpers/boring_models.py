@@ -16,19 +16,19 @@ from pathlib import Path
 from contextlib import ExitStack, contextmanager
 
 import torch
-from lightning.pytorch import LightningDataModule, LightningModule
-from lightning.pytorch.core.optimizer import LightningOptimizer
-from lightning.pytorch.utilities.types import STEP_OUTPUT
-from lightning.pytorch.demos.transformer import WikiText2
 from torch import Tensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LRScheduler
 from torch.utils.data import DataLoader, Dataset, IterableDataset, Subset
-
-# conditionally import indirectly to avoid duplicating import logic in several different modules
-from finetuning_scheduler.strategy_adapters._mp_imports import SDPBackend, sdpa_kernel, implicit_replication
+from torch.distributed.tensor.experimental import implicit_replication
+from torch.nn.attention import SDPBackend, sdpa_kernel
+from lightning.pytorch import LightningDataModule, LightningModule
+from lightning.pytorch.core.optimizer import LightningOptimizer
+from lightning.pytorch.utilities.types import STEP_OUTPUT
+from lightning.pytorch.demos.transformer import WikiText2
 
 from tests import _PATH_DATASETS
+
 
 class LinearWarmupLR(LambdaLR):
     def __init__(self, optimizer, num_warmup_steps, num_training_steps, last_epoch=-1):

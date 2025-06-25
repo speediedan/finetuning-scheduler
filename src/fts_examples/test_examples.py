@@ -100,7 +100,7 @@ def test_advanced_examples_fts_superglue(monkeypatch, recwarn, tmpdir, config_fi
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
-@RunIf(min_cuda_gpus=2, min_torch="2.5.0", standalone=True)
+@RunIf(min_cuda_gpus=2, standalone=True)
 @pytest.mark.parametrize(
     "config_files",
     [

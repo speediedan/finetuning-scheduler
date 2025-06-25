@@ -6,7 +6,7 @@ date-released: 2022-02-04
 authors:
   - family-names: "Dale"
     given-names: "Dan"
-version: 2.7.0
+version: 2.8.0
 identifiers:
   - description: "Fine-Tuning Scheduler (all versions)"
     type: doi

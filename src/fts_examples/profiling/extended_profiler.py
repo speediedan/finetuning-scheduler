@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 import torch
-#from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_2_4
 from lightning.fabric.accelerators.cuda import is_cuda_available
 from lightning.fabric.utilities import rank_zero_info
 from lightning.pytorch.profilers.pytorch import _KINETO_AVAILABLE, PyTorchProfiler

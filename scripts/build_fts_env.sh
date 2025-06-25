@@ -98,9 +98,7 @@ base_env_build(){
                 if [[ -n ${torchvision_dev_ver} ]]; then
                     torchvision_dev_ver=${torch_dev_ver}
                 fi
-                # temporarily remove torchvision until it supports cu128 in nightly binary
-                pip install ${pip_install_flags} --pre torch==2.8.0.${torch_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu128
-                #pip install ${pip_install_flags} --pre torch==2.7.1.${torch_dev_ver} torchvision==0.22.0.${torchvision_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu128
+                pip install ${pip_install_flags} --pre torch==2.9.0.${torch_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu129
             elif [[ $torch_test_channel -eq 1 ]]; then
                 pip install ${pip_install_flags} --pre torch==2.8.0 --index-url https://download.pytorch.org/whl/test/cu128
             else
@@ -115,15 +113,7 @@ base_env_build(){
                 pip install ${pip_install_flags} torch torchvision --index-url https://download.pytorch.org/whl/cu126
             fi
             ;;
-        fts_latest_pt_oldest  | fts_latest_pt2_3_x | fts_release_pt2_3_x)
-            clear_activate_env python3.11
-            pip install ${pip_install_flags} torch==2.3.1 torchvision --index-url https://download.pytorch.org/whl/cu118
-            ;;
-        fts_latest_pt2_4_x | fts_release_pt2_4_x)
-            clear_activate_env python3.11
-            pip install ${pip_install_flags} torch==2.4.1 torchvision --index-url https://download.pytorch.org/whl/cu118
-            ;;
-        fts_latest_pt2_5_x | fts_release_pt2_5_x)
+        fts_latest_pt_oldest | fts_latest_pt2_5_x | fts_release_pt2_5_x)
             clear_activate_env python3.12
             pip install ${pip_install_flags} torch==2.5.1 torchvision --index-url https://download.pytorch.org/whl/cu124
             ;;
@@ -134,6 +124,10 @@ base_env_build(){
         fts_latest_pt2_7_x | fts_release_pt2_7_x)
             clear_activate_env python3.12
             pip install ${pip_install_flags} torch==2.7.1 torchvision --index-url https://download.pytorch.org/whl/cu128
+            ;;
+        fts_latest_pt2_8_x | fts_release_pt2_8_x)
+            clear_activate_env python3.12
+            pip install ${pip_install_flags} torch==2.8.0 torchvision --index-url https://download.pytorch.org/whl/cu128
             ;;
         *)
             echo "no matching environment found, exiting..."
