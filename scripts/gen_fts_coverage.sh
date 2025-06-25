@@ -74,6 +74,27 @@ d=`date +%Y%m%d%H%M%S`
 tmp_coverage_dir="/tmp"
 coverage_session_log="${tmp_coverage_dir}/gen_fts_coverage_${target_env_name}_${d}.log"
 
+# Define arrays of supported versions
+supported_fts_latest=(fts_latest_pt2_5_x fts_latest_pt2_6_x fts_latest_pt2_7_x fts_latest_pt2_8_x)
+supported_fts_release=(fts_release_pt2_5_x fts_release_pt2_6_x fts_release_pt2_7_x fts_release_pt2_8_x)
+
+# Enable extended globbing for pattern matching
+shopt -s extglob
+
+# Helper to join array with '|' for extended globbing patterns
+join_by_pipe() {
+    local IFS="|"
+    echo "$*"
+}
+
+# Create extended globbing patterns
+supported_fts_latest_pattern="@($(join_by_pipe "${supported_fts_latest[@]}"))"
+supported_fts_release_pattern="@($(join_by_pipe "${supported_fts_release[@]}"))"
+all_supported_pattern="@($(join_by_pipe "${supported_fts_latest[@]}" "${supported_fts_release[@]}"))"
+
+echo "Currently supported fts_latest patterns: ${supported_fts_latest_pattern}" >> $coverage_session_log
+echo "Currently supported fts_release patterns: ${supported_fts_release_pattern}" >> $coverage_session_log
+
 env_rebuild(){
     # Prepare pip_install_flags parameter if set
     pip_flags_param=""
@@ -87,6 +108,10 @@ env_rebuild(){
         no_commit_pin_param="--no_commit_pin"
     fi
 
+    echo "Currently supported fts_latest patterns in env_rebuild: ${supported_fts_latest_pattern}" >> $coverage_session_log
+    echo "Currently supported fts_release patterns in env_rebuild: ${supported_fts_release_pattern}" >> $coverage_session_log
+
+    echo "testing if $1 in ${supported_fts_latest_pattern}|${supported_fts_release_pattern}" >> $coverage_session_log
     case $1 in
         fts_latest)
             if [[ -n ${torch_dev_ver} ]]; then
@@ -107,8 +132,9 @@ env_rebuild(){
                 ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param} ${no_commit_pin_param}
             fi
             ;;
-        fts_latest_pt2_5_x | fts_release_pt2_5_x)  # previous release still actively updated
+        $all_supported_pattern)
             ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param} ${no_commit_pin_param}
+            echo "logic successfully executed for $1" >> $coverage_session_log
             ;;
         *)
             echo "no matching environment found, exiting..." >> $coverage_session_log
@@ -126,8 +152,11 @@ collect_env_coverage(){
     printf "Current venv prompt is now ${VIRTUAL_ENV_PROMPT} \n" >> $coverage_session_log
 	cd ${repo_home}
     source ./scripts/infra_utils.sh
-	case $1 in
-	    fts_latest | fts_release | fts_release_pt2_5_x)
+
+    echo "Currently supported fts_latest patterns in env_coverage: ${supported_fts_latest_pattern}" >> $coverage_session_log
+    echo "Currently supported fts_release patterns in env_coverage: ${supported_fts_release_pattern}" >> $coverage_session_log
+    case $1 in
+	    fts_latest|fts_release|$all_supported_pattern)
 			python -m coverage erase
 			python -m coverage run --append --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v 2>&1 >> $coverage_session_log
             (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f' --log_file=${coverage_session_log} 2>&1 >> ${temp_special_log}) > /dev/null
@@ -167,10 +196,10 @@ echo "FTS coverage collection executing at ${d} PT" > $coverage_session_log
 echo "Generating base coverage for the FTS env ${target_env_name}" >> $coverage_session_log
 env_rebuild_collect "${target_env_name}"
 case ${target_env_name} in
-    fts_latest)
+    fts_latest|$supported_fts_latest_pattern)
         echo "No env-specific additional coverage currently required for ${target_env_name}" >> $coverage_session_log
         ;;
-    fts_release | fts_release_pt2_5_x)
+    fts_release|$supported_fts_release_pattern)
         echo "No env-specific additional coverage currently required for ${target_env_name}" >> $coverage_session_log
         ;;
     # fts_release_ptx_y_z)  # special path to be used when releasing a previous patch version after a new minor version available
