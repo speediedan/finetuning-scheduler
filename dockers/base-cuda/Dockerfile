@@ -91,9 +91,9 @@ RUN \
         # ... pytorch patch version
         # pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
         # ... pytorch nightly dev version
-        #pip install --pre torch==2.9.0.dev20250201 torchvision==0.24.0.dev20250201 --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        pip install --pre torch==2.8.0.dev20250624 --index-url https://download.pytorch.org/whl/nightly/cu128; \
         # ... test channel
-        pip install --pre torch==2.8.0 --index-url https://download.pytorch.org/whl/test/cu128; \
+        # pip install --pre torch==2.8.0 --index-url https://download.pytorch.org/whl/test/cu128; \
     fi && \
     # We avoid installing Lightning and other dependencies here as they are usually upgraded anyway later in
     # CI but we may re-enable in the future.

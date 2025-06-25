@@ -92,9 +92,6 @@ supported_fts_latest_pattern="@($(join_by_pipe "${supported_fts_latest[@]}"))"
 supported_fts_release_pattern="@($(join_by_pipe "${supported_fts_release[@]}"))"
 all_supported_pattern="@($(join_by_pipe "${supported_fts_latest[@]}" "${supported_fts_release[@]}"))"
 
-echo "Currently supported fts_latest patterns: ${supported_fts_latest_pattern}" >> $coverage_session_log
-echo "Currently supported fts_release patterns: ${supported_fts_release_pattern}" >> $coverage_session_log
-
 env_rebuild(){
     # Prepare pip_install_flags parameter if set
     pip_flags_param=""
@@ -108,10 +105,6 @@ env_rebuild(){
         no_commit_pin_param="--no_commit_pin"
     fi
 
-    echo "Currently supported fts_latest patterns in env_rebuild: ${supported_fts_latest_pattern}" >> $coverage_session_log
-    echo "Currently supported fts_release patterns in env_rebuild: ${supported_fts_release_pattern}" >> $coverage_session_log
-
-    echo "testing if $1 in ${supported_fts_latest_pattern}|${supported_fts_release_pattern}" >> $coverage_session_log
     case $1 in
         fts_latest)
             if [[ -n ${torch_dev_ver} ]]; then
@@ -153,8 +146,6 @@ collect_env_coverage(){
 	cd ${repo_home}
     source ./scripts/infra_utils.sh
 
-    echo "Currently supported fts_latest patterns in env_coverage: ${supported_fts_latest_pattern}" >> $coverage_session_log
-    echo "Currently supported fts_release patterns in env_coverage: ${supported_fts_release_pattern}" >> $coverage_session_log
     case $1 in
 	    fts_latest|fts_release|$all_supported_pattern)
 			python -m coverage erase
@@ -167,9 +158,6 @@ collect_env_coverage(){
                 echo "Skipping tests that require experimental patches." >> $coverage_session_log
             fi
 	        ;;
-	    # fts_latest_pt2_0_1 | fts_release_pt2_0_1)
-		# 	(./tests/standalone_tests.sh -k 'test_fsdp_multi_gpus[cust_awp_mwp_2_0_parity_no_use_orig] or test_fsdp_multi_gpus[cust_awp_noprec_dynamo]' --no-header 2>&1 > $temp_standalone_out) > /dev/null
-		# 	;;
 	    *)
 	        echo "no matching environment found, exiting..."  >> $coverage_session_log
 	        exit 1

@@ -516,8 +516,9 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
     ModParallelTestCfg(model_cfg_key="tp_lp_fp16", model_cls=cm_mod_parallel, precision_opts=fp16, model_cfg=tp_only,
                        strategy_cfg=dp1_tp2, runif_alias="alone",
                        expected_results=ExpectedResults(expected_state=path_tp)),
-    ModParallelTestCfg(model_cfg_key="tp_lp_bf16", model_cls=cm_mod_parallel, precision_opts=bf16,
-                       model_cfg=tp_lp_math_sdp_impl, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
+    # TODO: temporarly disabling until we can test with first 2.8.0 RC
+    # ModParallelTestCfg(model_cfg_key="tp_lp_bf16", model_cls=cm_mod_parallel, precision_opts=bf16,
+    #                    model_cfg=tp_lp_math_sdp_impl, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
 
     # FSDP2 + TP (trivial submesh) tests
     # temporarily disabling this test as it triggers a hang in `fsdp_autocm_tp` about 10% of the time and
