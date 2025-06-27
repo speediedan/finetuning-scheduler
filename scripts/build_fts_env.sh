@@ -98,9 +98,7 @@ base_env_build(){
                 if [[ -n ${torchvision_dev_ver} ]]; then
                     torchvision_dev_ver=${torch_dev_ver}
                 fi
-                # temporarily leave dev on 2.8.0 until rc built with cuda 12.8.1 is released
-                pip install ${pip_install_flags} --pre torch==2.8.0.${torch_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu128
-                # pip install ${pip_install_flags} --pre torch==2.9.0.${torch_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu129
+                pip install ${pip_install_flags} --pre torch==2.9.0.${torch_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu129
             elif [[ $torch_test_channel -eq 1 ]]; then
                 pip install ${pip_install_flags} --pre torch==2.8.0 --index-url https://download.pytorch.org/whl/test/cu128
             else
