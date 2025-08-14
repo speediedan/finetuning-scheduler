@@ -1,4 +1,4 @@
-datasets
+datasets>=4.0.0  # important removal of trust_remote_code
 evaluate
 transformers>=4.18.0
 scikit-learn
@@ -6,4 +6,4 @@ sentencepiece
 tensorboardX>=2.2
 tabulate
 psutil
-numpy<2.0  # to avoid issues with oldest supported pytorch (2.2)
+numpy  # <2.0  # to avoid issues with oldest supported pytorch (2.2)

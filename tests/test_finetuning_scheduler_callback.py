@@ -2251,8 +2251,7 @@ class TestConnectWarn(Callback, CallbackResolverMixin):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        #self.callback_attrs = ("lr_finder",)
-        self.callback_attrs = ("optimal_lr",)
+        self.callback_attrs = ("_max_lr", "_min_lr", "_early_exit")
         # choosing this callback because it's simple and has an attribute to find during target callback resolution
         self.target_callback_ref = "LearningRateFinder"
 
