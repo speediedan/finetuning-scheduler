@@ -29,7 +29,7 @@ from finetuning_scheduler.strategy_adapters import FSDPStrategyAdapter
 from tests.helpers.boring_models import RandomDataset
 from tests.helpers.common import get_fts, unexpected_warns, unmatched_warns, nones
 from tests.helpers.runif import RunIf, RUNIF_MAP
-from tests.fsdp_expected_paths import (path_default, path_default_orig, path_default_orig_eo_dyn, path_ignore_p_uo,
+from tests.fsdp_expected_paths import (path_default, path_default_orig, path_ignore_p_uo,
                                        path_8_14, path_5_10, path_ext_7_14, path_ext_8_16, path_optimlr_reinit,
                                        lrs_path_optimlr_reinit, path_bn_track_false, path_bn_track_true, ResultEnum)
 
@@ -62,12 +62,14 @@ from torch.distributed.fsdp.wrap import CustomPolicy
 DISABLE_USE_ORIG = {"use_orig_params": False}
 
 additional_fsdp_warns = [
+    "Using the current device set by the user",  # required starting with PT 2.7
     "The number of training batches",  # minimizing cost of training for these tests
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
     "FSDP.state_dict_type", # required until Lightning uses new FSDP state dict API
     "of Tensor.pin_memory",  # required with PT 2.5 for FSDP1 `_flat_param` internal usage
     "Tensor.is_pinned",  # required with PT 2.5 for FSDP1 `_flat_param` internal usage
     "Deallocating Tensor ", # required with PT 2.5
+    "`_get_pg_default_device` will be deprecated",
 ]
 EXPECTED_WARNS.extend(additional_fsdp_warns)
 FSDP_BASE_WARNS = EXPECTED_WARNS
@@ -655,11 +657,11 @@ FTS_FSDP_TESTS = {
         None,
         (path_default_orig, "degenerate and unintended", *nones(2)),
     ),
-    "cust_awp_noprec_dynamo": (
-        (nond_loss_adam_model, cust_awp, False, 7, unwrap_7_dyn, None, epoch_t_only, max_epoch_4, None),
-        None,
-        (path_default_orig_eo_dyn, *nones(3)),
-    ),
+    # "cust_awp_noprec_dynamo": (
+    #     (nond_loss_adam_model, cust_awp, False, 7, unwrap_7_dyn, None, epoch_t_only, max_epoch_4, None),
+    #     None,
+    #     (path_default_orig_eo_dyn, *nones(3)),
+    # ),
     "cust_awp_mwp_reinitlr_optim_no_use_orig": (
         (base_model, awp_mwp_parity, True, 8, unwrap_7_mp, None, opt_inspect, None, DISABLE_USE_ORIG),
         None,

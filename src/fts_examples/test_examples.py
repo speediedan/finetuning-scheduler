@@ -44,6 +44,7 @@ ALL_EXAMPLE_EXPECTED = [
     "does not have many workers",
 ]
 EXPECTED_WARNS = [
+    "Using the current device set by the user",  # required starting with PT 2.7
     "sentencepiece tokenizer that you are converting",
     "`resume_download` is deprecated",  # required because of upstream usage as of 2.2.2
     "distutils Version classes are deprecated",  # still required as of PyTorch/Lightning 2.2
@@ -63,7 +64,7 @@ EXPECTED_WARNS.extend(ALL_EXAMPLE_EXPECTED)
 
 # min/max versions only applies to base examples, TODO: consider for deprecation
 MIN_VERSION_WARNS = "2.2"
-MAX_VERSION_WARNS = "2.5"
+MAX_VERSION_WARNS = "2.8"
 # torch version-specific warns go here
 EXPECTED_VERSION_WARNS = {MIN_VERSION_WARNS: [], MAX_VERSION_WARNS:[] }
 torch_version = metadata.distribution('torch').version

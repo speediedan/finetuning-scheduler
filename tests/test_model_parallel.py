@@ -29,7 +29,7 @@ from finetuning_scheduler.strategy_adapters._mp_imports import (SDPBackend, Devi
 from tests.helpers.boring_models import FTSToyTransformer, TestModelArgs, FTSWikiText2
 from tests.helpers.common import (ExpectedResults, fts_check_warns, pytest_param_factory, get_fts,
                                   default_fts_sanity_chk, DeviceMeshSummary)
-from tests.model_parallel_expected_paths import (path_tp_fsdp, path_fsdp_autocm, path_tp_fsdp_autocm,
+from tests.model_parallel_expected_paths import (path_fsdp_autocm, path_tp_fsdp_autocm,
                                                  path_fsdp, path_tp)
 from tests.helpers.runif import RunIf
 from tests.test_finetuning_scheduler_callback import (
@@ -46,6 +46,8 @@ additional_model_parallel_warns = [
     "The number of training batches",  # minimizing cost of training for these tests
     "when logging on epoch level in distributed",  # validating FTS handling in this scenario
     "You are using `torch.load` with `weights_only=False`",  # known required w/ Lightning 2.4
+    "of Tensor.is_pinned",
+    "of Tensor.pin_memory",
 ]
 MODEL_PARALLEL_BASE_WARNS.extend(additional_model_parallel_warns)
 MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
@@ -362,7 +364,6 @@ def gen_apply_transformer_tp_plan(model: nn.Module, device_mesh: DeviceMesh, los
                 desired_input_layouts=Replicate(),
             ),
             "attention_norm": SequenceParallel(),
-
             "attention.wq": ColwiseParallel(use_local_output=False),
             "attention.wk": ColwiseParallel(use_local_output=False),
             "attention.wv": ColwiseParallel(use_local_output=False),
@@ -549,12 +550,16 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
     ModParallelTestCfg(model_cfg_key="tp_lp_fp16", model_cls=cm_mod_parallel, precision_opts=fp16, model_cfg=tp_only,
                        strategy_cfg=dp1_tp2, runif_alias="alone",
                        expected_results=ExpectedResults(expected_state=path_tp)),
-    ModParallelTestCfg(model_cfg_key="tp_lp_bf16", model_cls=cm_mod_parallel, precision_opts=bf16,
-                       model_cfg=tp_lp_math_sdp_impl, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
-
+    # TODO: given that SDPBackend.MATH with lp causes (at least without special accommodation)
+    #       https://github.com/pytorch/pytorch/pull/149764 as of PT 2.8, we are disabling this test until our
+    #       infrastructure is upgraded and we can use SDPBackend.FLASH with bf16 on all our cards
+    # ModParallelTestCfg(model_cfg_key="tp_lp_bf16", model_cls=cm_mod_parallel, precision_opts=bf16,
+    #                    model_cfg=tp_lp_math_sdp_impl, strategy_cfg=dp1_tp2, runif_alias="bf16_alone"),
     # FSDP2 + TP (trivial submesh) tests
-    ModParallelTestCfg(model_cfg_key="fsdp_tp", model_cls=cm_mod_parallel, model_cfg=fsdp_tp, runif_alias="einsum_exp",
-                       expected_results=ExpectedResults(expected_state=path_tp_fsdp)),
+    # temporarily disabling this test as it triggers a hang in `fsdp_autocm_tp` about 10% of the time and
+    # `fsdp_autocm_tp` and the marginal utility of `fsdp_tp` is minimal
+    # ModParallelTestCfg(model_cfg_key="fsdp_tp", model_cls=cm_mod_parallel, model_cfg=fsdp_tp,
+    # runif_alias="einsum_exp", expected_results=ExpectedResults(expected_state=path_tp_fsdp)),
     ModParallelTestCfg(model_cfg_key="fsdp_autocm_tp", model_cls=cm_mod_parallel, strategy_adapter_cfg=fsdp_autocm_tp,
                        model_cfg=fsdp_tp, runif_alias="einsum_exp",
                        expected_results=ExpectedResults(expected_state=path_tp_fsdp_autocm)),

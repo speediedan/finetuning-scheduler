@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [2.5.3] - 2025-03-27
+
+### Added
+
+- Support for Lightning ``2.5.2`` and ``2.5.3``
+
+### Fixed
+
+- Updated explicit pytorch version mapping matrix to include recent PyTorch release
+- Fixed newly failing test dependent on deprecated Lightning class attribute. Resolved [#19](https://github.com/speediedan/finetuning-scheduler/issues/19).
+
 ## [2.5.1] - 2025-03-27
 
 ### Added

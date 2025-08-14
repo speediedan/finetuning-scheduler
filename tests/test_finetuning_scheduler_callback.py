@@ -1353,7 +1353,8 @@ EXPECTED_WARNS = [
     "GPU available but",  # required for all PyTorch/Lightning versions
     "`max_epochs` was not",  # required for all PyTorch/Lightning versions
     "The dirpath has changed from",  # required for all PyTorch/Lightning versions
-    "Conversion of an array with ndim > 0"  # required for PyTorch 2.2
+    "Conversion of an array with ndim > 0",  # required for PyTorch 2.2
+    "Using the current device set by the user",  # required starting with PT 2.7
 ]
 EXPECTED_DIRPATH = "is not empty."
 EXPECTED_TRAINCHK = "could not find the monitored key in the returned"
@@ -2250,7 +2251,8 @@ class TestConnectWarn(Callback, CallbackResolverMixin):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.callback_attrs = ("lr_finder",)
+        #self.callback_attrs = ("lr_finder",)
+        self.callback_attrs = ("optimal_lr",)
         # choosing this callback because it's simple and has an attribute to find during target callback resolution
         self.target_callback_ref = "LearningRateFinder"
 
