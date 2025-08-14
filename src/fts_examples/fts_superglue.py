@@ -126,8 +126,6 @@ class RteBoolqDataModule(pl.LightningDataModule):
             "dataloader_kwargs": dataloader_kwargs,
             "tokenizers_parallelism": tokenizers_parallelism,
         }
-        # starting with HF Datasets v3.x, trust_remote_code must be `True` https://bit.ly/hf_datasets_trust_remote_req
-        self.trust_remote_code = True
         self.save_hyperparameters(self.init_hparams)
         self.dataloader_kwargs = {
             "num_workers": dataloader_kwargs.get("num_workers", 0),
@@ -142,12 +140,11 @@ class RteBoolqDataModule(pl.LightningDataModule):
         """Load the SuperGLUE dataset."""
         # N.B. PL calls prepare_data from a single process (rank 0) so do not use it to assign
         # state (e.g. self.x=y)
-        datasets.load_dataset("super_glue", self.hparams.task_name, trust_remote_code=self.trust_remote_code)
+        datasets.load_dataset("aps/super_glue", self.hparams.task_name)
 
     def setup(self, stage):
         """Setup our dataset splits for training/validation."""
-        self.dataset = datasets.load_dataset("super_glue", self.hparams.task_name,
-                                             trust_remote_code=self.trust_remote_code)
+        self.dataset = datasets.load_dataset("aps/super_glue", self.hparams.task_name)
         for split in self.dataset.keys():
             self.dataset[split] = self.dataset[split].map(
                 self._convert_to_features, batched=True, remove_columns=["label"]
@@ -203,9 +200,9 @@ class RteBoolqModule(pl.LightningModule):
         experiment_tag: str = "default",
         log_env_details: bool = True,
     ):
-        """In this example, this :class:`~lightning.pytorch.core.module.LightningModule` is initialized by composing
-        the ./config/fts_defaults.yaml default configuration with various scheduled fine-tuning yaml configurations
-        via the :class:`~lightning.pytorch.cli.LightningCLI` but it can be used like any other
+        """In this example, this :class:`~lightning.pytorch.core.module.LightningModule` is initialized by
+        composing the ./config/fts_defaults.yaml default configuration with various scheduled fine-tuning yaml
+        configurations via the :class:`~lightning.pytorch.cli.LightningCLI` but it can be used like any other
         :class:`~lightning.pytorch.core.module.LightningModule` as well.
 
         Args:

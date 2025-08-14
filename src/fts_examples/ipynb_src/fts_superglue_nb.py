@@ -234,7 +234,8 @@ class RteBoolqDataModule(L.LightningDataModule):
         tokenizers_parallelism: bool = True,
         **dataloader_kwargs: Any,
     ):
-        r"""Initialize the ``LightningDataModule`` designed for both the RTE or BoolQ SuperGLUE Hugging Face datasets.
+        r"""Initialize the ``LightningDataModule`` designed for both the RTE or BoolQ SuperGLUE Hugging Face
+        datasets.
 
         Args:
             model_name_or_path (str):
@@ -255,8 +256,6 @@ class RteBoolqDataModule(L.LightningDataModule):
         super().__init__()
         task_name = task_name if task_name in TASK_NUM_LABELS.keys() else DEFAULT_TASK
         self.text_fields = self.TASK_TEXT_FIELD_MAP[task_name]
-        # starting with HF Datasets v3.x, trust_remote_code must be `True` https://bit.ly/hf_datasets_trust_remote_req
-        self.trust_remote_code = True
         self.dataloader_kwargs = {
             "num_workers": dataloader_kwargs.get("num_workers", 0),
             "pin_memory": dataloader_kwargs.get("pin_memory", False),
@@ -271,12 +270,11 @@ class RteBoolqDataModule(L.LightningDataModule):
         """Load the SuperGLUE dataset."""
         # N.B. PL calls prepare_data from a single process (rank 0) so do not use it to assign
         # state (e.g. self.x=y)
-        datasets.load_dataset("super_glue", self.hparams.task_name, trust_remote_code=self.trust_remote_code)
+        datasets.load_dataset("aps/super_glue", self.hparams.task_name)
 
     def setup(self, stage):
         """Setup our dataset splits for training/validation."""
-        self.dataset = datasets.load_dataset("super_glue", self.hparams.task_name,
-                                             trust_remote_code=self.trust_remote_code)
+        self.dataset = datasets.load_dataset("aps/super_glue", self.hparams.task_name)
         for split in self.dataset.keys():
             self.dataset[split] = self.dataset[split].map(
                 self._convert_to_features, batched=True, remove_columns=["label"]
