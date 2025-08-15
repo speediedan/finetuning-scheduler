@@ -43,11 +43,27 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - removed support for PyTorch `2.2`
 - removed use of conda builds (aligning with upstream PyTorch)
 
+## [2.5.3] - 2025-08-14
+
+### Added
+
+- Verified support for Lightning ``2.5.2`` and ``2.5.3``
+
+### Fixed
+
+- Updated explicit pytorch version mapping matrix to include recent PyTorch release
+- Fixed newly failing test dependent on deprecated Lightning class attribute. Resolved [#19](https://github.com/speediedan/finetuning-scheduler/issues/19).
+
+### Changed
+
+- For the examples extra, updated minimum `datasets` version to `4.0.0` to ensure the new API (especially important removal of `trust_remote_code`) is used.
+
 ## [2.5.1] - 2025-03-27
 
 ### Added
 
 - Support for Lightning ``2.5.1``
+- Added (multi)representer for ``PretrainedConfig`` object types
 
 ## [2.5.0] - 2024-12-20
 
