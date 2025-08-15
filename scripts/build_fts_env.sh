@@ -98,9 +98,9 @@ base_env_build(){
                 if [[ -n ${torchvision_dev_ver} ]]; then
                     torchvision_dev_ver=${torch_dev_ver}
                 fi
-                pip install ${pip_install_flags} --pre torch==2.9.0.${torch_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu129
+                pip install ${pip_install_flags} --pre torch==2.9.0.${torch_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu128
             elif [[ $torch_test_channel -eq 1 ]]; then
-                pip install ${pip_install_flags} --pre torch==2.8.0 --index-url https://download.pytorch.org/whl/test/cu128
+                pip install ${pip_install_flags} --pre torch==2.9.0 --index-url https://download.pytorch.org/whl/test/cu128
             else
                 pip install ${pip_install_flags} torch torchvision --index-url https://download.pytorch.org/whl/cu128
             fi
@@ -108,9 +108,9 @@ base_env_build(){
         fts_release)
             clear_activate_env python3.12
             if [[ $torch_test_channel -eq 1 ]]; then
-                pip install ${pip_install_flags} --pre torch torchvision --index-url https://download.pytorch.org/whl/test/cu126
+                pip install ${pip_install_flags} --pre torch torchvision --index-url https://download.pytorch.org/whl/test/cu128
             else
-                pip install ${pip_install_flags} torch torchvision --index-url https://download.pytorch.org/whl/cu126
+                pip install ${pip_install_flags} torch torchvision --index-url https://download.pytorch.org/whl/cu128
             fi
             ;;
         fts_latest_pt_oldest | fts_latest_pt2_5_x | fts_release_pt2_5_x)

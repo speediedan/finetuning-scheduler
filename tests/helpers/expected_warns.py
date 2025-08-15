@@ -22,6 +22,7 @@ BASE_WARNINGS = [
     "`max_epochs` was not",
     "The dirpath has changed from",
     "Conversion of an array with ndim > 0",  # still needed with python 3.9 and torch 2.4.0
+    "Please use the new API settings to control TF32 behavior",  # TODO: temporarily required with 20250811 nightly
     WORKER_WARNING,
 ]
 

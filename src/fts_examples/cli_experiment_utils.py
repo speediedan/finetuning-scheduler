@@ -9,7 +9,6 @@ from torch.utils import collect_env
 from torch.optim import Optimizer
 from torch.utils.data import Dataset, DataLoader
 import lightning as L
-from lightning.fabric.accelerators.cuda import is_cuda_available
 from lightning.fabric.utilities import rank_zero_warn
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
@@ -87,22 +86,34 @@ def get_env_info():
     run_lambda = collect_env.run
     pip_version, pip_list_output = get_pip_packages(run_lambda)
 
-    if collect_env.TORCH_AVAILABLE:
-        version_str = torch.__version__
-        debug_mode_str = str(torch.version.debug)
-        cuda_available_str = str(is_cuda_available())
-        cuda_version_str = torch.version.cuda
-        if not hasattr(torch.version, "hip") or torch.version.hip is None:  # cuda version
-            hip_compiled_version = hip_runtime_version = miopen_runtime_version = "N/A"
-        else:  # HIP version
-            cfg = torch._C._show_config().split("\n")
-            hip_runtime_version = [s.rsplit(None, 1)[-1] for s in cfg if "HIP Runtime" in s][0]
-            miopen_runtime_version = [s.rsplit(None, 1)[-1] for s in cfg if "MIOpen" in s][0]
-            cuda_version_str = "N/A"
-            hip_compiled_version = torch.version.hip
-    else:
-        version_str = debug_mode_str = cuda_available_str = cuda_version_str = "N/A"
+    version_str = torch.__version__
+    debug_mode_str = str(torch.version.debug)
+    cuda_available_str = str(torch.cuda.is_available())
+    cuda_version_str = torch.version.cuda
+    xpu_available_str = str(torch.xpu.is_available())
+    if torch.xpu.is_available():
+        xpu_available_str = (
+            f"{xpu_available_str}\n"
+            + f"XPU used to build PyTorch: {torch.version.xpu}\n"
+            + f"Intel GPU driver version:\n{collect_env.get_intel_gpu_driver_version(run_lambda)}\n"
+            + f"Intel GPU models onboard:\n{collect_env.get_intel_gpu_onboard(run_lambda)}\n"
+            + f"Intel GPU models detected:\n{collect_env.get_intel_gpu_detected(run_lambda)}"
+        )
+    if (
+        not hasattr(torch.version, "hip") or torch.version.hip is None
+    ):  # cuda version
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = "N/A"
+    else:  # HIP version
+
+        def get_version_or_na(cfg, prefix):
+            _lst = [s.rsplit(None, 1)[-1] for s in cfg if prefix in s]
+            return _lst[0] if _lst else "N/A"
+
+        cfg = torch._C._show_config().split("\n")
+        hip_runtime_version = get_version_or_na(cfg, "HIP Runtime")
+        miopen_runtime_version = get_version_or_na(cfg, "MIOpen")
+        cuda_version_str = "N/A"
+        hip_compiled_version = torch.version.hip
 
     sys_version = sys.version.replace("\n", " ")
 
@@ -130,6 +141,7 @@ def get_env_info():
         "cmake_version": collect_env.get_cmake_version(run_lambda),
         "caching_allocator_config": collect_env.get_cachingallocator_config(),
         "is_xnnpack_available": collect_env.is_xnnpack_available(),
+        "is_xpu_available": xpu_available_str,
         "cpu_info": collect_env.get_cpu_info(run_lambda),
     }
     # get_cuda_module_loading_config() initializes CUDA which we want to avoid so we bypass this inspection
