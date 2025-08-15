@@ -29,7 +29,7 @@ ENV \
     TZ=US/Pacific \
     PATH="$PATH:/root/.local/bin" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
-    TORCH_CUDA_ARCH_LIST="6.0;7.0;7.5;8.0;8.6;9.0" \
+    TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0" \
     MKL_THREADING_LAYER=${MKL_THREADING_LAYER} \
     MAKEFLAGS="-j2"
 RUN apt-get update -qq --fix-missing  && \
@@ -91,9 +91,9 @@ RUN \
         # ... pytorch patch version
         # pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
         # ... pytorch nightly dev version
-        # pip install --pre torch==2.8.0.dev20250624 --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        pip install --pre torch==2.9.0.dev20250815 --index-url https://download.pytorch.org/whl/nightly/cu128; \
         # ... test channel
-        pip install --pre torch==2.8.0 --index-url https://download.pytorch.org/whl/test/cu128; \
+        # pip install --pre torch==2.8.0 --index-url https://download.pytorch.org/whl/test/cu128; \
     fi && \
     # We avoid installing Lightning and other dependencies here as they are usually upgraded anyway later in
     # CI but we may re-enable in the future.
