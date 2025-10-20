@@ -22,8 +22,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
-- Official versioning policy to align with PyTorch minor releases; see the new Versioning documentation and compatibility matrix
-  (docs/versioning.rst) for details on supported PyTorch/Lightning ranges: [Versioning docs](https://finetuning-scheduler.readthedocs.io/en/stable/versioning.html)
+- Official versioning policy to align with PyTorch minor releases; see the new Versioning documentation and compatibility matrix (docs/versioning.rst) for details on supported PyTorch/Lightning ranges
 
 - Updated documentation and improved type annotations
 - einsum patch no longer required for PyTorch >= 2.6 for FTS to leverage 2D mesh parallelism
