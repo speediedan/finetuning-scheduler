@@ -166,14 +166,24 @@ ______________________________________________________________________
 
 ## Continuous Integration
 
-Fine-Tuning Scheduler is rigorously tested across multiple CPUs, GPUs and against major Python and PyTorch versions. Each Fine-Tuning Scheduler minor release (major.minor.patch) is paired with a Lightning minor release (e.g. Fine-Tuning Scheduler 2.0 depends upon Lightning 2.0).
+Fine-Tuning Scheduler is rigorously tested across multiple CPUs, GPUs and against major Python and PyTorch versions.
 
-To ensure maximum stability, the latest Lightning patch release fully tested with Fine-Tuning Scheduler is set as a maximum dependency in Fine-Tuning Scheduler's requirements.txt (e.g. \<= 1.7.1). If you'd like to test a specific Lightning patch version greater than that currently in Fine-Tuning Scheduler's requirements.txt, it will likely work but you should install Fine-Tuning Scheduler from source and update the requirements.txt as desired.
+**Versioning Policy (Updated in 2.9)**: Starting with the 2.9 minor release, Fine-Tuning Scheduler is pivoting from tight Lightning version alignment to **core PyTorch version alignment**. This change:
+
+- Provides greater flexibility to integrate the latest PyTorch functionality increasingly important in research
+- Reduces maintenance burden while continuing to support the stable Lightning API and robust integration
+- Officially supports **at least the latest 4 PyTorch minor releases** (e.g., when PyTorch 2.9 is released, FTS supports >= 2.6)
+
+This versioning approach is motivated by Lightning's evolving release cadence (see [Lightning Issue #21073](https://github.com/Lightning-AI/pytorch-lightning/issues/21073) and [PR #21107](https://github.com/Lightning-AI/pytorch-lightning/pull/21107)) and allows FTS to adopt new PyTorch capabilities more rapidly while maintaining clear deprecation policies.
+
+See the [versioning documentation](https://finetuning-scheduler.readthedocs.io/en/stable/versioning.html) for complete details on compatibility policies and migration guidance.
+
+**Prior Versioning (\< 2.9)**: Each Fine-Tuning Scheduler minor release (major.minor.patch) was paired with a Lightning minor release (e.g., Fine-Tuning Scheduler 2.0 depends upon Lightning 2.0). To ensure maximum stability, the latest Lightning patch release fully tested with Fine-Tuning Scheduler was set as a maximum dependency in Fine-Tuning Scheduler's requirements.txt (e.g., \<= 1.7.1).
 
 <details>
   <summary>Current build statuses for Fine-Tuning Scheduler </summary>
 
-| System / (PyTorch/Python ver) |                                                                                                        2.3.1/3.9                                                                                                         |                                                                                                              2.9.0/3.9, 2.9.0/3.12                                                                                                               |
+| System / (PyTorch/Python ver) |                                                                                                        2.5.1/3.9                                                                                                         |                                                                                                              2.9.0/3.9, 2.9.0/3.12                                                                                                               |
 | :---------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
 |      Linux \[GPUs\*\*\]       |                                                                                                            -                                                                                                             | [![Build Status](https://dev.azure.com//speediedan/finetuning-scheduler/_apis/build/status/Multi-GPU%20&%20Example%20Tests?branchName=main)](https://dev.azure.com/speediedan/finetuning-scheduler/_build/latest?definitionId=1&branchName=main) |
 |     Linux (Ubuntu 22.04)      | [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml) |             [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml)             |

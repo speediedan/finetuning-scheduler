@@ -4,22 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [2.7.0] - 2025-XX-XX
+## [2.9.0] - 2025-10-20
 
 ### Added
 
-- Support for Lightning and PyTorch ``2.7.0``
-
-### Deprecated
-
-- removed support for PyTorch `2.3`
-
-## [2.6.0] - 2025-XX-XX
-
-
-### Added
-
-- Support for Lightning and PyTorch ``2.6.0``
 - Added YAML (multi)representer for ``PretrainedConfig`` object types
 - Introduced a `log_dir` parameter to allow specifying a custom directory for artifacts, defaulting to `trainer.log_dir` or `trainer.default_root_dir` [#17](https://github.com/speediedan/finetuning-scheduler/pull/17/).
 - Added trainer convenience reference to FTS for a cleaner interface and enable future improved encapsulation
@@ -34,13 +22,16 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- Official versioning policy to align with PyTorch minor releases; see the new Versioning documentation and compatibility matrix
+  (docs/versioning.rst) for details on supported PyTorch/Lightning ranges: [Versioning docs](https://finetuning-scheduler.readthedocs.io/en/stable/versioning.html)
+
 - Updated documentation and improved type annotations
 - einsum patch no longer required for PyTorch >= 2.6 for FTS to leverage 2D mesh parallelism
 - Improved CI configuration with automatic Lightning commit pinning
 
 ### Deprecated
 
-- removed support for PyTorch `2.2`
+- removed support for PyTorch `2.2`, `2.3`, and `2.4`
 - removed use of conda builds (aligning with upstream PyTorch)
 
 ## [2.5.3] - 2025-08-14
