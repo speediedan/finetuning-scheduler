@@ -78,6 +78,7 @@ MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
 
 # Example warnings
 EXAMPLE_BASE_WARNS = [
+    "in eval mode at the start of training", # required starting with Lightning #21446
     "using the device under current context",  # required w/ PT 2.9 stable
     "Using the current device set by the user",  # required starting with PT 2.7
     "sentencepiece tokenizer that you are converting",
