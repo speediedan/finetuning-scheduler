@@ -13,7 +13,7 @@
 from copy import copy
 from itertools import chain
 
-# warning inventory last evaluated w/ PT 2.7.0.dev20250201 and Lightning commit efe311cd (2.6.0dev)
+# warning inventory last evaluated w/ PT 2.7.0.dev20250201 and Lightning commit efe311cd
 
 WORKER_WARNING = "does not have many workers"
 

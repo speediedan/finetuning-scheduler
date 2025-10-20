@@ -40,7 +40,7 @@ You can also fill out the list below manually.
 -->
 
 - Fine-Tuning Scheduler Version (e.g., 2.9.0):
-- Lightning Version (e.g., 2.6.0):
+- Lightning Version (e.g., 2.5.0):
 - PyTorch Version (e.g., 2.9.0):
 - Python version (e.g., 3.12):
 - OS (e.g., Linux):

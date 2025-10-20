@@ -81,7 +81,7 @@ python -m pip install -e ".[all]" -r requirements/docs.txt
 #### Install a specific FTS version from source using the standalone `pytorch-lighting` package:
 
 ```bash
-export FTS_VERSION=2.6.0
+export FTS_VERSION=2.9.0
 export PACKAGE_NAME=pytorch
 git clone -b v${FTS_VERSION} https://github.com/speediedan/finetuning-scheduler
 cd finetuning-scheduler
@@ -128,7 +128,7 @@ pip install finetuning-scheduler-${FTS_VERSION}.tar.gz
 
 ### Dynamic Versioning
 
-FTS (as of version `2.6.0`) now enables dynamic versioning both at installation time and via CLI post-installation. Initially, the dynamic versioning system allows toggling between Lightning unified and standalone imports. The two conversion operations are individually idempotent and mutually reversible.
+FTS (as of version `2.9.0`) now enables dynamic versioning both at installation time and via CLI post-installation. Initially, the dynamic versioning system allows toggling between Lightning unified and standalone imports. The two conversion operations are individually idempotent and mutually reversible.
 
 #### Toggling Between Unified and Standalone Lightning Imports
 
