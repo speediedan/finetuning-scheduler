@@ -85,7 +85,7 @@ jobs:
         time: 3m
 
     - name: Publish to Test PyPI
-      uses: pypa/gh-action-pypi-publish@v1.8.14
+      uses: pypa/gh-action-pypi-publish@v1.13.0
 
   publish-package-pypi:
     runs-on: ubuntu-22.04
@@ -109,4 +109,4 @@ jobs:
         time: 2m
 
     - name: Publish distribution 📦 to PyPI
-      uses: pypa/gh-action-pypi-publish@v1.8.14
+      uses: pypa/gh-action-pypi-publish@v1.13.0
