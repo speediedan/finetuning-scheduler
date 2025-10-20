@@ -51,6 +51,7 @@ BASE_DYNAMO_EXPECTED_WARNS = [
 ]
 
 distributed_warnings = [
+        "using the device under current context",  # required w/ PT 2.9 stable
         "Using the current device set by the user",  # required starting with PT 2.7
         "of Tensor.pin_memory",
         "Tensor.is_pinned",
@@ -63,7 +64,6 @@ additional_fsdp_warns = [
     "FSDP.state_dict_type",
     "Deallocating Tensor ",
     "`_get_pg_default_device` will be deprecated",
-
 ]
 
 DISTRIBUTED_WARNS = extend_warns(BASE_EXPECTED_WARNS, distributed_warnings)
@@ -78,6 +78,7 @@ MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
 
 # Example warnings
 EXAMPLE_BASE_WARNS = [
+    "using the device under current context",  # required w/ PT 2.9 stable
     "Using the current device set by the user",  # required starting with PT 2.7
     "sentencepiece tokenizer that you are converting",
     "co_lnotab is deprecated, use co_lines instead.",

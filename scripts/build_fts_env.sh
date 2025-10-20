@@ -98,9 +98,9 @@ base_env_build(){
                 if [[ -n ${torchvision_dev_ver} ]]; then
                     torchvision_dev_ver=${torch_dev_ver}
                 fi
-                pip install ${pip_install_flags} --pre torch==2.9.0.${torch_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu128
+                pip install ${pip_install_flags} --pre torch==2.10.0.${torch_dev_ver} --index-url https://download.pytorch.org/whl/nightly/cu128
             elif [[ $torch_test_channel -eq 1 ]]; then
-                pip install ${pip_install_flags} --pre torch==2.9.0 --index-url https://download.pytorch.org/whl/test/cu128
+                pip install ${pip_install_flags} --pre torch==2.10.0 --index-url https://download.pytorch.org/whl/test/cu128
             else
                 pip install ${pip_install_flags} torch torchvision --index-url https://download.pytorch.org/whl/cu128
             fi
@@ -128,6 +128,10 @@ base_env_build(){
         fts_latest_pt2_8_x | fts_release_pt2_8_x)
             clear_activate_env python3.12
             pip install ${pip_install_flags} torch==2.8.0 torchvision --index-url https://download.pytorch.org/whl/cu128
+            ;;
+        fts_latest_pt2_9_x | fts_release_pt2_9_x)
+            clear_activate_env python3.12
+            pip install ${pip_install_flags} torch==2.9.0 torchvision --index-url https://download.pytorch.org/whl/cu128
             ;;
         *)
             echo "no matching environment found, exiting..."

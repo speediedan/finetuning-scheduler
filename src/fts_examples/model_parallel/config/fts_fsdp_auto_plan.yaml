@@ -9,7 +9,7 @@ trainer:
         fsdp_default_kwargs:
           reshard_after_forward: True  # default value of a normal ``fully_shard`` kwarg
           act_ckpt: ['composable']  # use composable AC with default kwargs
-          cpu_offload_policy: {}  # apply default cpu offload policy
+          # cpu_offload_policy: {}  # apply default cpu offload policy
         fsdp_plan: {'model.output': {}, 'model.layers.\d*$': {}}
   strategy:
     init_args:

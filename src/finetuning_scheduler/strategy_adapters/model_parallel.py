@@ -265,7 +265,8 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         for k, v in list(config_dict.items()):
             # currently adding a `cpu_offload_policy` option alias for convenience
             # open a GitHub issue if you think other poliy alias options would be useful
-            if k == "cpu_offload_policy":
+            # TODO: renable coverage below when upstream cpu offload issue addressed
+            if k == "cpu_offload_policy":  # pragma: no cover
                 config_dict["offload_policy"] = CPUOffloadPolicy(**v)
                 del config_dict[k]
             elif k == "act_ckpt":
@@ -283,7 +284,8 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         """
         if not self.fsdp_plan:
             return
-        if self.fsdp_default_kwargs:
+        # TODO: renable coverage below when upstream cpu offload issue addressed
+        if self.fsdp_default_kwargs:  # pragma: no cover
             self.fsdp_default_kwargs = ModelParallelStrategyAdapter._resolve_cfg_aliases(self.fsdp_default_kwargs)
         named_modules = dict(self.pl_module.named_modules()).keys()
         resolved_modules: Dict[str, Dict] = {}

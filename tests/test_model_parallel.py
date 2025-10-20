@@ -490,10 +490,13 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
     ModParallelTestCfg(model_cfg_key="fsdp_cm_fp16", model_cls=cm_mod_parallel, precision_opts=fp16,
                        model_cfg=fsdp_cm_only, runif_alias="alone"),
     # FSDP2 auto plan tests
+    # TODO: debug upstream issues currently preventing use of `fsdp_auto_cpuoffld` cfg with fsdp_auto_* tests
+    # ModParallelTestCfg(model_cfg_key="fsdp_auto", model_cls=fsdp_auto_mod_parallel, model_cfg=fsdp_auto,
+    #                    strategy_adapter_cfg=fsdp_auto_cpuoffld, runif_alias="alone",
+    #                    expected_results=ExpectedResults(expected_state=path_fsdp)),
     ModParallelTestCfg(model_cfg_key="fsdp_auto", model_cls=fsdp_auto_mod_parallel, model_cfg=fsdp_auto,
-                       strategy_adapter_cfg=fsdp_auto_cpuoffld, runif_alias="alone",
+                       strategy_adapter_cfg=fsdp_auto_only, runif_alias="alone",
                        expected_results=ExpectedResults(expected_state=path_fsdp)),
-    # TODO: upstream bug currently preventing use of `fsdp_auto_cpuoffld` here w/ fp16
     ModParallelTestCfg(model_cfg_key="fsdp_auto_fp16", model_cls=fsdp_auto_mod_parallel, model_cfg=fsdp_auto,
                        precision_opts=fp16, strategy_adapter_cfg=fsdp_auto_only, runif_alias="alone",
                        expected_results=ExpectedResults(expected_state=path_fsdp)),
