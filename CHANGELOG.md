@@ -4,11 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [2.9.0] - 2025-10-2X
+## [2.9.0] - 2025-10-20
 
 ### Added
 
-- Updated versioning policy to align with PyTorch minor releases see [TODO] (placeholder for PR link)
 - Added YAML (multi)representer for ``PretrainedConfig`` object types
 - Introduced a `log_dir` parameter to allow specifying a custom directory for artifacts, defaulting to `trainer.log_dir` or `trainer.default_root_dir` [#17](https://github.com/speediedan/finetuning-scheduler/pull/17/).
 - Added trainer convenience reference to FTS for a cleaner interface and enable future improved encapsulation
@@ -22,6 +21,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Addressed upstream issue [#20615](https://github.com/Lightning-AI/pytorch-lightning/issues/20615) where `trainer.log_dir` resolution logic does not accommodate artifact persistence via `trainer.log_dir` for loggers that do not have a `save_dir` set (using `trainer.default_root_dir`) by refactoring and enhancing FTS `log_dir` handling in [#17](https://github.com/speediedan/finetuning-scheduler/pull/17/).
 
 ### Changed
+
+- Official versioning policy to align with PyTorch minor releases; see the new Versioning documentation and compatibility matrix
+  (docs/versioning.rst) for details on supported PyTorch/Lightning ranges: [Versioning docs](https://finetuning-scheduler.readthedocs.io/en/stable/versioning.html)
 
 - Updated documentation and improved type annotations
 - einsum patch no longer required for PyTorch >= 2.6 for FTS to leverage 2D mesh parallelism

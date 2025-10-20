@@ -548,6 +548,7 @@ Footnotes
 
    generated/CODE_OF_CONDUCT.md
    generated/CONTRIBUTING.md
+   versioning
    governance
    generated/CHANGELOG.md
 
