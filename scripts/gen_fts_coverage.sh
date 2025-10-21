@@ -75,8 +75,8 @@ tmp_coverage_dir="/tmp"
 coverage_session_log="${tmp_coverage_dir}/gen_fts_coverage_${target_env_name}_${d}.log"
 
 # Define arrays of supported versions
-supported_fts_latest=(fts_latest_pt2_5_x fts_latest_pt2_6_x fts_latest_pt2_7_x fts_latest_pt2_8_x fts_latest_pt2_9_x)
-supported_fts_release=(fts_release_pt2_5_x fts_release_pt2_6_x fts_release_pt2_7_x fts_release_pt2_8_x fts_release_pt2_9_x)
+supported_fts_latest=(fts_latest_pt2_6_x fts_latest_pt2_7_x fts_latest_pt2_8_x fts_latest_pt2_9_x fts_latest_pt2_10_x)
+supported_fts_release=(fts_release_pt2_6_x fts_release_pt2_7_x fts_release_pt2_8_x fts_release_pt2_9_x fts_release_pt2_10_x)
 
 # Enable extended globbing for pattern matching
 shopt -s extglob

@@ -42,10 +42,8 @@ def maybe_mark_exp(exp_patch_set: Set[ExpPatch], mark_if_false: Optional[Dict] =
 
 # RunIf aliases
 RUNIF_MAP = {
-    "min2_6": {"min_torch": "2.6.0"},
     "alone": {"standalone": True},
     "bf16_alone": {"bf16_cuda": True, "standalone": True},
-    "einsum_exp": maybe_mark_exp({ExpPatch.EINSUM_STRATEGIES}, {"standalone": True}),
 }
 
 

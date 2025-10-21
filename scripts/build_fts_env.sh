@@ -113,11 +113,7 @@ base_env_build(){
                 pip install ${pip_install_flags} torch torchvision --index-url https://download.pytorch.org/whl/cu128
             fi
             ;;
-        fts_latest_pt_oldest | fts_latest_pt2_5_x | fts_release_pt2_5_x)
-            clear_activate_env python3.12
-            pip install ${pip_install_flags} torch==2.5.1 torchvision --index-url https://download.pytorch.org/whl/cu124
-            ;;
-        fts_latest_pt2_6_x | fts_release_pt2_6_x)
+        fts_latest_pt_oldest | fts_latest_pt2_6_x | fts_release_pt2_6_x)
             clear_activate_env python3.12
             pip install ${pip_install_flags} torch==2.6.0 torchvision --index-url https://download.pytorch.org/whl/cu126
             ;;
@@ -132,6 +128,10 @@ base_env_build(){
         fts_latest_pt2_9_x | fts_release_pt2_9_x)
             clear_activate_env python3.12
             pip install ${pip_install_flags} torch==2.9.0 torchvision --index-url https://download.pytorch.org/whl/cu128
+            ;;
+        fts_latest_pt2_10_x | fts_release_pt2_10_x)
+            clear_activate_env python3.12
+            pip install ${pip_install_flags} torch==2.10.0 torchvision --index-url https://download.pytorch.org/whl/cu128
             ;;
         *)
             echo "no matching environment found, exiting..."

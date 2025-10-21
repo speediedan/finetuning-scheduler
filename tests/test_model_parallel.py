@@ -530,7 +530,8 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
     # ModParallelTestCfg(model_cfg_key="fsdp_tp", model_cls=cm_mod_parallel, model_cfg=fsdp_tp,
     # runif_alias="einsum_exp", expected_results=ExpectedResults(expected_state=path_tp_fsdp)),
     ModParallelTestCfg(model_cfg_key="fsdp_autocm_tp", model_cls=cm_mod_parallel, strategy_adapter_cfg=fsdp_autocm_tp,
-                       model_cfg=fsdp_tp, runif_alias="einsum_exp",
+                       model_cfg=fsdp_tp, runif_alias="alone",
+                       # runif_alias="einsum_exp",
                        expected_results=ExpectedResults(expected_state=path_tp_fsdp_autocm)),
 )
 @RunIf(min_cuda_gpus=2)

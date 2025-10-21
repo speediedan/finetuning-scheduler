@@ -17,10 +17,6 @@ name/pattern-based configuration instead of manually inspecting modules and appl
 As the best way to learn how to use this FTS functionality may be by example, feel free to skip the discussion below
 and move directly to :ref:`reviewing/running the examples<model-parallel-fine-tuning-examples>` in this guide.
 
-.. note::
-  FTS supports PyTorch's composable distributed and Tensor Parallelism (TP) APIs via
-  :external+pl:class:`~lightning.pytorch.strategies.model_parallel.ModelParallelStrategy` beginning with PyTorch
-  ``2.5.0`` [#]_.
 
 FTS 'Auto' FSDP2 Plan Configuration
 ***********************************
@@ -310,10 +306,3 @@ As you can observe in (``./mp_examples.py``) our TP plan in this example is appl
 
     cd ./fts_examples/model_parallel
     python mp_examples.py fit --config config/fts_tp_plan.yaml
-
-Footnotes
-*********
-
-.. [#] Specifically, FTS depends upon these two PRs included in PyTorch ``2.5.0``:
-  `#133502 <https://github.com/pytorch/pytorch/pull/133502>`_,
-  `#134146 <https://github.com/pytorch/pytorch/pull/134146>`_

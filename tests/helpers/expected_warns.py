@@ -52,6 +52,7 @@ BASE_DYNAMO_EXPECTED_WARNS = [
 
 distributed_warnings = [
         "using the device under current context",  # required w/ PT 2.9 stable
+        "This get_root_mesh API",  # temporarily required with PT 2.10 nightly 20251017
         "Using the current device set by the user",  # required starting with PT 2.7
         "of Tensor.pin_memory",
         "Tensor.is_pinned",
@@ -78,6 +79,7 @@ MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
 
 # Example warnings
 EXAMPLE_BASE_WARNS = [
+    "This get_root_mesh API",  # temporarily required with PT 2.10 nightly 20251017
     "in eval mode at the start of training", # required starting with Lightning #21446
     "using the device under current context",  # required w/ PT 2.9 stable
     "Using the current device set by the user",  # required starting with PT 2.7

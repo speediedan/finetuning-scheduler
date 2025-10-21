@@ -17,7 +17,7 @@ ARG OS_VER=ubuntu22.04
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
 ARG PYTHON_VERSION=3.12
-ARG PYTORCH_VERSION=2.9.0
+ARG PYTORCH_VERSION=2.10.0
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
 
@@ -87,13 +87,13 @@ RUN \
     else \
         # or target a specific cuda build, by specifying a particular index url w/...
         # ... default channel
-        pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128; \
+        # pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128; \
         # ... pytorch patch version
         # pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
         # ... pytorch nightly dev version
-        # pip install --pre torch==2.9.0.dev20250811 --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        pip install --pre torch==2.10.0.dev20251017 --index-url https://download.pytorch.org/whl/nightly/cu128; \
         # ... test channel
-        # pip install --pre torch==2.9.0 --index-url https://download.pytorch.org/whl/test/cu128; \
+        # pip install --pre torch==2.10.0 --index-url https://download.pytorch.org/whl/test/cu128; \
     fi && \
     # We avoid installing Lightning and other dependencies here as they are usually upgraded anyway later in
     # CI but we may re-enable in the future.

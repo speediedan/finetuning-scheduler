@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [2.10.0] - 2025-XX-XX
+
 ## [2.9.0] - 2025-10-20
 
 ### Added
