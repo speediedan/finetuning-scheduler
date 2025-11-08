@@ -22,8 +22,8 @@ from typing import Callable, List, Optional, Tuple, Dict
 
 import torch
 
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
-from lightning.fabric.utilities.types import ReduceLROnPlateau
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.callbacks import BaseFinetuning
