@@ -21,6 +21,7 @@ BASE_WARNINGS = [
     "GPU available but",
     "`max_epochs` was not",
     "The dirpath has changed from",
+    "unless they are explicitly allowlisted", # required for oldest pytorch (2.5.0) with Lightning 2.5.6
     "Conversion of an array with ndim > 0",  # still needed with python 3.9 and torch 2.4.0
     "Please use the new API settings to control TF32 behavior",  # TODO: temporarily required with 20250811 nightly
     WORKER_WARNING,
