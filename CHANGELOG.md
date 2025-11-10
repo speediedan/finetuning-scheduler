@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [2.9.1] - 2025-11-10
+
+### Fixed
+
+- Import `ReduceLROnPlateau` from `torch.optim.lr_scheduler` directly to accommodate Lightning refactor [#21](https://github.com/speediedan/finetuning-scheduler/pull/21).
+
 ## [2.9.0] - 2025-10-20
 
 ### Added
