@@ -6,12 +6,17 @@ set -eo pipefail
 unset repo_home
 unset target_env_name
 unset torch_dev_ver
-unset torchvision_dev_ver
 unset torch_test_channel
 unset no_rebuild_base
 unset include_experimental
-unset pip_install_flags
+unset uv_install_flags
 unset no_commit_pin
+unset venv_dir
+unset dry_run
+declare -a from_source_specs=()
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/infra_utils.sh"
 
 usage(){
 >&2 cat << EOF
@@ -19,33 +24,37 @@ Usage: $0
    [ --repo_home input]
    [ --target_env_name input ]
    [ --torch_dev_ver input ]
-   [ --torchvision_dev_ver input ]
    [ --torch_test_channel ]
    [ --no_rebuild_base ]
    [ --include_experimental ]
-   [ --pip_install_flags "flags" ]
+   [ --uv_install_flags "flags" ]
    [ --no_commit_pin ]
+   [ --venv-dir input ]
+   [ --from-source "package:path[:extras][:ENV_VAR=value]" ]
+   [ --dry-run ]
    [ --help ]
    Examples:
 	# generate fts_latest coverage without rebuilding the fts_latest base environment:
 	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --no_rebuild_base
 	# generate fts_latest coverage with a given torch_dev_version:
-	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_dev_ver=dev20240201 --torchvision_dev_ver=dev20240201
+	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_dev_ver=dev20240201
     # generate fts_latest coverage, rebuilding base fts_latest with PyTorch test channel and run tests that require experimental patches:
     #   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_test_channel --include_experimental
 	# generate fts_release coverage, rebuilding the base fts_release environment with PyTorch stable channel:
 	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release
 	# generate fts_release coverage, rebuilding the base fts_release environment with PyTorch test channel:
 	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release --torch_test_channel
-	# generate fts_latest coverage with no pip cache:
-	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --pip_install_flags="--no-cache-dir"
+	# generate fts_latest coverage with explicit venv directory (recommended for hardlink performance):
+	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --venv-dir=/mnt/cache/\${USER}/.venvs
 	# generate fts_release coverage without using CI commit pinning:
 	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release --no_commit_pin
+	# dry-run mode: setup environment and show what tests would run without executing them:
+	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_dev_ver=dev20240201 --dry-run
 EOF
 exit 1
 }
 
-args=$(getopt -o '' --long repo_home:,target_env_name:,torch_dev_ver:,torchvision_dev_ver:,torch_test_channel,no_rebuild_base,include_experimental,pip_install_flags:,no_commit_pin,help -- "$@")
+args=$(getopt -o '' --long repo_home:,target_env_name:,torch_dev_ver:,torch_test_channel,no_rebuild_base,include_experimental,uv_install_flags:,no_commit_pin,venv-dir:,from-source:,dry-run,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -57,12 +66,17 @@ do
     --repo_home)  repo_home=$2    ; shift 2  ;;
     --target_env_name)  target_env_name=$2  ; shift 2 ;;
     --torch_dev_ver)   torch_dev_ver=$2   ; shift 2 ;;
-    --torchvision_dev_ver)   torchvision_dev_ver=$2   ; shift 2 ;;
     --torch_test_channel)   torch_test_channel=1 ; shift  ;;
     --no_rebuild_base)   no_rebuild_base=1 ; shift  ;;
     --include_experimental)   include_experimental=1 ; shift  ;;
-    --pip_install_flags)   pip_install_flags=$2 ; shift 2 ;;
+    --uv_install_flags)   uv_install_flags=$2 ; shift 2 ;;
     --no_commit_pin)   no_commit_pin=1 ; shift  ;;
+    --venv-dir)   venv_dir=$2 ; shift 2 ;;
+    --from-source)
+        from_source_specs+=("$2")
+        shift 2
+        ;;
+    --dry-run)   dry_run=1 ; shift  ;;
     --help)    usage      ; shift   ;;
     --) shift; break ;;
     *) >&2 echo Unsupported option: $1
@@ -73,6 +87,17 @@ done
 d=`date +%Y%m%d%H%M%S`
 tmp_coverage_dir="/tmp"
 coverage_session_log="${tmp_coverage_dir}/gen_fts_coverage_${target_env_name}_${d}.log"
+echo "Use 'tail -f ${coverage_session_log}' to monitor progress"
+
+# Log message with timestamp
+log_msg() {
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[${timestamp}] $1" >> $coverage_session_log
+}
+
+# Determine venv path using infra_utils function
+venv_path=$(determine_venv_path "${venv_dir}" "${target_env_name}")
+echo "Target venv path: ${venv_path}"
 
 # Define arrays of supported versions
 supported_fts_latest=(fts_latest_pt2_6_x fts_latest_pt2_7_x fts_latest_pt2_8_x fts_latest_pt2_9_x fts_latest_pt2_10_x)
@@ -93,73 +118,116 @@ supported_fts_release_pattern="@($(join_by_pipe "${supported_fts_release[@]}"))"
 all_supported_pattern="@($(join_by_pipe "${supported_fts_latest[@]}" "${supported_fts_release[@]}"))"
 
 env_rebuild(){
-    # Prepare pip_install_flags parameter if set
-    pip_flags_param=""
-    if [[ -n "${pip_install_flags}" ]]; then
-        pip_flags_param="--pip_install_flags=\"${pip_install_flags}\""
+    # Build command arguments array
+    local -a cmd_args=("${repo_home}/scripts/build_fts_env.sh" "--repo_home=${repo_home}" "--target_env_name=$1")
+
+    # Add uv_install_flags if specified
+    if [[ -n "${uv_install_flags}" ]]; then
+        cmd_args+=("--uv_install_flags=${uv_install_flags}")
     fi
 
     # Add no_commit_pin flag if specified
-    no_commit_pin_param=""
     if [[ $no_commit_pin -eq 1 ]]; then
-        no_commit_pin_param="--no_commit_pin"
+        cmd_args+=("--no_commit_pin")
     fi
+
+    # Add venv-dir flag if specified
+    if [[ -n "${venv_dir}" ]]; then
+        cmd_args+=("--venv-dir=${venv_dir}")
+    fi
+
+    # Add from-source parameters
+    for spec in "${from_source_specs[@]}"; do
+        cmd_args+=("--from-source=${spec}")
+    done
+
+    # Log the build command before execution
+    log_msg "Executing build command: ${cmd_args[*]}"
 
     case $1 in
         fts_latest)
             if [[ -n ${torch_dev_ver} ]]; then
-                if [[ -n ${torchvision_dev_ver} ]]; then
-                    torchvision_dev_ver=${torch_dev_ver}
-                fi
-                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 --torch_dev_ver=${torch_dev_ver} --torchvision_dev_ver=${torchvision_dev_ver} ${pip_flags_param} ${no_commit_pin_param}
+                cmd_args+=("--torch_dev_ver=${torch_dev_ver}")
 			elif [[ $torch_test_channel -eq 1 ]]; then
-                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 --torch_test_channel ${pip_flags_param} ${no_commit_pin_param}
-            else
-                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param} ${no_commit_pin_param}
+                cmd_args+=("--torch_test_channel")
             fi
+            log_msg "Final build command: ${cmd_args[*]}"
+            "${cmd_args[@]}"
             ;;
         fts_release)
             if [[ $torch_test_channel -eq 1 ]]; then
-                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 --torch_test_channel ${pip_flags_param} ${no_commit_pin_param}
-            else
-                ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param} ${no_commit_pin_param}
+                cmd_args+=("--torch_test_channel")
             fi
+            log_msg "Final build command: ${cmd_args[*]}"
+            "${cmd_args[@]}"
             ;;
         $all_supported_pattern)
-            ${repo_home}/scripts/build_fts_env.sh --repo_home=${repo_home} --target_env_name=$1 ${pip_flags_param} ${no_commit_pin_param}
-            echo "logic successfully executed for $1" >> $coverage_session_log
+            log_msg "Final build command: ${cmd_args[*]}"
+            "${cmd_args[@]}"
+            log_msg "Logic successfully executed for $1"
             ;;
         *)
-            echo "no matching environment found, exiting..." >> $coverage_session_log
+            log_msg "ERROR: No matching environment found, exiting..."
             exit 1
             ;;
     esac
 }
 
+log_key_package_versions(){
+    log_msg "=== Key Package Versions ==="
+    log_msg "torch: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'not installed')"
+    log_msg "lightning: $(python -c 'import lightning; print(lightning.__version__)' 2>/dev/null || echo 'not installed')"
+    log_msg "pytorch_lightning: $(python -c 'import pytorch_lightning; print(pytorch_lightning.__version__)' 2>/dev/null || echo 'not installed')"
+    log_msg "finetuning_scheduler: $(python -c 'import finetuning_scheduler; print(finetuning_scheduler.__version__)' 2>/dev/null || echo 'not installed')"
+    log_msg "transformers: $(python -c 'import transformers; print(transformers.__version__)' 2>/dev/null || echo 'not installed')"
+    log_msg "============================="
+}
+
 collect_env_coverage(){
     temp_special_log="${tmp_coverage_dir}/special_test_output_$1_${d}.log"
-	if [ -n "$VIRTUAL_ENV" ]; then
-        deactivate
-    fi
-    source ~/.venvs/$1/bin/activate
-    printf "Current venv prompt is now ${VIRTUAL_ENV_PROMPT} \n" >> $coverage_session_log
+    maybe_deactivate
+    source "${venv_path}/bin/activate"
+    log_msg "Current venv prompt is now ${VIRTUAL_ENV_PROMPT}"
 	cd ${repo_home}
-    source ./scripts/infra_utils.sh
+
+    # Log key package versions after environment activation
+    log_key_package_versions
+
+    # If dry-run mode, show test collection and exit
+    if [[ $dry_run -eq 1 ]]; then
+        log_msg ""
+        log_msg "=== DRY-RUN MODE: Collecting tests without execution ==="
+        log_msg "Tests that would be collected:"
+        python -m pytest src/finetuning_scheduler tests --collect-only -q 2>&1 >> $coverage_session_log
+        log_msg ""
+        log_msg "Standalone tests that would run (pattern: test_f):"
+        PL_RUN_STANDALONE_TESTS=1 python -m pytest tests -m standalone --collect-only -q -k 'test_f' 2>&1 >> $coverage_session_log || true
+        if [[ $include_experimental -eq 1 ]]; then
+            log_msg ""
+            log_msg "Experimental patch tests that would run:"
+            PL_RUN_EXP_PATCH_TESTS=1 python -m pytest tests -m exp_patch --collect-only -q -k 'test_f' 2>&1 >> $coverage_session_log || true
+        fi
+        log_msg "=== DRY-RUN COMPLETE ==="
+        return 0
+    fi
 
     case $1 in
 	    fts_latest|fts_release|$all_supported_pattern)
+            log_msg "Erasing previous coverage data"
 			python -m coverage erase
+            log_msg "Running main test suite with coverage"
 			python -m coverage run --append --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v 2>&1 >> $coverage_session_log
+            log_msg "Running standalone tests (pattern: test_f)"
             (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f' --log_file=${coverage_session_log} 2>&1 >> ${temp_special_log}) > /dev/null
             if [[ $include_experimental -eq 1 ]]; then
-                echo "Running tests that require experimental patches using $1" >> $coverage_session_log
+                log_msg "Running tests that require experimental patches using $1"
                 (./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --log_file=${coverage_session_log} --experiment_patch_mask="1 0 0 1" 2>&1 >> ${temp_special_log}) > /dev/null
             else
-                echo "Skipping tests that require experimental patches." >> $coverage_session_log
+                log_msg "Skipping tests that require experimental patches."
             fi
 	        ;;
 	    *)
-	        echo "no matching environment found, exiting..."  >> $coverage_session_log
+	        log_msg "ERROR: No matching environment found, exiting..."
 	        exit 1
 	        ;;
 	esac
@@ -167,40 +235,47 @@ collect_env_coverage(){
 
 env_rebuild_collect(){
 	if [[ $no_rebuild_base -eq 1 ]]; then
-		echo "Skipping rebuild of the base FTS env ${target_env_name}" >> $coverage_session_log
+		log_msg "Skipping rebuild of the base FTS env ${target_env_name}"
 	else
-		echo "Beginning FTS env rebuild for $1" >> $coverage_session_log
+		log_msg "Beginning FTS env rebuild for $1"
 		env_rebuild "$1"
 	fi
-	echo "Collecting coverage for the FTS env $1" >> $coverage_session_log
-    printf "\n"  >> $coverage_session_log
+	log_msg "Collecting coverage for the FTS env $1"
+    log_msg ""
 	collect_env_coverage "$1"
 }
 
 
 ## Main coverage collection logic
 start_time=$(date +%s)
-echo "FTS coverage collection executing at ${d} PT" > $coverage_session_log
-echo "Generating base coverage for the FTS env ${target_env_name}" >> $coverage_session_log
+log_msg "FTS coverage collection executing at ${d} PT"
+if [[ $dry_run -eq 1 ]]; then
+    log_msg "*** DRY-RUN MODE ENABLED ***"
+fi
+log_msg "Generating base coverage for the FTS env ${target_env_name}"
 env_rebuild_collect "${target_env_name}"
 case ${target_env_name} in
     fts_latest|$supported_fts_latest_pattern)
-        echo "No env-specific additional coverage currently required for ${target_env_name}" >> $coverage_session_log
+        log_msg "No env-specific additional coverage currently required for ${target_env_name}"
         ;;
     fts_release|$supported_fts_release_pattern)
-        echo "No env-specific additional coverage currently required for ${target_env_name}" >> $coverage_session_log
+        log_msg "No env-specific additional coverage currently required for ${target_env_name}"
         ;;
     # fts_release_ptx_y_z)  # special path to be used when releasing a previous patch version after a new minor version available
-    #     echo "Generating env-specific coverage for the FTS env fts_release_pta_b_c" >> $coverage_session_log
+    #     log_msg "Generating env-specific coverage for the FTS env fts_release_pta_b_c"
     #     env_rebuild_collect "fts_release_pta_b_c"
-    #     echo "Generating env-specific coverage for the FTS env fts_release_ptd_e_f" >> $coverage_session_log
+    #     log_msg "Generating env-specific coverage for the FTS env fts_release_ptd_e_f"
     #     env_rebuild_collect "fts_release_ptd_e_f"
     #     ;;
     *)
-        echo "no matching environment found, exiting..."  >> $coverage_session_log
+        log_msg "ERROR: No matching environment found, exiting..."
         exit 1
         ;;
 esac
-echo "Writing collected coverage stats for FTS env ${target_env_name}" >> $coverage_session_log
-python -m coverage report -m >> $coverage_session_log
+if [[ $dry_run -eq 1 ]]; then
+    log_msg "Dry-run complete. No tests were executed."
+else
+    log_msg "Writing collected coverage stats for FTS env ${target_env_name}"
+    python -m coverage report -m >> $coverage_session_log
+fi
 show_elapsed_time $coverage_session_log "FTS coverage collection"

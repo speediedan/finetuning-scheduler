@@ -155,3 +155,37 @@ notebook_metadata_filter = "-all"
 [tool.jupytext.formats]
 "notebooks/" = "ipynb"
 "scripts/" = "py"
+
+# Dependency groups for development (PEP 735)
+# Note: Main dependencies and optional-dependencies remain in setup.py for dynamic Lightning switching
+[dependency-groups]
+dev = [
+    # install all mandatory dependencies (via base extras)
+    # install all extra dependencies for full package testing
+    # install all extra dependencies for running examples
+    # install all extra dependencies for running notebook-based example tests
+    # install all extra dependencies required for cli
+    # extended list of dependencies for development and run lint and tests (via test group)
+]
+test = [
+    "coverage>=6.4",
+    "pytest>=6.0",
+    "pytest-rerunfailures>=10.2",
+    "twine==3.2",
+    "mypy>=0.920",
+    "pre-commit>=1.0",
+    "protobuf<=3.20.1",  # strict
+    "mlflow>=1.0.0",  # optional dependencies used in base fts coverage
+]
+# git dependencies installed separately (git URLs cannot be in universal lock files)
+git-deps = [
+    # Lightning is handled dynamically via setup.py based on PACKAGE_NAME and USE_CI_COMMIT_PIN
+]
+
+[tool.uv]
+# Override dependencies for editable installations
+# This replaces git URL dependencies with version constraints, allowing
+# editable installations to satisfy requirements via UV's git dependency caching
+override-dependencies = [
+    # Lightning override handled via overrides file specified at install time for more flexibility
+]

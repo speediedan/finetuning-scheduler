@@ -75,5 +75,5 @@ environment variable. This approach is similar to PyTorch's approach with Triton
     cd finetuning-scheduler
     python -m pip install -e ".[all]"
 
-The specific Lightning commit is defined in ``requirements/lightning_pin.txt`` and is used by the CI system to
+The specific Lightning commit is defined in ``requirements/ci/overrides.txt`` and is used by the CI system to
 ensure consistent testing.

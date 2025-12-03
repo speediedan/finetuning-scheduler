@@ -1,0 +1,66 @@
+name: "Install CI Dependencies"
+description: "Install Python dependencies for CI workflows using uv"
+
+inputs:
+  python_version:
+    description: "Python version to use"
+    required: false
+    default: "3.12"
+  use_oldest:
+    description: "Whether to use oldest compatible versions (for testing min version support)"
+    required: false
+    default: "false"
+  use_commit_pin:
+    description: "Whether to use Lightning commit pinning"
+    required: false
+    default: "true"
+  show_pip_list:
+    description: "Whether to show package list output after installations"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install uv and set Python version
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: ${{ inputs.python_version }}
+        activate-environment: true
+        enable-cache: true
+
+    - name: Set min. dependencies
+      if: inputs.use_oldest == 'true'
+      shell: bash
+      run: |
+        # Use assistant.py to replace version constraints with oldest compatible versions
+        python .actions/assistant.py replace_oldest_ver
+
+    - name: Install project in editable mode (with commit pin)
+      if: inputs.use_commit_pin == 'true'
+      shell: bash
+      env:
+        USE_CI_COMMIT_PIN: "1"
+      run: |
+        echo "Installing finetuning-scheduler in editable mode with Lightning commit pin..."
+        uv pip install -e ".[all]" --override requirements/ci/overrides.txt
+
+    - name: Install project in editable mode (without commit pin)
+      if: inputs.use_commit_pin != 'true'
+      shell: bash
+      run: |
+        echo "Installing finetuning-scheduler in editable mode..."
+        uv pip install -e ".[all]"
+
+    - name: Install locked CI requirements
+      if: inputs.use_oldest != 'true'
+      shell: bash
+      run: |
+        echo "Installing locked CI requirements for reproducibility..."
+        uv pip install -r requirements/ci/requirements.txt
+
+    - name: Show package list
+      if: inputs.show_pip_list == 'true'
+      shell: bash
+      run: |
+        uv pip list

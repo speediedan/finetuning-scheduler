@@ -82,12 +82,54 @@ def get_requirement_files(standalone: bool = False) -> List[str]:
 
     return reqs
 
+def parse_overrides_file(overrides_path: str) -> Dict[str, str]:
+    """Parse the overrides.txt file to extract package commit hashes.
+
+    The overrides file format supports lines like:
+        package @ git+https://github.com/owner/repo.git@commit_hash
+        package==version
+
+    Args:
+        overrides_path: Path to the overrides.txt file
+
+    Returns:
+        Dictionary mapping package names to their git URL specifications or version pins
+    """
+    overrides: Dict[str, str] = {}
+    if not os.path.exists(overrides_path):
+        return overrides
+
+    with open(overrides_path) as f:
+        for line in f:
+            line = line.strip()
+            # Skip comments and empty lines
+            if not line or line.startswith("#"):
+                continue
+
+            # Parse git URL format: package @ git+https://...@commit
+            if " @ git+" in line:
+                match = re.match(r'^([a-zA-Z0-9_-]+)\s*@\s*(git\+.+)$', line)
+                if match:
+                    pkg_name = match.group(1).lower()
+                    git_url = match.group(2)
+                    overrides[pkg_name] = git_url
+            # Parse version pin format: package==version
+            elif "==" in line:
+                match = re.match(r'^([a-zA-Z0-9_-]+)==(.+)$', line)
+                if match:
+                    pkg_name = match.group(1).lower()
+                    version = match.group(2)
+                    overrides[pkg_name] = f"=={version}"
+
+    return overrides
+
+
 def get_lightning_requirement(package_type: str = "unified", use_commit: bool = False) -> str:
     """Get the Lightning requirement string based on configuration.
 
     Args:
         package_type: Either "unified" or "standalone"
-        use_commit: Whether to use the specific commit hash
+        use_commit: Whether to use the specific commit hash from overrides.txt
 
     Returns:
         The requirement string for the Lightning package
@@ -99,19 +141,26 @@ def get_lightning_requirement(package_type: str = "unified", use_commit: bool = 
         return f"{package_name}{pkg_info['version']}"
 
     project_root = Path(__file__).parent.parent.parent.parent
-    LIGHTNING_COMMIT_FILE = os.path.join(project_root, "requirements/lightning_pin.txt")
+    overrides_file = os.path.join(project_root, "requirements/ci/overrides.txt")
 
-    # Check if the commit file exists
-    if not os.path.exists(LIGHTNING_COMMIT_FILE):
-        print(f"Warning: USE_CI_COMMIT_PIN is set but {LIGHTNING_COMMIT_FILE} does not exist.")
+    # Check if the overrides file exists
+    if not os.path.exists(overrides_file):
+        print(f"Warning: USE_CI_COMMIT_PIN is set but {overrides_file} does not exist.")
         print(f"Falling back to release-based installation: {package_name}{pkg_info['version']}")
         return f"{package_name}{pkg_info['version']}"
 
-    with open(LIGHTNING_COMMIT_FILE) as f:
-        LIGHTNING_COMMIT = f.read().strip()
+    # Parse overrides and look for the Lightning package
+    overrides = parse_overrides_file(overrides_file)
+    pkg_key = package_name.lower()
 
-    repo = pkg_info["repo"]
-    return f"{package_name} @ git+https://github.com/{repo}.git@{LIGHTNING_COMMIT}#egg={package_name}"
+    if pkg_key not in overrides:
+        print(f"Warning: {package_name} not found in {overrides_file}.")
+        print(f"Falling back to release-based installation: {package_name}{pkg_info['version']}")
+        return f"{package_name}{pkg_info['version']}"
+
+    git_url = overrides[pkg_key]
+    return f"{package_name} @ {git_url}#egg={package_name}"
+
 
 def _retrieve_files(directory: str, *ext: str, exclude_files: Optional[List[str]] = None) -> List[str]:
     """Find all files in a directory with optional extension filtering and exclusion."""

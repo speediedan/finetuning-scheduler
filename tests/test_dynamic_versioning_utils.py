@@ -7,10 +7,42 @@ import pytest
 from finetuning_scheduler.dynamic_versioning.utils import (
     get_lightning_requirement, _retrieve_files,
     _replace_imports, _check_import_format, use_standalone_pl, use_unified_pl,
-    get_project_paths, toggle_lightning_imports,
+    get_project_paths, toggle_lightning_imports, parse_overrides_file,
     LIGHTNING_PACKAGE_MAPPING, EXCLUDE_FILES_FROM_CONVERSION, get_requirement_files,
     _is_package_installed
 )
+
+
+def test_parse_overrides_file(tmp_path):
+    """Test parsing the overrides.txt file format."""
+    # Create a test overrides file
+    overrides_file = tmp_path / "overrides.txt"
+    overrides_file.write_text("""# FTS dependency overrides
+# Comment line
+
+lightning @ git+https://github.com/Lightning-AI/lightning.git@abc123def456
+pytorch-lightning @ git+https://github.com/Lightning-AI/pytorch-lightning.git@789xyz
+
+# Version pin example
+torch==2.10.0.dev20251124+cu128
+""")
+
+    overrides = parse_overrides_file(str(overrides_file))
+
+    assert "lightning" in overrides
+    assert overrides["lightning"] == "git+https://github.com/Lightning-AI/lightning.git@abc123def456"
+
+    assert "pytorch-lightning" in overrides
+    assert overrides["pytorch-lightning"] == "git+https://github.com/Lightning-AI/pytorch-lightning.git@789xyz"
+
+    assert "torch" in overrides
+    assert overrides["torch"] == "==2.10.0.dev20251124+cu128"
+
+
+def test_parse_overrides_file_missing():
+    """Test parsing when overrides file doesn't exist."""
+    overrides = parse_overrides_file("/nonexistent/path/overrides.txt")
+    assert overrides == {}
 
 
 def test_get_lightning_requirement():
@@ -24,24 +56,30 @@ def test_get_lightning_requirement():
     assert "pytorch-lightning>=" in req
     assert "@" not in req
 
-    # Test with commit (mock the file reading)
-    with patch("builtins.open", mock_open(read_data="abc123")):
+    # Test with commit (mock the overrides file)
+    mock_overrides_content = "lightning @ git+https://github.com/Lightning-AI/lightning.git@abc123\n"
+    with patch("os.path.exists", return_value=True), \
+         patch("builtins.open", mock_open(read_data=mock_overrides_content)):
         req = get_lightning_requirement("unified", True)
         assert "lightning @ git+" in req
         assert "abc123" in req
 
+    # Test standalone with commit
+    mock_overrides_content = "pytorch-lightning @ git+https://github.com/Lightning-AI/pytorch-lightning.git@xyz789\n"
+    with patch("os.path.exists", return_value=True), \
+         patch("builtins.open", mock_open(read_data=mock_overrides_content)):
         req = get_lightning_requirement("standalone", True)
         assert "pytorch-lightning @ git+" in req
-        assert "abc123" in req
+        assert "xyz789" in req
 
 
-def test_get_lightning_requirement_missing_pin_file():
-    """Test getting the Lightning requirement string when commit pin file is missing."""
-    # Mock os.path.exists to return False for the lightning_pin.txt file
+def test_get_lightning_requirement_missing_overrides_file():
+    """Test getting the Lightning requirement string when overrides file is missing."""
+    # Mock os.path.exists to return False for the overrides.txt file
     with patch('os.path.exists', return_value=False), \
          patch('builtins.print') as mock_print:
 
-        # Test with use_commit=True but missing pin file
+        # Test with use_commit=True but missing overrides file
         req = get_lightning_requirement("unified", True)
 
         # Should fall back to release-based installation
@@ -63,13 +101,31 @@ def test_get_lightning_requirement_missing_pin_file():
         assert "@" not in req
 
 
+def test_get_lightning_requirement_package_not_in_overrides():
+    """Test when the package is not found in the overrides file."""
+    # Overrides file exists but doesn't contain the requested package
+    mock_overrides_content = "some-other-package @ git+https://github.com/owner/repo.git@commit\n"
+    with patch("os.path.exists", return_value=True), \
+         patch("builtins.open", mock_open(read_data=mock_overrides_content)), \
+         patch('builtins.print') as mock_print:
+
+        req = get_lightning_requirement("unified", True)
+
+        # Should fall back to release-based installation
+        assert "lightning>=" in req
+        assert "@" not in req
+
+        # Should print warning about package not found
+        assert any("not found in" in call_args[0][0]
+                  for call_args in mock_print.call_args_list)
+
+
 def test_lightning_package_mapping():
     """Test Lightning package mapping constants."""
     assert "lightning.pytorch" in LIGHTNING_PACKAGE_MAPPING
     assert LIGHTNING_PACKAGE_MAPPING["lightning.pytorch"] == "pytorch_lightning"
     assert "lightning.fabric" in LIGHTNING_PACKAGE_MAPPING
     assert LIGHTNING_PACKAGE_MAPPING["lightning.fabric"] == "lightning_fabric"
-
 
 def test_retrieve_files(tmp_path):
     """Test retrieving files with extensions and exclusions."""

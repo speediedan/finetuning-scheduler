@@ -93,7 +93,7 @@ unset FTS_GLOBAL_STATE_LOG_MODE
   - `~/repos/finetuning-scheduler` for development
   - `~/repos/fts-release` for release branches
 - Update `build_fts_env.sh` when testing with different PyTorch versions
-- For CI testing configurations, use the `USE_CI_COMMIT_PIN=1` environment variable to install Lightning from the commit specified in `requirements/lightning_pin.txt`
+- For CI testing configurations, use the `USE_CI_COMMIT_PIN=1` environment variable to install Lightning from the commit specified in `requirements/ci/overrides.txt`
 
 ## Running Basic Coverage Manually
 

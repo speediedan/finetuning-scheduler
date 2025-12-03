@@ -13,7 +13,9 @@ on:  # Trigger the workflow on push or pull request, but only for the main branc
       - "src/**"
       - "requirements/**"
       - ".github/workflows/ci_test-full.yml"
+      - ".github/actions/**"
       - ".actions/**"
+      - "scripts/infra_utils.sh"
   pull_request:
     branches: [main, "release/*"]
     types: [opened, reopened, ready_for_review, synchronize]
@@ -26,7 +28,9 @@ on:  # Trigger the workflow on push or pull request, but only for the main branc
       - "src/**"
       - "requirements/**"
       - ".github/workflows/ci_test-full.yml"
+      - ".github/actions/**"
       - ".actions/**"
+      - "scripts/infra_utils.sh"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref }}
@@ -61,50 +65,33 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+    - name: Install CI Dependencies
+      uses: ./.github/actions/install-ci-dependencies
       with:
-        python-version: ${{ matrix.python-version }}
+        python_version: ${{ matrix.python-version }}
+        use_oldest: ${{ matrix.requires == 'oldest' }}
+        use_commit_pin: "true"
+        show_pip_list: "true"
 
     - name: Reset caching
       run: python -c "import time; days = time.time() / 60 / 60 / 24; print(f'TIME_PERIOD=d{int(days / 2) * 2}')" >> $GITHUB_ENV
 
-    - name: basic setup
-      env:
-        USE_CI_COMMIT_PIN: "1"
-      run: |
-        pip --version
-        pip install --requirement requirements/cli.txt --upgrade
-
-    - name: Set min. dependencies
-      if: matrix.requires == 'oldest'
-      run: |
-        python .actions/assistant.py replace_oldest_ver
-
-    - name: Install package with dependencies
-      env:
-        USE_CI_COMMIT_PIN: "1"
-      run: |
-        # Install the package with all dependencies (including pinned Lightning)
-        pip install '.[all]'
-        # pip list | grep -i lightning
-
     # Note: This uses an internal pip API and may not always work
     # https://github.com/actions/cache/blob/master/examples.md#multiple-oss-in-a-workflow
     # sadly, this env var is not properly abstracted over OS platforms so we set it twice, the second time for windows
-    - name: Get pip cache dir windows
-      id: pip-cache
+    - name: Get uv cache dir windows
+      id: uv-cache
+      shell: bash
       run: |
-        echo "PIP_CACHE_DIR=$(pip cache dir)" >> $GITHUB_OUTPUT
-        echo "PIP_CACHE_DIR=$(pip cache dir)" >> $env:GITHUB_OUTPUT
+        echo "UV_CACHE_DIR=$(uv cache dir)" >> $GITHUB_OUTPUT
 
-    - name: pip cache
+    - name: uv cache
       uses: actions/cache@v4
       with:
-        path: ${{ steps.pip-cache.outputs.PIP_CACHE_DIR }}
-        key: ${{ runner.os }}-pip-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-${{ hashFiles('requirements/base.txt') }}-${{ hashFiles('requirements/extra.txt') }}
+        path: ${{ steps.uv-cache.outputs.UV_CACHE_DIR }}
+        key: ${{ runner.os }}-uv-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-${{ hashFiles('requirements/base.txt') }}-${{ hashFiles('requirements/extra.txt') }}
         restore-keys: |
-          ${{ runner.os }}-pip-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-
+          ${{ runner.os }}-uv-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-
 
     - name: Cache datasets
       uses: actions/cache@v4

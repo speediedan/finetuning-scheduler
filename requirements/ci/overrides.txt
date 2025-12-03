@@ -1,0 +1,6 @@
+# FTS dependency overrides for CI/dev builds
+# This file is used with `uv pip install --override` when USE_CI_COMMIT_PIN is set.
+# Update the commit hash below to pin Lightning to a specific commit for testing.
+
+# Lightning commit pin - update this when testing against new Lightning commits
+lightning @ git+https://github.com/Lightning-AI/lightning.git@79ffe5025e0ceababbe874d6269e2006145226c1

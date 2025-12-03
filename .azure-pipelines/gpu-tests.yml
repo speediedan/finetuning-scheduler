@@ -40,6 +40,7 @@ pr:
       - "requirements/**"
       - ".azure-pipelines/**"
       - ".actions/**"
+  drafts: false  # Only run for PRs that are "ready for review"
 
 jobs:
   - job: pytest
@@ -68,59 +69,94 @@ jobs:
     steps:
 
     - bash: |
-        . /tmp/venvs/fts_dev/bin/activate
-        pip install --upgrade pip requests setuptools
-        pip install -e . --no-warn-script-location --requirement requirements/devel.txt
-        # pip install lightning --upgrade # rather than upgrade, we now use the relevant pin
+        set -e  # Exit on any error
+        source /tmp/venvs/fts_dev/bin/activate
+
+        echo "=== Installing finetuning-scheduler in editable mode ==="
+        if ! uv pip install -e ".[all]" --override requirements/ci/overrides.txt; then
+          echo "ERROR: Failed to install finetuning-scheduler in editable mode"
+          exit 1
+        fi
+        echo "✓ Finetuning-scheduler installation completed"
+
+        echo "=== Installing locked CI requirements ==="
+        if ! uv pip install -r requirements/ci/requirements.txt; then
+          echo "ERROR: Failed to install locked CI requirements"
+          exit 1
+        fi
+        echo "✓ CI requirements installation completed"
+
+        echo "=== Installed packages ==="
+        uv pip list
       env:
         USE_CI_COMMIT_PIN: "1"
       displayName: 'Install dependencies'
 
     - bash: |
-        . /tmp/venvs/fts_dev/bin/activate
+        source /tmp/venvs/fts_dev/bin/activate
         python requirements/collect_env_details.py
         python -c "import torch ; print(f'PyTorch CUDA version: {torch.version.cuda}') ; mgpu = torch.cuda.device_count() ; assert mgpu >= 2, f'GPU: {mgpu}'"
       displayName: 'Env details'
 
     - bash: |
-        . /tmp/venvs/fts_dev/bin/activate
+        source /tmp/venvs/fts_dev/bin/activate
         python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
       displayName: 'Testing: standard'
 
     - bash: |
-        . /tmp/venvs/fts_dev/bin/activate
+        source /tmp/venvs/fts_dev/bin/activate
         bash ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
       displayName: 'Testing: standalone multi-gpu'
 
     # - bash: |
-    #     . /tmp/venvs/fts_dev/bin/activate
+    #     source /tmp/venvs/fts_dev/bin/activate
     #     bash ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0 1"
     #   displayName: 'Testing: Experimental Multi-GPU'
 
     - bash: |
-        . /tmp/venvs/fts_dev/bin/activate
+        source /tmp/venvs/fts_dev/bin/activate
         python -m coverage report
         python -m coverage xml
         python -m coverage html
-        curl -Os https://uploader.codecov.io/latest/linux/codecov
+        # curl -Os https://uploader.codecov.io/latest/linux/codecov
+
+        curl https://keybase.io/codecovsecurity/pgp_keys.asc | gpg --no-default-keyring --keyring trustedkeys.gpg --import
+        curl -Os https://cli.codecov.io/latest/linux/codecov
+        curl -Os https://cli.codecov.io/latest/linux/codecov.SHA256SUM
+        curl -Os https://cli.codecov.io/latest/linux/codecov.SHA256SUM.sig
+        gpg --no-default-keyring --keyring trustedkeys.gpg --verify codecov.SHA256SUM.sig codecov.SHA256SUM
+        shasum -a 256 -c codecov.SHA256SUM
         chmod +x codecov
-        ./codecov -t $CODECOV_TOK --commit=$(Build.SourceVersion) --flags=gpu,pytest --name="GPU-coverage" --env=linux,azure
+        # ./codecov -t $CODECOV_TOK --commit=$(Build.SourceVersion) --flags=gpu,pytest --name="GPU-coverage" --env=linux,azure
+        ./codecov upload-process --slug 'speediedan/finetuning-scheduler' -t $CODECOV_TOK --commit-sha $(Build.SourceVersion) --git-service 'github' -n "GPU-coverage" -F 'gpu,pytest' --env 'linux,azure' -f 'coverage.xml'
       env:
         CODECOV_TOK: $(CODECOV_TOKEN)  # explicit mapping required for secret azure pipeline variables
       displayName: 'Statistics'
 
     - bash: |
         set -e
-        . /tmp/venvs/fts_dev/bin/activate
+        source /tmp/venvs/fts_dev/bin/activate
         python -m pytest src/fts_examples -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
       # condition: notIn(variables['scope'], '2.0.1')
       displayName: 'Testing: Examples'
 
     - bash: |
-        . /tmp/venvs/fts_dev/bin/activate
+        source /tmp/venvs/fts_dev/bin/activate
         mkdir -p /__w/_temp/kernel_cache
         bash ./tests/special_tests.sh --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'
       # condition: notIn(variables['scope'], '2.0.1')
       env:
         PYTORCH_KERNEL_CACHE_PATH: "/__w/_temp/kernel_cache"
       displayName: 'Testing: Multi-GPU Examples'
+
+    - bash: |
+        # since we use rootless docker and userns-remapping, we need to ensure all files/directories in previous
+        # steps that may have been written with Azure's `az_pipeline_agent_azpcontainer` user (100997 in the host
+        # subuid range) are chmod'd or removed
+        echo "Adjusting ownership/permissions..."
+        sudo chmod -R 775 /__w/1/s || true
+        echo "Cleaning up ephemeral directories..."
+        sudo rm -rf /__w/1/s/.pytest_cache || true
+        echo 'Agent workspace cleanup completed'
+      condition: always()
+      displayName: 'Cleaning up agent workspace'
