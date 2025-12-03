@@ -15,6 +15,15 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict, ValuesView
 
+# Try to import tomllib (Python 3.11+) or fallback to tomli
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib  # type: ignore[import-not-found,no-redef]
+    except ImportError:
+        tomllib = None  # type: ignore[assignment]
+
 # -----------------------------------------------------------------------------
 # Lightning Configuration
 # -----------------------------------------------------------------------------
@@ -41,6 +50,12 @@ LIGHTNING_PACKAGES = {
     }
 }
 
+# Base dependencies (torch + Lightning are handled dynamically)
+# These are the core dependencies that are always installed
+BASE_DEPENDENCIES = [
+    "torch>=2.6.0",
+]
+
 # Files to exclude from modification to prevent self-modification
 EXCLUDE_FILES_FROM_CONVERSION = [
     "setup_tools.py",
@@ -51,8 +66,29 @@ EXCLUDE_FILES_FROM_CONVERSION = [
     "test_dynamic_versioning_utils.py"
 ]
 
+
+def _get_project_root() -> Path:
+    """Get the project root directory."""
+    current_file_dir = Path(__file__).parent
+    # Navigate up from dynamic_versioning/ -> finetuning_scheduler/ -> src/ -> project_root/
+    return current_file_dir.parent.parent.parent
+
+
+def get_base_dependencies() -> List[str]:
+    """Get the base dependencies list.
+
+    Returns:
+        List of base dependency strings (excluding Lightning, which is added dynamically)
+    """
+    return BASE_DEPENDENCIES.copy()
+
+
 def get_requirement_files(standalone: bool = False) -> List[str]:
     """Get installation requirements with dynamic Lightning configuration.
+
+    Note: Lightning commit pinning is now handled at install time via UV_OVERRIDE
+    environment variable rather than at package metadata time. This simplifies the
+    install_requires list to just include version constraints.
 
     Args:
         standalone: Whether to use standalone pytorch-lightning package
@@ -60,106 +96,31 @@ def get_requirement_files(standalone: bool = False) -> List[str]:
     Returns:
         List of requirement strings
     """
-    base_req_file = "base.txt"
-    with open(os.path.join(Path(__file__).parent.parent.parent.parent, "requirements", base_req_file)) as file:
-        lines = [ln.strip() for ln in file.readlines()]
+    # Start with base dependencies
+    reqs = get_base_dependencies()
 
-    reqs = []
-    for ln in lines:
-        if ln.startswith("#") or not ln:
-            continue
-        if ln.startswith("pytorch-lightning") or ln.startswith("lightning"):
-            continue
-        reqs.append(ln)
-
-    use_commit = os.environ.get("USE_CI_COMMIT_PIN", "").lower() in ("1", "true", "yes")
+    # Add Lightning dependency based on package type
     package_type = "standalone" if standalone else "unified"
-    lightning_req = get_lightning_requirement(package_type, use_commit)
+    lightning_req = get_lightning_requirement(package_type)
     reqs.append(lightning_req)
-
-    if use_commit:
-        print(f"Using Lightning from commit: {lightning_req}")
 
     return reqs
 
-def parse_overrides_file(overrides_path: str) -> Dict[str, str]:
-    """Parse the overrides.txt file to extract package commit hashes.
 
-    The overrides file format supports lines like:
-        package @ git+https://github.com/owner/repo.git@commit_hash
-        package==version
-
-    Args:
-        overrides_path: Path to the overrides.txt file
-
-    Returns:
-        Dictionary mapping package names to their git URL specifications or version pins
-    """
-    overrides: Dict[str, str] = {}
-    if not os.path.exists(overrides_path):
-        return overrides
-
-    with open(overrides_path) as f:
-        for line in f:
-            line = line.strip()
-            # Skip comments and empty lines
-            if not line or line.startswith("#"):
-                continue
-
-            # Parse git URL format: package @ git+https://...@commit
-            if " @ git+" in line:
-                match = re.match(r'^([a-zA-Z0-9_-]+)\s*@\s*(git\+.+)$', line)
-                if match:
-                    pkg_name = match.group(1).lower()
-                    git_url = match.group(2)
-                    overrides[pkg_name] = git_url
-            # Parse version pin format: package==version
-            elif "==" in line:
-                match = re.match(r'^([a-zA-Z0-9_-]+)==(.+)$', line)
-                if match:
-                    pkg_name = match.group(1).lower()
-                    version = match.group(2)
-                    overrides[pkg_name] = f"=={version}"
-
-    return overrides
-
-
-def get_lightning_requirement(package_type: str = "unified", use_commit: bool = False) -> str:
+def get_lightning_requirement(package_type: str = "unified") -> str:
     """Get the Lightning requirement string based on configuration.
+
+    Note: Commit pinning is handled at install time via UV_OVERRIDE, not here.
 
     Args:
         package_type: Either "unified" or "standalone"
-        use_commit: Whether to use the specific commit hash from overrides.txt
 
     Returns:
-        The requirement string for the Lightning package
+        The requirement string for the Lightning package with version constraint
     """
     pkg_info = LIGHTNING_PACKAGES[package_type]
     package_name = pkg_info["package"]
-
-    if not use_commit:
-        return f"{package_name}{pkg_info['version']}"
-
-    project_root = Path(__file__).parent.parent.parent.parent
-    overrides_file = os.path.join(project_root, "requirements/ci/overrides.txt")
-
-    # Check if the overrides file exists
-    if not os.path.exists(overrides_file):
-        print(f"Warning: USE_CI_COMMIT_PIN is set but {overrides_file} does not exist.")
-        print(f"Falling back to release-based installation: {package_name}{pkg_info['version']}")
-        return f"{package_name}{pkg_info['version']}"
-
-    # Parse overrides and look for the Lightning package
-    overrides = parse_overrides_file(overrides_file)
-    pkg_key = package_name.lower()
-
-    if pkg_key not in overrides:
-        print(f"Warning: {package_name} not found in {overrides_file}.")
-        print(f"Falling back to release-based installation: {package_name}{pkg_info['version']}")
-        return f"{package_name}{pkg_info['version']}"
-
-    git_url = overrides[pkg_key]
-    return f"{package_name} @ {git_url}#egg={package_name}"
+    return f"{package_name}{pkg_info['version']}"
 
 
 def _retrieve_files(directory: str, *ext: str, exclude_files: Optional[List[str]] = None) -> List[str]:

@@ -11,14 +11,13 @@ inputs:
     required: false
     default: "false"
   use_commit_pin:
-    description: "Whether to use Lightning commit pinning"
+    description: "Whether to use Lightning commit pinning via UV_OVERRIDE"
     required: false
     default: "true"
   show_pip_list:
     description: "Whether to show package list output after installations"
     required: false
     default: "false"
-
 runs:
   using: "composite"
   steps:
@@ -29,35 +28,64 @@ runs:
         activate-environment: true
         enable-cache: true
 
-    - name: Set min. dependencies
-      if: inputs.use_oldest == 'true'
+    # Detect if torch nightly is configured
+    - name: Check torch nightly configuration
+      id: torch-config
       shell: bash
       run: |
-        # Use assistant.py to replace version constraints with oldest compatible versions
-        python .actions/assistant.py replace_oldest_ver
+        NIGHTLY_FILE="requirements/ci/torch-nightly.txt"
+        if [[ -f "${NIGHTLY_FILE}" ]]; then
+          TORCH_VERSION=$(grep -v '^#' "${NIGHTLY_FILE}" | grep -v '^$' | head -1 || true)
+          if [[ -n "${TORCH_VERSION}" ]]; then
+            echo "torch_nightly=true" >> $GITHUB_OUTPUT
+            echo "torch_version=${TORCH_VERSION}" >> $GITHUB_OUTPUT
+            echo "Torch nightly detected: ${TORCH_VERSION}"
+          else
+            echo "torch_nightly=false" >> $GITHUB_OUTPUT
+            echo "No torch nightly configured"
+          fi
+        else
+          echo "torch_nightly=false" >> $GITHUB_OUTPUT
+          echo "No torch-nightly.txt found"
+        fi
 
-    - name: Install project in editable mode (with commit pin)
-      if: inputs.use_commit_pin == 'true'
+    # Pre-install torch nightly if configured (before lock file installation)
+    - name: Pre-install torch nightly
+      if: steps.torch-config.outputs.torch_nightly == 'true'
+      shell: bash
+      run: |
+        echo "Pre-installing torch nightly: ${{ steps.torch-config.outputs.torch_version }}+cpu"
+        uv pip install --prerelease=allow "torch==${{ steps.torch-config.outputs.torch_version }}+cpu" \
+          --index-url https://download.pytorch.org/whl/nightly/cpu
+
+    # Single command installation of FTS and all dependencies
+    # - UV_OVERRIDE: applies Lightning commit pin from overrides.txt
+    # - When nightly: filter torch from requirements file
+    # - When stable: use --torch-backend=cpu to ensure CPU variant
+    - name: Install FTS and all dependencies
       shell: bash
       env:
-        USE_CI_COMMIT_PIN: "1"
+        UV_OVERRIDE: ${{ inputs.use_commit_pin == 'true' && format('{0}/requirements/ci/overrides.txt', github.workspace) || '' }}
       run: |
-        echo "Installing finetuning-scheduler in editable mode with Lightning commit pin..."
-        uv pip install -e ".[all]" --override requirements/ci/overrides.txt
+        if [[ "${{ inputs.use_oldest }}" == "true" ]]; then
+          REQ_FILE="requirements/ci/requirements-oldest.txt"
+          echo "Installing with oldest versions..."
+        else
+          REQ_FILE="requirements/ci/requirements.txt"
+          echo "Installing with latest versions..."
+        fi
 
-    - name: Install project in editable mode (without commit pin)
-      if: inputs.use_commit_pin != 'true'
-      shell: bash
-      run: |
-        echo "Installing finetuning-scheduler in editable mode..."
-        uv pip install -e ".[all]"
+        # When torch nightly is configured, requirements.txt already has torch filtered
+        # (done during lock file generation). Otherwise use --torch-backend for CPU variant.
+        if [[ "${{ steps.torch-config.outputs.torch_nightly }}" == "true" ]]; then
+          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE}"
+        else
+          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=cpu"
+        fi
 
-    - name: Install locked CI requirements
-      if: inputs.use_oldest != 'true'
-      shell: bash
-      run: |
-        echo "Installing locked CI requirements for reproducibility..."
-        uv pip install -r requirements/ci/requirements.txt
+        echo "Running: ${INSTALL_CMD}"
+        echo "  UV_OVERRIDE=${UV_OVERRIDE:-'(not set)'}"
+        ${INSTALL_CMD}
 
     - name: Show package list
       if: inputs.show_pip_list == 'true'

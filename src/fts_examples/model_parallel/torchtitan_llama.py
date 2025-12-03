@@ -394,8 +394,9 @@ class Transformer(nn.Module):
         self.init_weights()
 
     def init_weights(self):
-        """
-        [Note: On ``init_weights`` vs. ``reset_parameters``]
+        """[Note: On ``init_weights`` vs.
+
+        ``reset_parameters``]
         Modules may define ``reset_parameters`` to initialize parameter values.
         ``reset_parameters`` is meant to only initialize directly owned
         parameters/buffers, not those of their child modules, and it can be

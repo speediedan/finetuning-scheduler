@@ -69,7 +69,6 @@ COPY ./requirements.txt requirements.txt
 COPY ./requirements/ ./requirements/
 
 ENV PYTHONPATH=/usr/lib/python${PYTHON_VERSION}/site-packages
-ENV USE_CI_COMMIT_PIN="1"
 ENV PATH="/root/.local/bin:$PATH"
 
 RUN \

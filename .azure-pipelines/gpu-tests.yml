@@ -72,24 +72,22 @@ jobs:
         set -e  # Exit on any error
         source /tmp/venvs/fts_dev/bin/activate
 
-        echo "=== Installing finetuning-scheduler in editable mode ==="
-        if ! uv pip install -e ".[all]" --override requirements/ci/overrides.txt; then
-          echo "ERROR: Failed to install finetuning-scheduler in editable mode"
+        echo "=== Pre-installed torch version ==="
+        python -c "import torch; print(f'torch: {torch.__version__}')"
+
+        echo "=== Installing finetuning-scheduler with locked dependencies ==="
+        # Use UV_OVERRIDE for Lightning commit pinning
+        # requirements.txt has torch filtered when nightly is configured (done during lock generation)
+        # Docker image torch version should match - if not, we want an error to trigger image rebuild
+        export UV_OVERRIDE="${PWD}/requirements/ci/overrides.txt"
+        if ! uv pip install -e . -r requirements/ci/requirements.txt; then
+          echo "ERROR: Failed to install finetuning-scheduler with dependencies"
           exit 1
         fi
         echo "✓ Finetuning-scheduler installation completed"
 
-        echo "=== Installing locked CI requirements ==="
-        if ! uv pip install -r requirements/ci/requirements.txt; then
-          echo "ERROR: Failed to install locked CI requirements"
-          exit 1
-        fi
-        echo "✓ CI requirements installation completed"
-
         echo "=== Installed packages ==="
         uv pip list
-      env:
-        USE_CI_COMMIT_PIN: "1"
       displayName: 'Install dependencies'
 
     - bash: |

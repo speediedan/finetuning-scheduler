@@ -44,7 +44,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, windows-2022, macOS-14]
-        python-version: ["3.9", "3.12"]  # minimum, maximum
+        python-version: ["3.10", "3.12"]  # minimum, maximum
         # tests will include oldest and newest tested patch versions of pytorch
         requires: ["oldest", "latest"]
         release: ["latest"]
@@ -52,7 +52,6 @@ jobs:
           - {os: ubuntu-22.04, python-version: "3.12", requires: "oldest"}
           - {os: windows-2022, python-version: "3.12", requires: "oldest"}
           - {os: macOS-14, python-version: "3.12", requires: "oldest"}
-          - {os: macOS-14, python-version: "3.9", requires: "oldest"}  # exclude until 2.6 due to tokenizers build error
         # include:
         #   # adding when using a release candidate
         #   # - {os: ubuntu-22.04, python-version: "3.12", requires: "latest", release: "pre"}
