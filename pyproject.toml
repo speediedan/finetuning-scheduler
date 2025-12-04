@@ -59,8 +59,8 @@ examples = [
     "evaluate>=0.3.0",
     "transformers>=4.26.0",
     "scikit-learn>=1.2.0",
-    "sentencepiece>=0.2.0",  # 0.2.0+ has pre-built wheels
-    "tensorboardX>=2.2",
+    "sentencepiece>=0.2.0",
+    "tensorboardX>=2.5",
     "tabulate>=0.8.9",
     "psutil>=5.9.0",
     # Include CLI deps
@@ -98,7 +98,7 @@ all = [
     "transformers>=4.26.0",
     "scikit-learn>=1.2.0",
     "sentencepiece>=0.2.0",
-    "tensorboardX>=2.2",
+    "tensorboardX>=2.5",
     "tabulate>=0.8.9",
     "psutil>=5.9.0",
     # ipynb
