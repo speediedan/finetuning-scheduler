@@ -62,7 +62,5 @@ jobs:
         run: |
           pyright -p pyproject.toml
 
-      - name: Minimize uv cache
-        if: always()
-        shell: bash
-        run: uv cache prune --ci
+      # Note: UV cache pruning is handled automatically by setup-uv action
+      # with prune-cache: true (set in install-ci-dependencies action)

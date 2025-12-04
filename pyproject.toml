@@ -42,31 +42,31 @@ classifiers = [
 # CLI tools for LightningCLI integration
 cli = [
     "jsonargparse[signatures]>=4.27.7,<4.42.0",
-    "omegaconf>=2.1.0",
-    "hydra-core>=1.1.0",
+    "omegaconf>=2.2.3",
+    "hydra-core>=1.2.0",
 ]
 # Extended functionality
 extra = [
     "rich>=12.3.0",
     # Include CLI deps
     "jsonargparse[signatures]>=4.27.7,<4.42.0",
-    "omegaconf>=2.1.0",
-    "hydra-core>=1.1.0",
+    "omegaconf>=2.2.3",
+    "hydra-core>=1.2.0",
 ]
 # Example scripts dependencies
 examples = [
     "datasets>=4.0.0",  # Important removal of trust_remote_code
     "evaluate>=0.3.0",
     "transformers>=4.18.0",
-    "scikit-learn>=1.0.0",
+    "scikit-learn>=1.2.0",
     "sentencepiece>=0.2.0",  # 0.2.0+ has pre-built wheels
     "tensorboardX>=2.2",
     "tabulate>=0.8.9",
-    "psutil>=5.8.0",
+    "psutil>=5.9.0",
     # Include CLI deps
     "jsonargparse[signatures]>=4.27.7,<4.42.0",
-    "omegaconf>=2.1.0",
-    "hydra-core>=1.1.0",
+    "omegaconf>=2.2.3",
+    "hydra-core>=1.2.0",
 ]
 # Jupyter notebook testing
 ipynb = [
@@ -90,17 +90,17 @@ all = [
     "rich>=12.3.0",
     # cli
     "jsonargparse[signatures]>=4.27.7,<4.42.0",
-    "omegaconf>=2.1.0",
-    "hydra-core>=1.1.0",
+    "omegaconf>=2.2.3",
+    "hydra-core>=1.2.0",
     # examples
     "datasets>=4.0.0",
     "evaluate>=0.3.0",
     "transformers>=4.18.0",
-    "scikit-learn>=1.0.0",
+    "scikit-learn>=1.2.0",
     "sentencepiece>=0.2.0",
     "tensorboardX>=2.2",
     "tabulate>=0.8.9",
-    "psutil>=5.8.0",
+    "psutil>=5.9.0",
     # ipynb
     "ipython>=7.10.0",
     "jupytext>=1.10.0",

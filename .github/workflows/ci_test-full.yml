@@ -72,25 +72,10 @@ jobs:
         use_commit_pin: "true"
         show_pip_list: "true"
 
-    - name: Reset caching
-      run: python -c "import time; days = time.time() / 60 / 60 / 24; print(f'TIME_PERIOD=d{int(days / 2) * 2}')" >> $GITHUB_ENV
-
-    # Note: This uses an internal pip API and may not always work
-    # https://github.com/actions/cache/blob/master/examples.md#multiple-oss-in-a-workflow
-    # sadly, this env var is not properly abstracted over OS platforms so we set it twice, the second time for windows
-    - name: Get uv cache dir windows
-      id: uv-cache
-      shell: bash
-      run: |
-        echo "UV_CACHE_DIR=$(uv cache dir)" >> $GITHUB_OUTPUT
-
-    - name: uv cache
-      uses: actions/cache@v4
-      with:
-        path: ${{ steps.uv-cache.outputs.UV_CACHE_DIR }}
-        key: ${{ runner.os }}-uv-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-${{ hashFiles('requirements/base.txt') }}-${{ hashFiles('requirements/extra.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-uv-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-
+    # Note: UV caching is handled by setup-uv action in install-ci-dependencies
+    # with enable-cache: true, prune-cache: true, and cache-suffix for differentiation.
+    # No additional manual UV cache step is needed - the setup-uv action automatically
+    # saves/restores the cache with proper key generation based on lockfiles.
 
     - name: Cache datasets
       uses: actions/cache@v4
@@ -126,7 +111,5 @@ jobs:
         fail_ci_if_error: false
         verbose: true # optional (default = false)
 
-    - name: Minimize uv cache
-      if: always()
-      shell: bash
-      run: uv cache prune --ci
+    # Note: UV cache pruning is handled automatically by setup-uv action
+    # with prune-cache: true (set in install-ci-dependencies action)
