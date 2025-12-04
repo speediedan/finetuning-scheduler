@@ -57,7 +57,7 @@ extra = [
 examples = [
     "datasets>=4.0.0",  # Important removal of trust_remote_code
     "evaluate>=0.3.0",
-    "transformers>=4.18.0",
+    "transformers>=4.26.0",
     "scikit-learn>=1.2.0",
     "sentencepiece>=0.2.0",  # 0.2.0+ has pre-built wheels
     "tensorboardX>=2.2",
@@ -95,7 +95,7 @@ all = [
     # examples
     "datasets>=4.0.0",
     "evaluate>=0.3.0",
-    "transformers>=4.18.0",
+    "transformers>=4.26.0",
     "scikit-learn>=1.2.0",
     "sentencepiece>=0.2.0",
     "tensorboardX>=2.2",
@@ -267,7 +267,7 @@ notebook_metadata_filter = "-all"
 dev = [
     # Development dependencies include test group
     "coverage>=6.4",
-    "pytest>=6.0.0",
+    "pytest>=7.0.0",
     "pytest-rerunfailures>=10.2",
     "twine>=3.2.0",
     "pyright>=1.1.390",
@@ -276,7 +276,7 @@ dev = [
 ]
 test = [
     "coverage>=6.4",
-    "pytest>=6.0.0",
+    "pytest>=7.0.0",
     "pytest-rerunfailures>=10.2",
     "twine>=3.2.0",
     "pyright>=1.1.390",

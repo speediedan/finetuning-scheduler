@@ -58,7 +58,6 @@ click==8.3.1
     #   databricks-cli
     #   flask
     #   mlflow
-    #   sacremoses
 cloudpickle==3.1.2
     # via mlflow
 colorama==0.4.6
@@ -209,9 +208,7 @@ jinja2==3.1.6
     #   notebook
     #   torch
 joblib==1.5.2
-    # via
-    #   sacremoses
-    #   scikit-learn
+    # via scikit-learn
 jsonargparse[signatures]==4.27.7
     # via finetuning-scheduler (pyproject.toml)
 jsonschema==4.17.3
@@ -279,7 +276,6 @@ more-itertools==10.8.0
     # via
     #   jaraco-classes
     #   jaraco-functools
-    #   pytest
 mpmath==1.3.0
     # via sympy
 multidict==6.7.0
@@ -416,7 +412,7 @@ pkginfo==1.12.1.2
     # via twine
 platformdirs==4.5.0
     # via virtualenv
-pluggy==0.13.1
+pluggy==1.6.0
     # via pytest
 pre-commit==2.0.0
     # via
@@ -464,7 +460,7 @@ pyright==1.1.390
     #   finetuning-scheduler (pyproject.toml:test)
 pyrsistent==0.20.0
     # via jsonschema
-pytest==6.0.0
+pytest==7.0.0
     # via
     #   finetuning-scheduler (pyproject.toml:dev)
     #   finetuning-scheduler (pyproject.toml:test)
@@ -515,9 +511,7 @@ querystring-parser==1.2.4
 readme-renderer==44.0
     # via twine
 regex==2025.11.3
-    # via
-    #   sacremoses
-    #   transformers
+    # via transformers
 requests==2.32.5
     # via
     #   databricks-cli
@@ -538,8 +532,6 @@ rfc3986==2.0.0
     # via twine
 rich==12.3.0
     # via finetuning-scheduler (pyproject.toml)
-sacremoses==0.1.1
-    # via transformers
 scikit-learn==1.2.0
     # via
     #   finetuning-scheduler (pyproject.toml)
@@ -593,15 +585,16 @@ testpath==0.6.0
     # via nbconvert
 threadpoolctl==3.6.0
     # via scikit-learn
-tokenizers==0.12.1
+tokenizers==0.13.3
     # via transformers
 toml==0.10.2
     # via
     #   jupytext
     #   pre-commit
+tomli==2.3.0
+    # via
+    #   alembic
     #   pytest
-tomli==2.3.0 ; python_full_version < '3.11'
-    # via alembic
 torch==2.6.0
     # via
     #   finetuning-scheduler (pyproject.toml)
@@ -625,7 +618,6 @@ tqdm==4.67.1
     #   huggingface-hub
     #   lightning
     #   pytorch-lightning
-    #   sacremoses
     #   transformers
     #   twine
 traitlets==5.0.0
@@ -641,7 +633,7 @@ traitlets==5.0.0
     #   nbconvert
     #   nbformat
     #   notebook
-transformers==4.18.0
+transformers==4.26.0
     # via finetuning-scheduler (pyproject.toml)
 triton==3.2.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
