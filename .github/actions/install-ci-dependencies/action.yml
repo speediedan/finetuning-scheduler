@@ -27,6 +27,11 @@ runs:
         python-version: ${{ inputs.python_version }}
         activate-environment: true
         enable-cache: true
+        # Use cache-suffix to differentiate caches by Python version and resolution type
+        # This prevents cache conflicts between oldest/latest and different Python versions
+        cache-suffix: ${{ inputs.python_version }}-${{ inputs.use_oldest == 'true' && 'oldest' || 'latest' }}
+        # Prune cache before saving to limit disk usage (default is true, but be explicit)
+        prune-cache: true
 
     # Detect if torch nightly is configured
     - name: Check torch nightly configuration
@@ -52,8 +57,9 @@ runs:
     # Pre-install torch nightly if configured (before lock file installation)
     # Note: Skip on macOS ARM64 - nightly +cpu wheels are only built for x86_64
     # macOS ARM uses MPS acceleration, not CPU-only builds
+    # Also skip for "oldest" builds - they should use the oldest torch from lock file
     - name: Pre-install torch nightly
-      if: steps.torch-config.outputs.torch_nightly == 'true' && runner.os != 'macOS'
+      if: steps.torch-config.outputs.torch_nightly == 'true' && runner.os != 'macOS' && inputs.use_oldest != 'true'
       shell: bash
       run: |
         echo "Pre-installing torch nightly: ${{ steps.torch-config.outputs.torch_version }}+cpu"
@@ -62,8 +68,8 @@ runs:
 
     # Single command installation of FTS and all dependencies
     # - UV_OVERRIDE: applies Lightning commit pin from overrides.txt
-    # - When nightly: filter torch from requirements file
-    # - When stable: use --torch-backend=cpu to ensure CPU variant
+    # - When nightly (and not oldest): filter torch from requirements file
+    # - Otherwise: use --torch-backend=cpu to ensure CPU variant
     - name: Install FTS and all dependencies
       shell: bash
       env:
@@ -77,11 +83,13 @@ runs:
           echo "Installing with latest versions..."
         fi
 
-        # When torch nightly is configured, requirements.txt already has torch filtered
-        # (done during lock file generation). Otherwise use --torch-backend for CPU variant.
-        # Note: On macOS ARM64, torch nightly +cpu isn't available, so we need --torch-backend=auto
-        # to get regular torch with MPS support
-        if [[ "${{ steps.torch-config.outputs.torch_nightly }}" == "true" ]]; then
+        # For "oldest" builds: always use --torch-backend=cpu to get oldest torch from lock file
+        # For "latest" builds with nightly: torch already pre-installed (except macOS which needs --torch-backend=auto)
+        # For "latest" builds without nightly: use --torch-backend=cpu
+        if [[ "${{ inputs.use_oldest }}" == "true" ]]; then
+          # Oldest builds: use pinned torch from lock file with CPU backend
+          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=cpu"
+        elif [[ "${{ steps.torch-config.outputs.torch_nightly }}" == "true" ]]; then
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             # macOS: torch nightly +cpu not available for ARM64, install regular torch
             INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=auto"

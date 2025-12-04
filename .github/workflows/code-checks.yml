@@ -61,3 +61,8 @@ jobs:
         shell: bash
         run: |
           pyright -p pyproject.toml
+
+      - name: Minimize uv cache
+        if: always()
+        shell: bash
+        run: uv cache prune --ci
