@@ -142,7 +142,7 @@ gitdb==4.0.12
     # via gitpython
 gitpython==3.1.45
     # via mlflow
-greenlet==3.2.4 ; platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64'
+greenlet==3.3.0 ; platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64'
     # via sqlalchemy
 gunicorn==21.2.0 ; sys_platform != 'win32'
     # via mlflow
@@ -555,7 +555,7 @@ secretstorage==3.5.0 ; sys_platform == 'linux'
     # via keyring
 send2trash==1.8.3
     # via notebook
-sentencepiece==0.1.91
+sentencepiece==0.2.0
     # via finetuning-scheduler (pyproject.toml)
 setuptools==80.9.0
     # via
