@@ -13,6 +13,8 @@ unset uv_install_flags
 unset no_commit_pin
 unset venv_dir
 unset dry_run
+unset oldest
+unset no_special
 declare -a from_source_specs=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,9 +25,11 @@ usage(){
 Usage: $0
    [ --repo_home input]
    [ --target_env_name input ]
+   [ --oldest ]                  # Use oldest CI requirements (Python 3.10, requirements-oldest.txt)
    [ --torch_dev_ver input ]
    [ --torch_test_channel ]
    [ --no_rebuild_base ]
+   [ --no-special ]              # Skip special tests (standalone/experimental), run only main test suite
    [ --include_experimental ]
    [ --uv_install_flags "flags" ]
    [ --no_commit_pin ]
@@ -35,26 +39,28 @@ Usage: $0
    [ --help ]
    Examples:
 	# generate fts_latest coverage without rebuilding the fts_latest base environment:
-	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --no_rebuild_base
+	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --no_rebuild_base
+	# generate oldest CI build coverage (matches CI oldest matrix):
+	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_oldest --oldest --no-special --venv-dir=/mnt/cache/\${USER}/.venvs
 	# generate fts_latest coverage with a given torch_dev_version:
-	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_dev_ver=dev20240201
+	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_dev_ver=dev20240201
     # generate fts_latest coverage, rebuilding base fts_latest with PyTorch test channel and run tests that require experimental patches:
-    #   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_test_channel --include_experimental
+    #   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_test_channel --include_experimental
 	# generate fts_release coverage, rebuilding the base fts_release environment with PyTorch stable channel:
-	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release
+	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/fts-release --target_env_name=fts_release
 	# generate fts_release coverage, rebuilding the base fts_release environment with PyTorch test channel:
-	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release --torch_test_channel
+	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/fts-release --target_env_name=fts_release --torch_test_channel
 	# generate fts_latest coverage with explicit venv directory (recommended for hardlink performance):
-	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --venv-dir=/mnt/cache/\${USER}/.venvs
+	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --venv-dir=/mnt/cache/\${USER}/.venvs
 	# generate fts_release coverage without using CI commit pinning:
-	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release --no_commit_pin
+	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/fts-release --target_env_name=fts_release --no_commit_pin
 	# dry-run mode: setup environment and show what tests would run without executing them:
-	#   ./gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_dev_ver=dev20240201 --dry-run
+	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_dev_ver=dev20240201 --dry-run
 EOF
 exit 1
 }
 
-args=$(getopt -o '' --long repo_home:,target_env_name:,torch_dev_ver:,torch_test_channel,no_rebuild_base,include_experimental,uv_install_flags:,no_commit_pin,venv-dir:,from-source:,dry-run,help -- "$@")
+args=$(getopt -o '' --long repo_home:,target_env_name:,oldest,torch_dev_ver:,torch_test_channel,no_rebuild_base,no-special,include_experimental,uv_install_flags:,no_commit_pin,venv-dir:,from-source:,dry-run,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -65,9 +71,11 @@ do
   case $1 in
     --repo_home)  repo_home=$2    ; shift 2  ;;
     --target_env_name)  target_env_name=$2  ; shift 2 ;;
+    --oldest)   oldest=1 ; shift  ;;
     --torch_dev_ver)   torch_dev_ver=$2   ; shift 2 ;;
     --torch_test_channel)   torch_test_channel=1 ; shift  ;;
     --no_rebuild_base)   no_rebuild_base=1 ; shift  ;;
+    --no-special)   no_special=1 ; shift  ;;
     --include_experimental)   include_experimental=1 ; shift  ;;
     --uv_install_flags)   uv_install_flags=$2 ; shift 2 ;;
     --no_commit_pin)   no_commit_pin=1 ; shift  ;;
@@ -121,6 +129,11 @@ env_rebuild(){
     # Build command arguments array
     local -a cmd_args=("${repo_home}/scripts/build_fts_env.sh" "--repo_home=${repo_home}" "--target_env_name=$1")
 
+    # Add oldest flag if specified
+    if [[ $oldest -eq 1 ]]; then
+        cmd_args+=("--oldest")
+    fi
+
     # Add uv_install_flags if specified
     if [[ -n "${uv_install_flags}" ]]; then
         cmd_args+=("--uv_install_flags=${uv_install_flags}")
@@ -145,7 +158,7 @@ env_rebuild(){
     log_msg "Executing build command: ${cmd_args[*]}"
 
     case $1 in
-        fts_latest)
+        fts_latest|fts_oldest)
             if [[ -n ${torch_dev_ver} ]]; then
                 cmd_args+=("--torch_dev_ver=${torch_dev_ver}")
 			elif [[ $torch_test_channel -eq 1 ]]; then
@@ -212,18 +225,23 @@ collect_env_coverage(){
     fi
 
     case $1 in
-	    fts_latest|fts_release|$all_supported_pattern)
+	    fts_latest|fts_oldest|fts_release|$all_supported_pattern)
             log_msg "Erasing previous coverage data"
 			python -m coverage erase
             log_msg "Running main test suite with coverage"
 			python -m coverage run --append --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v 2>&1 >> $coverage_session_log
-            log_msg "Running standalone tests (pattern: test_f)"
-            (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f' --log_file=${coverage_session_log} 2>&1 >> ${temp_special_log}) > /dev/null
-            if [[ $include_experimental -eq 1 ]]; then
-                log_msg "Running tests that require experimental patches using $1"
-                (./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --log_file=${coverage_session_log} --experiment_patch_mask="1 0 0 1" 2>&1 >> ${temp_special_log}) > /dev/null
+            # Skip special tests if --no-special flag is set
+            if [[ $no_special -eq 1 ]]; then
+                log_msg "Skipping special tests (--no-special flag set)"
             else
-                log_msg "Skipping tests that require experimental patches."
+                log_msg "Running standalone tests (pattern: test_f)"
+                (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f' --log_file=${coverage_session_log} 2>&1 >> ${temp_special_log}) > /dev/null
+                if [[ $include_experimental -eq 1 ]]; then
+                    log_msg "Running tests that require experimental patches using $1"
+                    (./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --log_file=${coverage_session_log} --experiment_patch_mask="1 0 0 1" 2>&1 >> ${temp_special_log}) > /dev/null
+                else
+                    log_msg "Skipping tests that require experimental patches."
+                fi
             fi
 	        ;;
 	    *)
@@ -255,7 +273,7 @@ fi
 log_msg "Generating base coverage for the FTS env ${target_env_name}"
 env_rebuild_collect "${target_env_name}"
 case ${target_env_name} in
-    fts_latest|$supported_fts_latest_pattern)
+    fts_latest|fts_oldest|$supported_fts_latest_pattern)
         log_msg "No env-specific additional coverage currently required for ${target_env_name}"
         ;;
     fts_release|$supported_fts_release_pattern)

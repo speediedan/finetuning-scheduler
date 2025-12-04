@@ -391,6 +391,7 @@ packaging==23.2
     #   mlflow
     #   pytest
     #   pytorch-lightning
+    #   tensorboardx
     #   torchmetrics
     #   transformers
 pandas==2.3.3
@@ -563,7 +564,6 @@ six==1.17.0
     #   nbval
     #   python-dateutil
     #   querystring-parser
-    #   tensorboardx
 smmap==5.0.2
     # via gitdb
 sqlalchemy==2.0.44
@@ -578,7 +578,7 @@ tabulate==0.8.9
     # via
     #   finetuning-scheduler (pyproject.toml)
     #   databricks-cli
-tensorboardx==2.5
+tensorboardx==2.6.1
     # via finetuning-scheduler (pyproject.toml)
 terminado==0.18.1
     # via notebook

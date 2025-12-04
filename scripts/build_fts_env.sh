@@ -6,6 +6,8 @@
 #   ./build_fts_env.sh --repo_home=~/repos/finetuning-scheduler --target_env_name=fts_latest
 # build latest with explicit venv directory (recommended for hardlink performance):
 #   ./build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --venv-dir=/mnt/cache/${USER}/.venvs
+# build oldest (CI oldest build simulation with Python 3.10 and oldest deps):
+#   ./build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_oldest --oldest
 # build release:
 #   ./build_fts_env.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release
 # build latest with torch test channel:
@@ -22,6 +24,7 @@ unset torch_test_channel
 unset uv_install_flags
 unset no_commit_pin
 unset venv_dir
+unset oldest
 declare -a from_source_specs=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,6 +35,7 @@ usage(){
 Usage: $0
    [ --repo_home input]
    [ --target_env_name input ]
+   [ --oldest ]                # Use oldest CI requirements (Python 3.10, requirements-oldest.txt)
    [ --torch_test_channel ]    # Use PyTorch test/RC channel
    [ --uv_install_flags "flags" ]
    [ --no_commit_pin ]
@@ -43,6 +47,8 @@ Usage: $0
     #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest
     # build latest with explicit venv directory (recommended for hardlink performance):
     #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --venv-dir=/mnt/cache/\${USER}/.venvs
+    # build oldest (CI oldest build simulation):
+    #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_oldest --oldest --venv-dir=/mnt/cache/\${USER}/.venvs
     # build release:
     #   ./build_fts_env.sh --repo_home=\${HOME}/repos/fts-release --target_env_name=fts_release
     # build latest with torch test channel:
@@ -61,7 +67,7 @@ EOF
 exit 1
 }
 
-args=$(getopt -o '' --long repo_home:,target_env_name:,torch_test_channel,uv_install_flags:,no_commit_pin,venv-dir:,from-source:,help -- "$@")
+args=$(getopt -o '' --long repo_home:,target_env_name:,oldest,torch_test_channel,uv_install_flags:,no_commit_pin,venv-dir:,from-source:,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -72,6 +78,7 @@ do
   case $1 in
     --repo_home)  repo_home=$2    ; shift 2  ;;
     --target_env_name)  target_env_name=$2  ; shift 2 ;;
+    --oldest)   oldest=1 ; shift  ;;
     --torch_test_channel)   torch_test_channel=1 ; shift  ;;
     --uv_install_flags)   uv_install_flags=$2 ; shift 2 ;;
     --no_commit_pin)   no_commit_pin=1 ; shift  ;;
@@ -143,16 +150,26 @@ log_torch_version(){
 }
 
 base_env_build(){
+    # Use Python 3.10 for oldest builds, 3.12 for latest
     local python_version="python3.12"
+    if [[ -n ${oldest} ]]; then
+        python_version="python3.10"
+        echo "Using Python 3.10 for oldest build"
+    fi
 
     clear_activate_env ${python_version}
 
-    # Check for torch nightly configuration
-    read_torch_nightly_config
+    # Check for torch nightly configuration (skip for oldest builds)
+    if [[ -z ${oldest} ]]; then
+        read_torch_nightly_config
+    fi
 
     # Handle PyTorch version selection (pre-install before FTS dependencies)
-    # Priority: torch nightly from config > torch test channel > stable (via --torch-backend in fts_install)
-    if [[ -n "${TORCH_NIGHTLY_VERSION}" ]]; then
+    # Priority: oldest (stable from lock) > torch nightly from config > torch test channel > stable (via --torch-backend in fts_install)
+    if [[ -n ${oldest} ]]; then
+        # For oldest builds, torch is installed from requirements-oldest.txt (stable version)
+        echo "Using torch stable from requirements-oldest.txt for oldest build"
+    elif [[ -n "${TORCH_NIGHTLY_VERSION}" ]]; then
         # Nightly version from torch-nightly.txt with specified CUDA backend
         local cuda_target="${TORCH_NIGHTLY_CUDA:-cu128}"  # Default to cu128 if not specified
         local torch_pkg="torch==${TORCH_NIGHTLY_VERSION}"
@@ -195,7 +212,13 @@ fts_install(){
     local req_file="${repo_home}/requirements/ci/requirements.txt"
     local torch_backend_flag=""
 
-    if [[ -n "${TORCH_NIGHTLY_VERSION}" || -n ${torch_test_channel} ]]; then
+    # For oldest builds, use requirements-oldest.txt
+    if [[ -n ${oldest} ]]; then
+        req_file="${repo_home}/requirements/ci/requirements-oldest.txt"
+        echo "Using oldest requirements file: ${req_file}"
+        # Oldest builds use torch stable from lock file, need --torch-backend=auto
+        torch_backend_flag="--torch-backend=auto"
+    elif [[ -n "${TORCH_NIGHTLY_VERSION}" || -n ${torch_test_channel} ]]; then
         # Torch already pre-installed (nightly or test channel)
         # When nightly: requirements.txt already has torch filtered during lock generation
         # When test channel: filter at runtime
@@ -227,12 +250,11 @@ fts_install(){
     uv pip install ${uv_install_flags} -r requirements/docs.txt ${torch_backend_flag}
     log_torch_version "after docs requirements install"
 
-    # Install pip for mypy and pre-commit (they use pip internally)
+    # Install pip for pre-commit (it uses pip internally)
     uv pip install pip
 
     # Development setup
-    rm -rf .mypy_cache
-    mypy --install-types --non-interactive
+    pyright -p pyproject.toml || echo "⚠ pyright check had issues, continuing..."
     pre-commit install
     git lfs install
 

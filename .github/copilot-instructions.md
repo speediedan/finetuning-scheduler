@@ -97,6 +97,9 @@ Use the provided build script for automated setup:
 
 # Build from Lightning source
 ./scripts/build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --from-source="lightning:${HOME}/repos/lightning"
+
+# Build with oldest compatible dependencies (Python 3.10, mirrors CI oldest matrix)
+./scripts/build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_oldest --oldest
 ```
 
 **Venv Location Options:**
@@ -266,16 +269,64 @@ python -m pytest src/finetuning_scheduler tests -v
 
 ### Coverage Collection
 
+Use the `manage_standalone_processes.sh` harness with `--use-nohup` to run coverage collection in an isolated process. Output is written to `/tmp/gen_fts_coverage_<env>_<timestamp>.log`.
+
+**Monitoring progress:**
+
 ```bash
-# Generate coverage with rebuild
-./scripts/gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest
+# Tail the most recent coverage log
+tail -f `ls -rt /tmp/gen_fts_coverage_fts_* | tail -1`
+```
+
+**Common coverage commands:**
+
+```bash
+# Generate coverage with rebuild (fts_latest with stable PyTorch)
+~/repos/finetuning-scheduler/scripts/manage_standalone_processes.sh --use-nohup \
+  ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh \
+  --repo_home=${HOME}/repos/finetuning-scheduler \
+  --target_env_name=fts_latest \
+  --venv-dir=/mnt/cache/${USER}/.venvs
 
 # Generate coverage without rebuild
-./scripts/gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --no_rebuild_base
+~/repos/finetuning-scheduler/scripts/manage_standalone_processes.sh --use-nohup \
+  ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh \
+  --repo_home=${HOME}/repos/finetuning-scheduler \
+  --target_env_name=fts_latest \
+  --venv-dir=/mnt/cache/${USER}/.venvs \
+  --no_rebuild_base
 
 # Include experimental patch tests
-./scripts/gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --include_experimental
+~/repos/finetuning-scheduler/scripts/manage_standalone_processes.sh --use-nohup \
+  ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh \
+  --repo_home=${HOME}/repos/finetuning-scheduler \
+  --target_env_name=fts_latest \
+  --venv-dir=/mnt/cache/${USER}/.venvs \
+  --include_experimental
+
+# Generate coverage with oldest dependencies (Python 3.10, mirrors CI oldest matrix)
+~/repos/finetuning-scheduler/scripts/manage_standalone_processes.sh --use-nohup \
+  ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh \
+  --repo_home=${HOME}/repos/finetuning-scheduler \
+  --target_env_name=fts_oldest \
+  --venv-dir=/mnt/cache/${USER}/.venvs \
+  --oldest
+
+# Generate coverage with oldest deps, skip special tests (faster CI-like run)
+~/repos/finetuning-scheduler/scripts/manage_standalone_processes.sh --use-nohup \
+  ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh \
+  --repo_home=${HOME}/repos/finetuning-scheduler \
+  --target_env_name=fts_oldest \
+  --venv-dir=/mnt/cache/${USER}/.venvs \
+  --oldest \
+  --no-special
 ```
+
+**Flags:**
+
+- `--oldest`: Uses Python 3.10 and `requirements/ci/requirements-oldest.txt` (mirrors CI oldest matrix)
+- `--no-special`: Skips `special_tests.sh` standalone and experimental patch tests (faster iteration)
+- `--venv-dir`: Base directory for venvs (recommended: `/mnt/cache/${USER}/.venvs` for hardlink performance)
 
 ## Special Dependencies and Known Issues
 
