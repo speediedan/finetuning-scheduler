@@ -18,12 +18,8 @@ jobs:
           cache-dependency-glob: "requirements/**/*.txt"
           version: "latest"
 
-      - name: Install pkg
-        run: |
-          uv pip install --system check-jsonschema
-
       - name: GH Workflows
-        run: check-jsonschema .github/workflows/*.yml --builtin-schema "github-workflows"
+        run: uvx check-jsonschema .github/workflows/*.yml --builtin-schema "github-workflows"
 
       # - name: Azure Pipelines
       #   env:
