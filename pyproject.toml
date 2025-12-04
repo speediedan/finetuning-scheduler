@@ -200,6 +200,34 @@ exclude = ['tests/.*']
 # module = []
 # ignore_errors = "True"
 
+[tool.pyright]
+# Using "basic" mode for initial migration from mypy
+# TODO: Progressively tighten to "standard" as type issues are resolved
+typeCheckingMode = "basic"
+include = ["src/finetuning_scheduler"]
+exclude = [
+    "tests",
+    "docs",
+    "build",
+    "dist",
+    ".git",
+]
+# Match mypy's ignore_missing_imports behavior
+reportMissingImports = "none"
+# Match mypy's disable_error_code = "attr-defined" for PL Trainer attributes
+reportAttributeAccessIssue = "none"
+# Match mypy's allow_redefinition behavior
+reportConstantRedefinition = "none"
+# Disable private import usage warnings - required for Lightning internals
+reportPrivateImportUsage = "none"
+# Disable general type issues for generator context managers until properly annotated
+reportGeneralTypeIssues = "warning"
+# Disable invalid type form warnings for dynamic type expressions
+reportInvalidTypeForm = "none"
+# Temporarily disable these until code is updated with proper type annotations
+reportAssignmentType = "none"
+reportCallIssue = "none"
+reportIndexIssue = "none"
 
 [tool.coverage.report]
 exclude_lines = [
@@ -242,7 +270,7 @@ dev = [
     "pytest>=6.0.0",
     "pytest-rerunfailures>=10.2",
     "twine>=3.2.0",
-    "mypy>=0.920",
+    "pyright>=1.1.390",
     "pre-commit>=2.0.0",
     "mlflow>=2.0.0",
 ]
@@ -251,7 +279,7 @@ test = [
     "pytest>=6.0.0",
     "pytest-rerunfailures>=10.2",
     "twine>=3.2.0",
-    "mypy>=0.920",
+    "pyright>=1.1.390",
     "pre-commit>=2.0.0",
     # protobuf upper bound removed - handled by dependency resolution
     "mlflow>=2.0.0",

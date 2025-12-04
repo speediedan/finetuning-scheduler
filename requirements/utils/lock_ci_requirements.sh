@@ -107,7 +107,8 @@ generate_lockfile() {
 }
 
 # Generate both lock files
-# - Latest: Python 3.12 (current default), highest resolution
+# - Latest: Python 3.10 (minimum supported) to ensure proper version markers for
+#   packages like contourpy that have Python version requirements
 # - Oldest: Python 3.10 (minimum supported), lowest resolution
 #
 # When torch nightly is configured, torch is filtered from requirements.txt
@@ -118,7 +119,7 @@ if [[ -n "${TORCH_NIGHTLY_VERSION}" ]]; then
     echo "Torch nightly mode: ${TORCH_NIGHTLY_VERSION} - torch will be filtered from requirements.txt"
 fi
 
-generate_lockfile "highest" "${CI_DIR}/requirements.txt" "3.12" "${FILTER_TORCH}"
+generate_lockfile "highest" "${CI_DIR}/requirements.txt" "3.10" "${FILTER_TORCH}"
 generate_lockfile "lowest-direct" "${CI_DIR}/requirements-oldest.txt" "3.10" "false"
 
 echo ""

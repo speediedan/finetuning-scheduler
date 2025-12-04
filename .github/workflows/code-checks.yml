@@ -1,24 +1,63 @@
-name: Test
+name: Type Checks
 
 on:  # Trigger the workflow on push or pull request, but only for the main branch
   push:
     branches: [main, "release/*"]
+    paths:
+      - "setup.*"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - "src/**"
+      - "requirements/**"
+      - ".github/workflows/code-checks.yml"
+      # Exclude documentation-only files from triggering
+      - "!docs/**"
+      - "!**/*.md"
+      - "!**/*.rst"
+      - "!**/CHANGELOG.md"
+      - "!**/CODE_OF_CONDUCT.md"
+      - "!**/CONTRIBUTING.md"
+      - "!**/LICENSE*"
   pull_request:
     branches: [main, "release/*"]
+    paths:
+      - "setup.*"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - "src/**"
+      - "requirements/**"
+      - ".github/workflows/code-checks.yml"
+      # Exclude documentation-only files from triggering
+      - "!docs/**"
+      - "!**/*.md"
+      - "!**/*.rst"
+      - "!**/CHANGELOG.md"
+      - "!**/CODE_OF_CONDUCT.md"
+      - "!**/CONTRIBUTING.md"
+      - "!**/LICENSE*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref }}
+  cancel-in-progress: ${{ ! (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) }}
 
 env:
   USE_CI_COMMIT_PIN: "1"
 
 jobs:
-  mypy:
+  type-check:
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - name: Install CI Dependencies
+        uses: ./.github/actions/install-ci-dependencies
         with:
-          python-version: '3.12'
-      - name: Install dependencies
+          python_version: "3.12"
+          use_commit_pin: "true"
+          show_pip_list: "true"
+
+      - name: Run pyright type check
+        shell: bash
         run: |
-          pip install '.[dev]'
-          pip list
-      - run: mypy --install-types --non-interactive
+          pyright -p pyproject.toml

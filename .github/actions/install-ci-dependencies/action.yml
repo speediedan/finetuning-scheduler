@@ -50,8 +50,10 @@ runs:
         fi
 
     # Pre-install torch nightly if configured (before lock file installation)
+    # Note: Skip on macOS ARM64 - nightly +cpu wheels are only built for x86_64
+    # macOS ARM uses MPS acceleration, not CPU-only builds
     - name: Pre-install torch nightly
-      if: steps.torch-config.outputs.torch_nightly == 'true'
+      if: steps.torch-config.outputs.torch_nightly == 'true' && runner.os != 'macOS'
       shell: bash
       run: |
         echo "Pre-installing torch nightly: ${{ steps.torch-config.outputs.torch_version }}+cpu"
@@ -77,8 +79,16 @@ runs:
 
         # When torch nightly is configured, requirements.txt already has torch filtered
         # (done during lock file generation). Otherwise use --torch-backend for CPU variant.
+        # Note: On macOS ARM64, torch nightly +cpu isn't available, so we need --torch-backend=auto
+        # to get regular torch with MPS support
         if [[ "${{ steps.torch-config.outputs.torch_nightly }}" == "true" ]]; then
-          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE}"
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            # macOS: torch nightly +cpu not available for ARM64, install regular torch
+            INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=auto"
+          else
+            # Linux/Windows: torch nightly already pre-installed
+            INSTALL_CMD="uv pip install -e . -r ${REQ_FILE}"
+          fi
         else
           INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=cpu"
         fi
