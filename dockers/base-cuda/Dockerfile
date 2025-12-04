@@ -96,7 +96,6 @@ RUN \
     # uv pip install -r requirements/devel.txt && \
     # Update six
     uv pip install -U six && \
-    chmod -R 777 /tmp/venvs/fts_dev && \
     rm -rf requirements.* requirements/
 
 RUN \
@@ -113,8 +112,8 @@ RUN \
 RUN \
     echo "=== Post-ENV permission check ===" && \
     ls -ld /tmp/venvs/fts_dev && \
-    echo "Checking torch __pycache__ permissions:" && \
-    find /tmp/venvs/fts_dev -type d -path "*/torch/__pycache__" | head -3 | xargs ls -ld || echo "No torch __pycache__ found" && \
+    echo "Checking __pycache__ permissions (sample):" && \
+    find /tmp/venvs/fts_dev -type d -name "__pycache__" | head -5 | xargs ls -ld || echo "No __pycache__ found" && \
     echo "=== Post-ENV check complete ==="
 
 RUN \
@@ -129,4 +128,9 @@ RUN \
     python -c "import sys; ver = sys.version_info; print(f'Python {ver.major}.{ver.minor} detected'); assert f'{ver.major}.{ver.minor}' == '$PYTHON_VERSION', ver" && \
     echo "Verifying PyTorch version:" && \
     python -c "import torch; print(f'PyTorch {torch.__version__} detected'); assert torch.__version__.startswith('$PYTORCH_VERSION'), torch.__version__" && \
-    echo "============= Environment Verification Complete ============="
+    echo "============= Environment Verification Complete =============" && \
+    # Apply recursive chmod to allow userns-remapped rootless Docker users to update the venv
+    chmod -R 777 /tmp/venvs/fts_dev && \
+    echo "Verify permission state after final chmod:" && \
+    find /tmp/venvs/fts_dev -type d -name "__pycache__" | head -5 | xargs ls -ld || echo "No __pycache__ found" && \
+    echo "=== Post-env-check chmod complete ==="
