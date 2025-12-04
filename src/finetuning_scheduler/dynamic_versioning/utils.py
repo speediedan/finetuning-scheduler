@@ -15,15 +15,6 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict, ValuesView
 
-# Try to import tomllib (Python 3.11+) or fallback to tomli
-try:
-    import tomllib
-except ImportError:
-    try:
-        import tomli as tomllib  # type: ignore[import-not-found,no-redef]
-    except ImportError:
-        tomllib = None  # type: ignore[assignment]
-
 # -----------------------------------------------------------------------------
 # Lightning Configuration
 # -----------------------------------------------------------------------------
@@ -246,12 +237,12 @@ def toggle_lightning_imports(mode: str = "unified", debug: bool = False) -> None
     try:
         if mode == "unified" and not _is_package_installed("lightning"):
             print("Warning: Cannot toggle to unified imports because the 'lightning' package is not installed.")
-            print("Please install the unified Lightning package with: pip install lightning")
+            print("Please install the unified Lightning package with: uv pip install lightning")
             return
         elif mode == "standalone" and not _is_package_installed("pytorch_lightning"):
             print("Warning: Cannot toggle to standalone imports because the 'pytorch-lightning' package is not "
                   "installed.")
-            print("Please install the standalone Lightning package with: pip install pytorch-lightning")
+            print("Please install the standalone Lightning package with: uv pip install pytorch-lightning")
             return
 
         _, install_paths = get_project_paths()

@@ -66,11 +66,6 @@ validate_process_not_running() {
     exit 2
   fi
 
-  if [ ${#patterns[@]} -eq 0 ]; then
-    echo "No patterns found to check for conflicting processes; proceeding..."
-    return 0
-  fi
-
   # Join patterns with | for pgrep -f
   IFS='|'; pgrep_pattern="${patterns[*]}"; unset IFS
 

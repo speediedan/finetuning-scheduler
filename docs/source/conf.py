@@ -51,8 +51,11 @@ def _transform_changelog(path_in: str, path_out: str) -> None:
 
 
 os.makedirs(os.path.join(PATH_HERE, FOLDER_GENERATED), exist_ok=True)
-# copy all documents from GH templates like contribution guide
+# copy all documents from GH templates like contribution guide (exclude internal development docs)
 for md in glob.glob(os.path.join(PATH_ROOT, ".github", "*.md")):
+    # Skip copilot-instructions.md as it's an internal development document
+    if os.path.basename(md) == "copilot-instructions.md":
+        continue
     shutil.copy(md, os.path.join(PATH_HERE, FOLDER_GENERATED, os.path.basename(md)))
 # copy also the changelog
 _transform_changelog(os.path.join(PATH_ROOT, "CHANGELOG.md"), os.path.join(PATH_HERE, FOLDER_GENERATED, "CHANGELOG.md"))
@@ -295,13 +298,25 @@ PACKAGE_MAPPING = {
     "PyYAML": "yaml",
     "pyDeprecate": "deprecate",
 }
+# Packages to mock for autodoc (RTD doesn't install ML dependencies)
+# These are the packages from pyproject.toml dependencies and optional-dependencies
 MOCK_PACKAGES = []
 if SPHINX_MOCK_REQUIREMENTS:
-    MOCK_PACKAGES += ["torchmetrics"]
-    # mock also base packages when we are on RTD since we don't install them there
-    MOCK_PACKAGES += package_list_from_file(os.path.join(PATH_ROOT, "requirements", "base.txt"))
-    MOCK_PACKAGES += package_list_from_file(os.path.join(PATH_ROOT, "requirements", "examples.txt"))
-    MOCK_PACKAGES += package_list_from_file(os.path.join(PATH_ROOT, "requirements", "extra.txt"))
+    # Base dependencies (torch + Lightning are imported directly)
+    MOCK_PACKAGES += ["torch", "torchmetrics"]
+    # Examples optional dependencies
+    MOCK_PACKAGES += [
+        "datasets",
+        "evaluate",
+        "transformers",
+        "sklearn",
+        "sentencepiece",
+        "tensorboardX",
+        "tabulate",
+        "psutil",
+    ]
+    # Extra optional dependencies
+    MOCK_PACKAGES += ["rich", "jsonargparse", "omegaconf", "hydra"]
 MOCK_PACKAGES = [PACKAGE_MAPPING.get(pkg, pkg) for pkg in MOCK_PACKAGES]
 autodoc_mock_imports = MOCK_PACKAGES
 

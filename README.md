@@ -41,7 +41,7 @@ ______________________________________________________________________
 ### Step 0: Install from PyPI
 
 ```bash
-pip install finetuning-scheduler
+uv pip install finetuning-scheduler
 ```
 
 <!-- following section will be skipped from PyPI description -->
@@ -55,27 +55,60 @@ pip install finetuning-scheduler
 #### To install additional packages required for examples:
 
 ```bash
-pip install finetuning-scheduler['examples']
+uv pip install finetuning-scheduler['examples']
 ```
 
 #### or to include packages for examples, development and testing:
 
 ```bash
-pip install finetuning-scheduler['all']
+uv pip install finetuning-scheduler['all']
 ```
 
 #### *Source Installation Examples*
 
-#### To install from (editable) source (includes docs as well):
+#### Using the build script (recommended):
+
+The `build_fts_env.sh` script automatically handles Lightning commit pinning and optional PyTorch nightly installation:
 
 ```bash
-# FTS pins Lightning to a specific commit for CI and development
-# This is similar to PyTorch's approach with Triton.
-export USE_CI_COMMIT_PIN="1"
-
 git clone https://github.com/speediedan/finetuning-scheduler.git
 cd finetuning-scheduler
-python -m pip install -e ".[all]" -r requirements/docs.txt
+
+# Standard development build (handles Lightning pin automatically)
+./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest
+
+# Build with PyTorch nightly (if configured in requirements/ci/torch-nightly.txt)
+./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest --venv-dir=/path/to/.venvs
+
+# Activate (use your venv base path)
+export FTS_VENV_BASE=~/.venvs  # or /mnt/cache/${USER}/.venvs
+export FTS_VENV_NAME=fts_latest
+source ${FTS_VENV_BASE}/${FTS_VENV_NAME}/bin/activate
+```
+
+#### Manual installation with Lightning commit pin:
+
+```bash
+git clone https://github.com/speediedan/finetuning-scheduler.git
+cd finetuning-scheduler
+
+# Set UV_OVERRIDE to use the pinned Lightning commit
+export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
+uv pip install -e ".[all]"
+```
+
+#### Manual installation with PyTorch nightly:
+
+```bash
+git clone https://github.com/speediedan/finetuning-scheduler.git
+cd finetuning-scheduler
+
+# Install PyTorch nightly first (adjust version and CUDA target as needed)
+uv pip install torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# Then install FTS with Lightning commit pin
+export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
+uv pip install -e ".[all]"
 ```
 
 #### Install a specific FTS version from source using the standalone `pytorch-lighting` package:
@@ -85,7 +118,8 @@ export FTS_VERSION=2.6.0
 export PACKAGE_NAME=pytorch
 git clone -b v${FTS_VERSION} https://github.com/speediedan/finetuning-scheduler
 cd finetuning-scheduler
-python -m pip install -e ".[all]" -r requirements/docs.txt
+export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
+uv pip install -e ".[all]"
 ```
 
 #### *Latest Docker Image*
@@ -123,7 +157,7 @@ Install a given FTS release (for example v2.0.0) using standalone `pytorch-light
 export FTS_VERSION=2.0.0
 export PACKAGE_NAME=pytorch
 wget https://github.com/speediedan/finetuning-scheduler/releases/download/v${FTS_VERSION}/finetuning-scheduler-${FTS_VERSION}.tar.gz
-pip install finetuning-scheduler-${FTS_VERSION}.tar.gz
+uv pip install finetuning-scheduler-${FTS_VERSION}.tar.gz
 ```
 
 ### Dynamic Versioning

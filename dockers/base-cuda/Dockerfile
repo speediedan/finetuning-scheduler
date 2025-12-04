@@ -20,7 +20,6 @@ ARG PYTHON_VERSION=3.12
 ARG PYTORCH_VERSION=2.10.0
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
-ARG UV_VERSION=0.7.0
 
 SHELL ["/bin/bash", "-c"]
 # https://techoverflow.net/2019/05/18/how-to-fix-configuring-tzdata-interactive-input-when-building-docker-images/
@@ -32,7 +31,8 @@ ENV \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0" \
     MKL_THREADING_LAYER=${MKL_THREADING_LAYER} \
-    MAKEFLAGS="-j2"
+    MAKEFLAGS="-j2" \
+    UV_HTTP_TIMEOUT=120
 RUN apt-get update -qq --fix-missing  && \
     apt-get install -y --no-install-recommends \
         build-essential \
@@ -55,21 +55,17 @@ RUN apt-get update -qq --fix-missing  && \
     && \
     update-alternatives --install /usr/bin/python${PYTHON_VERSION%%.*} python${PYTHON_VERSION%%.*} /usr/bin/python${PYTHON_VERSION} 1 && \
     update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1 && \
+    # Install uv for fast, reliable package management (system-wide)
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh && \
     # Cleaning
     apt-get autoremove -y && \
     apt-get clean && \
     rm -rf /root/.cache && \
     rm -rf /var/lib/apt/lists/*
 
-# Install uv for fast Python package management
-RUN curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | sh && \
-    echo 'source $HOME/.local/bin/env' >> ~/.bashrc
-
-COPY ./requirements.txt requirements.txt
 COPY ./requirements/ ./requirements/
 
 ENV PYTHONPATH=/usr/lib/python${PYTHON_VERSION}/site-packages
-ENV PATH="/root/.local/bin:$PATH"
 
 RUN \
     # Create venv with uv

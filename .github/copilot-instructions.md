@@ -64,6 +64,7 @@ export FTS_REPO_DIR=${HOME}/repos/finetuning-scheduler  # Example: adjust to you
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Create development environment (creates traditional venv)
+# The build script handles Lightning commit pinning and optional PyTorch nightly automatically
 ./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest
 
 # Activate the environment
@@ -73,6 +74,29 @@ source ${FTS_VENV_BASE}/${FTS_TARGET_VENV}/bin/activate
 # Run commands directly (no need for 'uv run')
 python --version
 python -m pytest tests/
+```
+
+**Manual installation (without build script):**
+
+```bash
+cd ${FTS_REPO_DIR}
+
+# For manual installs, set UV_OVERRIDE to use the pinned Lightning commit
+export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
+uv pip install -e ".[all]"
+```
+
+**Manual installation with PyTorch nightly:**
+
+```bash
+cd ${FTS_REPO_DIR}
+
+# Install PyTorch nightly first (adjust version and CUDA target as needed, see any specified metadata in requirements/ci/torch-nightly.txt or use your preferred one)
+uv pip install torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# Then install FTS with Lightning commit pin
+export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
+uv pip install -e ".[all]"
 ```
 
 ### Development Environment Scripts
@@ -202,11 +226,11 @@ src/fts_examples/             # Example experiments
 - `pyproject.toml` - Main project config, dependencies, ruff/pytest settings
 - `setup.py` - Dynamic dependency handling for Lightning packages
 - `.pre-commit-config.yaml` - Code quality hooks
-- `requirements/` - Dependency files
-  - `base.txt` - Core dependencies
-  - `extra.txt` - Extra dependencies
-  - `docs.txt` - Documentation dependencies
-  - `ci/overrides.txt` - Dependency overrides for dev/CI (Lightning commit pin, etc.)
+- `requirements/` - Dependency files (CI and docs only)
+  - `docs.txt` - Documentation dependencies (Sphinx, etc.)
+  - `ci/overrides.txt` - Dependency overrides for dev/CI (Lightning commit pin)
+  - `ci/requirements.txt` - Locked CI requirements
+  - `ci/requirements-oldest.txt` - Locked oldest compatible versions
 
 ### Key Entry Points
 
@@ -220,7 +244,7 @@ src/fts_examples/             # Example experiments
 **File:** `.github/workflows/ci_test-full.yml`
 
 **Triggers:** Push/PR to main, changes to source/test files
-**Platforms:** Ubuntu 22.04, Windows 2022, macOS 14 (Python 3.9, 3.12)
+**Platforms:** Ubuntu 22.04, Windows 2022, macOS 14 (Python 3.10, 3.12)
 **Timeout:** 90 minutes
 
 **Matrix Strategy:**

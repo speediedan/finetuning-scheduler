@@ -1,67 +1,123 @@
 # Testing Finetuning Scheduler
 
+## Quick Start (Using Build Script)
+
+The build script automatically handles Lightning commit pinning and optional PyTorch nightly:
+
 ```bash
 git clone https://github.com/speediedan/finetuning-scheduler
 cd finetuning-scheduler
 
-# FTS pins Lightning to a specific commit for CI and development (similar to PyTorch's approach with Triton)
-# When running tests or developing, it's recommended to use this environment variable when installing
-export USE_CI_COMMIT_PIN="1"
+# Create development environment (handles Lightning pin automatically)
+./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest
 
-# install dev deps
-python -m pip install ".[all]"
+# Activate and run tests (use your venv base path)
+export FTS_VENV_BASE=~/.venvs  # or /mnt/cache/${USER}/.venvs
+export FTS_VENV_NAME=fts_latest
+source ${FTS_VENV_BASE}/${FTS_VENV_NAME}/bin/activate
+pytest -xvs .
+```
 
-# run tests
+## Manual Installation
+
+```bash
+git clone https://github.com/speediedan/finetuning-scheduler
+cd finetuning-scheduler
+
+# Set UV_OVERRIDE to use the pinned Lightning commit
+export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
+
+# Install dev deps
+uv pip install ".[all]"
+
+# Run tests
+pytest -xvs .
+```
+
+## Manual Installation with PyTorch Nightly
+
+```bash
+git clone https://github.com/speediedan/finetuning-scheduler
+cd finetuning-scheduler
+
+# Install PyTorch nightly first (adjust version and CUDA target as needed)
+uv pip install torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# Then install FTS with Lightning commit pin
+export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
+uv pip install ".[all]"
+
+# Run tests
 pytest -xvs .
 ```
 
 ## Testing Infrastructure
 
-FTS provides helpful scripts to accelerating building test environments and generation of coverage reports.
+FTS provides helpful scripts to accelerate building test environments and generating coverage reports.
+The `gen_fts_coverage.sh` script handles environment creation/rebuild and coverage collection in a single command.
 
-### Building Test Environments
-
-The `build_fts_env.sh` script helps create virtual environments for testing (using `venv`):
+**Set environment context variables (developer-specific paths):**
 
 ```bash
-# Latest development environment with stable PyTorch
-~/repos/finetuning-scheduler/scripts/build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest
-
-# Latest with PyTorch test/RC channel
-~/repos/finetuning-scheduler/scripts/build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_test_channel
-
-# Latest with specific PyTorch nightly
-~/repos/finetuning-scheduler/scripts/build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_dev_ver=dev20241121 --torchvision_dev_ver=dev20241121
-
-# Latest with oldest supported PyTorch version
-~/repos/finetuning-scheduler/scripts/build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest_pt_oldest
-
-# Release environment
-~/repos/fts-release/scripts/build_fts_env.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release
+export FTS_VENV_BASE=/mnt/cache/${USER}/.venvs
+export FTS_TARGET_VENV=fts_latest
+export FTS_REPO_DIR=${HOME}/repos/finetuning-scheduler  # Example: adjust to your local repo path
 ```
 
-### Generating Coverage Reports
+### Generating Coverage Reports (Recommended)
 
-The `gen_fts_coverage.sh` script runs tests and generates coverage reports (including special tests that will run based on the available hardware):
+The `gen_fts_coverage.sh` script orchestrates environment building/rebuilding, running tests
+(including standalone/special tests if GPU resources are available), and generating coverage reports:
+
+**Simple usage (from repository root):**
 
 ```bash
-# Generate coverage without rebuilding environment
-nohup ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --no_rebuild_base > /tmp/fts_latest_coverage_nohup.out 2>&1 &
+cd ${FTS_REPO_DIR}
 
-# Generate coverage with experimental tests
-nohup ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --no_rebuild_base --include_experimental > /tmp/fts_latest_coverage_nohup.out 2>&1 &
+# Generate coverage with environment rebuild (builds/rebuilds environment automatically)
+./scripts/gen_fts_coverage.sh --repo_home=${PWD} --target_env_name=fts_latest
 
-# Generate coverage with specific PyTorch nightly
-nohup ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_dev_ver=dev20250201 --torchvision_dev_ver=dev20250201 > /tmp/fts_latest_coverage_nohup.out 2>&1 &
+# Generate coverage without rebuilding environment (faster if env already set up)
+./scripts/gen_fts_coverage.sh --repo_home=${PWD} --target_env_name=fts_latest --no_rebuild_base
 
-# Generate coverage with PyTorch test channel and verbose pip install
-nohup ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --pip_install_flags="-vv" --torch_test_channel > /tmp/fts_latest_coverage_nohup.out 2>&1 &
+# Skip standalone/special tests for faster iteration
+./scripts/gen_fts_coverage.sh --repo_home=${PWD} --target_env_name=fts_latest --no_rebuild_base --no-special
+```
 
-# Generate release coverage with PyTorch test channel
-nohup ~/repos/fts-release/scripts/gen_fts_coverage.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release --torch_test_channel > /tmp/fts_release_coverage_nohup.out 2>&1 &
+**Using nohup wrapper for long-running coverage collection:**
 
-# Generate coverage for release with specific PyTorch channel
-nohup ~/repos/fts-release/scripts/gen_fts_coverage.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release_pt2_6_x --no_rebuild_base > /tmp/fts_release_coverage_nohup.out 2>&1 &
+```bash
+# Generate coverage using nohup wrapper (recommended for full coverage runs)
+${FTS_REPO_DIR}/scripts/manage_standalone_processes.sh --use-nohup \
+  ${FTS_REPO_DIR}/scripts/gen_fts_coverage.sh \
+  --repo_home=${FTS_REPO_DIR} \
+  --target_env_name=fts_latest \
+  --venv-dir=${FTS_VENV_BASE}
+
+# Include experimental patch tests
+${FTS_REPO_DIR}/scripts/manage_standalone_processes.sh --use-nohup \
+  ${FTS_REPO_DIR}/scripts/gen_fts_coverage.sh \
+  --repo_home=${FTS_REPO_DIR} \
+  --target_env_name=fts_latest \
+  --venv-dir=${FTS_VENV_BASE} \
+  --include_experimental
+
+# Generate coverage with oldest dependencies (Python 3.10, mirrors CI oldest matrix)
+${FTS_REPO_DIR}/scripts/manage_standalone_processes.sh --use-nohup \
+  ${FTS_REPO_DIR}/scripts/gen_fts_coverage.sh \
+  --repo_home=${FTS_REPO_DIR} \
+  --target_env_name=fts_oldest \
+  --venv-dir=${FTS_VENV_BASE} \
+  --oldest
+
+# Generate coverage with oldest deps, skip special tests (faster CI-like run)
+${FTS_REPO_DIR}/scripts/manage_standalone_processes.sh --use-nohup \
+  ${FTS_REPO_DIR}/scripts/gen_fts_coverage.sh \
+  --repo_home=${FTS_REPO_DIR} \
+  --target_env_name=fts_oldest \
+  --venv-dir=${FTS_VENV_BASE} \
+  --oldest \
+  --no-special
 ```
 
 ### Monitoring Coverage Generation
@@ -71,6 +127,29 @@ Monitor progress by tailing the log files:
 ```bash
 # Main coverage log
 tail -f `ls -rt /tmp/gen_fts_coverage_fts_* | tail -1`
+```
+
+### Building Test Environments (Standalone)
+
+If you need to build an environment without running coverage (e.g., for manual testing),
+the `build_fts_env.sh` script creates virtual environments with proper Lightning commit pinning
+and optional PyTorch nightly (if configured in `requirements/ci/torch-nightly.txt`):
+
+```bash
+# From the repository root directory
+cd ${FTS_REPO_DIR}
+
+# Latest development environment with stable PyTorch
+./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest
+
+# With explicit venv directory
+./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest --venv-dir=${FTS_VENV_BASE}
+
+# Latest with PyTorch test/RC channel
+./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest --torch_test_channel
+
+# Oldest supported dependencies (Python 3.10, mirrors CI oldest matrix)
+./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_oldest --oldest
 ```
 
 ### Running Special Tests
@@ -89,11 +168,13 @@ unset FTS_GLOBAL_STATE_LOG_MODE
 
 ## Notes
 
-- The examples assume two separate working trees:
-  - `~/repos/finetuning-scheduler` for development
-  - `~/repos/fts-release` for release branches
+- The examples assume environment variables are configured for your development setup:
+  - `FTS_REPO_DIR` - path to your local finetuning-scheduler clone
+  - `FTS_VENV_BASE` - base directory for virtual environments
+  - `FTS_TARGET_VENV` - name of the active virtual environment
+- For release branch testing, create a separate working tree (e.g., `~/repos/fts-release`)
 - Update `build_fts_env.sh` when testing with different PyTorch versions
-- For CI testing configurations, use the `USE_CI_COMMIT_PIN=1` environment variable to install Lightning from the commit specified in `requirements/ci/overrides.txt`
+- For CI testing configurations, Lightning is pinned to a specific commit via `UV_OVERRIDE` using the override file at `requirements/ci/overrides.txt`
 
 ## Running Basic Coverage Manually
 

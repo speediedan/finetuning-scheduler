@@ -29,7 +29,7 @@ Setup is straightforward, just install from PyPI!
 
 .. code-block:: bash
 
-   pip install finetuning-scheduler
+   uv pip install finetuning-scheduler
 
 Additional installation options (from source etc.) are discussed under "Additional installation options" in the
 `README <https://github.com/speediedan/finetuning-scheduler/blob/main/README.md>`_
@@ -377,7 +377,7 @@ should install them using the ``[examples]`` extra:
 
 .. code-block:: bash
 
-   pip install finetuning-scheduler['examples']
+   uv pip install finetuning-scheduler['examples']
 
 There are three different demo schedule configurations composed with shared defaults (./config/fts_defaults.yaml)
 provided for the default 'rte' task. Note DDP (with auto-selected GPUs) is the default configuration so ensure you

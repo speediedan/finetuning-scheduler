@@ -147,10 +147,13 @@ def my_func(param_a: int, param_b: Optional[float] = None) -> str:
 
 When updating the docs make sure to build them first locally and visually inspect the html files (in the browser) for
 formatting errors. In certain cases, a missing blank line or a wrong indent can lead to a broken layout.
-Run these commands
+Run these commands (from the repository root):
 
 ```bash
-pip install -r requirements/docs.txt
+cd ~/repos/finetuning-scheduler
+export FTS_VENV_BASE=~/.venvs  # or your venv base path
+export FTS_VENV_NAME=fts_latest
+source ${FTS_VENV_BASE}/${FTS_VENV_NAME}/bin/activate
 make clean
 cd docs
 make html
@@ -170,20 +173,30 @@ Notes:
 **Local:** Testing your work locally will help you speed up the process since it allows you to focus on particular (failing) test-cases.
 To setup a local development environment, install both local and test dependencies:
 
+**Using the build script (recommended):**
+
 ```bash
-# PACKAGE_NAME variable currently required to specify pytorch-lightning dev package dep (as of lightning 1.8.0)
-export PACKAGE_NAME=pytorch
-python -m pip install ".[all]"
-python -m pip install pre-commit
+cd ~/repos/finetuning-scheduler
+./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest
+
+# Activate (use your venv base path)
+export FTS_VENV_BASE=~/.venvs
+export FTS_VENV_NAME=fts_latest
+source ${FTS_VENV_BASE}/${FTS_VENV_NAME}/bin/activate
 pre-commit install
 ```
 
-Note: if your computer does not have multi-GPU nor TPU these tests are skipped.
+**Manual installation:**
 
-**GitHub Actions:** For convenience, you can also use your own GHActions building which will be triggered with each commit.
-This is useful if you do not test against all required dependency versions.
+```bash
+cd ~/repos/finetuning-scheduler
 
-You can then run:
+# Set UV_OVERRIDE to use the pinned Lightning commit
+export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
+uv pip install ".[all]"
+uv pip install pre-commit
+pre-commit install
+```
 
 ```bash
 python -m pytest src/finetuning_scheduler src/fts_examples tests -v
