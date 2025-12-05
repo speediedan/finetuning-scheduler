@@ -83,17 +83,21 @@ environment variable. This is handled automatically by the build scripts and CI 
 
 **Manual installation with PyTorch nightly:**
 
+When ``torch-nightly.txt`` is configured, use a two-step installation approach:
+
 .. code-block:: bash
 
     git clone https://github.com/speediedan/finetuning-scheduler.git
     cd finetuning-scheduler
 
-    # Install PyTorch nightly first (adjust version and CUDA target as needed)
-    uv pip install torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128
+    # Step 1: Install PyTorch nightly (adjust version and CUDA target as needed)
+    uv pip install --prerelease=if-necessary-or-explicit torch==2.10.0.dev20251124 \
+        --index-url https://download.pytorch.org/whl/nightly/cu128
 
-    # Then install FTS with Lightning commit pin
+    # Step 2: Install FTS with Lightning commit pin (torch already installed, will be skipped)
     export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
     uv pip install -e ".[all]"
 
-The specific Lightning commit is defined in ``requirements/ci/overrides.txt`` and the optional PyTorch nightly
-version is configured in ``requirements/ci/torch-nightly.txt``.
+The nightly version is specified in ``requirements/ci/torch-nightly.txt`` and documented in
+``requirements/ci/torch_override.txt`` for reference. The specific Lightning commit is defined in
+``requirements/ci/overrides.txt``.
