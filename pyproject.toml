@@ -63,6 +63,7 @@ examples = [
     "tensorboardX>=2.6.1",
     "tabulate>=0.8.9",
     "psutil>=5.9.0",
+    "pip>=21.0.0",  # bc for torch collect_env until it supports uv
     # Include CLI deps
     "jsonargparse[signatures]>=4.27.7,<4.42.0",
     "omegaconf>=2.2.3",
@@ -101,6 +102,7 @@ all = [
     "tensorboardX>=2.6.1",
     "tabulate>=0.8.9",
     "psutil>=5.9.0",
+    "pip>=21.0.0",  # bc for torch collect_env until it supports uv
     # ipynb
     "ipython>=7.10.0",
     "jupytext>=1.10.0",

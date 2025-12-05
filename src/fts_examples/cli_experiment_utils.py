@@ -185,8 +185,14 @@ def collect_env_info() -> Dict:
     collect_env.get_pip_packages = get_pip_packages
     sys_info = get_env_info()
     sys_dict = sys_info._asdict()
-    pip_dict = {name: ver for name, ver in [p.split("==") for p in sys_info._asdict()["pip_packages"].split("\n")]}
-    sys_dict["pip_packages"] = pip_dict
+    # TODO: since we now use uv via the pip interface, we should consider adding uv pip package versions here if torch
+    # does not start doing so soon
+    pip_packages = sys_dict.get("pip_packages")
+    if pip_packages:
+        pip_dict = {name: ver for name, ver in [p.split("==", 1) for p in pip_packages.split("\n") if "==" in p]}
+        sys_dict["pip_packages"] = pip_dict
+    else:
+        sys_dict["pip_packages"] = {}
     return sys_dict
 
 
