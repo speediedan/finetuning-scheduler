@@ -40,7 +40,13 @@ ______________________________________________________________________
 
 ### Step 0: Install from PyPI
 
+Starting with version 2.10, [uv](https://docs.astral.sh/uv/) is the preferred installation approach for Fine-Tuning Scheduler.
+
 ```bash
+# Install uv if you haven't already (one-time setup)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install Fine-Tuning Scheduler
 uv pip install finetuning-scheduler
 ```
 

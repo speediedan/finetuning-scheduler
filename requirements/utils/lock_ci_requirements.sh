@@ -10,12 +10,13 @@
 # which allows uv to properly resolve oldest compatible versions.
 #
 # Torch handling:
-# - Lock files are backend-agnostic (no --torch-backend flag)
-# - At install time:
-#   - CI uses --torch-backend=cpu to get CPU variant
-#   - Local builds use --torch-backend=auto for GPU auto-detection
-#   - When torch-nightly.txt is configured: torch is pre-installed from specific
-#     nightly index (cpu or cuda) and filtered from requirements file
+# - When torch-nightly.txt is configured:
+#   - Lock file is generated with torch pinned to the nightly version
+#   - Uses PyTorch nightly index for resolution
+#   - Docker image and CI both use the same nightly version
+# - Without torch-nightly.txt:
+#   - Uses stable torch from PyPI
+#   - CI uses --torch-backend=cpu for CPU variant
 set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,50 +59,58 @@ get_torch_nightly_version() {
 # which ensures uv can properly resolve oldest compatible versions with
 # --resolution=lowest-direct without needing external constraint files.
 
-# Check if torch nightly is configured (for informational message)
+# Check if torch nightly is configured
 TORCH_NIGHTLY_VERSION=$(get_torch_nightly_version)
 
 generate_lockfile() {
     local resolution=$1
     local output_file=$2
     local python_version=$3
-    local filter_torch=$4  # "true" to filter out torch from the output
+    local use_nightly=$4  # "true" to use torch nightly
 
     echo "Generating ${output_file} with resolution=${resolution}, python=${python_version}..."
 
-    # Lock files are backend-agnostic - torch backend is specified at install time:
-    # - CI: --torch-backend=cpu
-    # - Local: --torch-backend=auto
-    # - Nightly: torch pre-installed, filtered from requirements
-    if [[ "${filter_torch}" == "true" ]]; then
-        # Generate to temp file, then filter torch
-        local temp_file=$(mktemp)
-        uv pip compile \
-            "${REPO_ROOT}/pyproject.toml" \
-            --extra all \
-            --group dev \
-            --group test \
-            --output-file "${temp_file}" \
-            --upgrade \
-            --no-strip-extras \
-            --resolution "${resolution}" \
-            --universal \
-            --python-version "${python_version}"
-        grep -v '^torch==' "${temp_file}" > "${output_file}"
-        rm -f "${temp_file}"
-        echo "✓ Generated ${output_file} (torch filtered)"
+    # Build the base compile command
+    local compile_cmd=(
+        uv pip compile
+        "${REPO_ROOT}/pyproject.toml"
+        --extra all
+        --group dev
+        --group test
+        --output-file "${output_file}"
+        --upgrade
+        --no-strip-extras
+        --resolution "${resolution}"
+        --universal
+        --python-version "${python_version}"
+    )
+
+    # When using torch nightly:
+    # 1. Create a temporary override file to pin torch to the nightly version for dependency resolution
+    # 2. Use --prerelease=if-necessary-or-explicit to only allow prereleases for explicitly specified packages (torch)
+    #    or where all versions of the package are pre-release
+    # 3. Use --extra-index-url with nightly CPU index for torch resolution
+    # 4. Use --index-strategy=unsafe-best-match to prefer PyPI for non-torch packages
+    # 5. Use --no-emit-package=torch to exclude torch from output (installed separately with backend)
+    if [[ "${use_nightly}" == "true" && -n "${TORCH_NIGHTLY_VERSION}" ]]; then
+        local torch_override_file=$(mktemp)
+        echo "torch==${TORCH_NIGHTLY_VERSION}" > "${torch_override_file}"
+
+        compile_cmd+=(
+            --prerelease=if-necessary-or-explicit
+            --override "${torch_override_file}"
+            --extra-index-url "https://download.pytorch.org/whl/nightly/cpu"
+            --index-strategy unsafe-best-match
+            --no-emit-package torch
+        )
+
+        echo "  Using torch nightly: ${TORCH_NIGHTLY_VERSION} (excluded from output, dependencies resolved)"
+        "${compile_cmd[@]}"
+
+        rm -f "${torch_override_file}"
+        echo "✓ Generated ${output_file} (torch ${TORCH_NIGHTLY_VERSION} excluded, install separately)"
     else
-        uv pip compile \
-            "${REPO_ROOT}/pyproject.toml" \
-            --extra all \
-            --group dev \
-            --group test \
-            --output-file "${output_file}" \
-            --upgrade \
-            --no-strip-extras \
-            --resolution "${resolution}" \
-            --universal \
-            --python-version "${python_version}"
+        "${compile_cmd[@]}"
         echo "✓ Generated ${output_file}"
     fi
 }
@@ -111,15 +120,18 @@ generate_lockfile() {
 #   packages like contourpy that have Python version requirements
 # - Oldest: Python 3.10 (minimum supported), lowest resolution
 #
-# When torch nightly is configured, torch is filtered from requirements.txt
-# because it's pre-installed separately from the nightly index
-FILTER_TORCH="false"
+# When torch nightly is configured:
+# - requirements.txt excludes torch (installed separately with appropriate backend)
+# - torch dependencies are still resolved against the nightly version
+# - requirements-oldest.txt uses stable torch (for minimum version testing)
+
+USE_NIGHTLY="false"
 if [[ -n "${TORCH_NIGHTLY_VERSION}" ]]; then
-    FILTER_TORCH="true"
-    echo "Torch nightly mode: ${TORCH_NIGHTLY_VERSION} - torch will be filtered from requirements.txt"
+    USE_NIGHTLY="true"
+    echo "Torch nightly mode: ${TORCH_NIGHTLY_VERSION}"
 fi
 
-generate_lockfile "highest" "${CI_DIR}/requirements.txt" "3.10" "${FILTER_TORCH}"
+generate_lockfile "highest" "${CI_DIR}/requirements.txt" "3.10" "${USE_NIGHTLY}"
 generate_lockfile "lowest-direct" "${CI_DIR}/requirements-oldest.txt" "3.10" "false"
 
 echo ""
@@ -129,17 +141,20 @@ echo "  - ${CI_DIR}/requirements-oldest.txt (lowest resolution, for oldest tests
 echo ""
 if [[ -n "${TORCH_NIGHTLY_VERSION}" ]]; then
     echo "⚠️  Torch nightly mode: ${TORCH_NIGHTLY_VERSION}"
-    echo "   requirements.txt has torch filtered out (pre-installed separately)"
+    echo "   requirements.txt excludes torch (dependencies resolved against nightly)"
+    echo "   torch must be installed separately before other dependencies"
     echo ""
-    echo "Installation (CI - CPU):"
-    echo "  1. Pre-install torch:  uv pip install --prerelease=allow torch==${TORCH_NIGHTLY_VERSION}+cpu --index-url https://download.pytorch.org/whl/nightly/cpu"
-    echo "  2. Install deps:       UV_OVERRIDE=requirements/ci/overrides.txt uv pip install -e . -r requirements/ci/requirements.txt"
+    echo "Docker image installation (CUDA):"
+    echo "  Ensure Dockerfile installs: torch==${TORCH_NIGHTLY_VERSION} from nightly/cu128 index"
     echo ""
-    echo "Installation (local - CUDA, e.g., cu128):"
-    echo "  1. Pre-install torch:  uv pip install --prerelease=allow torch==${TORCH_NIGHTLY_VERSION} --index-url https://download.pytorch.org/whl/nightly/cu128"
-    echo "  2. Install FTS:        UV_OVERRIDE=requirements/ci/overrides.txt uv pip install -e . -r requirements/ci/requirements.txt"
+    echo "Azure Pipelines (Docker with pre-installed torch):"
+    echo "  UV_OVERRIDE=requirements/ci/overrides.txt uv pip install -e . -r requirements/ci/requirements.txt"
+    echo ""
+    echo "GitHub Actions (CPU):"
+    echo "  1. uv pip install --prerelease=allow torch==${TORCH_NIGHTLY_VERSION}+cpu --index-url https://download.pytorch.org/whl/nightly/cpu"
+    echo "  2. UV_OVERRIDE=requirements/ci/overrides.txt uv pip install -e . -r requirements/ci/requirements.txt"
 else
-    echo "Standard installation (torch included in requirements.txt):"
+    echo "Standard installation (stable torch):"
     echo "  CI:    UV_OVERRIDE=requirements/ci/overrides.txt uv pip install -e . -r requirements/ci/requirements.txt --torch-backend=cpu"
     echo "  Local: UV_OVERRIDE=requirements/ci/overrides.txt uv pip install -e . -r requirements/ci/requirements.txt --torch-backend=auto"
 fi

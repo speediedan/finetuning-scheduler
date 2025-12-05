@@ -108,6 +108,11 @@ RUN \
     py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.12'.split('.')))") && \
     echo "Python version check result: ${py_ver}"
 
+# Create excludes file to prevent torch from being reinstalled during CI
+# This preserves the pre-installed CUDA torch when installing from requirements.txt
+RUN echo "torch" > /tmp/venvs/fts_dev/torch-excludes.txt && \
+    chmod 644 /tmp/venvs/fts_dev/torch-excludes.txt
+
 # Separate RUN to verify permissions persist across Docker layers
 RUN \
     echo "=== Post-ENV permission check ===" && \

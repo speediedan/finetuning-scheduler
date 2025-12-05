@@ -33,43 +33,34 @@ runs:
         # Prune cache before saving to limit disk usage (default is true, but be explicit)
         prune-cache: true
 
-    # Detect if torch nightly is configured
-    - name: Check torch nightly configuration
-      id: torch-config
+    # Install torch separately when nightly is configured
+    # - requirements.txt excludes torch (dependencies resolved against nightly)
+    # - Skip on macOS ARM64 - nightly +cpu wheels aren't available, use stable torch
+    # - Skip for "oldest" builds - they use stable torch from lock file
+    - name: Install torch nightly
+      if: inputs.use_oldest != 'true'
       shell: bash
       run: |
         NIGHTLY_FILE="requirements/ci/torch-nightly.txt"
         if [[ -f "${NIGHTLY_FILE}" ]]; then
           TORCH_VERSION=$(grep -v '^#' "${NIGHTLY_FILE}" | grep -v '^$' | head -1 || true)
           if [[ -n "${TORCH_VERSION}" ]]; then
-            echo "torch_nightly=true" >> $GITHUB_OUTPUT
-            echo "torch_version=${TORCH_VERSION}" >> $GITHUB_OUTPUT
-            echo "Torch nightly detected: ${TORCH_VERSION}"
-          else
-            echo "torch_nightly=false" >> $GITHUB_OUTPUT
-            echo "No torch nightly configured"
+            if [[ "${{ runner.os }}" == "macOS" ]]; then
+              echo "Skipping torch nightly on macOS ARM64 (no +cpu wheels available)"
+              echo "Will install stable torch with --torch-backend=auto"
+            else
+              echo "Installing torch nightly: ${TORCH_VERSION}+cpu"
+              uv pip install --prerelease=allow "torch==${TORCH_VERSION}+cpu" \
+                --index-url https://download.pytorch.org/whl/nightly/cpu
+            fi
           fi
-        else
-          echo "torch_nightly=false" >> $GITHUB_OUTPUT
-          echo "No torch-nightly.txt found"
         fi
 
-    # Pre-install torch nightly if configured (before lock file installation)
-    # Note: Skip on macOS ARM64 - nightly +cpu wheels are only built for x86_64
-    # macOS ARM uses MPS acceleration, not CPU-only builds
-    # Also skip for "oldest" builds - they should use the oldest torch from lock file
-    - name: Pre-install torch nightly
-      if: steps.torch-config.outputs.torch_nightly == 'true' && runner.os != 'macOS' && inputs.use_oldest != 'true'
-      shell: bash
-      run: |
-        echo "Pre-installing torch nightly: ${{ steps.torch-config.outputs.torch_version }}+cpu"
-        uv pip install --prerelease=allow "torch==${{ steps.torch-config.outputs.torch_version }}+cpu" \
-          --index-url https://download.pytorch.org/whl/nightly/cpu
-
-    # Single command installation of FTS and all dependencies
+    # Install FTS and all dependencies
     # - UV_OVERRIDE: applies Lightning commit pin from overrides.txt
-    # - When nightly (and not oldest): filter torch from requirements file
-    # - Otherwise: use --torch-backend=cpu to ensure CPU variant
+    # - When nightly configured (and not macOS): torch already installed, just install rest
+    # - For macOS: use --torch-backend=auto for MPS-compatible stable torch
+    # - For stable builds: use --torch-backend=cpu
     - name: Install FTS and all dependencies
       shell: bash
       env:
@@ -83,20 +74,28 @@ runs:
           echo "Installing with latest versions..."
         fi
 
-        # For "oldest" builds: always use --torch-backend=cpu to get oldest torch from lock file
-        # For "latest" builds with nightly: torch already pre-installed (except macOS which needs --torch-backend=auto)
-        # For "latest" builds without nightly: use --torch-backend=cpu
-        if [[ "${{ inputs.use_oldest }}" == "true" ]]; then
-          # Oldest builds: use pinned torch from lock file with CPU backend
-          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=cpu"
-        elif [[ "${{ steps.torch-config.outputs.torch_nightly }}" == "true" ]]; then
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            # macOS: torch nightly +cpu not available for ARM64, install regular torch
-            INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=auto"
-          else
-            # Linux/Windows: torch nightly already pre-installed
-            INSTALL_CMD="uv pip install -e . -r ${REQ_FILE}"
+        # Check if torch nightly is configured
+        NIGHTLY_FILE="requirements/ci/torch-nightly.txt"
+        TORCH_NIGHTLY="false"
+        if [[ -f "${NIGHTLY_FILE}" ]]; then
+          TORCH_VERSION=$(grep -v '^#' "${NIGHTLY_FILE}" | grep -v '^$' | head -1 || true)
+          if [[ -n "${TORCH_VERSION}" ]]; then
+            TORCH_NIGHTLY="true"
           fi
+        fi
+
+        # Determine install command based on platform and torch configuration
+        # - Oldest builds: use --torch-backend=cpu for stable torch
+        # - macOS: use --torch-backend=auto (MPS), nightly not available
+        # - Linux/Windows with nightly: torch already installed, no backend flag needed
+        # - Linux/Windows with stable: use --torch-backend=cpu
+        if [[ "${{ inputs.use_oldest }}" == "true" ]]; then
+          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=cpu"
+        elif [[ "${{ runner.os }}" == "macOS" ]]; then
+          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=auto"
+        elif [[ "${TORCH_NIGHTLY}" == "true" ]]; then
+          # Torch nightly already installed, just install FTS and deps
+          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE}"
         else
           INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=cpu"
         fi

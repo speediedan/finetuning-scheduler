@@ -60,7 +60,7 @@ examples = [
     "transformers>=4.26.0",
     "scikit-learn>=1.2.0",
     "sentencepiece>=0.2.0",
-    "tensorboardX>=2.6.1",  # 2.6.1+ regenerated protos for protobuf 4.x
+    "tensorboardX>=2.6.1",
     "tabulate>=0.8.9",
     "psutil>=5.9.0",
     # Include CLI deps
@@ -98,7 +98,7 @@ all = [
     "transformers>=4.26.0",
     "scikit-learn>=1.2.0",
     "sentencepiece>=0.2.0",
-    "tensorboardX>=2.6.1",  # 2.6.1+ regenerated protos for protobuf 4.x
+    "tensorboardX>=2.6.1",
     "tabulate>=0.8.9",
     "psutil>=5.9.0",
     # ipynb
@@ -272,7 +272,7 @@ dev = [
     "twine>=3.2.0",
     "pyright>=1.1.390",
     "pre-commit>=2.0.0",
-    "mlflow>=2.0.0",
+    "mlflow>=3.0.0",
 ]
 test = [
     "coverage>=6.4",
@@ -282,7 +282,7 @@ test = [
     "pyright>=1.1.390",
     "pre-commit>=2.0.0",
     # protobuf upper bound removed - handled by dependency resolution
-    "mlflow>=2.0.0",
+    "mlflow>=3.0.0",
 ]
 # git dependencies installed separately (git URLs cannot be in universal lock files)
 git-deps = [

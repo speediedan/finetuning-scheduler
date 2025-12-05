@@ -25,10 +25,15 @@ foundation model experimentation with flexible fine-tuning schedules. Training w
 
 Setup
 *****
-Setup is straightforward, just install from PyPI!
+Starting with version 2.10, `uv <https://docs.astral.sh/uv/>`_ is the preferred installation approach for
+Fine-Tuning Scheduler.
 
 .. code-block:: bash
 
+   # Install uv if you haven't already (one-time setup)
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+
+   # Install Fine-Tuning Scheduler
    uv pip install finetuning-scheduler
 
 Additional installation options (from source etc.) are discussed under "Additional installation options" in the

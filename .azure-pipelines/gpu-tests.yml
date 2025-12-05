@@ -77,10 +77,11 @@ jobs:
 
         echo "=== Installing finetuning-scheduler with locked dependencies ==="
         # Use UV_OVERRIDE for Lightning commit pinning
-        # requirements.txt has torch filtered when nightly is configured (done during lock generation)
-        # Docker image torch version should match - if not, we want an error to trigger image rebuild
+        # requirements.txt excludes torch (via --no-emit-package in lock script)
+        # Use --exclude torch-excludes.txt to explicitly prevent torch from being reinstalled
+        # (preserves the pre-installed CUDA torch from Docker image)
         export UV_OVERRIDE="${PWD}/requirements/ci/overrides.txt"
-        if ! uv pip install -e . -r requirements/ci/requirements.txt; then
+        if ! uv pip install -e . -r requirements/ci/requirements.txt --excludes /tmp/venvs/fts_dev/torch-excludes.txt; then
           echo "ERROR: Failed to install finetuning-scheduler with dependencies"
           exit 1
         fi
