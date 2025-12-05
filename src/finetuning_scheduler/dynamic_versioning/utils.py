@@ -57,14 +57,6 @@ EXCLUDE_FILES_FROM_CONVERSION = [
     "test_dynamic_versioning_utils.py"
 ]
 
-
-def _get_project_root() -> Path:
-    """Get the project root directory."""
-    current_file_dir = Path(__file__).parent
-    # Navigate up from dynamic_versioning/ -> finetuning_scheduler/ -> src/ -> project_root/
-    return current_file_dir.parent.parent.parent
-
-
 def get_base_dependencies() -> List[str]:
     """Get the base dependencies list.
 
