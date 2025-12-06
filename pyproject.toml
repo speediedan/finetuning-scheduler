@@ -204,7 +204,7 @@ reportGeneralTypeIssues = "warning"
 reportInvalidTypeForm = "none"
 # Temporarily disable these until code is updated with proper type annotations
 reportAssignmentType = "error"
-reportCallIssue = "none"
+reportCallIssue = "error"
 reportIndexIssue = "none"
 
 [tool.coverage.report]

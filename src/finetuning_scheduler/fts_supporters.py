@@ -1278,7 +1278,7 @@ class ScheduleParsingMixin(ABC):
             del test_lr_init["min_lr"]  # our mock optimizer will not have any param groups
         try:
             assert callable(lrs_class)
-            testlr = lrs_class(optimizer=_MockOptimizer(), **test_lr_init)
+            testlr = lrs_class(_MockOptimizer(), **test_lr_init)  # type: ignore[call-arg]
         except Exception as err:
             error_msg = (
                 "Could not configure the specified LR scheduler class using the `init_args` "
