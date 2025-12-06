@@ -78,7 +78,9 @@ FSDP_BASE_WARNS = extend_warns(DISTRIBUTED_WARNS, additional_fsdp_warns)
 FSDP_DYNAMO_EXPECTED_WARNS = [DYNAMO_PHASE_WARNING]
 
 # Model parallel warnings
-additional_model_parallel_warns = []  # for future use, currently empty
+additional_model_parallel_warns = [
+   "Profiler clears events at the end of each cycle.",  # with PT 2.10 nightly 20251124
+]  # for future use, currently empty
 MODEL_PARALLEL_BASE_WARNS = extend_warns(DISTRIBUTED_WARNS, additional_model_parallel_warns)
 MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
 

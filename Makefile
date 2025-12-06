@@ -19,12 +19,11 @@ clean:
 	rm -rf ./docs/source/api
 
 test: clean
-	pip install -r requirements/devel.txt
-
+	# Assumes environment is already set up via build_fts_env.sh or manual install
 	# run tests with coverage (cpu-only, running gpu standalone tests required for full coverage)
 	python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v
 	python -m coverage report
 
 docs: clean
-	pip install --quiet -r requirements/docs.txt
+	# Assumes environment is already set up via build_fts_env.sh
 	python -m sphinx -b html -W --keep-going docs/source docs/build

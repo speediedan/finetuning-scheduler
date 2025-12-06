@@ -41,6 +41,12 @@ LIGHTNING_PACKAGES = {
     }
 }
 
+# Base dependencies (torch + Lightning are handled dynamically)
+# These are the core dependencies that are always installed
+BASE_DEPENDENCIES = [
+    "torch>=2.6.0",
+]
+
 # Files to exclude from modification to prevent self-modification
 EXCLUDE_FILES_FROM_CONVERSION = [
     "setup_tools.py",
@@ -51,8 +57,21 @@ EXCLUDE_FILES_FROM_CONVERSION = [
     "test_dynamic_versioning_utils.py"
 ]
 
+def get_base_dependencies() -> List[str]:
+    """Get the base dependencies list.
+
+    Returns:
+        List of base dependency strings (excluding Lightning, which is added dynamically)
+    """
+    return BASE_DEPENDENCIES.copy()
+
+
 def get_requirement_files(standalone: bool = False) -> List[str]:
     """Get installation requirements with dynamic Lightning configuration.
+
+    Note: Lightning commit pinning is now handled at install time via UV_OVERRIDE
+    environment variable rather than at package metadata time. This simplifies the
+    install_requires list to just include version constraints.
 
     Args:
         standalone: Whether to use standalone pytorch-lightning package
@@ -60,58 +79,32 @@ def get_requirement_files(standalone: bool = False) -> List[str]:
     Returns:
         List of requirement strings
     """
-    base_req_file = "base.txt"
-    with open(os.path.join(Path(__file__).parent.parent.parent.parent, "requirements", base_req_file)) as file:
-        lines = [ln.strip() for ln in file.readlines()]
+    # Start with base dependencies
+    reqs = get_base_dependencies()
 
-    reqs = []
-    for ln in lines:
-        if ln.startswith("#") or not ln:
-            continue
-        if ln.startswith("pytorch-lightning") or ln.startswith("lightning"):
-            continue
-        reqs.append(ln)
-
-    use_commit = os.environ.get("USE_CI_COMMIT_PIN", "").lower() in ("1", "true", "yes")
+    # Add Lightning dependency based on package type
     package_type = "standalone" if standalone else "unified"
-    lightning_req = get_lightning_requirement(package_type, use_commit)
+    lightning_req = get_lightning_requirement(package_type)
     reqs.append(lightning_req)
-
-    if use_commit:
-        print(f"Using Lightning from commit: {lightning_req}")
 
     return reqs
 
-def get_lightning_requirement(package_type: str = "unified", use_commit: bool = False) -> str:
+
+def get_lightning_requirement(package_type: str = "unified") -> str:
     """Get the Lightning requirement string based on configuration.
+
+    Note: Commit pinning is handled at install time via UV_OVERRIDE, not here.
 
     Args:
         package_type: Either "unified" or "standalone"
-        use_commit: Whether to use the specific commit hash
 
     Returns:
-        The requirement string for the Lightning package
+        The requirement string for the Lightning package with version constraint
     """
     pkg_info = LIGHTNING_PACKAGES[package_type]
     package_name = pkg_info["package"]
+    return f"{package_name}{pkg_info['version']}"
 
-    if not use_commit:
-        return f"{package_name}{pkg_info['version']}"
-
-    project_root = Path(__file__).parent.parent.parent.parent
-    LIGHTNING_COMMIT_FILE = os.path.join(project_root, "requirements/lightning_pin.txt")
-
-    # Check if the commit file exists
-    if not os.path.exists(LIGHTNING_COMMIT_FILE):
-        print(f"Warning: USE_CI_COMMIT_PIN is set but {LIGHTNING_COMMIT_FILE} does not exist.")
-        print(f"Falling back to release-based installation: {package_name}{pkg_info['version']}")
-        return f"{package_name}{pkg_info['version']}"
-
-    with open(LIGHTNING_COMMIT_FILE) as f:
-        LIGHTNING_COMMIT = f.read().strip()
-
-    repo = pkg_info["repo"]
-    return f"{package_name} @ git+https://github.com/{repo}.git@{LIGHTNING_COMMIT}#egg={package_name}"
 
 def _retrieve_files(directory: str, *ext: str, exclude_files: Optional[List[str]] = None) -> List[str]:
     """Find all files in a directory with optional extension filtering and exclusion."""
@@ -236,12 +229,12 @@ def toggle_lightning_imports(mode: str = "unified", debug: bool = False) -> None
     try:
         if mode == "unified" and not _is_package_installed("lightning"):
             print("Warning: Cannot toggle to unified imports because the 'lightning' package is not installed.")
-            print("Please install the unified Lightning package with: pip install lightning")
+            print("Please install the unified Lightning package with: uv pip install lightning")
             return
         elif mode == "standalone" and not _is_package_installed("pytorch_lightning"):
             print("Warning: Cannot toggle to standalone imports because the 'pytorch-lightning' package is not "
                   "installed.")
-            print("Please install the standalone Lightning package with: pip install pytorch-lightning")
+            print("Please install the standalone Lightning package with: uv pip install pytorch-lightning")
             return
 
         _, install_paths = get_project_paths()

@@ -59,21 +59,45 @@ command multiple times.
 Using Lightning CI Commit Pinning
 ----------------------------------
 
-For development and testing, FTS supports pinning to a specific Lightning commit via the ``USE_CI_COMMIT_PIN``
-environment variable. This approach is similar to PyTorch's approach with Triton:
+For development and testing, FTS supports pinning to a specific Lightning commit via the ``UV_OVERRIDE``
+environment variable. This is handled automatically by the build scripts and CI workflows.
+
+**Using the build script (recommended):**
 
 .. code-block:: bash
 
-    # Enable Lightning CI commit pinning during installation
-    export USE_CI_COMMIT_PIN="1"
+    # The build_fts_env.sh script automatically sets up Lightning commit pinning
+    # and optionally installs PyTorch nightly (if configured in requirements/ci/torch-nightly.txt)
+    ./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest
 
-    # Install FTS with pinned Lightning commit
-    pip install finetuning-scheduler
+**Manual installation with Lightning commit pin:**
 
-    # Or for development installation
+.. code-block:: bash
+
     git clone https://github.com/speediedan/finetuning-scheduler.git
     cd finetuning-scheduler
-    python -m pip install -e ".[all]"
 
-The specific Lightning commit is defined in ``requirements/lightning_pin.txt`` and is used by the CI system to
-ensure consistent testing.
+    # Set UV_OVERRIDE to use the pinned Lightning commit
+    export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
+    uv pip install -e ".[all]"
+
+**Manual installation with PyTorch nightly:**
+
+When ``torch-nightly.txt`` is configured, use a two-step installation approach:
+
+.. code-block:: bash
+
+    git clone https://github.com/speediedan/finetuning-scheduler.git
+    cd finetuning-scheduler
+
+    # Step 1: Install PyTorch nightly (adjust version and CUDA target as needed)
+    uv pip install --prerelease=if-necessary-or-explicit torch==2.10.0.dev20251124 \
+        --index-url https://download.pytorch.org/whl/nightly/cu128
+
+    # Step 2: Install FTS with Lightning commit pin (torch already installed, will be skipped)
+    export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
+    uv pip install -e ".[all]"
+
+The nightly version is specified in ``requirements/ci/torch-nightly.txt`` and documented in
+``requirements/ci/torch_override.txt`` for reference. The specific Lightning commit is defined in
+``requirements/ci/overrides.txt``.

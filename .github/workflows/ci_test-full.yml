@@ -13,7 +13,9 @@ on:  # Trigger the workflow on push or pull request, but only for the main branc
       - "src/**"
       - "requirements/**"
       - ".github/workflows/ci_test-full.yml"
+      - ".github/actions/**"
       - ".actions/**"
+      - "scripts/infra_utils.sh"
   pull_request:
     branches: [main, "release/*"]
     types: [opened, reopened, ready_for_review, synchronize]
@@ -26,7 +28,9 @@ on:  # Trigger the workflow on push or pull request, but only for the main branc
       - "src/**"
       - "requirements/**"
       - ".github/workflows/ci_test-full.yml"
+      - ".github/actions/**"
       - ".actions/**"
+      - "scripts/infra_utils.sh"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref }}
@@ -40,7 +44,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, windows-2022, macOS-14]
-        python-version: ["3.9", "3.12"]  # minimum, maximum
+        python-version: ["3.10", "3.12"]  # minimum, maximum
         # tests will include oldest and newest tested patch versions of pytorch
         requires: ["oldest", "latest"]
         release: ["latest"]
@@ -48,7 +52,6 @@ jobs:
           - {os: ubuntu-22.04, python-version: "3.12", requires: "oldest"}
           - {os: windows-2022, python-version: "3.12", requires: "oldest"}
           - {os: macOS-14, python-version: "3.12", requires: "oldest"}
-          - {os: macOS-14, python-version: "3.9", requires: "oldest"}  # exclude until 2.6 due to tokenizers build error
         # include:
         #   # adding when using a release candidate
         #   # - {os: ubuntu-22.04, python-version: "3.12", requires: "latest", release: "pre"}
@@ -61,50 +64,18 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+    - name: Install CI Dependencies
+      uses: ./.github/actions/install-ci-dependencies
       with:
-        python-version: ${{ matrix.python-version }}
+        python_version: ${{ matrix.python-version }}
+        use_oldest: ${{ matrix.requires == 'oldest' }}
+        use_commit_pin: "true"
+        show_pip_list: "true"
 
-    - name: Reset caching
-      run: python -c "import time; days = time.time() / 60 / 60 / 24; print(f'TIME_PERIOD=d{int(days / 2) * 2}')" >> $GITHUB_ENV
-
-    - name: basic setup
-      env:
-        USE_CI_COMMIT_PIN: "1"
-      run: |
-        pip --version
-        pip install --requirement requirements/cli.txt --upgrade
-
-    - name: Set min. dependencies
-      if: matrix.requires == 'oldest'
-      run: |
-        python .actions/assistant.py replace_oldest_ver
-
-    - name: Install package with dependencies
-      env:
-        USE_CI_COMMIT_PIN: "1"
-      run: |
-        # Install the package with all dependencies (including pinned Lightning)
-        pip install '.[all]'
-        # pip list | grep -i lightning
-
-    # Note: This uses an internal pip API and may not always work
-    # https://github.com/actions/cache/blob/master/examples.md#multiple-oss-in-a-workflow
-    # sadly, this env var is not properly abstracted over OS platforms so we set it twice, the second time for windows
-    - name: Get pip cache dir windows
-      id: pip-cache
-      run: |
-        echo "PIP_CACHE_DIR=$(pip cache dir)" >> $GITHUB_OUTPUT
-        echo "PIP_CACHE_DIR=$(pip cache dir)" >> $env:GITHUB_OUTPUT
-
-    - name: pip cache
-      uses: actions/cache@v4
-      with:
-        path: ${{ steps.pip-cache.outputs.PIP_CACHE_DIR }}
-        key: ${{ runner.os }}-pip-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-${{ hashFiles('requirements/base.txt') }}-${{ hashFiles('requirements/extra.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-td${{ env.TIME_PERIOD }}-py${{ matrix.python-version }}-${{ matrix.release }}-${{ matrix.requires }}-
+    # Note: UV caching is handled by setup-uv action in install-ci-dependencies
+    # with enable-cache: true, prune-cache: true, and cache-suffix for differentiation.
+    # No additional manual UV cache step is needed - the setup-uv action automatically
+    # saves/restores the cache with proper key generation based on lockfiles.
 
     - name: Cache datasets
       uses: actions/cache@v4
@@ -139,3 +110,6 @@ jobs:
         name: CPU-coverage
         fail_ci_if_error: false
         verbose: true # optional (default = false)
+
+    # Note: UV cache pruning is handled automatically by setup-uv action
+    # with prune-cache: true (set in install-ci-dependencies action)

@@ -10,13 +10,11 @@ prune tests
 include *.md
 # Include the license file
 include LICENSE
-include .actions/assistant.py
 # Include the citation info
 include *.cff
 # Include marker file for PEP 561
 include src/finetuning_scheduler/py.typed
 # Explicitly include the toggle script to ensure entry points work
 include src/finetuning_scheduler/dynamic_versioning/toggle_lightning_mode.py
-# Include the Requirements
-recursive-include requirements *.txt
-include requirements.txt
+# Include docs requirements
+include requirements/docs.txt

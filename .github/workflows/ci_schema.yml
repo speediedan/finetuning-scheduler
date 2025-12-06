@@ -11,12 +11,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install pkg
-        run: |
-          pip install check-jsonschema
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "requirements/**/*.txt"
+          version: "latest"
 
       - name: GH Workflows
-        run: check-jsonschema .github/workflows/*.yml --builtin-schema "github-workflows"
+        run: uvx check-jsonschema .github/workflows/*.yml --builtin-schema "github-workflows"
 
       # - name: Azure Pipelines
       #   env:
