@@ -203,7 +203,7 @@ reportGeneralTypeIssues = "warning"
 # Disable invalid type form warnings for dynamic type expressions
 reportInvalidTypeForm = "none"
 # Temporarily disable these until code is updated with proper type annotations
-reportAssignmentType = "none"
+reportAssignmentType = "error"
 reportCallIssue = "none"
 reportIndexIssue = "none"
 
