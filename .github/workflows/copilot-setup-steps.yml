@@ -1,0 +1,45 @@
+name: "Copilot Setup Steps"
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    environment: copilot
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install CI dependencies
+        uses: ./.github/actions/install-ci-dependencies
+        with:
+          python_version: '3.12'
+          show_pip_list: 'true'
+
+      - name: Install pre-commit
+        shell: bash
+        run: |
+          pre-commit install
+
+      - name: Run type checking
+        shell: bash
+        run: |
+          pyright -p pyproject.toml
+
+      - name: Run pre-commit hooks
+        shell: bash
+        run: |
+          pre-commit run --all-files
+
+      - name: Run Copilot setup steps
+        run: echo "Copilot setup steps completed successfully."

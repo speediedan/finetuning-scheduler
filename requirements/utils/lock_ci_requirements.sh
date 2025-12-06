@@ -14,6 +14,7 @@
 #   - Lock file is generated with torch pinned to the nightly version
 #   - Uses PyTorch nightly index for resolution
 #   - Docker image and CI both use the same nightly version
+#   - Post-processing prunes torch-only dependencies (see prune_torch_only_deps)
 # - Without torch-nightly.txt:
 #   - Uses stable torch from PyPI
 #   - CI uses --torch-backend=cpu for CPU variant
@@ -66,6 +67,15 @@ get_torch_nightly_version() {
 
 # Check if torch nightly is configured
 TORCH_NIGHTLY_VERSION=$(get_torch_nightly_version)
+
+# Prune packages that are ONLY dependencies of torch from the lockfile.
+# This reduces the dependency confusion attack surface when using unsafe-best-match
+# by removing any packages that could potentially be resolved from the nightly index only.
+# See prune_torch_deps.py for detailed documentation and implementation.
+prune_torch_only_deps() {
+    local lockfile=$1
+    python "${SCRIPT_DIR}/prune_torch_deps.py" "${lockfile}"
+}
 
 # Generate/update torch_override.txt if nightly is configured, remove if not
 generate_torch_override() {
@@ -125,16 +135,25 @@ generate_lockfile() {
     # 1. Create a temporary override file to pin torch to the nightly version for dependency resolution
     # 2. Use --prerelease=if-necessary-or-explicit to only allow prereleases for explicitly specified packages (torch)
     #    or where all versions of the package are pre-release
-    # 3. Use --extra-index-url with nightly CPU index for torch resolution
+    # 3. Use --index with nightly CPU index for torch resolution
     # 4. Use --index-strategy=unsafe-best-match for lockfile GENERATION only
     #    This is required because with first-index (default), uv would either:
     #      - Find torch on PyPI first (no nightly version), or
     #      - Find scipy/etc on nightly index first (missing versions)
-    #    Security impact is minimal because:
-    #      - Lockfile generation runs on maintainer machines, not user machines
-    #      - Generated lockfile pins exact package versions from PyPI
-    #      - User INSTALLATION uses secure two-step approach (no unsafe-best-match)
+    #
+    #    Security rationale for using unsafe-best-match during lockfile generation:
+    #    a) User INSTALLATION uses a secure two-step approach, only ever installing torch nightly
+    #       from the explicitly specified nightly index (no unsafe-best-match at install time)
+    #    b) The marginal dependency confusion attack surface is limited to the closely monitored
+    #       PyTorch nightly index, which is maintained by PyTorch team. Post-processing prunes any packages that are
+    #       ONLY dependencies of torch, eliminating potential attack vectors from torch-exclusive dependencies that
+    #       might only exist on the nightly index. If a package is shared with other dependencies, it's already
+    #       being resolved from PyPI and subject to normal security scanning.
+    #    c) Lockfile generation runs on maintainer machines, not user machines
+    #    d) Generated lockfile pins exact package versions from PyPI
+    #
     # 5. Use --no-emit-package=torch to exclude torch from output (installed separately with backend)
+    # 6. Post-process to prune torch-only dependencies (see prune_torch_only_deps)
     if [[ "${use_nightly}" == "true" && -n "${TORCH_NIGHTLY_VERSION}" ]]; then
         local torch_override_file=$(mktemp)
         echo "torch==${TORCH_NIGHTLY_VERSION}" > "${torch_override_file}"
@@ -142,7 +161,7 @@ generate_lockfile() {
         compile_cmd+=(
             --prerelease=if-necessary-or-explicit
             --override "${torch_override_file}"
-            --extra-index-url "https://download.pytorch.org/whl/nightly/cpu"
+            --index "https://download.pytorch.org/whl/nightly/cpu"
             --index-strategy unsafe-best-match  # for lockfile generation only, see comment above
             --no-emit-package torch
         )
@@ -151,7 +170,11 @@ generate_lockfile() {
         "${compile_cmd[@]}"
 
         rm -f "${torch_override_file}"
-        echo "✓ Generated ${output_file} (torch ${TORCH_NIGHTLY_VERSION} excluded, install separately)"
+
+        # Prune torch-only dependencies to minimize dependency confusion attack surface
+        prune_torch_only_deps "${output_file}"
+
+        echo "✓ Generated ${output_file} (torch ${TORCH_NIGHTLY_VERSION} excluded, torch-only deps pruned)"
     else
         "${compile_cmd[@]}"
         echo "✓ Generated ${output_file}"

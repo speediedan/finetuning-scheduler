@@ -23,11 +23,11 @@ import os
 import re
 import warnings
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
 from functools import partial, partialmethod, wraps
 from pprint import pformat
-from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, Union, cast
 from typing_extensions import override
 
 import torch
@@ -44,8 +44,8 @@ from torch.optim import Optimizer
 
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
-
-if torch.distributed.is_available():
+# Type checking imports - always available for static analysis
+if TYPE_CHECKING or torch.distributed.is_available():
     from torch.distributed.fsdp.fully_sharded_data_parallel import (
         FLAT_PARAM,
         FullyShardedDataParallel,
@@ -250,8 +250,11 @@ class FSDPStrategyAdapter(StrategyAdapter):
         # rank0_only should be false to enable loading of the optimizer state on all ranks
         # irrespective of `use_orig_params` mode, we start with a full, unflattened, unsharded, consolidated osd
         # we then ensure the local osd is properly keyed and transformed for loading into each rank's local optimizer
-        with _get_full_state_dict_context(
-            self.pls_handle.model, world_size=self.pls_handle.world_size, rank0_only=False
+        with cast(
+            AbstractContextManager[None],
+            _get_full_state_dict_context(
+                self.pls_handle.model, world_size=self.pls_handle.world_size, rank0_only=False
+            ),
         ):
             for optimizer, opt_state in zip(self.pls_handle.optimizers, optimizer_states):
 
@@ -281,7 +284,10 @@ class FSDPStrategyAdapter(StrategyAdapter):
         assert self.pls_handle.model is not None
 
         # irrespective of `use_orig_params` mode, we need the full, unflattened, unsharded, consolidated osd
-        with _get_full_state_dict_context(self.pl_module, world_size=self.pls_handle.world_size, rank0_only=True):
+        with cast(
+            AbstractContextManager[None],
+            _get_full_state_dict_context(self.pl_module, world_size=self.pls_handle.world_size, rank0_only=True),
+        ):
             state_dict = FullyShardedDataParallel.optim_state_dict(self.pl_module, optimizer)
 
         return state_dict
