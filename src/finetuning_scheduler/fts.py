@@ -608,9 +608,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         Returns:
             bool: The reduced decision across all world processes.
         """
-        decision = torch.tensor(int(decision), device=strategy.root_device)
-        decision = bool(strategy.reduce(decision, reduce_op=ReduceOp.SUM))  # type:ignore[arg-type]
-        return decision
+        decision_tensor = torch.tensor(int(decision), device=strategy.root_device)
+        reduced_decision = bool(strategy.reduce(decision_tensor, reduce_op=ReduceOp.SUM))  # type:ignore[arg-type]
+        return reduced_decision
 
     def _sync_es_state(self, trainer: "pl.Trainer") -> None:
         """Synchronize the :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` callback transition state

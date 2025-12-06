@@ -179,29 +179,6 @@ known-first-party = ["docs","fts_examples","finetuning_scheduler","tests"]
 force-sort-within-sections = false
 order-by-type = false
 
-[tool.mypy]
-files = ["src/finetuning_scheduler"]
-disallow_untyped_defs = "True"
-ignore_missing_imports = "True"
-show_error_codes = "True"
-warn_redundant_casts = "True"
-warn_unused_configs = "True"
-warn_unused_ignores = "False"
-allow_redefinition = "True"
-# disable this rule as the PL Trainer attributes are defined in the connectors, not in its __init__
-disable_error_code = "attr-defined"
-# style choices
-warn_no_return = "False"
-exclude = ['tests/.*']
-
-# Ignore mypy errors for these files
-# TODO: the goal is for this to be empty
-#[[tool.mypy.overrides]]
-# the list can be generated with:
-# mypy | tr ':' ' ' |  awk '{print $1}' | sort | uniq | sed 's/\.py//g' | sed 's|\/|\.|g' | xargs -I {} echo '"{}",'
-# module = []
-# ignore_errors = "True"
-
 [tool.pyright]
 # Using "standard" mode for comprehensive type checking
 typeCheckingMode = "standard"
@@ -213,22 +190,21 @@ exclude = [
     "dist",
     ".git",
 ]
-# Match mypy's ignore_missing_imports behavior
+# Ignore missing imports from third-party libraries without type stubs
 reportMissingImports = "none"
-# Match mypy's disable_error_code = "attr-defined" for PL Trainer attributes
+# Disable attribute access checks - PL Trainer attributes are defined in connectors, not __init__
 reportAttributeAccessIssue = "none"
-# Match mypy's allow_redefinition behavior
+# Allow constant redefinition for dynamic configuration patterns
 reportConstantRedefinition = "none"
 # Disable private import usage warnings - required for Lightning internals
 reportPrivateImportUsage = "none"
-# Disable general type issues for generator context managers until properly annotated
-reportGeneralTypeIssues = "warning"
+# Enable comprehensive type checking for standard mode
+reportGeneralTypeIssues = "error"
+reportAssignmentType = "error"
+reportCallIssue = "error"
+reportIndexIssue = "error"
 # Disable invalid type form warnings for dynamic type expressions
 reportInvalidTypeForm = "none"
-# Temporarily disable these until code is updated with proper type annotations
-reportAssignmentType = "none"
-reportCallIssue = "none"
-reportIndexIssue = "none"
 
 [tool.coverage.report]
 exclude_lines = [

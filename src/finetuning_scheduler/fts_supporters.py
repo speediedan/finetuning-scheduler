@@ -1164,7 +1164,7 @@ class ScheduleParsingMixin(ABC):
         except (ImportError, AttributeError) as err:
             error_msg = (
                 "Could not import specified reinitialization configuration class using class_path "
-                f"({reinit_cfg['class_path']}). Recieved the following error while importing: {err}. Please validate "
+                f"({reinit_cfg['class_path']}). Received the following error while importing: {err}. Please validate "
                 "specified `class_path` before resubmitting."
             )
             rank_zero_warn(error_msg)
@@ -1199,7 +1199,7 @@ class ScheduleParsingMixin(ABC):
         except (ImportError, AttributeError) as err:
             error_msg = (
                 "Could not import the specified custom strategy adapter class using the provided fully qualified class"
-                f" name ({qualname}). Recieved the following error while importing: {err}. Please validate specified"
+                f" name ({qualname}). Received the following error while importing: {err}. Please validate specified"
                 " path."
             )
             rank_zero_warn(error_msg)
@@ -1230,7 +1230,7 @@ class ScheduleParsingMixin(ABC):
         except Exception as err:
             error_msg = (
                 "Could not configure the specified optimizer class using the `init_args` "
-                f"({optimizer_init['init_args']}). Recieved the following error while sanity checking schedule "
+                f"({optimizer_init['init_args']}). Received the following error while sanity checking schedule "
                 f"phases: {err}. Please validate specified `init_args` before resubmitting."
             )
             rank_zero_warn(error_msg)
@@ -1278,11 +1278,11 @@ class ScheduleParsingMixin(ABC):
             del test_lr_init["min_lr"]  # our mock optimizer will not have any param groups
         try:
             assert callable(lrs_class)
-            testlr = lrs_class(optimizer=_MockOptimizer(), **test_lr_init)
+            testlr = lrs_class(_MockOptimizer(), **test_lr_init)  # type: ignore[call-arg]
         except Exception as err:
             error_msg = (
                 "Could not configure the specified LR scheduler class using the `init_args` "
-                f"({lr_scheduler_init['init_args']}). Recieved the following error while sanity checking schedule "
+                f"({lr_scheduler_init['init_args']}). Received the following error while sanity checking schedule "
                 f"phases: {err}. Please validate specified `init_args` before resubmitting."
             )
             rank_zero_warn(error_msg)
@@ -1530,7 +1530,7 @@ class ScheduleImplMixin(ABC):
             else optimizer.partition_parameters
         )
         optimizer._clear_cache()
-        optimizer.optim.param_groups = partition_params()[optimizer.rank]
+        optimizer.optim.param_groups = partition_params()[optimizer.rank]  # type: ignore[index]
         optimizer._sync_param_groups(optimizer.optim.param_groups, optimizer.param_groups)
 
     def _restore_latest_lr_state(self, curr_lr_state: Dict, prev_optimizer_lrs: List) -> None:
