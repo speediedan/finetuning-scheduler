@@ -31,7 +31,8 @@ ENV \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
     TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0" \
     MKL_THREADING_LAYER=${MKL_THREADING_LAYER} \
-    MAKEFLAGS="-j2"
+    MAKEFLAGS="-j2" \
+    UV_HTTP_TIMEOUT=120
 RUN apt-get update -qq --fix-missing  && \
     apt-get install -y --no-install-recommends \
         build-essential \
@@ -54,56 +55,47 @@ RUN apt-get update -qq --fix-missing  && \
     && \
     update-alternatives --install /usr/bin/python${PYTHON_VERSION%%.*} python${PYTHON_VERSION%%.*} /usr/bin/python${PYTHON_VERSION} 1 && \
     update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1 && \
+    # Install uv for fast, reliable package management (system-wide)
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh && \
     # Cleaning
     apt-get autoremove -y && \
     apt-get clean && \
     rm -rf /root/.cache && \
     rm -rf /var/lib/apt/lists/*
 
-COPY ./requirements.txt requirements.txt
 COPY ./requirements/ ./requirements/
 
 ENV PYTHONPATH=/usr/lib/python${PYTHON_VERSION}/site-packages
-ENV USE_CI_COMMIT_PIN="1"
 
 RUN \
-    wget https://bootstrap.pypa.io/get-pip.py --progress=bar:force:noscroll --no-check-certificate | python${PYTHON_VERSION} && \
-    python${PYTHON_VERSION} get-pip.py && \
-    rm get-pip.py && \
-    python${PYTHON_VERSION} -m pip install --upgrade pip setuptools && \
-    # Disable cache
-    pip config set global.cache-dir false && \
-    pip install virtualenv && \
-    mkdir /tmp/venvs && \
-    python -m virtualenv -p python${PYTHON_VERSION} /tmp/venvs/fts_dev && \
+    # Create venv with uv
+    uv venv --python python${PYTHON_VERSION} /tmp/venvs/fts_dev && \
     . /tmp/venvs/fts_dev/bin/activate && \
     # set particular PyTorch version by default
     if [[ "${CUST_BUILD}" -eq 0 ]]; then \
         CUDA_VERSION_MM=${CUDA_VERSION%.*}; \
-        pip install torch --no-cache-dir \
+        uv pip install torch --prerelease=allow \
         --find-links="https://download.pytorch.org/whl/cu${CUDA_VERSION_MM//'.'/''}/torch_stable.html" \
         --find-links="https://download.pytorch.org/whl/test/cu${CUDA_VERSION_MM//'.'/''}/torch" \
         --find-links="https://download.pytorch.org/whl/test/cu${CUDA_VERSION_MM//'.'/''}/pytorch-triton"; \
     else \
         # or target a specific cuda build, by specifying a particular index url w/...
         # ... default channel
-        # pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128; \
+        # uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128; \
         # ... pytorch patch version
-        # pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
+        # uv pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
         # ... pytorch nightly dev version
-        pip install --pre torch==2.10.0.dev20251017 --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        uv pip install --prerelease=allow torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128; \
         # ... test channel
-        # pip install --pre torch==2.10.0 --index-url https://download.pytorch.org/whl/test/cu128; \
+        # uv pip install --prerelease=allow torch==2.10.0 --index-url https://download.pytorch.org/whl/test/cu128; \
     fi && \
     # We avoid installing Lightning and other dependencies here as they are usually upgraded anyway later in
     # CI but we may re-enable in the future.
-    # LIGHTNING_COMMIT=$(cat ./requirements/lightning_pin.txt) && \
-    # pip install "lightning @ git+https://github.com/Lightning-AI/lightning.git@${LIGHTNING_COMMIT}#egg=lightning" --no-cache-dir && \
+    # Lightning commit can be installed using: uv pip install -e ".[all]" --override requirements/ci/overrides.txt
     # Install all requirements
-    # pip install -r requirements/devel.txt --no-cache-dir && \
+    # uv pip install -r requirements/devel.txt && \
     # Update six
-    pip install -U six --no-cache-dir && \
-    chmod -R 777 /tmp/venvs/fts_dev && \
+    uv pip install -U six && \
     rm -rf requirements.* requirements/
 
 RUN \
@@ -116,16 +108,34 @@ RUN \
     py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.12'.split('.')))") && \
     echo "Python version check result: ${py_ver}"
 
+# Create excludes file to prevent torch from being reinstalled during CI
+# This preserves the pre-installed CUDA torch when installing from requirements.txt
+RUN echo "torch" > /tmp/venvs/fts_dev/torch-excludes.txt && \
+    chmod 644 /tmp/venvs/fts_dev/torch-excludes.txt
+
+# Separate RUN to verify permissions persist across Docker layers
+RUN \
+    echo "=== Post-ENV permission check ===" && \
+    ls -ld /tmp/venvs/fts_dev && \
+    echo "Checking __pycache__ permissions (sample):" && \
+    find /tmp/venvs/fts_dev -type d -name "__pycache__" | head -5 | xargs ls -ld || echo "No __pycache__ found" && \
+    echo "=== Post-ENV check complete ==="
+
 RUN \
     set -x && \
     echo "============= Environment Information =============" && \
     . /tmp/venvs/fts_dev/bin/activate && \
-    echo "Pip version:" && \
-    pip --version && \
+    echo "uv version:" && \
+    uv --version && \
     echo "Installed packages:" && \
-    pip list && \
+    uv pip list && \
     echo "Verifying Python version:" && \
     python -c "import sys; ver = sys.version_info; print(f'Python {ver.major}.{ver.minor} detected'); assert f'{ver.major}.{ver.minor}' == '$PYTHON_VERSION', ver" && \
     echo "Verifying PyTorch version:" && \
     python -c "import torch; print(f'PyTorch {torch.__version__} detected'); assert torch.__version__.startswith('$PYTORCH_VERSION'), torch.__version__" && \
-    echo "============= Environment Verification Complete ============="
+    echo "============= Environment Verification Complete =============" && \
+    # Apply recursive chmod to allow userns-remapped rootless Docker users to update the venv
+    chmod -R 777 /tmp/venvs/fts_dev && \
+    echo "Verify permission state after final chmod:" && \
+    find /tmp/venvs/fts_dev -type d -name "__pycache__" | head -5 | xargs ls -ld || echo "No __pycache__ found" && \
+    echo "=== Post-env-check chmod complete ==="

@@ -24,7 +24,7 @@ COPY ./tests ./tests
 COPY ./requirements ./requirements
 COPY ./src ./src
 COPY ./.actions ./.actions
-COPY ./requirements.txt ./setup.py ./pyproject.toml ./README.md ./
+COPY ./setup.py ./pyproject.toml ./README.md ./
 
 # install dependencies
 RUN \

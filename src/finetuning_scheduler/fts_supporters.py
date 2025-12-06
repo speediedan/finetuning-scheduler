@@ -1595,8 +1595,13 @@ class ScheduleImplMixin(ABC):
                         scheduler.min_lrs.extend([scheduler.min_lrs[0]] * added_pgs)  # type: ignore[attr-defined]
                     else:
                         scheduler.base_lrs.extend([orig_lr_factor] * added_pgs)
-                        if hasattr(scheduler, "lr_lambdas"):
-                            scheduler.lr_lambdas.extend([scheduler.lr_lambdas[-1]] * added_pgs)
+                        if hasattr(scheduler, "lr_lambdas") and scheduler.lr_lambdas:
+                            # due to PyTorch lr scheduler state_dict peculiarities wrt lr_lambdas, lr_lambdas may
+                            # already be pg-aligned (since lr_lambdas are only conditionally saved/restored) see:
+                            # https://bit.ly/lr_lambda_state_dict_special_handling
+                            lambdas_to_sync = max(len(scheduler.base_lrs) - len(scheduler.lr_lambdas), 0)
+                            if lambdas_to_sync:
+                                scheduler.lr_lambdas.extend([scheduler.lr_lambdas[-1]] * lambdas_to_sync)
             else:
                 _ = ScheduleImplMixin._add_groups(no_decay, optimizer, module, thawed_pl, phase_lr)
 

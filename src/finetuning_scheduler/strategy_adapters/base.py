@@ -250,7 +250,7 @@ class StrategyAdapter:
         Args:
             trainer (Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
             orig_num_pgs (List): A list of the number of parameter groups pruned for each optimizer (since only a single
-                optimizer is currently supported by FTS, this list will have only a single element in this verison.)
+                optimizer is currently supported by FTS, this list will have only a single element in this version.)
         """
         # since we may have added parameter groups (e.g. implementing ``no_decay`` for user), we need to reinitialize
         # certain lr_scheduler variables (including type-dependent ones like ``min_lrs`` and ``lr_lambdas``)
@@ -263,8 +263,6 @@ class StrategyAdapter:
                 ]
                 if isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
                     lrs_cfg.scheduler.min_lrs = lrs_cfg.scheduler.min_lrs[orig_num_pgs[0] :]
-                elif hasattr(lrs_cfg.scheduler, "lr_lambdas"):
-                    lrs_cfg.scheduler.lr_lambdas = lrs_cfg.scheduler.lr_lambdas[orig_num_pgs[0] :]
 
     def phase0_optimizer_override(self) -> None:
         """Reconfigure the user-configured optimizer (configured via `configure_optimizers`) to optimize the

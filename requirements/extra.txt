@@ -1,2 +1,0 @@
-# extended list of package dependencies to reach full functionality
-rich>=12.3.0

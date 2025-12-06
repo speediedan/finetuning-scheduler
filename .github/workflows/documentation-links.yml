@@ -1,0 +1,24 @@
+# .github/workflows/documentation-links.yml
+# Adds Read the Docs preview links to Pull Request descriptions
+
+name: readthedocs/actions
+on:
+  pull_request_target:
+    types:
+      - opened
+    # Execute this action only on PRs that touch documentation files
+    paths:
+      - "docs/**"
+      - "README.md"
+      - "src/**"  # docstrings in source files
+
+permissions:
+  pull-requests: write
+
+jobs:
+  documentation-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: readthedocs/actions/preview@v1
+        with:
+          project-slug: "finetuning-scheduler"

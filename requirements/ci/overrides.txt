@@ -1,0 +1,13 @@
+# FTS dependency overrides for CI/dev builds
+# This file is used with UV_OVERRIDE environment variable or uv pip install --override
+# UV will override any matching package with the version specified here.
+#
+# Usage:
+#   export UV_OVERRIDE=/path/to/finetuning-scheduler/requirements/ci/overrides.txt
+#   uv pip install -e ".[all]" --torch-backend=cpu
+#
+# Or directly:
+#   uv pip install -e ".[all]" --override requirements/ci/overrides.txt --torch-backend=auto
+
+# Lightning commit pin - update this when testing against new Lightning commits
+lightning @ git+https://github.com/Lightning-AI/lightning.git@79ffe5025e0ceababbe874d6269e2006145226c1

@@ -24,6 +24,8 @@ BASE_WARNINGS = [
     "unless they are explicitly allowlisted", # required for oldest pytorch (2.5.0) with Lightning 2.5.6
     "Conversion of an array with ndim > 0",  # still needed with python 3.9 and torch 2.4.0
     "Please use the new API settings to control TF32 behavior",  # TODO: temporarily required with 20250811 nightly
+    "treespec, LeafSpec",  # TODO: required temporarily while lightning uses deprecated PT pytree API
+    "torch.jit.script",  # TODO: required temporarily with PT 2.10 nightly 20251124 due to upstream import
     WORKER_WARNING,
 ]
 
@@ -59,6 +61,7 @@ distributed_warnings = [
         "Tensor.is_pinned",
         "when logging on epoch level in distributed",
         "The number of training batches",
+        "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch", # TODO: investigate, required w/ PT 20251124
 ]
 
 # FSDP specific warnings
@@ -66,6 +69,7 @@ additional_fsdp_warns = [
     "FSDP.state_dict_type",
     "Deallocating Tensor ",
     "`_get_pg_default_device` will be deprecated",
+    "enables computation in lower precision"  # new warning with Lightning 2.6
 ]
 
 DISTRIBUTED_WARNS = extend_warns(BASE_EXPECTED_WARNS, distributed_warnings)
@@ -74,7 +78,9 @@ FSDP_BASE_WARNS = extend_warns(DISTRIBUTED_WARNS, additional_fsdp_warns)
 FSDP_DYNAMO_EXPECTED_WARNS = [DYNAMO_PHASE_WARNING]
 
 # Model parallel warnings
-additional_model_parallel_warns = []  # for future use, currently empty
+additional_model_parallel_warns = [
+   "Profiler clears events at the end of each cycle.",  # with PT 2.10 nightly 20251124
+]  # for future use, currently empty
 MODEL_PARALLEL_BASE_WARNS = extend_warns(DISTRIBUTED_WARNS, additional_model_parallel_warns)
 MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
 
@@ -86,6 +92,7 @@ EXAMPLE_BASE_WARNS = [
     "Using the current device set by the user",  # required starting with PT 2.7
     "sentencepiece tokenizer that you are converting",
     "co_lnotab is deprecated, use co_lines instead.",
+    "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch", # TODO: investigate, required with PT 20251124
     #"`resume_download` is deprecated",
     #"distutils Version classes are deprecated",
     #"Please use torch.utils._pytree.register_pytree_node",

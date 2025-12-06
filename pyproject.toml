@@ -8,11 +8,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "finetuning-scheduler"
-dynamic = ["version", "description", "readme", "dependencies", "optional-dependencies"]
+dynamic = ["version", "description", "readme", "dependencies"]
 authors = [{name = "Daniel Dale", email = "danny.dale@gmail.com"}]
 license = "Apache-2.0"
 license-files = ["LICENSE*"]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = [
     "deep learning",
     "pytorch",
@@ -33,10 +33,89 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+# CLI tools for LightningCLI integration
+cli = [
+    "jsonargparse[signatures]>=4.27.7,<4.42.0",
+    "omegaconf>=2.2.3",
+    "hydra-core>=1.2.0",
+]
+# Extended functionality
+extra = [
+    "rich>=12.3.0",
+    # Include CLI deps
+    "jsonargparse[signatures]>=4.27.7,<4.42.0",
+    "omegaconf>=2.2.3",
+    "hydra-core>=1.2.0",
+]
+# Example scripts dependencies
+examples = [
+    "datasets>=4.0.0",  # Important removal of trust_remote_code
+    "evaluate>=0.3.0",
+    "transformers>=4.26.0",
+    "scikit-learn>=1.2.0",
+    "sentencepiece>=0.2.0",
+    "tensorboardX>=2.6.1",
+    "tabulate>=0.8.9",
+    "psutil>=5.9.0",
+    "pip>=21.0.0",  # bc for torch collect_env until it supports uv
+    # Include CLI deps
+    "jsonargparse[signatures]>=4.27.7,<4.42.0",
+    "omegaconf>=2.2.3",
+    "hydra-core>=1.2.0",
+]
+# Jupyter notebook testing
+ipynb = [
+    "ipython>=7.10.0",
+    "jupytext>=1.10.0",
+    "nbval>=0.9.6",
+    # Notebook infrastructure
+    "notebook>=6.4.0",
+    "nbformat>=5.0.0",
+    "nbclient>=0.5.0",
+    "nbconvert>=6.0.0",
+    "jupyter-client>=7.0.0",
+    "jupyter-core>=4.8.0",
+    "ipykernel>=6.0.0",
+    "ipywidgets>=7.6.0",
+    "traitlets>=5.0.0",
+]
+# All optional dependencies combined
+all = [
+    # extra
+    "rich>=12.3.0",
+    # cli
+    "jsonargparse[signatures]>=4.27.7,<4.42.0",
+    "omegaconf>=2.2.3",
+    "hydra-core>=1.2.0",
+    # examples
+    "datasets>=4.0.0",
+    "evaluate>=0.3.0",
+    "transformers>=4.26.0",
+    "scikit-learn>=1.2.0",
+    "sentencepiece>=0.2.0",
+    "tensorboardX>=2.6.1",
+    "tabulate>=0.8.9",
+    "psutil>=5.9.0",
+    "pip>=21.0.0",  # bc for torch collect_env until it supports uv
+    # ipynb
+    "ipython>=7.10.0",
+    "jupytext>=1.10.0",
+    "nbval>=0.9.6",
+    "notebook>=6.4.0",
+    "nbformat>=5.0.0",
+    "nbclient>=0.5.0",
+    "nbconvert>=6.0.0",
+    "jupyter-client>=7.0.0",
+    "jupyter-core>=4.8.0",
+    "ipykernel>=6.0.0",
+    "ipywidgets>=7.6.0",
+    "traitlets>=5.0.0",
 ]
 
 [project.urls]
@@ -123,6 +202,34 @@ exclude = ['tests/.*']
 # module = []
 # ignore_errors = "True"
 
+[tool.pyright]
+# Using "basic" mode for initial migration from mypy
+# TODO: Progressively tighten to "standard" as type issues are resolved
+typeCheckingMode = "basic"
+include = ["src/finetuning_scheduler"]
+exclude = [
+    "tests",
+    "docs",
+    "build",
+    "dist",
+    ".git",
+]
+# Match mypy's ignore_missing_imports behavior
+reportMissingImports = "none"
+# Match mypy's disable_error_code = "attr-defined" for PL Trainer attributes
+reportAttributeAccessIssue = "none"
+# Match mypy's allow_redefinition behavior
+reportConstantRedefinition = "none"
+# Disable private import usage warnings - required for Lightning internals
+reportPrivateImportUsage = "none"
+# Disable general type issues for generator context managers until properly annotated
+reportGeneralTypeIssues = "warning"
+# Disable invalid type form warnings for dynamic type expressions
+reportInvalidTypeForm = "none"
+# Temporarily disable these until code is updated with proper type annotations
+reportAssignmentType = "none"
+reportCallIssue = "none"
+reportIndexIssue = "none"
 
 [tool.coverage.report]
 exclude_lines = [
@@ -155,3 +262,46 @@ notebook_metadata_filter = "-all"
 [tool.jupytext.formats]
 "notebooks/" = "ipynb"
 "scripts/" = "py"
+
+# Dependency groups for development (PEP 735)
+# These are NOT installed by default, only via uv pip install --group <name>
+[dependency-groups]
+dev = [
+    # Development dependencies include test group
+    "coverage>=6.4",
+    "pytest>=7.0.0",
+    "pytest-rerunfailures>=10.2",
+    "twine>=3.2.0",
+    "pyright>=1.1.390",
+    "pre-commit>=2.0.0",
+    "mlflow>=3.0.0",
+]
+test = [
+    "coverage>=6.4",
+    "pytest>=7.0.0",
+    "pytest-rerunfailures>=10.2",
+    "twine>=3.2.0",
+    "pyright>=1.1.390",
+    "pre-commit>=2.0.0",
+    # protobuf upper bound removed - handled by dependency resolution
+    "mlflow>=3.0.0",
+]
+# git dependencies installed separately (git URLs cannot be in universal lock files)
+git-deps = [
+    # Lightning is handled dynamically via setup.py based on PACKAGE_NAME and USE_CI_COMMIT_PIN
+]
+
+[tool.uv]
+# Override dependencies for editable installations
+# This replaces git URL dependencies with version constraints, allowing
+# editable installations to satisfy requirements via UV's git dependency caching
+override-dependencies = [
+    # Lightning override handled via overrides file specified at install time for more flexibility
+]
+
+# PyTorch index configuration is handled via --torch-backend flag
+# For CI (CPU-only): use --torch-backend=cpu
+# For local dev (CUDA): use --torch-backend=auto or UV_TORCH_BACKEND=cu128
+# See: https://docs.astral.sh/uv/guides/integration/pytorch/
+# Note: We don't define explicit indices or sources here because --torch-backend
+# configures everything automatically and allows flexibility between CPU/CUDA builds
