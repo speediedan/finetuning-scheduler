@@ -580,6 +580,7 @@ class ScheduleParsingMixin(ABC):
         Returns:
             Dict: PyTorch Lightning lr scheduler configuration without extra keys
         """
+        supported_keys = set(pl_lrs_cfg.keys())
         if self.pl_module.automatic_optimization:
             supported_keys = {field.name for field in fields(LRSchedulerConfig)}
             extra_keys = pl_lrs_cfg.keys() - supported_keys
@@ -1184,8 +1185,8 @@ class ScheduleParsingMixin(ABC):
         Returns:
             StrategyAdapter: The custom strategy adapter class to be instantiated.
         """
+        qualname = adapter_map.get(strategy_key, None)
         try:
-            qualname = adapter_map.get(strategy_key, None)
             if not qualname:
                 raise MisconfigurationException(
                     f"Current strategy name ({strategy_key}) does not map to a custom strategy adapter in the"

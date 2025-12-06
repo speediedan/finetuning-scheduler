@@ -203,9 +203,8 @@ exclude = ['tests/.*']
 # ignore_errors = "True"
 
 [tool.pyright]
-# Using "basic" mode for initial migration from mypy
-# TODO: Progressively tighten to "standard" as type issues are resolved
-typeCheckingMode = "basic"
+# Using "standard" mode for comprehensive type checking
+typeCheckingMode = "standard"
 include = ["src/finetuning_scheduler"]
 exclude = [
     "tests",

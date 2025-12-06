@@ -18,7 +18,7 @@ Base adapter class to extend Fine-Tuning Scheduler support of complex or custom 
 """
 from functools import partialmethod
 from pprint import pformat as pfmt
-from typing import Callable, List, Optional, Tuple, Dict
+from typing import Callable, Iterable, List, Optional, Tuple, Dict, Union
 
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -263,8 +263,6 @@ class StrategyAdapter:
                 ]
                 if isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
                     lrs_cfg.scheduler.min_lrs = lrs_cfg.scheduler.min_lrs[orig_num_pgs[0] :]
-                elif hasattr(lrs_cfg.scheduler, "lr_lambdas"):
-                    lrs_cfg.scheduler.lr_lambdas = lrs_cfg.scheduler.lr_lambdas[orig_num_pgs[0] :]
 
     def phase0_optimizer_override(self) -> None:
         """Reconfigure the user-configured optimizer (configured via `configure_optimizers`) to optimize the
@@ -331,7 +329,7 @@ class StrategyAdapter:
     # dispatching pattern for module-specific handling)
     ####################################################################################################################
 
-    def _module_specific_freezing(self, modules: torch.nn.Module) -> None:
+    def _module_specific_freezing(self, modules: Union[torch.nn.Module, Iterable[torch.nn.Module]]) -> None:
         """Orchestrates module-specific freezing behavior. Currently only.
 
         :external+torch:class:`~torch.nn.modules.batchnorm._BatchNorm` layers require special handling. Running
@@ -339,14 +337,15 @@ class StrategyAdapter:
         `frozen_bn_track_running_stats` flag.
 
         Args:
-            modules (torch.nn.Module): The modules for which the `BatchNorm` layer running statistics should be enabled.
+            modules: The modules for which the `BatchNorm` layer running statistics should be enabled.
+                Can be a single Module or an iterable of Modules.
         Returns:
             None
         """
         if self.fts_handle.frozen_bn_track_running_stats:
             rank_zero_debug("Since `frozen_bn_track_running_stats` is currently set to `True`, FinetuningScheduler"
                             " will set `track_running_stats` to `True` for all `BatchNorm` layers.")
-            modules = BaseFinetuning.flatten_modules(modules)  # type: ignore[assignment]
+            modules = BaseFinetuning.flatten_modules(modules)
             for mod in modules:
                 if isinstance(mod, torch.nn.modules.batchnorm._BatchNorm):
                     mod.track_running_stats = True

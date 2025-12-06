@@ -9,13 +9,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Dict, List, Set, Iterator, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Set, Iterator, Tuple
 from types import resolve_bases
 
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import _CHECKPOINT_PREFIX
 import torch
 
-if torch.distributed.is_available():
+# Type checking imports - always available for static analysis
+if TYPE_CHECKING or torch.distributed.is_available():
     from torch.distributed.fsdp.wrap import _Policy, CustomPolicy
 
 
