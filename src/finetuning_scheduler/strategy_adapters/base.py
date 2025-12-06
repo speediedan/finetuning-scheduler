@@ -330,8 +330,7 @@ class StrategyAdapter:
     ####################################################################################################################
 
     def _module_specific_freezing(self, modules: Union[torch.nn.Module, Iterable[torch.nn.Module]]) -> None:
-        """Orchestrates module-specific freezing behavior. Currently only.
-
+        """Orchestrates module-specific freezing behavior. Currently only
         :external+torch:class:`~torch.nn.modules.batchnorm._BatchNorm` layers require special handling. Running
         statistics tracking for frozen `BatchNorm` layers is conditionally re-enabled here based on the
         `frozen_bn_track_running_stats` flag.
