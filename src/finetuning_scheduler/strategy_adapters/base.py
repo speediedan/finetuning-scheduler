@@ -224,8 +224,6 @@ class StrategyAdapter:
             lrs_cfg.scheduler.last_epoch = -1  # type: ignore[union-attr]
             if not isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
                 lrs_cfg.scheduler.base_lrs = []
-            # if hasattr(lrs_cfg.scheduler, "lr_lambdas"):
-            #     lrs_cfg.scheduler.lr_lambdas = []
         return orig_num_pgs
 
     def _reconfigure_optimizer_for_phase0(self, trainer: Trainer) -> None:
@@ -258,8 +256,6 @@ class StrategyAdapter:
         # certain lr_scheduler variables (including type-dependent ones like ``min_lrs`` and ``lr_lambdas``)
         if trainer.lr_scheduler_configs:
             for lrs_cfg in trainer.lr_scheduler_configs:
-                # if hasattr(lrs_cfg.scheduler, "lr_lambdas"):
-                #     lrs_cfg.scheduler.lr_lambdas = lrs_cfg.scheduler.lr_lambdas[orig_num_pgs[0] :]
                 if not isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
                     lrs_cfg.scheduler._initial_step()
                 lrs_cfg.scheduler._last_lr = [  # type: ignore[union-attr]
@@ -267,8 +263,8 @@ class StrategyAdapter:
                 ]
                 if isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
                     lrs_cfg.scheduler.min_lrs = lrs_cfg.scheduler.min_lrs[orig_num_pgs[0] :]
-                # elif hasattr(lrs_cfg.scheduler, "lr_lambdas"):
-                #     lrs_cfg.scheduler.lr_lambdas = lrs_cfg.scheduler.lr_lambdas[orig_num_pgs[0] :]
+                elif hasattr(lrs_cfg.scheduler, "lr_lambdas"):
+                    lrs_cfg.scheduler.lr_lambdas = lrs_cfg.scheduler.lr_lambdas[orig_num_pgs[0] :]
 
     def phase0_optimizer_override(self) -> None:
         """Reconfigure the user-configured optimizer (configured via `configure_optimizers`) to optimize the

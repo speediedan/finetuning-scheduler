@@ -1,6 +1,5 @@
-import os
 import sys
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
 from pathlib import Path
 import pytest
 
@@ -9,58 +8,25 @@ from finetuning_scheduler.dynamic_versioning.utils import (
     _replace_imports, _check_import_format, use_standalone_pl, use_unified_pl,
     get_project_paths, toggle_lightning_imports,
     LIGHTNING_PACKAGE_MAPPING, EXCLUDE_FILES_FROM_CONVERSION, get_requirement_files,
-    _is_package_installed
+    _is_package_installed, get_base_dependencies, BASE_DEPENDENCIES
 )
 
 
 def test_get_lightning_requirement():
-    """Test getting the Lightning requirement string based on configuration."""
-    # Test without commit
-    req = get_lightning_requirement("unified", False)
+    """Test getting the Lightning requirement string.
+
+    Note: Commit pinning is now handled at install time via UV_OVERRIDE,
+    so get_lightning_requirement just returns version-constrained requirements.
+    """
+    # Test unified package
+    req = get_lightning_requirement("unified")
     assert "lightning>=" in req
     assert "@" not in req
 
-    req = get_lightning_requirement("standalone", False)
+    # Test standalone package
+    req = get_lightning_requirement("standalone")
     assert "pytorch-lightning>=" in req
     assert "@" not in req
-
-    # Test with commit (mock the file reading)
-    with patch("builtins.open", mock_open(read_data="abc123")):
-        req = get_lightning_requirement("unified", True)
-        assert "lightning @ git+" in req
-        assert "abc123" in req
-
-        req = get_lightning_requirement("standalone", True)
-        assert "pytorch-lightning @ git+" in req
-        assert "abc123" in req
-
-
-def test_get_lightning_requirement_missing_pin_file():
-    """Test getting the Lightning requirement string when commit pin file is missing."""
-    # Mock os.path.exists to return False for the lightning_pin.txt file
-    with patch('os.path.exists', return_value=False), \
-         patch('builtins.print') as mock_print:
-
-        # Test with use_commit=True but missing pin file
-        req = get_lightning_requirement("unified", True)
-
-        # Should fall back to release-based installation
-        assert "lightning>=" in req
-        assert "@" not in req
-
-        # Should print warning messages
-        assert any("Warning: USE_CI_COMMIT_PIN is set but" in call_args[0][0]
-                  for call_args in mock_print.call_args_list)
-        assert any("Falling back to release-based installation" in call_args[0][0]
-                  for call_args in mock_print.call_args_list)
-
-        # Reset mock
-        mock_print.reset_mock()
-
-        # Same for standalone package
-        req = get_lightning_requirement("standalone", True)
-        assert "pytorch-lightning>=" in req
-        assert "@" not in req
 
 
 def test_lightning_package_mapping():
@@ -69,7 +35,6 @@ def test_lightning_package_mapping():
     assert LIGHTNING_PACKAGE_MAPPING["lightning.pytorch"] == "pytorch_lightning"
     assert "lightning.fabric" in LIGHTNING_PACKAGE_MAPPING
     assert LIGHTNING_PACKAGE_MAPPING["lightning.fabric"] == "lightning_fabric"
-
 
 def test_retrieve_files(tmp_path):
     """Test retrieving files with extensions and exclusions."""
@@ -195,69 +160,43 @@ def test_toggle_lightning_imports():
 
 
 def test_get_requirement_files():
-    """Test the behavior of get_requirement_files."""
-    # Test with different environment variables
-    with patch.dict(os.environ, {"USE_CI_COMMIT_PIN": "0"}), \
-         patch('builtins.open', mock_open(read_data="pytorch>=2.0.0\nother-req>=1.0")):
+    """Test the behavior of get_requirement_files.
 
-        # Test standalone mode
-        reqs = get_requirement_files(standalone=True)
-        assert any(r.startswith("pytorch-lightning>=") for r in reqs)
+    Note: Commit pinning is now handled at install time via UV_OVERRIDE,
+    so get_requirement_files just returns version-constrained requirements.
+    """
+    # Test standalone mode
+    reqs = get_requirement_files(standalone=True)
+    assert any(r.startswith("pytorch-lightning>=") for r in reqs)
+    # Should include base dependencies
+    assert any(r.startswith("torch>=") for r in reqs)
 
-        # Test unified mode
-        reqs = get_requirement_files(standalone=False)
-        assert any(r.startswith("lightning>=") for r in reqs)
+    # Test unified mode
+    reqs = get_requirement_files(standalone=False)
+    assert any(r.startswith("lightning>=") for r in reqs)
+    assert any(r.startswith("torch>=") for r in reqs)
+
+
+def test_get_base_dependencies():
+    """Test that get_base_dependencies returns expected deps."""
+    deps = get_base_dependencies()
+    assert isinstance(deps, list)
+    assert any(d.startswith("torch>=") for d in deps)
+    # Ensure it returns a copy, not the original
+    deps.append("test-package")
+    assert "test-package" not in BASE_DEPENDENCIES
 
 
 def test_get_requirement_files_comment_handling():
-    """Test handling of comments and empty lines in get_requirement_files."""
-    mock_content = """
-    # This is a comment
-
-    pytorch>=2.0.0
-    # Another comment
-    other-req>=1.0
-    pytorch-lightning>=1.0.0
-    lightning>=2.0.0
-    """
-    with patch.dict(os.environ, {"USE_CI_COMMIT_PIN": "0"}), \
-         patch('builtins.open', mock_open(read_data=mock_content)), \
-         patch('finetuning_scheduler.dynamic_versioning.utils.get_lightning_requirement',
-               return_value="lightning>=2.5.0"):
-
-        reqs = get_requirement_files(standalone=False)
-
-        # Verify comments and Lightning packages were skipped
-        assert "# This is a comment" not in reqs
-        assert "# Another comment" not in reqs
-        assert not any(r.startswith("pytorch-lightning") for r in reqs)
-        assert not any(r == "" for r in reqs)
-
-        # Verify other requirements were included
-        assert "pytorch>=2.0.0" in reqs
-        assert "other-req>=1.0" in reqs
-        assert "lightning>=2.5.0" in reqs
-
-
-def test_get_requirement_files_with_commit_pin():
-    """Test get_requirement_files with commit pinning enabled."""
-    mock_content = "pytorch>=2.0.0\nother-req>=1.0"
-
-    with patch.dict(os.environ, {"USE_CI_COMMIT_PIN": "true"}), \
-         patch('builtins.open', mock_open(read_data=mock_content)), \
-         patch('finetuning_scheduler.dynamic_versioning.utils.get_lightning_requirement',
-               return_value="lightning @ git+https://github.com/Lightning-AI/lightning.git@abc123#egg=lightning"), \
-         patch('builtins.print') as mock_print:
-
-        reqs = get_requirement_files(standalone=False)
-
-        # Verify the commit message was printed
-        mock_print.assert_called_once_with(
-            "Using Lightning from commit: lightning @ git+https://github.com/Lightning-AI/lightning.git@abc123#egg=lightning"
-        )
-
-        # Verify requirements list contains the pinned version
-        assert "lightning @ git+https://github.com/Lightning-AI/lightning.git@abc123#egg=lightning" in reqs
+    """Test that get_requirement_files correctly handles base dependencies."""
+    # Dependencies come from BASE_DEPENDENCIES constant
+    reqs = get_requirement_files(standalone=False)
+    # Should have torch and Lightning
+    assert any(r.startswith("torch>=") for r in reqs)
+    assert any(r.startswith("lightning>=") for r in reqs)
+    # Lightning should not appear twice
+    lightning_count = sum(1 for r in reqs if r.startswith("lightning>=") or r.startswith("lightning "))
+    assert lightning_count == 1
 
 
 @pytest.mark.parametrize("use_function,source_format,target_format,sample_content", [

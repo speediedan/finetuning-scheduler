@@ -1,0 +1,11 @@
+# PyTorch nightly version configuration
+# To enable nightly builds, uncomment and set the version and CUDA target below.
+# Leave commented/empty to use stable PyTorch releases.
+#
+# Format:
+#   Line 1: torch version (e.g., 2.10.0.dev20251203)
+#   Line 2: CUDA target for local builds (e.g., cu128) - CI always uses cpu
+#
+# Example (uncomment both lines to enable):
+2.10.0.dev20251124
+cu128
