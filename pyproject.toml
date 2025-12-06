@@ -198,14 +198,13 @@ reportAttributeAccessIssue = "none"
 reportConstantRedefinition = "none"
 # Disable private import usage warnings - required for Lightning internals
 reportPrivateImportUsage = "none"
-# Disable general type issues for generator context managers until properly annotated
-reportGeneralTypeIssues = "warning"
-# Disable invalid type form warnings for dynamic type expressions
-reportInvalidTypeForm = "none"
-# Temporarily disable these until code is updated with proper type annotations
+# Enable comprehensive type checking for standard mode
+reportGeneralTypeIssues = "error"
 reportAssignmentType = "error"
 reportCallIssue = "error"
 reportIndexIssue = "error"
+# Disable invalid type form warnings for dynamic type expressions
+reportInvalidTypeForm = "none"
 
 [tool.coverage.report]
 exclude_lines = [
