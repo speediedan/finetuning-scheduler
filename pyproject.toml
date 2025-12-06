@@ -205,7 +205,7 @@ reportInvalidTypeForm = "none"
 # Temporarily disable these until code is updated with proper type annotations
 reportAssignmentType = "error"
 reportCallIssue = "error"
-reportIndexIssue = "none"
+reportIndexIssue = "error"
 
 [tool.coverage.report]
 exclude_lines = [

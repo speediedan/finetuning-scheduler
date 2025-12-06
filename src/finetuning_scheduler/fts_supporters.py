@@ -1530,7 +1530,7 @@ class ScheduleImplMixin(ABC):
             else optimizer.partition_parameters
         )
         optimizer._clear_cache()
-        optimizer.optim.param_groups = partition_params()[optimizer.rank]
+        optimizer.optim.param_groups = partition_params()[optimizer.rank]  # type: ignore[index]
         optimizer._sync_param_groups(optimizer.optim.param_groups, optimizer.param_groups)
 
     def _restore_latest_lr_state(self, curr_lr_state: Dict, prev_optimizer_lrs: List) -> None:
