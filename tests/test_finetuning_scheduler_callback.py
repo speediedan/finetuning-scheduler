@@ -327,7 +327,7 @@ class TestFinetuningScheduler(FinetuningScheduler):
         if self.mock_strategy:
             trainer._accelerator_connector._strategy_flag = MOCK_STRATEGY_MAPPING[self.mock_strategy][0]
             self.allow_untested = MOCK_STRATEGY_MAPPING[self.mock_strategy][1]
-            self.custom_strategy_adapter = MOCK_STRATEGY_MAPPING[self.mock_strategy][2]
+            self.custom_strategy_adapters = MOCK_STRATEGY_MAPPING[self.mock_strategy][2]
         super().setup(trainer, pl_module, stage)
         if self.mock_strategy and self.allow_untested:
             raise SystemExit(0)

@@ -9,12 +9,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-r"""
-Fine-Tuning Scheduler
-^^^^^^^^^^^^^^^^^^^^^
+r"""Fine-Tuning Scheduler.
 
 Used to implement flexible fine-tuning training schedules
-
 """
 import logging
 import os
@@ -111,7 +108,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         reinit_optim_cfg: Optional[Dict] = None,
         reinit_lr_cfg: Optional[Dict] = None,
         strategy_adapter_cfg: Optional[Dict] = None,
-        custom_strategy_adapter: Optional[Dict[str, str]] = None,
+        custom_strategy_adapters: Optional[Dict[str, str]] = None,
         allow_untested: bool = False,
         apply_lambdas_new_pgs: bool = False,
         logging_level: int = logging.INFO,
@@ -223,7 +220,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 :external+pl:class:`~lightning.pytorch.strategies.Strategy`. See the relevant
                 :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` documentation for strategy-specific
                 configuration options. Defaults to None.
-            custom_strategy_adapter: A dictionary associating the canonical ``strategy_flag`` associated with a
+            custom_strategy_adapters: A dictionary associating the canonical ``strategy_flag`` associated with a
                 :external+pl:class:`~lightning.pytorch.strategies.Strategy` (potentially a custom user-registered one)
                 to the fully qualified path of a
                 :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` subclass. This is an experimental
@@ -270,7 +267,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.reinit_optim_cfg = reinit_optim_cfg
         self.reinit_lr_cfg = reinit_lr_cfg
         self.strategy_adapter_cfg = strategy_adapter_cfg or {}
-        self.custom_strategy_adapter = custom_strategy_adapter
+        self.custom_strategy_adapters = custom_strategy_adapters
         self.allow_untested = allow_untested
         self.apply_lambdas_new_pgs = apply_lambdas_new_pgs
         self.enforce_phase0_params = enforce_phase0_params
@@ -527,6 +524,20 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         except KeyError as ke:  # we may want to allow training to progress conditioned on context of restoration
             self._maybe_allow_incompatible_reinit_ckpt(ke)
         self.trainer._checkpoint_connector.restore_datamodule()
+
+        # Allow strategy-specific adapters to transform the state dict before model restoration
+        try:
+            loaded_ckpt = self.trainer._checkpoint_connector._loaded_checkpoint
+            if self.strategy_adapter is not None:
+                try:
+                    loaded_ckpt = self.strategy_adapter.before_restore_model(loaded_ckpt)
+                    # assign back in case adapter replaced or modified the checkpoint
+                    self.trainer._checkpoint_connector._loaded_checkpoint = loaded_ckpt
+                except Exception as err:
+                    rank_zero_warn(f"Strategy adapter before_restore_model hook raised: {err}")
+        except Exception:
+            # best-effort only; do not prevent training if state dict transformation fails here
+            pass
         self.trainer._checkpoint_connector.restore_model()
         # we need to override checkpoint_connector.restore_training_state() to bypass loop restoration
         # if additional customizations are required, may make sense to subclass _CheckpointConnector at some point
@@ -671,8 +682,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                     f" '{strategy}' because ``allow_untested`` is ``True``."  # type: ignore[attr-defined]
                 )
                 rank_zero_warn(warn_msg)
-        if self.custom_strategy_adapter:
-            strategy_cls = self._import_strategy_adapter(strategy_flag, self.custom_strategy_adapter)
+        if self.custom_strategy_adapters:
+            strategy_cls = self._import_strategy_adapter(strategy_flag, self.custom_strategy_adapters)
             rank_zero_info(
                 f"Imported custom strategy adapter class type `{strategy_cls}` associated with the current strategy"
                 f" `{strategy_flag}`."
@@ -703,9 +714,11 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         Raises:
             SystemExit: Gracefully exit before training if only generating and not executing a fine-tuning schedule.
         """
+        # TODO: might not be necessary if we move introspection back to IT where it belongs
+        # Save pl_module/trainer refs early to allow strategy adapter selection to introspect the module
+        self.pl_module, self.trainer = pl_module, trainer  # save pl_module/trainer refs for downstream convenience
         self._callback_dep_setup(trainer, pl_module, stage)
         self._strategy_setup(trainer)
-        self.pl_module, self.trainer = pl_module, trainer  # save pl_module/trainer refs for downstream convenience
         if self.gen_ft_sched_only:
             if trainer.is_global_zero:
                 assert self.log_dir is not None, "log_dir must be set to generate a fine-tuning schedule"

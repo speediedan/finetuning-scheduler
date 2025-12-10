@@ -67,6 +67,41 @@ TARGET_CALLBACK_REF = "FinetuningScheduler"
 STRATEGY_ADAPTERS = {"fsdp": FSDPStrategyAdapter, "modelparallelstrategy": ModelParallelStrategyAdapter}
 
 
+def _discover_strategy_adapters() -> None:
+    """Discover strategy adapter plugins via entry points.
+
+    This tries to discover user-contributed adapters registered under the
+    `finetuning_scheduler.strategy_adapters` entry point group and extends the
+    runtime `STRATEGY_ADAPTERS` mapping with any discovered adapters keyed by
+    the entry point name (lowercased).
+    """
+    # This code targets Python 3.10+ environments; use the standard importlib.metadata API.
+    from importlib.metadata import entry_points
+    eps = entry_points(group="finetuning_scheduler.strategy_adapters")
+    for ep in eps:
+        try:
+            # prefer using the standard entrypoint loader which handles 'module:attr'
+            try:
+                cls = ep.load()
+            except Exception:
+                # fall back to dot notation if a colon-separated import path was not provided
+                val = getattr(ep, 'value', '')
+                if ':' in val:
+                    module, attr = val.split(':', 1)
+                else:
+                    module, attr = val.rsplit('.', 1)
+                module = __import__(module, fromlist=[attr])
+                cls = getattr(module, attr)
+            if hasattr(ep, "name") and isinstance(ep.name, str):
+                STRATEGY_ADAPTERS[ep.name.lower()] = cls
+                rank_zero_info(f"Discovered strategy adapter entrypoint '{ep.name}' -> {cls}")
+        except Exception as err:
+            rank_zero_warn(f"Failed to load strategy adapter entry point {ep}: {err}")
+
+
+_discover_strategy_adapters()
+
+
 @dataclass
 class FTSState:
     """Dataclass to encapsulate the :class:`~finetuning_scheduler.fts.FinetuningScheduler` internal state."""
@@ -1173,7 +1208,7 @@ class ScheduleParsingMixin(ABC):
 
     @staticmethod
     def _import_strategy_adapter(strategy_key: str, adapter_map: Dict[str, str]) -> Type[StrategyAdapter]:
-        """Import the custom strategy adapter specified in the ``custom_strategy_adapter`` configuration.
+        """Import the custom strategy adapter specified in the ``custom_strategy_adapters`` configuration.
 
         Args:
             qualname (Dict): The user-provided custom strategy adapter fully qualified class name.
@@ -1190,9 +1225,18 @@ class ScheduleParsingMixin(ABC):
             if not qualname:
                 raise MisconfigurationException(
                     f"Current strategy name ({strategy_key}) does not map to a custom strategy adapter in the"
-                    f" provided `custom_strategy_adapter` mapping ({adapter_map})."
+                    f" provided `custom_strategy_adapters` mapping ({adapter_map})."
                 )
-            class_module, class_name = qualname.rsplit(".", 1)
+            # If a short entry point name was provided, prefer the discovered STRATEGY_ADAPTERS mapping
+            if qualname in STRATEGY_ADAPTERS:
+                return STRATEGY_ADAPTERS[qualname]
+
+            # Accept either 'module.Class' or 'module:Class' form to support both direct import paths and
+            # entry-point-like strings.
+            if ":" in qualname:
+                class_module, class_name = qualname.split(":", 1)
+            else:
+                class_module, class_name = qualname.rsplit(".", 1)
             module = __import__(class_module, fromlist=[class_name])
             custom_strategy_adapter_cls = getattr(module, class_name)
             issubclass(custom_strategy_adapter_cls, StrategyAdapter)

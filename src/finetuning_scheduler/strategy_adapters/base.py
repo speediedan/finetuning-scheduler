@@ -18,7 +18,7 @@ Base adapter class to extend Fine-Tuning Scheduler support of complex or custom 
 """
 from functools import partialmethod
 from pprint import pformat as pfmt
-from typing import Callable, Iterable, List, Optional, Tuple, Dict, Union
+from typing import Callable, Iterable, List, Optional, Tuple, Dict, Union, Any
 
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -164,6 +164,20 @@ class StrategyAdapter:
                 names.
         """
         return orig_pl
+
+    def before_restore_model(self, checkpoint: Dict[str, Any]) -> Dict[str, Any]:
+        """Adapter hook executed before model restore.
+
+        Strategy adapters can override this to modify or translate the checkpoint contents (e.g. for state-dict
+        translations) before the model's load path is executed.
+
+        Args:
+            checkpoint (Dict[str, Any]): The full checkpoint dict loaded by the Trainer.
+
+        Returns:
+            Dict[str, Any]: The checkpoint dictionary to be used for restore.
+        """
+        return checkpoint
 
     def logical_param_translation(self, param_names: List) -> List:
         """Effectively the reverse transformation of
