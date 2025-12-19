@@ -20,7 +20,7 @@ from typing import List, Optional, Tuple, Dict, ValuesView
 # -----------------------------------------------------------------------------
 
 # Shared version constraint for all Lightning packages
-LIGHTNING_VERSION = ">=2.5.0,<2.5.7"
+LIGHTNING_VERSION = ">=2.5.0,<2.6.1"
 
 LIGHTNING_PACKAGE_MAPPING = {
     "lightning.pytorch": "pytorch_lightning",

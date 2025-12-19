@@ -65,6 +65,7 @@ additional_fsdp_warns = [
     "FSDP.state_dict_type",
     "Deallocating Tensor ",
     "`_get_pg_default_device` will be deprecated",
+    "enables computation in lower precision"  # new warning with Lightning 2.6
 ]
 
 DISTRIBUTED_WARNS = extend_warns(BASE_EXPECTED_WARNS, distributed_warnings)

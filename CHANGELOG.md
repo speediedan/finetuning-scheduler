@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [2.9.2] - 2025-12-19
+
+### Added
+
+- Verified support for Lightning 2.6.0, resolves [#25](https://github.com/speediedan/finetuning-scheduler/pull/25).
+
 ## [2.9.1] - 2025-11-10
 
 ### Fixed

@@ -81,7 +81,7 @@ python -m pip install -e ".[all]" -r requirements/docs.txt
 #### Install a specific FTS version from source using the standalone `pytorch-lighting` package:
 
 ```bash
-export FTS_VERSION=2.9.0
+export FTS_VERSION=2.9.2
 export PACKAGE_NAME=pytorch
 git clone -b v${FTS_VERSION} https://github.com/speediedan/finetuning-scheduler
 cd finetuning-scheduler
@@ -183,7 +183,7 @@ See the [versioning documentation](https://finetuning-scheduler.readthedocs.io/e
 <details>
   <summary>Current build statuses for Fine-Tuning Scheduler </summary>
 
-| System / (PyTorch/Python ver) |                                                                                                        2.5.1/3.9                                                                                                         |                                                                                                              2.9.0/3.9, 2.9.0/3.12                                                                                                               |
+| System / (PyTorch/Python ver) |                                                                                                        2.5.1/3.9                                                                                                         |                                                                                                              2.9.1/3.9, 2.9.1/3.12                                                                                                               |
 | :---------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
 |      Linux \[GPUs\*\*\]       |                                                                                                            -                                                                                                             | [![Build Status](https://dev.azure.com//speediedan/finetuning-scheduler/_apis/build/status/Multi-GPU%20&%20Example%20Tests?branchName=main)](https://dev.azure.com/speediedan/finetuning-scheduler/_build/latest?definitionId=1&branchName=main) |
 |     Linux (Ubuntu 22.04)      | [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml) |             [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml)             |
