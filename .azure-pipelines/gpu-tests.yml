@@ -126,8 +126,8 @@ jobs:
         gpg --no-default-keyring --keyring trustedkeys.gpg --verify codecov.SHA256SUM.sig codecov.SHA256SUM
         shasum -a 256 -c codecov.SHA256SUM
         chmod +x codecov
-        # ./codecov -t $CODECOV_TOK --commit=$(Build.SourceVersion) --flags=gpu,pytest --name="GPU-coverage" --env=linux,azure
-        ./codecov upload-process --slug 'speediedan/finetuning-scheduler' -t $CODECOV_TOK --commit-sha $(Build.SourceVersion) --git-service 'github' -n "GPU-coverage" -F 'gpu,pytest' --env 'linux,azure' -f 'coverage.xml'
+        # ./codecov -t $CODECOV_TOK --commit=$(Build.SourceVersion) -F gpu -F pytest --name="GPU-coverage" --env=linux,azure
+        ./codecov upload-process --slug 'speediedan/finetuning-scheduler' -t $CODECOV_TOK --commit-sha $(Build.SourceVersion) --git-service 'github' -n "GPU-coverage" -F gpu -F pytest --env 'linux,azure' -f 'coverage.xml'
       env:
         CODECOV_TOK: $(CODECOV_TOKEN)  # explicit mapping required for secret azure pipeline variables
       displayName: 'Statistics'
