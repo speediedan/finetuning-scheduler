@@ -357,6 +357,30 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             only supports single-schedule/optimizer fine-tuning configurations
         """
         assert self.trainer is not None
+
+        # Inspect state at beginning of step
+        if self.strategy_adapter is not None and hasattr(self.strategy_adapter, "inspect_state"):
+            try:
+                self.strategy_adapter.inspect_state(
+                    self.pl_module,
+                    "self.pl_module.named_parameters()",
+                    context_message="At beginning of FinetuningScheduler.step()",
+                    prefix_filter="",
+                    num_keys_sample=10,
+                    log_debug=True,
+                )
+                if hasattr(self.pl_module, "model") and hasattr(self.pl_module.model, "tl_named_parameters"):
+                    self.strategy_adapter.inspect_state(
+                        self.pl_module.model,
+                        "self.pl_module.model.tl_named_parameters()",
+                        context_message="At beginning of FinetuningScheduler.step()",
+                        prefix_filter="",
+                        num_keys_sample=10,
+                        log_debug=True,
+                    )
+            except Exception as e:
+                print(f"Inspection utility encountered an error: {e}")
+
         pre_reinit_state = self._save_pre_reinit_lr_state(self.trainer)
         if not self._fts_state._resume_fit_from_ckpt:
             if self.restore_best:
@@ -391,6 +415,30 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 f"Given the current configuration of `max_depth` ({self.max_depth}), this training session"
                 f" will now end when {max_epochs_msg if self.epoch_transitions_only else composition_msg}"
             )
+
+        # Inspect state at end of step after parameter thawing
+        if self.strategy_adapter is not None and hasattr(self.strategy_adapter, "inspect_state"):
+            try:
+                self.strategy_adapter.inspect_state(
+                    self.pl_module,
+                    "self.pl_module.named_parameters()",
+                    context_message="At end of FinetuningScheduler.step() after parameter thawing",
+                    prefix_filter="",
+                    num_keys_sample=10,
+                    log_debug=True,
+                )
+                if hasattr(self.pl_module, "model") and hasattr(self.pl_module.model, "tl_named_parameters"):
+                    self.strategy_adapter.inspect_state(
+                        self.pl_module.model,
+                        "self.pl_module.model.tl_named_parameters()",
+                        context_message="At end of FinetuningScheduler.step() after parameter thawing",
+                        prefix_filter="",
+                        num_keys_sample=10,
+                        log_debug=True,
+                    )
+            except Exception as e:
+                print(f"Inspection utility encountered an error: {e}")
+        pass  # for breakpoint
 
     def step_pg(
         self,
@@ -525,9 +573,40 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             self._maybe_allow_incompatible_reinit_ckpt(ke)
         self.trainer._checkpoint_connector.restore_datamodule()
 
+        # Inspect state before strategy adapter transformation
+        loaded_ckpt = self.trainer._checkpoint_connector._loaded_checkpoint
+        if self.strategy_adapter is not None and hasattr(self.strategy_adapter, "inspect_state"):
+            try:
+                self.strategy_adapter.inspect_state(
+                    self.pl_module,
+                    "self.pl_module.named_parameters()",
+                    context_message="Before strategy adapter before_restore_model",
+                    prefix_filter="",
+                    num_keys_sample=10,
+                    log_debug=True,
+                )
+                if hasattr(self.pl_module, "model") and hasattr(self.pl_module.model, "tl_named_parameters"):
+                    self.strategy_adapter.inspect_state(
+                        self.pl_module.model,
+                        "self.pl_module.model.tl_named_parameters()",
+                        context_message="Before strategy adapter before_restore_model",
+                        prefix_filter="",
+                        num_keys_sample=10,
+                        log_debug=True,
+                    )
+                self.strategy_adapter.inspect_state(
+                    loaded_ckpt.get("state_dict", {}),
+                    "loaded_ckpt['state_dict']",
+                    context_message="Before strategy adapter before_restore_model",
+                    prefix_filter="model.",
+                    num_keys_sample=10,
+                    log_debug=True,
+                )
+            except Exception as e:
+                print(f"Inspection utility encountered an error: {e}")
+
         # Allow strategy-specific adapters to transform the state dict before model restoration
         try:
-            loaded_ckpt = self.trainer._checkpoint_connector._loaded_checkpoint
             if self.strategy_adapter is not None:
                 try:
                     loaded_ckpt = self.strategy_adapter.before_restore_model(loaded_ckpt)
@@ -538,7 +617,70 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         except Exception:
             # best-effort only; do not prevent training if state dict transformation fails here
             pass
+
+        # Inspect after strategy adapter transformation
+        if self.strategy_adapter is not None and hasattr(self.strategy_adapter, "inspect_state"):
+            try:
+                self.strategy_adapter.inspect_state(
+                    self.pl_module,
+                    "self.pl_module.named_parameters()",
+                    context_message="After strategy adapter before_restore_model",
+                    prefix_filter="",
+                    num_keys_sample=10,
+                    log_debug=True,
+                )
+                if hasattr(self.pl_module, "model") and hasattr(self.pl_module.model, "tl_named_parameters"):
+                    self.strategy_adapter.inspect_state(
+                        self.pl_module.model,
+                        "self.pl_module.model.tl_named_parameters()",
+                        context_message="After strategy adapter before_restore_model",
+                        prefix_filter="",
+                        num_keys_sample=10,
+                        log_debug=True,
+                    )
+                self.strategy_adapter.inspect_state(
+                    loaded_ckpt.get("state_dict", {}),
+                    "loaded_ckpt['state_dict']",
+                    context_message="After strategy adapter before_restore_model",
+                    prefix_filter="",
+                    num_keys_sample=10,
+                    log_debug=True,
+                )
+            except Exception as e:
+                print(f"Inspection utility encountered an error: {e}")
         self.trainer._checkpoint_connector.restore_model()
+
+        # Inspect after restore_model()
+        if self.strategy_adapter is not None and hasattr(self.strategy_adapter, "inspect_state"):
+            try:
+                self.strategy_adapter.inspect_state(
+                    self.pl_module,
+                    "self.pl_module.named_parameters()",
+                    context_message="After checkpoint_connector.restore_model()",
+                    prefix_filter="",
+                    num_keys_sample=10,
+                    log_debug=True,
+                )
+                if hasattr(self.pl_module, "model") and hasattr(self.pl_module.model, "tl_named_parameters"):
+                    self.strategy_adapter.inspect_state(
+                        self.pl_module.model,
+                        "self.pl_module.model.tl_named_parameters()",
+                        context_message="After checkpoint_connector.restore_model()",
+                        prefix_filter="",
+                        num_keys_sample=10,
+                        log_debug=True,
+                    )
+                self.strategy_adapter.inspect_state(
+                    self.pl_module.state_dict(),
+                    "self.pl_module.state_dict()",
+                    context_message="After checkpoint_connector.restore_model()",
+                    prefix_filter="blocks.",
+                    num_keys_sample=10,
+                    log_debug=True,
+                )
+            except Exception as e:
+                print(f"Inspection utility encountered an error: {e}")
+
         # we need to override checkpoint_connector.restore_training_state() to bypass loop restoration
         # if additional customizations are required, may make sense to subclass _CheckpointConnector at some point
         self._restore_training_state()
