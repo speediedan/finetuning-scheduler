@@ -81,6 +81,12 @@ jobs:
       run: |
         python .actions/assistant.py replace_oldest_ver
 
+    - name: Pre-install CPU PyTorch (force CPU wheel from requirements)
+      run: |
+        python -m pip install --upgrade pip
+        # Install CPU PyTorch from our base requirements to avoid resolving CUDA variants
+        pip install --index-url https://download.pytorch.org/whl/cpu/ -r requirements/base.txt
+
     - name: Install package with dependencies
       env:
         USE_CI_COMMIT_PIN: "1"

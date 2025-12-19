@@ -17,6 +17,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Pre-install CPU PyTorch (force CPU wheel from requirements)
+        run: |
+          python -m pip install --upgrade pip
+          # Install CPU PyTorch from our base requirements to avoid resolving CUDA variants
+          pip install --index-url https://download.pytorch.org/whl/cpu/ -r requirements/base.txt
+
       - name: Install dependencies
         run: |
           pip install '.[dev]'
