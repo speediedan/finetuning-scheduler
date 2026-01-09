@@ -309,10 +309,6 @@ While not technically required, we add ``DebertaV2Embeddings`` separately as wel
 As always, if needed, one can alternatively override ``configure_model`` and manually wrap a given
 :external+pl:class:`~lightning.pytorch.core.module.LightningModule` to align with a desired fine-tuning schedule.
 
-.. warning::
-
-  :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` is in BETA and subject to change. The
-  interface can bring breaking changes and new features with the next release of PyTorch.
 
 .. note::
 

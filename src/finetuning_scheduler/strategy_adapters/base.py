@@ -19,6 +19,8 @@ Base adapter class to extend Fine-Tuning Scheduler support of complex or custom 
 from functools import partialmethod
 from pprint import pformat as pfmt
 from typing import Callable, Iterable, List, Optional, Tuple, Dict, Union, Any
+import logging
+import os
 
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -29,6 +31,8 @@ from lightning.pytorch.callbacks import BaseFinetuning
 from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 
+log = logging.getLogger(__name__)
+
 
 class StrategyAdapter:
     r"""Base class for all strategy adapters. Implements the default
@@ -36,11 +40,6 @@ class StrategyAdapter:
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` support for a complex or custom
     :external+pl:class:`~lightning.pytorch.strategies.Strategy` via an associated
     :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`.
-
-    .. warning::
-
-        :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is in BETA and subject to change. The interface
-        can bring breaking changes and new features with the next release of FTS.
 
     .. tip::
 
@@ -394,3 +393,89 @@ class StrategyAdapter:
                 isinstance(m, torch.nn.modules.batchnorm._BatchNorm)]
 
     fts_optim_inspect = partialmethod(fts_optim_transform, inspect_only=True)
+
+    def get_named_params_for_schedule_validation(self) -> Dict[str, torch.nn.Parameter]:
+        """Get named parameters for schedule validation.
+
+        This method can be overridden by :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`
+        subclasses to customize parameter iteration for schedule validation (e.g., returning TL-style
+        parameter names instead of canonical names).
+
+        .. note::
+            Strategy adapters can override validation behavior at two levels of abstraction:
+
+            1. **Parameter naming only** (simpler): Override this method to provide custom parameter names
+               while using the default validation logic from
+               :meth:`~finetuning_scheduler.fts_supporters.ScheduleParsingMixin._validate_ft_sched`.
+
+            2. **Full validation logic** (more control): Override
+               :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.validate_ft_sched` to
+               completely customize the validation process.
+
+            Choose the approach that best suits your use case. Most adapters only need to override this
+            method to provide custom parameter names.
+
+        Returns:
+            Dict[str, torch.nn.Parameter]: A dictionary mapping parameter names to parameter tensors.
+                By default, returns the standard ``named_parameters()`` dict.
+        """
+        return dict(self.pl_module.named_parameters())
+
+    def validate_ft_sched(self) -> Tuple[int, int]:
+        """Validate the fine-tuning schedule configuration.
+
+        This method can be overridden by :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`
+        subclasses to customize schedule validation for specific strategies (e.g., strategies that
+        require substantially different validation logic beyond just custom parameter naming).
+
+        .. note::
+            Strategy adapters can override validation behavior at two levels of abstraction:
+
+            1. **Parameter naming only** (simpler): Override
+               :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.get_named_params_for_schedule_validation`
+               to provide custom parameter names while using the default validation logic from
+               :meth:`~finetuning_scheduler.fts_supporters.ScheduleParsingMixin._validate_ft_sched`.
+
+            2. **Full validation logic** (more control): Override this method to completely customize
+               the validation process.
+
+            Choose the approach that best suits your use case. Most adapters only need to override
+            :meth:`get_named_params_for_schedule_validation` to provide custom parameter names.
+
+        Returns:
+            Tuple[int, int]: A tuple of ints specifying:
+                1. The depth of the final scheduled phase
+                2. The maximum epoch watermark explicitly specified in the schedule
+        """
+        # Import here to avoid circular dependency
+        from finetuning_scheduler.fts_supporters import ScheduleParsingMixin
+
+        rank_zero_debug(
+            f"[base StrategyAdapter.validate_ft_sched] Validating schedule for "
+            f"{self.pl_module.__class__.__name__}"
+        )
+        # Delegate to the mixin's implementation by default
+        return ScheduleParsingMixin._validate_ft_sched(self.fts_handle)
+
+    def gen_ft_schedule(self, dump_loc: Union[str, os.PathLike]) -> Optional[os.PathLike]:
+        """Generate the default fine-tuning schedule using a naive, 2-parameters per-level heuristic.
+
+        This method can be overridden by :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`
+        subclasses to customize schedule generation for specific strategies (e.g., using strategy-specific
+        parameter naming conventions).
+
+        Args:
+            dump_loc: The directory to which the generated schedule (.yaml) should be written
+
+        Returns:
+            os.PathLike: The path to the generated schedule, by default ``Trainer.log_dir`` and named after the
+            :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass in use with the suffix
+            ``_ft_schedule.yaml``)
+        """
+        # Import here to avoid circular dependency
+        from finetuning_scheduler.fts_supporters import ScheduleImplMixin
+
+        rank_zero_debug(
+            f"[base StrategyAdapter.gen_ft_schedule] Generating schedule for {self.pl_module.__class__.__name__}"
+        )
+        return ScheduleImplMixin._gen_ft_schedule_impl(self.pl_module, dump_loc)

@@ -49,10 +49,6 @@ class MemProfiler:
     - `cuda memory snapshot and allocator history tracking <https://pytorch.org/docs/stable/torch_cuda_memory.html>`_
     - host-level memory tracking
     - custom memory hooks (e.g. for activation checkpoint memory tracking via ``saved_tensors_hooks`` etc.)
-
-    .. warning::
-        :class:`~fts_examples.profiling.memprofiler.MemProfiler` is in BETA and subject to change.
-        The interface can bring breaking changes and new features with the next release of Finetuning Scheduler.
     """
     def __init__(self, *args, **kwargs) -> None:
         """The MemProfiler is a powerful memory profiling utility that synthesizes numerous complementary profiling

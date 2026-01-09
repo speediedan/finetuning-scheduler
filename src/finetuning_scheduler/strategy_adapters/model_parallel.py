@@ -80,10 +80,6 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
 
     See the :ref:`model-parallel-fine-tuning-examples` tutorial for a concrete example and additional guidance.
 
-    .. warning::
-        :class:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter` is in BETA and subject to change.
-        The interface can bring breaking changes and new features with the next release of PyTorch.
-
     .. note::
         ``fsdp_plan`` module name/pattern-based ``fully_shard`` directives are applied after any preceding Tensor
         Parallel or explicit ``fully_shard`` directives in ``LightningModule.configure_model``. FTS will only apply

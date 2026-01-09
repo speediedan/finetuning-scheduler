@@ -71,11 +71,19 @@ def _discover_strategy_adapters() -> None:
     """Discover strategy adapter plugins via entry points.
 
     This tries to discover user-contributed adapters registered under the
-    `finetuning_scheduler.strategy_adapters` entry point group and extends the
-    runtime `STRATEGY_ADAPTERS` mapping with any discovered adapters keyed by
+    ``finetuning_scheduler.strategy_adapters`` entry point group and extends the
+    runtime ``STRATEGY_ADAPTERS`` mapping with any discovered adapters keyed by
     the entry point name (lowercased).
+
+    Note:
+        This function is called lazily during strategy setup.
+
+    .. warning::
+        This is an :ref:`experimental <versioning:API Stability Classifications>` feature which is
+        still in development. The entry point API and plugin discovery mechanism may change in future
+        releases. See :ref:`plugins:Strategy Adapter Entry Points` for documentation.
     """
-    # This code targets Python 3.10+ environments; use the standard importlib.metadata API.
+    # We now require Python 3.10+ environments so can use the standard importlib.metadata API.
     from importlib.metadata import entry_points
     eps = entry_points(group="finetuning_scheduler.strategy_adapters")
     for ep in eps:
@@ -83,23 +91,29 @@ def _discover_strategy_adapters() -> None:
             # prefer using the standard entrypoint loader which handles 'module:attr'
             try:
                 cls = ep.load()
-            except Exception:
+            except Exception as ep_err:
                 # fall back to dot notation if a colon-separated import path was not provided
-                val = getattr(ep, 'value', '')
-                if ':' in val:
-                    module, attr = val.split(':', 1)
-                else:
-                    module, attr = val.rsplit('.', 1)
-                module = __import__(module, fromlist=[attr])
-                cls = getattr(module, attr)
+                try:
+                    val = getattr(ep, 'value', '')
+                    if not val:
+                        raise ValueError(f"Entry point {ep.name} has no value attribute")
+                    module_name, attr = val.split(':', 1) if ':' in val else val.rsplit('.', 1)
+                    module = __import__(module_name, fromlist=[attr])
+                    cls = getattr(module, attr)
+                except Exception as fallback_err:
+                    # If fallback also fails, log both errors and re-raise
+                    rank_zero_warn(
+                        f"Failed to load entry point {ep.name} with ep.load(): {ep_err}. "
+                        f"Fallback import also failed: {fallback_err}"
+                    )
+                    raise
             if hasattr(ep, "name") and isinstance(ep.name, str):
                 STRATEGY_ADAPTERS[ep.name.lower()] = cls
                 rank_zero_info(f"Discovered strategy adapter entrypoint '{ep.name}' -> {cls}")
         except Exception as err:
             rank_zero_warn(f"Failed to load strategy adapter entry point {ep}: {err}")
 
-
-_discover_strategy_adapters()
+# Note: _discover_strategy_adapters() is called lazily during strategy setup
 
 
 @dataclass
@@ -568,6 +582,7 @@ class ScheduleParsingMixin(ABC):
     ft_schedule: Optional[Union[str, dict]]
     reinit_optim_cfg: Optional[Dict]
     reinit_lr_cfg: Optional[Dict]
+    strategy_adapter: StrategyAdapter  # added to support adapter-based parameter naming
 
     def _validate_ft_sched(self) -> Tuple[int, int]:
         """Ensure the explicitly specified fine-tuning schedule has a valid configuration.
@@ -581,7 +596,8 @@ class ScheduleParsingMixin(ABC):
         max_phase = 0
         self._validate_schedule_keys()
         self._validate_reinit_cfg()
-        named_params = dict(self.pl_module.named_parameters()).keys()
+        # Use strategy adapter to get named params (allows TL-style or other custom naming)
+        named_params = self.strategy_adapter.get_named_params_for_schedule_validation().keys()
         model_shared_params = find_shared_parameters(self.pl_module)
         msp_ref = tuple((model_shared_params, set(itertools.chain(*model_shared_params))))
         for depth in self.ft_schedule.keys():  # type: ignore[union-attr]
@@ -1207,8 +1223,8 @@ class ScheduleParsingMixin(ABC):
         return reinit_class
 
     @staticmethod
-    def _import_strategy_adapter(strategy_key: str, adapter_map: Dict[str, str]) -> Type[StrategyAdapter]:
-        """Import the custom strategy adapter specified in the ``custom_strategy_adapters`` configuration.
+    def _resolve_strategy_adapter(strategy_key: str, adapter_map: Dict[str, str]) -> Type[StrategyAdapter]:
+        """Resolve the custom strategy adapter specified in the ``custom_strategy_adapters`` configuration.
 
         Args:
             qualname (Dict): The user-provided custom strategy adapter fully qualified class name.
@@ -1227,7 +1243,7 @@ class ScheduleParsingMixin(ABC):
                     f"Current strategy name ({strategy_key}) does not map to a custom strategy adapter in the"
                     f" provided `custom_strategy_adapters` mapping ({adapter_map})."
                 )
-            # If a short entry point name was provided, prefer the discovered STRATEGY_ADAPTERS mapping
+            # If a short entry point name was provided, check the discovered STRATEGY_ADAPTERS mapping
             if qualname in STRATEGY_ADAPTERS:
                 return STRATEGY_ADAPTERS[qualname]
 
@@ -1236,11 +1252,18 @@ class ScheduleParsingMixin(ABC):
             if ":" in qualname:
                 class_module, class_name = qualname.split(":", 1)
             else:
+                # Require at least one '.' for module.Class format
+                if "." not in qualname:
+                    raise ValueError(
+                        f"Invalid adapter name '{qualname}'. Must be either a registered plugin name "
+                        f"(found in STRATEGY_ADAPTERS: {list(STRATEGY_ADAPTERS.keys())}) or a fully qualified "
+                        f"class name in 'module.Class' or 'module:Class' format."
+                    )
                 class_module, class_name = qualname.rsplit(".", 1)
             module = __import__(class_module, fromlist=[class_name])
             custom_strategy_adapter_cls = getattr(module, class_name)
             issubclass(custom_strategy_adapter_cls, StrategyAdapter)
-        except (ImportError, AttributeError) as err:
+        except (ImportError, AttributeError, ValueError) as err:
             error_msg = (
                 "Could not import the specified custom strategy adapter class using the provided fully qualified class"
                 f" name ({qualname}). Received the following error while importing: {err}. Please validate specified"
@@ -1417,7 +1440,8 @@ class ScheduleImplMixin(ABC):
             self.max_depth = len(self.ft_schedule) - 1
         else:
             self.max_depth = min(self.max_depth, len(self.ft_schedule) - 1)
-        max_phase, max_epoch_wm = self._validate_ft_sched()  # type: ignore[attr-defined]
+        # Delegate schedule validation to strategy adapter (allows custom validation logic)
+        max_phase, max_epoch_wm = self.strategy_adapter.validate_ft_sched()
         # if the final phase is not using EarlyStopping, apply the maximum phase-specified epoch to global max_epochs
         if self.ft_schedule[max_phase]["max_transition_epoch"] >= 0:
             assert self.trainer is not None
@@ -1438,7 +1462,7 @@ class ScheduleImplMixin(ABC):
             sched_dir: directory to which the generated schedule should be written. By default will be
                 ``Trainer.log_dir``.
         """
-        default_ft_schedule = ScheduleImplMixin.gen_ft_schedule(self.pl_module, sched_dir)
+        default_ft_schedule = self.strategy_adapter.gen_ft_schedule(sched_dir)
         assert default_ft_schedule is not None
         rank_zero_info(f"Generated default fine-tuning schedule '{default_ft_schedule}' for iterative fine-tuning")
         self.ft_schedule = self.load_yaml_schedule(default_ft_schedule)
@@ -1473,6 +1497,11 @@ class ScheduleImplMixin(ABC):
     def gen_ft_schedule(module: Module, dump_loc: Union[str, os.PathLike]) -> Optional[os.PathLike]:
         """Generate the default fine-tuning schedule using a naive, 2-parameters per-level heuristic.
 
+        .. deprecated:: 2.10.0
+            Direct calls to this static method are deprecated. Use the
+            :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.gen_ft_schedule` instance method
+            instead, which allows strategy adapters to customize schedule generation.
+
         Args:
             module (:class:`~torch.nn.Module`): The :class:`~torch.nn.Module` for which a fine-tuning schedule will be
                 generated
@@ -1482,11 +1511,33 @@ class ScheduleImplMixin(ABC):
             :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass in use with the suffix
             ``_ft_schedule.yaml``)
         """
+        rank_zero_warn(
+            "Direct calls to ScheduleImplMixin.gen_ft_schedule() are deprecated since v2.10.0 and will be "
+            "removed in v2.12.0. Use strategy_adapter.gen_ft_schedule() instead to allow strategy-specific "
+            "customization."
+        )
+        return ScheduleImplMixin._gen_ft_schedule_impl(module, dump_loc)
+
+    @staticmethod
+    def _gen_ft_schedule_impl(module: Module, dump_loc: Union[str, os.PathLike]) -> Optional[os.PathLike]:
+        """Internal implementation of default fine-tuning schedule generation.
+
+        This method contains the actual schedule generation logic shared between the deprecated static method
+        and the strategy adapter instance method.
+
+        Args:
+            module (:class:`~torch.nn.Module`): The :class:`~torch.nn.Module` for which a fine-tuning schedule will be
+                generated
+            dump_loc: The directory to which the generated schedule (.yaml) should be written
+
+        Returns:
+            os.PathLike: The path to the generated schedule
+        """
         # Note: This initial default fine-tuning schedule generation approach is intentionally simple/naive but is
-        # effective for a suprising fraction of models. Future versions of this callback may use module introspection to
-        # generate default schedules that better accommodate more complex structures and specific architectures if the
-        # callback proves sufficiently useful.
-        log.info(f"Proceeding with dumping default fine-tuning schedule for {module.__class__.__name__}")
+        # effective for a surprising fraction of models. Future versions of this callback may use module
+        # introspection to generate default schedules that better accommodate more complex structures and
+        # specific architectures if the callback proves sufficiently useful.
+        rank_zero_info(f"Proceeding with dumping default fine-tuning schedule for {module.__class__.__name__}")
         param_lists: List = []
         cur_group: List = []
         model_params = list(module.named_parameters())[::-1]
