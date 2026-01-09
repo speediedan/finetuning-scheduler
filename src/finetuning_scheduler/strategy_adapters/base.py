@@ -449,13 +449,14 @@ class StrategyAdapter:
         """
         # Import here to avoid circular dependency
         from finetuning_scheduler.fts_supporters import ScheduleParsingMixin
+        from typing import cast
 
         rank_zero_debug(
             f"[base StrategyAdapter.validate_ft_sched] Validating schedule for "
             f"{self.pl_module.__class__.__name__}"
         )
-        # Delegate to the mixin's implementation by default
-        return ScheduleParsingMixin._validate_ft_sched(self.fts_handle)
+        # Delegate to the mixin's implementation by default.
+        return ScheduleParsingMixin._validate_ft_sched(cast(ScheduleParsingMixin, self.fts_handle))
 
     def gen_ft_schedule(self, dump_loc: Union[str, os.PathLike]) -> Optional[os.PathLike]:
         """Generate the default fine-tuning schedule using a naive, 2-parameters per-level heuristic.
