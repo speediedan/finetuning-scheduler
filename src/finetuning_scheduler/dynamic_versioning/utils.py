@@ -18,6 +18,12 @@ from typing import List, Optional, Tuple, Dict, ValuesView
 # -----------------------------------------------------------------------------
 # Lightning Configuration
 # -----------------------------------------------------------------------------
+#
+# These version constraints are the single source of truth for minimum versions.
+# They are used by setup.py to generate dynamic dependencies at build time.
+#
+# For visibility, these values are also documented in pyproject.toml under
+# [tool.fts.min-versions] (informational only - not used during installation).
 
 # Shared version constraint for all Lightning packages
 LIGHTNING_VERSION = ">=2.6.0,<2.6.1"
@@ -43,6 +49,9 @@ LIGHTNING_PACKAGES = {
 
 # Base dependencies (torch + Lightning are handled dynamically)
 # These are the core dependencies that are always installed
+#
+# Note: For visibility, minimum versions are also documented in pyproject.toml
+# under [tool.fts.min-versions] (informational only).
 BASE_DEPENDENCIES = [
     "torch>=2.6.0",
 ]

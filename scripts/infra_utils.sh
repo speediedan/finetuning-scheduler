@@ -248,3 +248,56 @@ install_from_source_packages(){
         fi
     done
 }
+
+# Read torch prerelease configuration from requirements/ci/torch-pre.txt
+# Returns values via global variables:
+#   TORCH_PRE_VERSION - torch version to install
+#   TORCH_PRE_CUDA    - CUDA target for local builds
+#   TORCH_PRE_CHANNEL - channel type: "test" or "nightly"
+# Note: Requires REPO_ROOT to be set (usually via SCRIPT_DIR)
+read_torch_pre_config() {
+    TORCH_PRE_VERSION=""
+    TORCH_PRE_CUDA=""
+    TORCH_PRE_CHANNEL=""
+
+    # Determine repo root from SCRIPT_DIR if not already set
+    local repo_root="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+    local pre_file="${repo_root}/requirements/ci/torch-pre.txt"
+
+    if [[ ! -f "${pre_file}" ]]; then
+        return
+    fi
+
+    # Read non-comment, non-empty lines
+    local lines=($(grep -v '^#' "${pre_file}" | grep -v '^$' || true))
+
+    if [[ ${#lines[@]} -ge 3 ]]; then
+        TORCH_PRE_VERSION="${lines[0]}"
+        TORCH_PRE_CUDA="${lines[1]}"
+        TORCH_PRE_CHANNEL="${lines[2]}"
+
+        # Validate channel
+        if [[ "${TORCH_PRE_CHANNEL}" != "test" && "${TORCH_PRE_CHANNEL}" != "nightly" ]]; then
+            echo "ERROR: Invalid channel '${TORCH_PRE_CHANNEL}' in ${pre_file}" >&2
+            echo "Must be 'test' or 'nightly'" >&2
+            return 1
+        fi
+    fi
+}
+
+# Get torch index URL based on channel and CUDA target
+# Args: $1 = channel ("test" or "nightly"), $2 = cuda_target (e.g., "cu128" or "cpu")
+# Returns: PyTorch wheel index URL
+get_torch_index_url() {
+    local channel="$1"
+    local cuda_target="${2:-cpu}"
+
+    if [[ "${channel}" == "test" ]]; then
+        echo "https://download.pytorch.org/whl/test/${cuda_target}"
+    elif [[ "${channel}" == "nightly" ]]; then
+        echo "https://download.pytorch.org/whl/nightly/${cuda_target}"
+    else
+        echo "ERROR: Invalid channel: ${channel}" >&2
+        return 1
+    fi
+}

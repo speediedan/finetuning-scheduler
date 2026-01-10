@@ -525,6 +525,13 @@ Footnotes
 
 .. toctree::
    :maxdepth: 1
+   :name: Plugins
+   :caption: Plugins
+
+   plugins/strategy_adapter_entry_points
+
+.. toctree::
+   :maxdepth: 1
    :name: Basic Examples
    :caption: Basic Examples
 

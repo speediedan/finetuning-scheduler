@@ -199,6 +199,43 @@ source ${FTS_VENV_BASE}/${FTS_TARGET_VENV}/bin/activate
 PL_RUN_STANDALONE_TESTS=1 python -m pytest tests/test_specific.py::test_function -v
 ```
 
+### Building Documentation
+
+**Documentation build commands (needs activated venv):**
+
+```bash
+export FTS_VENV_BASE=/mnt/cache/${USER}/.venvs
+export FTS_TARGET_VENV=fts_latest
+export FTS_REPO_DIR=${HOME}/repos/finetuning-scheduler  # Example: adjust to your local repo path
+# Activate your environment first
+cd ${FTS_REPO_DIR} && \
+source ${FTS_VENV_BASE}/${FTS_TARGET_VENV}/bin/activate
+
+# Clean previous builds
+cd docs && make clean
+
+# Build HTML documentation with warnings as errors
+make html --debug SPHINXOPTS="-W --keep-going"
+
+# Run linkcheck to verify all links
+make linkcheck SPHINXOPTS="-W --keep-going"
+
+# Check for errors in linkcheck output
+grep -i "error\|broken" build/linkcheck/output.txt || echo "No errors found in linkcheck"
+```
+
+**Documentation requirements:**
+
+- All documentation must build without warnings when using `-W` flag
+- All internal and external links must be valid (verified by linkcheck)
+- RST cross-references should use appropriate directives:
+  - `:class:` for class references
+  - `:meth:` for method references
+  - `:func:` for function references
+  - `:doc:` for document references
+  - `:ref:` for section references (requires explicit label like `.. _label_name:`)
+- Sphinx autosummary generates API documentation from docstrings
+
 ## Project Layout and Architecture
 
 ### Source Code Structure

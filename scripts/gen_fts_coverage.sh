@@ -5,8 +5,6 @@ set -eo pipefail
 
 unset repo_home
 unset target_env_name
-unset torch_dev_ver
-unset torch_test_channel
 unset no_rebuild_base
 unset include_experimental
 unset uv_install_flags
@@ -26,8 +24,6 @@ Usage: $0
    [ --repo_home input]
    [ --target_env_name input ]
    [ --oldest ]                  # Use oldest CI requirements (Python 3.10, requirements-oldest.txt)
-   [ --torch_dev_ver input ]
-   [ --torch_test_channel ]
    [ --no_rebuild_base ]
    [ --no-special ]              # Skip special tests (standalone/experimental), run only main test suite
    [ --include_experimental ]
@@ -42,25 +38,20 @@ Usage: $0
 	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --no_rebuild_base
 	# generate oldest CI build coverage (matches CI oldest matrix):
 	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_oldest --oldest --no-special --venv-dir=/mnt/cache/\${USER}/.venvs
-	# generate fts_latest coverage with a given torch_dev_version:
-	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_dev_ver=dev20240201
-    # generate fts_latest coverage, rebuilding base fts_latest with PyTorch test channel and run tests that require experimental patches:
-    #   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_test_channel --include_experimental
-	# generate fts_release coverage, rebuilding the base fts_release environment with PyTorch stable channel:
+	# generate fts_release coverage, rebuilding the base fts_release environment:
 	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/fts-release --target_env_name=fts_release
 	# generate fts_release coverage, rebuilding the base fts_release environment with PyTorch test channel:
-	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/fts-release --target_env_name=fts_release --torch_test_channel
 	# generate fts_latest coverage with explicit venv directory (recommended for hardlink performance):
 	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --venv-dir=/mnt/cache/\${USER}/.venvs
 	# generate fts_release coverage without using CI commit pinning:
 	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/fts-release --target_env_name=fts_release --no_commit_pin
 	# dry-run mode: setup environment and show what tests would run without executing them:
-	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_dev_ver=dev20240201 --dry-run
+	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --dry-run
 EOF
 exit 1
 }
 
-args=$(getopt -o '' --long repo_home:,target_env_name:,oldest,torch_dev_ver:,torch_test_channel,no_rebuild_base,no-special,include_experimental,uv_install_flags:,no_commit_pin,venv-dir:,from-source:,dry-run,help -- "$@")
+args=$(getopt -o '' --long repo_home:,target_env_name:,oldest,no_rebuild_base,no-special,include_experimental,uv_install_flags:,no_commit_pin,venv-dir:,from-source:,dry-run,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -72,8 +63,6 @@ do
     --repo_home)  repo_home=$2    ; shift 2  ;;
     --target_env_name)  target_env_name=$2  ; shift 2 ;;
     --oldest)   oldest=1 ; shift  ;;
-    --torch_dev_ver)   torch_dev_ver=$2   ; shift 2 ;;
-    --torch_test_channel)   torch_test_channel=1 ; shift  ;;
     --no_rebuild_base)   no_rebuild_base=1 ; shift  ;;
     --no-special)   no_special=1 ; shift  ;;
     --include_experimental)   include_experimental=1 ; shift  ;;
@@ -159,18 +148,10 @@ env_rebuild(){
 
     case $1 in
         fts_latest|fts_oldest)
-            if [[ -n ${torch_dev_ver} ]]; then
-                cmd_args+=("--torch_dev_ver=${torch_dev_ver}")
-			elif [[ $torch_test_channel -eq 1 ]]; then
-                cmd_args+=("--torch_test_channel")
-            fi
             log_msg "Final build command: ${cmd_args[*]}"
             "${cmd_args[@]}"
             ;;
         fts_release)
-            if [[ $torch_test_channel -eq 1 ]]; then
-                cmd_args+=("--torch_test_channel")
-            fi
             log_msg "Final build command: ${cmd_args[*]}"
             "${cmd_args[@]}"
             ;;

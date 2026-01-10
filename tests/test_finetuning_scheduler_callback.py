@@ -327,7 +327,7 @@ class TestFinetuningScheduler(FinetuningScheduler):
         if self.mock_strategy:
             trainer._accelerator_connector._strategy_flag = MOCK_STRATEGY_MAPPING[self.mock_strategy][0]
             self.allow_untested = MOCK_STRATEGY_MAPPING[self.mock_strategy][1]
-            self.custom_strategy_adapter = MOCK_STRATEGY_MAPPING[self.mock_strategy][2]
+            self.custom_strategy_adapters = MOCK_STRATEGY_MAPPING[self.mock_strategy][2]
         super().setup(trainer, pl_module, stage)
         if self.mock_strategy and self.allow_untested:
             raise SystemExit(0)
@@ -1110,6 +1110,28 @@ def test_fts_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, 
         assert len(test_schedule) == expected[0]
         assert test_schedule[1]["params"] == expected[1]
         assert test_schedule[next(reversed(list(test_schedule.keys())))]["params"] == expected[2]
+
+
+def test_fts_gen_ft_schedule_deprecation_warning(tmpdir):
+    """Validate that direct calls to ScheduleImplMixin.gen_ft_schedule() issue a deprecation warning."""
+    from finetuning_scheduler.fts_supporters import ScheduleImplMixin
+
+    model = FinetuningSchedulerBoringModel()
+
+    # Test that the deprecation warning is issued
+    with pytest.warns(
+        UserWarning,
+        match=r"Direct calls to ScheduleImplMixin\.gen_ft_schedule\(\) are deprecated since v2\.10\.0",
+    ):
+        schedule_path = ScheduleImplMixin.gen_ft_schedule(model, tmpdir)
+
+    # Verify the schedule was still generated correctly
+    assert schedule_path is not None
+    assert os.path.isfile(schedule_path)
+    with open(schedule_path) as f:
+        test_schedule = yaml.safe_load(f.read())
+    assert isinstance(test_schedule, Dict)
+    assert len(test_schedule) > 0
 
 @pytest.mark.skipif(not _MLFLOW_AVAILABLE, reason="test requires MLflow")
 @pytest.mark.parametrize("use_fts_log_dir", [True, False], ids=["fts_log_dir", "no_fts_log_dir"])
@@ -2026,6 +2048,43 @@ def test_fts_unallowed_key_error():
     test_fts.trainer._checkpoint_connector.resume_start = mock.MagicMock(side_effect=basic_ke)
     with pytest.raises(KeyError, match="Unallowed key"):
         test_fts.restore_best_ckpt()
+
+
+def test_fts_strategy_adapter_restore_exception():
+    """Test that exceptions raised by strategy adapter's before_restore_model hook are properly caught and
+    warned."""
+    test_fts = FinetuningScheduler()
+    test_fts.pl_module, test_fts.trainer = mock.MagicMock(), mock.MagicMock()
+
+    # Mock the checkpoint connector and its loaded checkpoint
+    mock_checkpoint = {"state_dict": {}, "optimizer_states": [{}]}
+    test_fts.trainer._checkpoint_connector._loaded_checkpoint = mock_checkpoint
+    test_fts.trainer._checkpoint_connector.resume_start = mock.MagicMock()
+    test_fts.trainer._checkpoint_connector.restore_datamodule = mock.MagicMock()
+    test_fts.trainer._checkpoint_connector.restore_model = mock.MagicMock()
+    test_fts.trainer._checkpoint_connector.resume_end = mock.MagicMock()
+    test_fts.trainer.strategy.barrier = mock.MagicMock()
+    test_fts.trainer.checkpoint_callback = mock.MagicMock()
+    test_fts.trainer.checkpoint_callback.best_model_path = "/mock/path/checkpoint.ckpt"
+    test_fts.trainer.optimizers = [mock.MagicMock()]
+    test_fts._fts_state._fts_ckpt_metadata = {"best_ckpt_pgs": [[]]}
+
+    # Mock the strategy adapter to raise an exception in before_restore_model
+    mock_adapter = mock.MagicMock()
+    test_error_message = "Mock adapter transformation error"
+    mock_adapter.before_restore_model = mock.MagicMock(side_effect=RuntimeError(test_error_message))
+    mock_adapter.using_sharded_optimizer = False
+    test_fts.strategy_adapter = mock_adapter
+
+    # Mock _restore_training_state to prevent further execution
+    test_fts._restore_training_state = mock.MagicMock()
+
+    # Execute and verify warning is issued
+    with pytest.warns(UserWarning, match=f"Strategy adapter before_restore_model hook raised.*{test_error_message}"):
+        test_fts.restore_best_ckpt()
+
+    # Verify that restore_model was still called despite the exception
+    test_fts.trainer._checkpoint_connector.restore_model.assert_called_once()
 
 
 @pytest.mark.parametrize(

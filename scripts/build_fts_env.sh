@@ -10,17 +10,14 @@
 #   ./build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_oldest --oldest
 # build release:
 #   ./build_fts_env.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release
-# build latest with torch test channel:
-#   ./build_fts_env.sh --repo_home=~/repos/finetuning-scheduler --target_env_name=fts_latest --torch_test_channel
 # build latest from a package from source:
 #   ./build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --from-source="lightning:${HOME}/repos/lightning:pytorch"
 #
-# To use a specific PyTorch nightly, edit requirements/ci/torch-nightly.txt
+# To configure PyTorch version (nightly/test/stable), edit requirements/ci/torch-pre.txt
 set -eo pipefail
 
 unset repo_home
 unset target_env_name
-unset torch_test_channel
 unset uv_install_flags
 unset no_commit_pin
 unset venv_dir
@@ -28,6 +25,7 @@ unset oldest
 declare -a from_source_specs=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/infra_utils.sh"
 
 usage(){
@@ -36,7 +34,6 @@ Usage: $0
    [ --repo_home input]
    [ --target_env_name input ]
    [ --oldest ]                # Use oldest CI requirements (Python 3.10, requirements-oldest.txt)
-   [ --torch_test_channel ]    # Use PyTorch test/RC channel
    [ --uv_install_flags "flags" ]
    [ --no_commit_pin ]
    [ --venv-dir input ]
@@ -51,8 +48,6 @@ Usage: $0
     #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_oldest --oldest --venv-dir=/mnt/cache/\${USER}/.venvs
     # build release:
     #   ./build_fts_env.sh --repo_home=\${HOME}/repos/fts-release --target_env_name=fts_release
-    # build latest with torch test channel:
-    #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --torch_test_channel
     # build latest with no cache:
     #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --uv_install_flags="--no-cache"
     # build latest without using CI commit pinning:
@@ -60,14 +55,15 @@ Usage: $0
     # build latest from Lightning source:
     #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --from-source="lightning:\${HOME}/repos/lightning:pytorch"
 
-    # To use a specific PyTorch nightly, edit requirements/ci/torch-nightly.txt:
-    #   Line 1: torch version (e.g., 2.10.0.dev20251124)
+    # To configure PyTorch version, edit requirements/ci/torch-pre.txt:
+    #   Line 1: torch version (e.g., 2.10.0 for test, 2.10.0.dev20251124 for nightly)
     #   Line 2: CUDA target (e.g., cu128)
+    #   Line 3: channel type (test or nightly)
 EOF
 exit 1
 }
 
-args=$(getopt -o '' --long repo_home:,target_env_name:,oldest,torch_test_channel,uv_install_flags:,no_commit_pin,venv-dir:,from-source:,help -- "$@")
+args=$(getopt -o '' --long repo_home:,target_env_name:,oldest,uv_install_flags:,no_commit_pin,venv-dir:,from-source:,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -79,7 +75,6 @@ do
     --repo_home)  repo_home=$2    ; shift 2  ;;
     --target_env_name)  target_env_name=$2  ; shift 2 ;;
     --oldest)   oldest=1 ; shift  ;;
-    --torch_test_channel)   torch_test_channel=1 ; shift  ;;
     --uv_install_flags)   uv_install_flags=$2 ; shift 2 ;;
     --no_commit_pin)   no_commit_pin=1 ; shift  ;;
     --venv-dir)   venv_dir=$2 ; shift 2 ;;
@@ -109,32 +104,7 @@ if [[ ${#from_source_specs[@]} -gt 0 ]]; then
     from_source_spec=$(IFS=';'; echo "${from_source_specs[*]}")
 fi
 
-# Read torch nightly configuration from requirements/ci/torch-nightly.txt
-# Returns two values via global variables: TORCH_NIGHTLY_VERSION and TORCH_NIGHTLY_CUDA
-read_torch_nightly_config() {
-    local nightly_file="${repo_home}/requirements/ci/torch-nightly.txt"
-    TORCH_NIGHTLY_VERSION=""
-    TORCH_NIGHTLY_CUDA=""
-
-    if [[ -f "${nightly_file}" ]]; then
-        # Read non-comment, non-empty lines
-        local lines=()
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            # Skip comments and empty lines
-            [[ "$line" =~ ^# ]] && continue
-            [[ -z "$line" ]] && continue
-            lines+=("$line")
-        done < "${nightly_file}"
-
-        # First line is torch version, second is CUDA target
-        if [[ ${#lines[@]} -ge 1 ]]; then
-            TORCH_NIGHTLY_VERSION="${lines[0]}"
-        fi
-        if [[ ${#lines[@]} -ge 2 ]]; then
-            TORCH_NIGHTLY_CUDA="${lines[1]}"
-        fi
-    fi
-}
+# Read torch prerelease configuration (now handled by infra_utils.sh::read_torch_pre_config)
 
 clear_activate_env(){
     local python_version=$1
@@ -159,33 +129,29 @@ base_env_build(){
 
     clear_activate_env ${python_version}
 
-    # Check for torch nightly configuration (skip for oldest builds)
+    # Check for torch prerelease configuration (skip for oldest builds)
     if [[ -z ${oldest} ]]; then
-        read_torch_nightly_config
+        read_torch_pre_config
     fi
 
     # Handle PyTorch version selection (pre-install before FTS dependencies)
-    # Priority: oldest (stable from lock) > torch nightly from config > torch test channel > stable (via --torch-backend in fts_install)
+    # Priority: oldest (stable from lock) > torch prerelease from config > stable (via --torch-backend in fts_install)
     if [[ -n ${oldest} ]]; then
         # For oldest builds, torch is installed from requirements-oldest.txt (stable version)
         echo "Using torch stable from requirements-oldest.txt for oldest build"
-    elif [[ -n "${TORCH_NIGHTLY_VERSION}" ]]; then
-        # Nightly version from torch-nightly.txt with specified CUDA backend
-        local cuda_target="${TORCH_NIGHTLY_CUDA:-cu128}"  # Default to cu128 if not specified
-        local torch_pkg="torch==${TORCH_NIGHTLY_VERSION}"
-        local torch_index_url="https://download.pytorch.org/whl/nightly/${cuda_target}"
-        echo "Pre-installing PyTorch nightly from torch-nightly.txt: ${torch_pkg}"
+    elif [[ -n "${TORCH_PRE_VERSION}" ]]; then
+        # Prerelease (nightly or test) configured in torch-pre.txt
+        local cuda_target="${TORCH_PRE_CUDA:-cu128}"  # Default to cu128 if not specified
+        local torch_pkg="torch==${TORCH_PRE_VERSION}"
+        local torch_index_url=$(get_torch_index_url "${TORCH_PRE_CHANNEL}" "${cuda_target}")
+
+        echo "Pre-installing PyTorch ${TORCH_PRE_CHANNEL} from torch-pre.txt: ${torch_pkg}"
+        echo "  Channel: ${TORCH_PRE_CHANNEL}"
         echo "  CUDA target: ${cuda_target}"
         echo "  Index URL: ${torch_index_url}"
+
         uv pip install ${uv_install_flags} --prerelease=allow "${torch_pkg}" --index-url "${torch_index_url}"
-        log_torch_version "after PyTorch nightly pre-install"
-    elif [[ -n ${torch_test_channel} ]]; then
-        # Test/RC channel - pre-install torch with test index and auto backend for GPU detection
-        local torch_index_url="https://download.pytorch.org/whl/test"
-        echo "Pre-installing PyTorch from test channel: ${torch_index_url}"
-        echo "  Using --torch-backend=auto for GPU auto-detection"
-        uv pip install ${uv_install_flags} --prerelease=allow torch --index-url ${torch_index_url} --torch-backend=auto
-        log_torch_version "after PyTorch test channel pre-install"
+        log_torch_version "after PyTorch ${TORCH_PRE_CHANNEL} pre-install"
     fi
     # For stable builds, torch will be installed via FTS dependencies with --torch-backend=auto
 }
@@ -218,16 +184,10 @@ fts_install(){
         echo "Using oldest requirements file: ${req_file}"
         # Oldest builds use torch stable from lock file, need --torch-backend=auto
         torch_backend_flag="--torch-backend=auto"
-    elif [[ -n "${TORCH_NIGHTLY_VERSION}" || -n ${torch_test_channel} ]]; then
-        # Torch already pre-installed (nightly or test channel)
-        # When nightly: requirements.txt already has torch filtered during lock generation
-        # When test channel: filter at runtime
-        if [[ -n ${torch_test_channel} ]]; then
-            echo "Torch test channel pre-installed, filtering torch from requirements..."
-            grep -v '^torch==' "${req_file}" > /tmp/requirements_no_torch.txt
-            req_file="/tmp/requirements_no_torch.txt"
-        fi
-        echo "Using requirements without torch (pre-installed)"
+    elif [[ -n "${TORCH_PRE_VERSION}" ]]; then
+        # Torch prerelease already pre-installed (nightly or test channel)
+        # requirements.txt already has torch filtered during lock generation
+        echo "Using requirements without torch (pre-installed ${TORCH_PRE_CHANNEL})"
     else
         # Use auto torch backend for GPU detection
         torch_backend_flag="--torch-backend=auto"

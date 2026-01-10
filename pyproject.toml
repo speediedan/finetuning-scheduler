@@ -13,6 +13,12 @@ authors = [{name = "Daniel Dale", email = "danny.dale@gmail.com"}]
 license = "Apache-2.0"
 license-files = ["LICENSE*"]
 requires-python = ">=3.10"
+
+# NOTE: Minimum versions for torch and Lightning are managed dynamically by setup.py
+# See src/finetuning_scheduler/dynamic_versioning/utils.py for version specifications:
+#   - torch: defined in BASE_DEPENDENCIES
+#   - Lightning: defined in LIGHTNING_PACKAGES (unified/standalone)
+# The 'dependencies' field above is marked as 'dynamic' and populated at build time.
 keywords = [
     "deep learning",
     "pytorch",
@@ -117,6 +123,17 @@ all = [
     "ipywidgets>=7.6.0",
     "traitlets>=5.0.0",
 ]
+
+# -----------------------------------------------------------------------------
+# FTS Metadata - Minimum Version Requirements (informational only)
+# -----------------------------------------------------------------------------
+# These values are for documentation purposes and are NOT used during installation.
+# Actual minimum versions are enforced in src/finetuning_scheduler/dynamic_versioning/utils.py
+# The build system (setup.py) reads from utils.py to populate the dynamic dependencies.
+[tool.fts.min-versions]
+torch = ">=2.6.0"
+lightning = ">=2.6.0,<2.6.1"
+python = "3.10"  # Defined in pyproject.toml requires-python
 
 [project.urls]
 "Homepage" = "https://github.com/speediedan/finetuning-scheduler"

@@ -81,13 +81,11 @@ RUN \
     else \
         # or target a specific cuda build, by specifying a particular index url w/...
         # ... default channel
-        # uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128; \
-        # ... pytorch patch version
-        # uv pip install torch==1.11.1+cu113 torchvision==0.11.3+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html; \
+        # uv pip install torch --torch-backend=cu128; \
         # ... pytorch nightly dev version
-        uv pip install --prerelease=allow torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        # uv pip install --prerelease=allow torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128; \
         # ... test channel
-        # uv pip install --prerelease=allow torch==2.10.0 --index-url https://download.pytorch.org/whl/test/cu128; \
+        uv pip install --prerelease=allow torch==2.10.0 --index-url https://download.pytorch.org/whl/test/cu128; \
     fi && \
     # We avoid installing Lightning and other dependencies here as they are usually upgraded anyway later in
     # CI but we may re-enable in the future.
