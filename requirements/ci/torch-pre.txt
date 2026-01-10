@@ -1,0 +1,18 @@
+# PyTorch prerelease version configuration
+# To enable prerelease builds, uncomment and set the values below.
+# Leave commented/empty to use stable PyTorch releases.
+#
+# Format:
+#   Line 1: torch version (e.g., 2.10.0 for test/RC, 2.10.0.dev20251203 for nightly)
+#   Line 2: CUDA target for local builds (e.g., cu128) - CI always uses cpu
+#   Line 3: channel type: "test" or "nightly"
+#
+# Example for test/RC channel (currently enabled):
+2.10.0
+cu128
+test
+
+# Example for nightly (commented out):
+# 2.10.0.dev20251124
+# cu128
+# nightly

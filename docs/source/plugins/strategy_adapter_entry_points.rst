@@ -122,7 +122,7 @@ Custom strategy adapters should:
 1. Inherit from :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`
 2. Implement required methods for your specific use case (see :doc:`/api/finetuning_scheduler.strategy_adapters`)
 3. Follow the adapter lifecycle hooks (``:meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.connect``,
-``:meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.on_before_init_fts``, etc.)
+   ``:meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.on_before_init_fts``, etc.)
 
 Override Points
 ===============

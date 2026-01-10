@@ -225,7 +225,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 names like ``"single_device"``, ``"auto"``, ``"ddp"``, etc.) to strategy adapter references. Multiple
                 ``strategy_flag`` keys can be associated with the same adapter. The adapter reference can be: (1) an
                 entry point name registered under ``finetuning_scheduler.strategy_adapters`` (see
-                :ref:`plugins:Strategy Adapter Entry Points`) (2) a fully
+                :ref:`strategy_adapter_entry_points`) (2) a fully
                 qualified :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` subclass path in the
                 format ``"module.path:ClassName"`` or (3) a fully qualified dot path in the format
                 ``"module.path.ClassName"``. This is an experimental feature that is subject to change.
