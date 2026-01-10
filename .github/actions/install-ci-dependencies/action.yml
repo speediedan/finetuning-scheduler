@@ -44,7 +44,11 @@ runs:
         PRE_FILE="requirements/ci/torch-pre.txt"
         if [[ -f "${PRE_FILE}" ]]; then
           # Read 3-line config: version, CUDA target, channel type
-          readarray -t PRE_CONFIG < <(grep -v '^#' "${PRE_FILE}" | grep -v '^$')
+          # Use while loop for bash 3.2 compatibility (macOS)
+          PRE_CONFIG=()
+          while IFS= read -r line; do
+            PRE_CONFIG+=("$line")
+          done < <(grep -v '^#' "${PRE_FILE}" | grep -v '^$')
           TORCH_VERSION="${PRE_CONFIG[0]}"
           CUDA_TARGET="${PRE_CONFIG[1]}"
           CHANNEL_TYPE="${PRE_CONFIG[2]}"
@@ -83,7 +87,11 @@ runs:
         PRE_FILE="requirements/ci/torch-pre.txt"
         TORCH_PRERELEASE="false"
         if [[ -f "${PRE_FILE}" ]]; then
-          readarray -t PRE_CONFIG < <(grep -v '^#' "${PRE_FILE}" | grep -v '^$')
+          # Use while loop for bash 3.2 compatibility (macOS)
+          PRE_CONFIG=()
+          while IFS= read -r line; do
+            PRE_CONFIG+=("$line")
+          done < <(grep -v '^#' "${PRE_FILE}" | grep -v '^$')
           TORCH_VERSION="${PRE_CONFIG[0]}"
           if [[ -n "${TORCH_VERSION}" ]]; then
             TORCH_PRERELEASE="true"
