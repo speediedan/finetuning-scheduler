@@ -81,7 +81,7 @@ def _discover_strategy_adapters() -> None:
     .. warning::
         This is an :ref:`experimental <versioning:API Stability Classifications>` feature which is
         still in development. The entry point API and plugin discovery mechanism may change in future
-        releases. See :ref:`plugins:Strategy Adapter Entry Points` for documentation.
+        releases. See :ref:`strategy_adapter_entry_points` for documentation.
     """
     # We now require Python 3.10+ environments so can use the standard importlib.metadata API.
     from importlib.metadata import entry_points

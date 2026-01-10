@@ -4,7 +4,6 @@ import pytest
 
 from finetuning_scheduler import fts_supporters
 from finetuning_scheduler.fts import FinetuningScheduler
-from finetuning_scheduler.fts_supporters import STRATEGY_ADAPTERS
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 
 
@@ -51,14 +50,16 @@ def test_resolve_strategy_adapter_by_dot_form():
     assert cls.__name__ == "FakeAdapter"
 
 
-def test_resolve_strategy_adapter_by_plugin_name():
+def test_resolve_strategy_adapter_by_plugin_name(monkeypatch):
     """Test importing strategy adapter using discovered plugin entry point name."""
-    # register alias in STRATEGY_ADAPTERS to simulate a discovered plugin
-    STRATEGY_ADAPTERS["fakeplugin"] = STRATEGY_ADAPTERS.get("fsdp")
+    # register alias in STRATEGY_ADAPTERS to simulate a discovered plugin (monkeypatched so it's reverted)
+    monkeypatch.setitem(
+        fts_supporters.STRATEGY_ADAPTERS, "fakeplugin", fts_supporters.STRATEGY_ADAPTERS.get("fsdp")
+    )
     adapter_map = {"single_device": "fakeplugin"}
     fts = FinetuningScheduler()
     cls = fts._resolve_strategy_adapter("single_device", adapter_map)
-    assert cls in STRATEGY_ADAPTERS.values()
+    assert cls in fts_supporters.STRATEGY_ADAPTERS.values()
 
 
 def test_discover_strategy_adapters_ep_load_failure(monkeypatch):
