@@ -120,8 +120,8 @@ log_torch_version(){
 }
 
 base_env_build(){
-    # Use Python 3.10 for oldest builds, 3.12 for latest
-    local python_version="python3.12"
+    # Use Python 3.10 for oldest builds, 3.13 for latest
+    local python_version="python3.13"
     if [[ -n ${oldest} ]]; then
         python_version="python3.10"
         echo "Using Python 3.10 for oldest build"

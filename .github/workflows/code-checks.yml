@@ -53,7 +53,7 @@ jobs:
       - name: Install CI Dependencies
         uses: ./.github/actions/install-ci-dependencies
         with:
-          python_version: "3.12"
+          python_version: "3.13"
           use_commit_pin: "true"
           show_pip_list: "true"
 

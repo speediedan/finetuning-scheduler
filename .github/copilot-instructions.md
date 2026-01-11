@@ -6,7 +6,7 @@
 
 **Key Technologies:**
 
-- Python 3.9+ (CI tests on 3.9 and 3.12)
+- Python 3.9+ (CI tests on 3.10 and 3.13)
 - PyTorch 2.6.0+ with PyTorch Lightning ecosystem
 - Core deps: pytorch-lightning (standalone) or lightning (unified package), transformers
 
@@ -281,7 +281,7 @@ src/fts_examples/             # Example experiments
 **File:** `.github/workflows/ci_test-full.yml`
 
 **Triggers:** Push/PR to main, changes to source/test files
-**Platforms:** Ubuntu 22.04, Windows 2022, macOS 14 (Python 3.10, 3.12)
+**Platforms:** Ubuntu 22.04, Windows 2022, macOS 14 (Python 3.10, 3.13)
 **Timeout:** 90 minutes
 
 **Matrix Strategy:**

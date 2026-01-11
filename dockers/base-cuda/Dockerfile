@@ -16,7 +16,7 @@ ARG OS_VER=ubuntu22.04
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
-ARG PYTHON_VERSION=3.12
+ARG PYTHON_VERSION=3.13
 ARG PYTORCH_VERSION=2.10.0
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
@@ -103,7 +103,7 @@ RUN \
     CUDA_VERSION_MAJOR=$(python -c "import torch; print(torch.version.cuda.split('.')[0])") && \
     echo "CUDA Version Major: ${CUDA_VERSION_MAJOR}" && \
     echo "Checking Python version compatibility:" && \
-    py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.12'.split('.')))") && \
+    py_ver=$(python -c "print(int('$PYTHON_VERSION'.split('.') >= '3.13'.split('.')))") && \
     echo "Python version check result: ${py_ver}"
 
 # Create excludes file to prevent torch from being reinstalled during CI

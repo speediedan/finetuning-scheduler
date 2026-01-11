@@ -90,10 +90,10 @@ TransformerLens-style parameter naming in FTS schedules. Here's how it's registe
     fts = FinetuningScheduler(
         custom_strategy_adapters={
             "single_device": "transformerbridge",  # Use entry point name
-            "ddp": "transformerbridge",  # Same adapter for DDP
+            "auto": "transformerbridge",  # Same adapter for auto strategy
             # Or use fully qualified paths:
             # "single_device": "interpretune.adapters.transformer_lens:TransformerBridgeStrategyAdapter",
-            # "ddp": "interpretune.adapters.transformer_lens.TransformerBridgeStrategyAdapter",
+            # "auto": "interpretune.adapters.transformer_lens.TransformerBridgeStrategyAdapter",
         },
         strategy_adapter_cfg={"use_tl_names": True},  # Adapter-specific config
     )
@@ -103,7 +103,7 @@ of verbose and architecture-dependent canonical names, while FTS handles the nec
 
 **Key Points:**
 
-- Strategy flags (``single_device``, ``ddp``, etc.) refer to Lightning's built-in strategies
+- Strategy flags (``single_device``, ``auto``, etc.) refer to Lightning's built-in strategies
 - The same adapter can be mapped to multiple strategy flags
 - Three formats are supported for referencing adapters:
 
