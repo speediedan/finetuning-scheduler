@@ -16,7 +16,7 @@ Fine-Tuning Scheduler Types
 Type definitions required for Fine-Tuning Scheduler.
 
 """
-from typing import Any, Dict, Protocol, runtime_checkable, Type, Union
+from typing import Any, Protocol, runtime_checkable, Type
 from typing_extensions import TypeAlias
 from enum import Enum
 
@@ -30,7 +30,7 @@ from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 class ParamGroupAddable(Optimizable, Protocol):
     """To structurally type ``optimizer`` s that support adding parameter groups."""
 
-    def add_param_group(self, param_group: Dict[Any, Any]) -> None:
+    def add_param_group(self, param_group: dict[Any, Any]) -> None:
         ...  # pragma: no cover
 
 
@@ -48,9 +48,9 @@ supported_lrs = [
     "LinearLR",
 ]
 FTSLRSchedulerTypeTuple = tuple(getattr(torch.optim.lr_scheduler, lr_class) for lr_class in supported_lrs)
-FTSLRSchedulerType = Union[Type[LRScheduler], Type[ReduceLROnPlateau]]
+FTSLRSchedulerType = Type[LRScheduler] | Type[ReduceLROnPlateau]
 
-BaseCallbackDepType: TypeAlias = Union[Type[EarlyStopping], Type[ModelCheckpoint]]
+BaseCallbackDepType: TypeAlias = Type[EarlyStopping] | Type[ModelCheckpoint]
 
 class AutoStrEnum(Enum):
     def _generate_next_value_(name, start, count, last_values) -> str:  # type: ignore

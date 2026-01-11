@@ -17,7 +17,7 @@ A :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that extends 
 for PyTorch's distributed composable and Tensor Parallel APIs.
 
 """
-from typing import Any, Optional, Callable, Dict, Sequence, Tuple, List, Union
+from typing import Any, Callable, Dict, Sequence  # Dict used for runtime isinstance() checks
 from functools import wraps
 from copy import deepcopy
 import re
@@ -48,9 +48,9 @@ class ActCkptEnum(LightningEnum):
 
 @dataclass
 class ActCkptCfg:
-    mode: Union[ActCkptEnum, str]
-    cfg: Optional[Dict[str, Any]] = field(default_factory=dict)
-    _func: Optional[Callable] = None
+    mode: ActCkptEnum | str
+    cfg: dict[str, Any] | None = field(default_factory=dict)
+    _func: Callable | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.mode, str):
@@ -98,7 +98,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
     with any provided ``Dict`` of policy kwargs.
     """
 
-    def __init__(self, fsdp_default_kwargs: Optional[Dict] = None, fsdp_plan: Optional[Dict] = None, *args: Any,
+    def __init__(self, fsdp_default_kwargs: dict | None = None, fsdp_plan: dict | None = None, *args: Any,
                  **kwargs: Any) -> None:
         """The only user-facing configuration for
         :class:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter` are
@@ -106,7 +106,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_default_kwargs`.
 
         Args:
-            fsdp_plan (Optional[Dict]): An optional dictionary of module names or regex pattern keys with associated
+            fsdp_plan (Dict | None): An optional dictionary of module names or regex pattern keys with associated
                 ``fully_shard`` composable distributed API kwargs to apply to matching modules.
 
                 - Allows users to apply the ``fully_shard`` API using module name/pattern-based configuration instead of
@@ -129,7 +129,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                   apply ``CPUOffloadPolicy`` to the matching module(s) along with any provided Dict of policy kwargs.
                   Defaults to ``None``.
 
-            fsdp_default_kwargs (Optional[Dict]): An optional dictionary of default ``fully_shard`` API kwargs to apply
+            fsdp_default_kwargs (Dict | None): An optional dictionary of default ``fully_shard`` API kwargs to apply
                 to each matching module in ``fsdp_plan``. Module-name/pattern specific kwargs will take precedence over
                 these. All kwargs valid for ``fsdp_plan`` above are supported. Defaults to ``None``.
 
@@ -184,7 +184,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         else:
             setattr(self.pl_module, "configure_model", self._fts_auto_configure_model)
 
-    def _validate_fsdp_fts_config(self) -> Optional[Tuple]:
+    def _validate_fsdp_fts_config(self) -> tuple | None:
         mixed_param_pgs: dict = {}
         inspection_map = deepcopy(self.fts_handle.ft_schedule)
         all_params = dict(self.pl_module.named_parameters())
@@ -208,7 +208,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
             ModelParallelStrategyAdapter._provide_mixed_pg_feedback(mixed_param_pgs)
 
     @staticmethod
-    def _provide_mixed_pg_feedback(mixed_param_pgs: Dict) -> None:
+    def _provide_mixed_pg_feedback(mixed_param_pgs: dict) -> None:
         phasewise_feedback = ""
         for d, mixed_params in mixed_param_pgs.items():
             if mixed_params:
@@ -240,7 +240,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         """
         self._validate_fsdp_fts_config()
 
-    def _maybe_update_fsdp_plan(self, resolved_modules: Dict, kwargs: Dict, name: str) -> bool:
+    def _maybe_update_fsdp_plan(self, resolved_modules: dict, kwargs: dict, name: str) -> bool:
         # right now, the only explicitly disallowed types are the container types w/o a forward: `ModuleList``
         #  and `ModuleDict``
         # NB there are other ``fully_shard`` distributed API constraints that the user may need to validate, for
@@ -256,7 +256,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         return True
 
     @staticmethod
-    def _resolve_cfg_aliases(config_dict: Dict) -> Dict:
+    def _resolve_cfg_aliases(config_dict: dict) -> dict:
         """Resolve any provided convenience FSDP default kwargs."""
         for k, v in list(config_dict.items()):
             # currently adding a `cpu_offload_policy` option alias for convenience
@@ -284,7 +284,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         if self.fsdp_default_kwargs:  # pragma: no cover
             self.fsdp_default_kwargs = ModelParallelStrategyAdapter._resolve_cfg_aliases(self.fsdp_default_kwargs)
         named_modules = dict(self.pl_module.named_modules()).keys()
-        resolved_modules: Dict[str, Dict] = {}
+        resolved_modules: dict[str, Dict] = {}
         for plan_n, kwargs in self.fsdp_plan.items():
             module_resolved = False
             if plan_n in named_modules:
@@ -316,7 +316,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         # self._apply_tp_auto_plan()
         self._apply_fsdp_plan()
 
-    def _compose_or_warn(self, n: str) -> Optional[str]:
+    def _compose_or_warn(self, n: str) -> str | None:
         # NB PL does not currently support passing user-created meshes so we unconditionally pass the device mesh
         if not getattr(self.pl_module.get_submodule(n), '_is_fsdp_managed_module', False):
             if act_ckpt := self.fsdp_plan[n].pop('act_ckpt', None):
@@ -346,7 +346,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         fully_shard(self.pl_module.get_submodule(n), mesh=self.pls_handle.device_mesh["data_parallel"],
                     **self.fsdp_plan[n])
 
-    def _any_noncomposable_AC(self) -> Optional[Tuple[str, type]]:
+    def _any_noncomposable_AC(self) -> tuple[str, type] | None:
         for n, m in self.pl_module.named_modules():
             if isinstance(m, ActivationWrapper):
                 for c in type(m).__mro__:
@@ -366,7 +366,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         auto_plan_keys = self.fsdp_plan.keys()
         named_modules = dict(self.pl_module.named_modules())
         has_fsdp_managed = False
-        unsuccessful_compositions: List[str] = []
+        unsuccessful_compositions: list[str] = []
         for n in auto_plan_keys:
             if n in named_modules:
                 unsuccessful_fqn = self._compose_or_warn(n)  # returns fqn if composition could not be performed

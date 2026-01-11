@@ -13,7 +13,7 @@
 import os
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, ValuesView
+from typing import ValuesView
 
 # -----------------------------------------------------------------------------
 # Lightning Configuration
@@ -66,7 +66,7 @@ EXCLUDE_FILES_FROM_CONVERSION = [
     "test_dynamic_versioning_utils.py"
 ]
 
-def get_base_dependencies() -> List[str]:
+def get_base_dependencies() -> list[str]:
     """Get the base dependencies list.
 
     Returns:
@@ -75,7 +75,7 @@ def get_base_dependencies() -> List[str]:
     return BASE_DEPENDENCIES.copy()
 
 
-def get_requirement_files(standalone: bool = False) -> List[str]:
+def get_requirement_files(standalone: bool = False) -> list[str]:
     """Get installation requirements with dynamic Lightning configuration.
 
     Note: Lightning commit pinning is now handled at install time via UV_OVERRIDE
@@ -115,7 +115,7 @@ def get_lightning_requirement(package_type: str = "unified") -> str:
     return f"{package_name}{pkg_info['version']}"
 
 
-def _retrieve_files(directory: str, *ext: str, exclude_files: Optional[List[str]] = None) -> List[str]:
+def _retrieve_files(directory: str, *ext: str, exclude_files: list[str] | None = None) -> list[str]:
     """Find all files in a directory with optional extension filtering and exclusion."""
     exclude_files = exclude_files or []
     all_files = []
@@ -136,7 +136,7 @@ def _retrieve_files(directory: str, *ext: str, exclude_files: Optional[List[str]
                 all_files.append(file_path)
     return all_files
 
-def _replace_imports(lines: List[str], mapping: List[Tuple[str, str]], lightning_by: str = "") -> List[str]:
+def _replace_imports(lines: list[str], mapping: list[tuple[str, str]], lightning_by: str = "") -> list[str]:
     """Replace imports of unified packages to standalone."""
     out = lines[:]
     for source_import, target_import in mapping:
@@ -150,7 +150,7 @@ def _replace_imports(lines: List[str], mapping: List[Tuple[str, str]], lightning
                 out[i] = out[i].replace("import lightning ", f"import {lightning_by} ")
     return out
 
-def _check_import_format(file_content: str, source_imports: List[str]) -> bool:
+def _check_import_format(file_content: str, source_imports: list[str]) -> bool:
     """Check if imports in a file already match the expected format."""
     for import_name in source_imports:
         if re.search(rf"(^|\s)from\s+{re.escape(import_name)}(\.|\s)", file_content, re.MULTILINE) or \
@@ -158,8 +158,8 @@ def _check_import_format(file_content: str, source_imports: List[str]) -> bool:
             return False
     return True
 
-def _process_lightning_imports(src_dirs: ValuesView, source_imports: List[str],
-                              mapping_pairs: List[Tuple[str, str]], target_format: str, debug: bool = False) -> None:
+def _process_lightning_imports(src_dirs: ValuesView, source_imports: list[str],
+                              mapping_pairs: list[tuple[str, str]], target_format: str, debug: bool = False) -> None:
     """Process Lightning imports in python files across directories.
 
     Args:
@@ -195,7 +195,7 @@ def _process_lightning_imports(src_dirs: ValuesView, source_imports: List[str],
 
 def use_standalone_pl(
     src_dirs: ValuesView,
-    mapping: Dict[str, str] = LIGHTNING_PACKAGE_MAPPING,
+    mapping: dict[str, str] = LIGHTNING_PACKAGE_MAPPING,
     debug: bool = False
 ) -> None:
     """Replace unified Lightning imports with standalone imports."""
@@ -203,12 +203,12 @@ def use_standalone_pl(
                                "standalone", debug)
 
 def use_unified_pl(src_dirs: ValuesView,
-                   mapping: Dict[str, str] = LIGHTNING_PACKAGE_MAPPING, debug: bool = False) -> None:
+                   mapping: dict[str, str] = LIGHTNING_PACKAGE_MAPPING, debug: bool = False) -> None:
     """Replace standalone Lightning imports with unified imports."""
     _process_lightning_imports(src_dirs, list(mapping.values()), list(zip(mapping.values(), mapping.keys())),
                                "unified", debug)
 
-def get_project_paths() -> Tuple[Path, Dict[str, Path]]:
+def get_project_paths() -> tuple[Path, dict[str, Path]]:
     """Get project paths for imports conversion and package setup."""
     current_file_dir = Path(os.path.dirname(os.path.abspath(__file__)))
     if "site-packages" in str(current_file_dir) or "dist-packages" in str(current_file_dir):

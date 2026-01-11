@@ -17,7 +17,7 @@ import logging
 import os
 from copy import deepcopy
 from pprint import pformat
-from typing import Any, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Sequence  # Dict is used for runtime isinstance() checks
 from typing_extensions import override
 
 import lightning.pytorch as pl
@@ -100,22 +100,22 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
 
     def __init__(
         self,
-        ft_schedule: Optional[Union[str, dict]] = None,
+        ft_schedule: str | dict | None = None,
         max_depth: int = -1,
         base_max_lr: float = 1e-5,
         restore_best: bool = True,
         gen_ft_sched_only: bool = False,
         epoch_transitions_only: bool = False,
-        reinit_optim_cfg: Optional[Dict] = None,
-        reinit_lr_cfg: Optional[Dict] = None,
-        strategy_adapter_cfg: Optional[Dict] = None,
-        custom_strategy_adapters: Optional[Dict[str, str]] = None,
+        reinit_optim_cfg: dict | None = None,
+        reinit_lr_cfg: dict | None = None,
+        strategy_adapter_cfg: dict | None = None,
+        custom_strategy_adapters: dict[str, str] | None = None,
         allow_untested: bool = False,
         apply_lambdas_new_pgs: bool = False,
         logging_level: int = logging.INFO,
         enforce_phase0_params: bool = True,
         frozen_bn_track_running_stats: bool = True,
-        log_dir: Optional[Union[str, os.PathLike]] = None,
+        log_dir: str | os.PathLike | None = None,
     ):
         r"""
         Arguments used to define and configure a scheduled fine-tuning training session:
@@ -284,11 +284,11 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         rz_logger.setLevel(logging_level)
 
     @property
-    def log_dir(self) -> Union[str, os.PathLike, None]:
+    def log_dir(self) -> str | os.PathLike | None:
         """Directory to used for :class:`~finetuning_scheduler.fts.FinetuningScheduler` artifacts.
 
         Returns:
-            Union[str, os.PathLike, None]: The directory to use, falling back to ``trainer.log_dir`` if
+            str | os.PathLike | None: The directory to use, falling back to ``trainer.log_dir`` if
             ``FinetuningScheduler._log_dir`` is not set, and ``trainer.default_root_dir`` if ``trainer.log_dir`` is also
             ``None``.
         """
@@ -402,7 +402,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         optimizer: ParamGroupAddable,
         depth: int,
         depth_sync: bool = True,
-        pre_reinit_state: Optional[Tuple] = None,
+        pre_reinit_state: tuple | None = None,
     ) -> None:
         """Configure optimizer parameter groups for the next scheduled fine-tuning level, adding parameter groups
         beyond the restored optimizer state up to
@@ -418,7 +418,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 than the restored checkpoint. If ``False``, configure groups only for the specified depth. Defaults to
                 ``True``.
         """
-        next_tl: Dict = {}
+        next_tl: dict = {}
         assert isinstance(self.ft_schedule, dict)
         assert isinstance(self.pl_module, pl.LightningModule)
         assert isinstance(self.trainer, pl.Trainer)
@@ -451,10 +451,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
     def _add_pgs_config_lrs(
         self,
         optimizer: ParamGroupAddable,
-        next_tl: Dict,
+        next_tl: dict,
         depth: int,
         is_target_depth: bool,
-        pre_reinit_state: Optional[Tuple],
+        pre_reinit_state: tuple | None,
     ) -> None:
         """Add optimizer parameter groups and potentially reinitialize/reconfigure the learning rate scheduler
         according to a given schedule phase configuration.
@@ -769,12 +769,12 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             self._validate_opt_init()
         super().on_fit_start(trainer, pl_module)
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """Before saving a checkpoint, add the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback
         state to be saved.
 
         Returns:
-            Dict[str, Any]: The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state dictionary
+            dict[str, Any]: The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback state dictionary
                 that will be added to the checkpoint
         """
         # callback state such as `_ft_init_epoch` does not currently need to be persisted
@@ -794,7 +794,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             "fts_metadata": self._fts_state._fts_ckpt_metadata,
         }
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """After loading a checkpoint, load the saved :class:`~finetuning_scheduler.fts.FinetuningScheduler`
         callback state and update the current callback state accordingly.
 

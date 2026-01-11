@@ -17,7 +17,7 @@ A powerful memory profiling utility that synthesizes numerous complementary prof
 """
 import os
 import pickle
-from typing import Any, Dict, Optional, Tuple,  DefaultDict, Callable, List, Set
+from typing import Any, Tuple, DefaultDict, Callable, Set
 from dataclasses import dataclass, field, fields, asdict
 from contextlib import redirect_stdout, contextmanager, ExitStack
 from collections import defaultdict
@@ -76,7 +76,7 @@ class MemProfiler:
             module (Any): The module being profiled.
             memprof_log_dir (str): The directory where memory profiles are saved.
             fsdp_mem_tracker (FSDPMemTracker): The FSDP memory tracker.
-            saved_tensors_funcs (List[Callable]): A list of functions used to track saved tensors.
+            saved_tensors_funcs (list[Callable]): A list of functions used to track saved tensors.
             _state (MemProfInternalState): The internal state of the MemProfiler.
         """
         super().__init__()
@@ -86,7 +86,7 @@ class MemProfiler:
         self.module = None
         self.memprof_log_dir = None
         self.fsdp_mem_tracker = None
-        self.saved_tensors_funcs: List[Callable] = []
+        self.saved_tensors_funcs: list[Callable] = []
         self._state = _MemProfInternalState()
 
     def connect(self, obj_ref: Any) -> None:
@@ -115,7 +115,7 @@ class MemProfiler:
         return self.module.memprofiler_cfg.schedule
 
     @property
-    def fsdp_mem_tracker_root_module(self) -> Optional[FSDPModule]:  # type: ignore
+    def fsdp_mem_tracker_root_module(self) -> FSDPModule | None:  # type: ignore
         """If ``track_fsdp_mem`` is enabled, this is the root FSDP module used for FSDP2 memory tracking.
 
         The root module must have ``fully_shard`` applied for FSDP2 memory tracking.
@@ -272,13 +272,13 @@ class MemProfiler:
             self.remove_memprofiler_hooks()
             self.memprofiler_cfg.enable_memory_hooks = False
 
-    def gen_snap_keys(self, fn_name: str, iter_ctx: str, iter_idx: Optional[int] = None) -> Tuple[int, int, Tuple]:
+    def gen_snap_keys(self, fn_name: str, iter_ctx: str, iter_idx: int | None = None) -> tuple[int, int, Tuple]:
         """Generates the MemProfiler snapshot key for a given function and iteration context.
 
         Args:
             fn_name (str): The name of the function to generate a snapshot key for.
             iter_ctx (str): The iteration context of the function to generate a snapshot key for.
-            iter_idx (Optional[int]): The iteration index to use in the snapshot key. If ``None``, the current iteration
+            iter_idx (int | None): The iteration index to use in the snapshot key. If ``None``, the current iteration
                 index will be used.
 
         Returns:
@@ -296,7 +296,7 @@ class MemProfiler:
             iter_idx = self._state.snap_indices[(fn_name, iter_ctx)]
         return iter_idx, (self.rank, fn_name, iter_idx, iter_ctx)
 
-    def update_collect_state(self, fn_name: str, iter_ctx: str, iter_idx: Optional[int] = None) -> None:
+    def update_collect_state(self, fn_name: str, iter_ctx: str, iter_idx: int | None = None) -> None:
         """Updates the MemProfiler state for a given function and iteration context.
 
         Args:
@@ -438,7 +438,7 @@ class MemProfiler:
 
     @contextmanager
     @staticmethod
-    def memprofile_fsdp_ctx(memprofiler, fn_name: str, track_inputs_target: Optional[Tuple] = None):
+    def memprofile_fsdp_ctx(memprofiler, fn_name: str, track_inputs_target: Tuple | None = None):
         """Sets the FSDP memory tracker context manager if ``fsdp_mem_tracker_enabled`` is ``True``.
 
         This context manager takes care of calling the `update_collect_state` and `reset_mod_stats`
@@ -448,7 +448,7 @@ class MemProfiler:
         Args:
             memprofiler (MemProfiler): The MemProfiler instance.
             fn_name (str): The name of the function being profiled.
-            track_inputs_target (Optional[Tuple]): The FSDP inputs to track. If ``None``, no inputs will be tracked.
+            track_inputs_target (Tuple | None): The FSDP inputs to track. If ``None``, no inputs will be tracked.
 
         Yields:
             None
@@ -554,16 +554,16 @@ yaml.SafeDumper.add_representer(MemProfilerCfg, _memprofiler_cfg_mapping_represe
 
 @dataclass
 class _MemProfInternalState:
-    can_collect: Dict[str, bool] = field(default_factory=dict)
-    curr_pid: Optional[Process] = None
-    snap_indices: Dict[str, int] = field(default_factory=dict)
-    configured_hooks: Dict[str, Any] = field(default_factory=dict)
-    hook_handles: DefaultDict[str, List[Any]] = field(default_factory=lambda: defaultdict(list))
-    done_prof_funcs: List[str] = field(default_factory=list)
-    base_collect_func_set: Optional[Set] = None
-    _iter_idx: Optional[int] = None
-    _snap_key: Optional[Tuple] = None
-    _iter_incremented: Dict[str, int] = field(default_factory=dict)
+    can_collect: dict[str, bool] = field(default_factory=dict)
+    curr_pid: Process | None = None
+    snap_indices: dict[str, int] = field(default_factory=dict)
+    configured_hooks: dict[str, Any] = field(default_factory=dict)
+    hook_handles: DefaultDict[str, list[Any]] = field(default_factory=lambda: defaultdict(list))
+    done_prof_funcs: list[str] = field(default_factory=list)
+    base_collect_func_set: Set | None = None
+    _iter_idx: int | None = None
+    _snap_key: Tuple | None = None
+    _iter_incremented: dict[str, int] = field(default_factory=dict)
 
     def maybe_init_iter_state(self, fn_name: str, iter_ctx: str) -> None:
         if not self.snap_indices.get((fn_name, iter_ctx), None):

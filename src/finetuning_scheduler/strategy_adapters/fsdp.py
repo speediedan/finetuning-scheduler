@@ -27,7 +27,7 @@ from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
 from functools import partial, partialmethod, wraps
 from pprint import pformat
-from typing import TYPE_CHECKING, Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, Generator, Iterable, cast  # Dict used for isinstance() checks
 from typing_extensions import override
 
 import torch
@@ -111,15 +111,15 @@ class FSDPStrategyAdapter(StrategyAdapter):
        :external+pl:class:`~lightning.pytorch.core.module.LightningModule` to align with a desired fine-tuning schedule.
     """
 
-    _fsdp_flat_to_unflat_mapping: Dict
-    _fsdp_unflat_to_flat_mapping: Dict
-    _ft_schedule_module_map: Dict
-    _unscheduled_params: List
+    _fsdp_flat_to_unflat_mapping: dict
+    _fsdp_unflat_to_flat_mapping: dict
+    _ft_schedule_module_map: dict
+    _unscheduled_params: list
     _use_orig_params: bool
     _allow_mixed_req_grad: bool
     _rank_zero_logger: logging.Logger = logging.getLogger("lightning.pytorch.utilities.rank_zero")
 
-    def __init__(self, awp_overrides: Optional[List] = None, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, awp_overrides: list | None = None, *args: Any, **kwargs: Any) -> None:
         """The only user-facing configuration for
         :class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter` is
         :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides`, an optional list of
@@ -128,7 +128,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         :external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy` strategy configuration.
 
         Args:
-            awp_overrides (Optional[List]): A list of module names to wrap in separate FSDP instances (i.e.,
+            awp_overrides (List | None): A list of module names to wrap in separate FSDP instances (i.e.,
                 ``auto_wrap_policy`` overrides). Only applicable when complementing/overriding an ``auto_wrap_policy``
                 provided in the
                 :external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`
@@ -205,7 +205,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             MisconfigurationException: If any FTS FSDP fine-tuning schedule/module wrapping alignment exceptions are
                 thrown. The provided exceptions provide detailed feedback for the user to address the misalignment.
         """
-        world_feedback_set: Set = set()
+        world_feedback_set: set = set()
         world_feedback = [[None] for _ in range(self.pls_handle.world_size)]
         all_gather_object(world_feedback, self._validate_fsdp_fts_config())
         for feedback in world_feedback:
@@ -271,7 +271,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
                 optimizer.load_state_dict(opt_state)
 
-    def optimizer_state(self, optimizer: Optimizer) -> Dict[str, Tensor]:
+    def optimizer_state(self, optimizer: Optimizer) -> dict[str, Tensor]:
         """Override the default ``optimizer_state`` method so that we can unify `use_orig_params` code-paths and
         save a full, consolidated optimizer state dict to be restored via ``load_optimizer_state_dict``.
 
@@ -279,7 +279,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             optimizer (Optimizer): The optimizer instance for which a full optimizer state dict will be captured.
 
         Returns:
-            Dict[str, Tensor]: The consolidated full optimizer state dict (if on rank 0, otherwise an empty dict).
+            dict[str, Tensor]: The consolidated full optimizer state dict (if on rank 0, otherwise an empty dict).
         """
         assert self.pls_handle.model is not None
 
@@ -292,7 +292,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
         return state_dict
 
-    def fts_optim_transform(self, orig_pl: List, inspect_only: bool = False) -> List:
+    def fts_optim_transform(self, orig_pl: list, inspect_only: bool = False) -> list:
         """Because FSDP performs parameter transformations that cause the current optimizer's view of parameter
         names to diverge from the original parameter names, this parameter transformation is required for optimizer
         operations.
@@ -309,7 +309,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         return self.fsdp_param_transform(orig_pl, inspect_only)
 
-    def fsdp_param_transform(self, orig_thaw_pl: List, inspect_only: bool) -> List:
+    def fsdp_param_transform(self, orig_thaw_pl: list, inspect_only: bool) -> list:
         """The parameter transformation function currently used by
         :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_transform` to transform
         original parameter lists for optimizer operations.
@@ -329,7 +329,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             self._flat_param_thaw(flat_next_tl)
         return [n for n, p in self.pl_module.named_parameters() if p in flat_next_tl]
 
-    def _flat_param_thaw(self, flat_next_tl: Set) -> None:
+    def _flat_param_thaw(self, flat_next_tl: set) -> None:
         """For FSDP modules that have been configured with ``_use_orig_params`` set to ``True``, this method
         ensures that the ``FlatParameter`` objects containing the logically original ``Parameter`` objects require
         grad when one or more of those contained original parameters are transformed for optimizer operations.
@@ -360,7 +360,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             f" `FlatParameters` thawed: {os.linesep}{pformat(thawed_fp_fqns)}"
         )
 
-    def logical_param_translation(self, param_names: List) -> List:
+    def logical_param_translation(self, param_names: list) -> list:
         """Effectively the reverse transformation of
         :meth:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.fts_optim_transform`.
 
@@ -403,7 +403,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             # (e.g. logger rename) continue anyway
             pass
 
-    def _validate_fsdp_fts_config(self) -> List:
+    def _validate_fsdp_fts_config(self) -> list:
         """Execute fine-tuning schedule/module wrapping misalignment checks, generating and aggregating detailed
         feedback to facilitate the user's remediation of the issue.
 
@@ -452,11 +452,11 @@ class FSDPStrategyAdapter(StrategyAdapter):
         self.awp_overrides = resolved_modules
 
     @staticmethod
-    def _phasewise_intersection(phase_lists: List[List]) -> Set:
+    def _phasewise_intersection(phase_lists: list[list]) -> set:
         """Calculates a phase-wise intersection of elements (whether modules or parameters)
 
         Args:
-            phase_lists (List[List]): Element lists (modules or parameters) for each fine-tuning schedule phase.
+            phase_lists (list[List]): Element lists (modules or parameters) for each fine-tuning schedule phase.
 
         Returns:
             Set: The set of elements present in more than one phase.
@@ -467,12 +467,12 @@ class FSDPStrategyAdapter(StrategyAdapter):
         dup_elems = set(elems.elements())
         return dup_elems
 
-    def _log_nonzero_local_shards(self) -> Optional[str]:
+    def _log_nonzero_local_shards(self) -> str | None:
         """If debugging diagnostics are requested, evaluate whether there are any ranks with no (non-zero sized)
         parameter shards and if so, provide parameter shard allocation debugging info for the user.
 
         Returns:
-            Optional[str]: Per-rank debugging info distilling relevant parameter shard allocation.
+            str | None: Per-rank debugging info distilling relevant parameter shard allocation.
         """
         curr_optimizer_params = [p for pg in self.pls_handle._optimizers[0].param_groups for p in pg["params"]]
         if not any(p.shape[0] for p in curr_optimizer_params if p.requires_grad):
@@ -502,14 +502,14 @@ class FSDPStrategyAdapter(StrategyAdapter):
             )
             return local_shard_advice
 
-    def _validate_fsdp_phases_disjoint(self) -> Tuple:
+    def _validate_fsdp_phases_disjoint(self) -> tuple:
         """Validate that the defined schedule does not specify any wrapped module or parameter in multiple phases.
 
         Returns:
             Tuple: Any fine-tuning schedule/wrapped module misalignment feedback messages to be provided to the user.
         """
-        feedback_errors: List[str] = []
-        feedback_nonerrors: List[str] = []
+        feedback_errors: list[str] = []
+        feedback_nonerrors: list[str] = []
         if self._allow_mixed_req_grad:
             rank_zero_debug(
                 "Bypassing FSDP-specific phase disjointness validation because `use_orig_params` is ``True``"
@@ -552,13 +552,13 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         return any(_is_fsdp_flattened(param) for param in submodule.parameters())
 
-    def _validate_min_wrap_condition(self) -> Optional[Tuple]:
+    def _validate_min_wrap_condition(self) -> tuple | None:
         """Validate (prior to optimizer validation via Lightning that occurs after a potential FTS phase 0
         override) that at least scheduled phase 0 contains FSDP flattened parameters with ``requires_grad`` set to
         ``True``.
 
         Returns:
-            Optional[str]: Error message for the user if the first fine-tuning phase does not include one or more FSDP
+            str | None: Error message for the user if the first fine-tuning phase does not include one or more FSDP
                 flattened parameters.
         """
         has_flattened = False
@@ -580,7 +580,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             )
             return ("ERROR", fts_p0_err)
 
-    def _phase_unaligned_fsdp_params(self, check_unsched: bool = False) -> Set:
+    def _phase_unaligned_fsdp_params(self, check_unsched: bool = False) -> set:
         """Inspect the fine-tuning schedule and FSDP-wrapped module for parameters that are unaligned with the FSDP
         wrapped module.
 
@@ -604,7 +604,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         fsdp_phase_lists = [list(fsdp_param_sets[d]) for d in fsdp_param_sets.keys()]
         return FSDPStrategyAdapter._phasewise_intersection(fsdp_phase_lists)
 
-    def _fsdp_param_phase_overlap_feedback(self, dup_params: Set, unsched_msg: bool = False) -> str:
+    def _fsdp_param_phase_overlap_feedback(self, dup_params: set, unsched_msg: bool = False) -> str:
         """Generate parameter-level phase overlap feedback for the user, identifying owning FSDP instances
         associated with parameters that span more than one fine-tuning phase.
 
@@ -647,7 +647,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         )
         return warn_msg
 
-    def _module_overlap_feedback(self, dup_mods: Set) -> str:
+    def _module_overlap_feedback(self, dup_mods: set) -> str:
         """Generate module-level phase overlap feedback for the user, identifying owning FSDP instances associated
         with modules that span more than one fine-tuning phase.
 
@@ -667,7 +667,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             )
             for m in dup_mods
         }
-        phase_mod_intersect: Dict = {}
+        phase_mod_intersect: dict = {}
         for m, plist in dup_mod_dict.items():
             phase_mod_intersect[m] = {}
             for phase in ft_sched.keys():
@@ -786,7 +786,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         auto_wrap_policy_handle = _ConfigAutoWrap.kwargs.pop("auto_wrap_policy", None)
         override_ids = [id(m) for n, m in self.pl_module.named_modules() if n in self.awp_overrides]
-        name_based_override_policy: Union[NameDrivenPolicy, Callable]
+        name_based_override_policy: NameDrivenPolicy | Callable
         if isinstance(auto_wrap_policy_handle, _Policy):
             name_based_override_policy = NameDrivenPolicy(auto_wrap_policy_handle, override_ids=override_ids)
         else:  # Callable policy implementation path
@@ -799,7 +799,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             _ConfigAutoWrap.kwargs["auto_wrap_policy"] = auto_wrap_policy_handle
 
     @override
-    def _get_target_bn_modules(self, schedule_phase: int) -> List:
+    def _get_target_bn_modules(self, schedule_phase: int) -> list:
         """Enumerate the :external+torch:class:`~torch.nn.modules.batchnorm._BatchNorm` modules for a given
         schedule phase.
 
@@ -807,7 +807,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             schedule_phase (int): The phase of the schedule to evaluate.
 
         Returns:
-            List[Tuple[str, torch.nn.modules.batchnorm._BatchNorm]]: A list of tuples containing the names and
+            list[tuple[str, torch.nn.modules.batchnorm._BatchNorm]]: A list of tuples containing the names and
               (possibly FSDP wrapped) instances of `BatchNorm` modules associated with a given schedule phase.
         """
         target_bn_modules = []

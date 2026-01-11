@@ -1,4 +1,3 @@
-from typing import List
 import torch
 
 # accessed in global scope to track non-parameter packed bytes (npp) as a simple proxy (ceiling) for activation memory
@@ -21,7 +20,7 @@ def _hook_npp_post_forward(module, *args, **kwargs):
     module.rss_diff = rss_diff + (module.rss_diff if hasattr(module, "rss_diff") else 0)
     return None
 
-def _reset_memory_hooks_state(model, reset_attrs: List[str]):
+def _reset_memory_hooks_state(model, reset_attrs: list[str]):
     global _npp_bytes
     _npp_bytes = 0
     for module in model.modules():

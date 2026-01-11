@@ -1,7 +1,7 @@
 import os
 import sys
 from collections import namedtuple
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict
 from datetime import datetime
 
 import torch
@@ -31,7 +31,7 @@ class CustLightningCLI(LightningCLI):
         parser.link_arguments("data.init_args.task_name", "model.init_args.task_name")
 
 
-def instantiate_class(init: Dict[str, Any], args: Optional[Union[Any, Tuple[Any, ...]]] = None) -> Any:
+def instantiate_class(init: dict[str, Any], args: Any | tuple[Any, ...] | None = None) -> Any:
     """Instantiates a class with the given args and init. Accepts class definitions with a "class_path".
 
     Args:
@@ -217,10 +217,10 @@ class RandomTokenDataset(Dataset):
 
 class ExpHarness(ProfilerHooksMixin, L.LightningModule):
     def __init__(self, model_cfg: ModelCfg, exp_cfg: ExperimentCfg,
-                 optimizer_cfg: Optional[OptimizerCfg] = None,
-                 lr_scheduler_cfg: Optional[LRSchedulerCfg] = None,
-                 lightning_lrs_cfg: Optional[LightningLRSCfg] = None,
-                 memprofiler_cfg: Optional[MemProfilerCfg] = None,
+                 optimizer_cfg: OptimizerCfg | None = None,
+                 lr_scheduler_cfg: LRSchedulerCfg | None = None,
+                 lightning_lrs_cfg: LightningLRSCfg | None = None,
+                 memprofiler_cfg: MemProfilerCfg | None = None,
                  *args, **kwargs):
         super().__init__(memprofiler_cfg=memprofiler_cfg, *args, **kwargs)
         self.init_hparams = {
@@ -251,7 +251,7 @@ class ExpHarness(ProfilerHooksMixin, L.LightningModule):
         return loss
 
     @MemProfiler.memprofilable
-    def validation_step(self, batch: torch.Tensor) -> Optional[STEP_OUTPUT]:
+    def validation_step(self, batch: torch.Tensor) -> STEP_OUTPUT | None:
         inputs = batch[:, :-1]
         labels = batch[:, 1:]
         output = self.model(inputs)
@@ -281,11 +281,11 @@ class FTSExperimentCLI(LightningCLI):
         # by LightningCLI's auto_configure_optimizers option)
 
     def add_exp_harness_args_to_parser(self, parser, nested_key, datacls):
-        kwargs: Dict[str, Any] = {"instantiate": False, "fail_untyped": False, 'required': False}
+        kwargs: dict[str, Any] = {"instantiate": False, "fail_untyped": False, 'required': False}
         parser.add_dataclass_arguments(datacls, nested_key, **kwargs)
         parser.link_arguments(nested_key, f"model.init_args.{nested_key}")
 
-    def _add_configure_optimizers_method_to_model(self, subcommand: Optional[str]) -> None:
+    def _add_configure_optimizers_method_to_model(self, subcommand: str | None) -> None:
         if self.auto_configure_optimizers:
             super()._add_configure_optimizers_method_to_model(subcommand)
             lightning_lrs_cfg = self._get(self.config_init[self.subcommand], "lightning_lrs_cfg")
@@ -301,7 +301,7 @@ class FTSExperimentCLI(LightningCLI):
         # optimizer and lr_scheduler configurations directly. We make them optional in the experimental harness and
         # pass them in via this args so that we have the option to save them with other hyperparameters as it's useful
         # for various experiment logging visualizations.
-        def convert_reserved_keys(d: Dict[str, Any]) -> Dict[str, Any]:
+        def convert_reserved_keys(d: dict[str, Any]) -> dict[str, Any]:
             """Transform configuration dataclass args to avoid using `class_path` or `init_args` keys as
             jsonargparse reserves those names."""
             return {

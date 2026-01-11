@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import TYPE_CHECKING, Any, Dict, List, Set, Iterator, Tuple
+from typing import TYPE_CHECKING, Any, Iterator
 from types import resolve_bases
 
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import _CHECKPOINT_PREFIX
@@ -33,12 +33,12 @@ class NameDrivenCustomPolicy(CustomPolicy):
             name-driven policy and returning the composed configuration.
     """
 
-    def __init__(self, auto_wrap_policy_handle: _Policy, override_ids: List):
+    def __init__(self, auto_wrap_policy_handle: _Policy, override_ids: list):
         """Compose the provided ``auto_wrap_policy`` with any provided override directives.
 
         Args:
-            auto_wrap_policy_handle (Union[Callable, _Policy]): The user's base ``auto_wrap_policy``.
-            override_ids (List): Object ids of the desired modules to wrap even if the provided ``auto_wrap_policy``
+            auto_wrap_policy_handle (Callable | _Policy): The user's base ``auto_wrap_policy``.
+            override_ids (list): Object ids of the desired modules to wrap even if the provided ``auto_wrap_policy``
                 otherwise would not dictate so.
         """
         super().__init__(lambda_fn=lambda m: id(m) in override_ids)
@@ -47,9 +47,9 @@ class NameDrivenCustomPolicy(CustomPolicy):
     def _run_policy(
         self,
         root_module: torch.nn.Module,
-        ignored_modules: Set[torch.nn.Module],
-        root_kwargs: Dict[str, Any],
-    ) -> Dict[torch.nn.Module, Dict[str, Any]]:
+        ignored_modules: set[torch.nn.Module],
+        root_kwargs: dict[str, Any],
+    ) -> dict[torch.nn.Module, dict[str, Any]]:
         target_module_to_kwargs = self._base_awp._run_policy(root_module, ignored_modules, root_kwargs)
         nb_policy_target_module_to_kwargs = super()._run_policy(root_module, ignored_modules, root_kwargs)
         target_module_to_kwargs.update(nb_policy_target_module_to_kwargs)
@@ -65,7 +65,7 @@ class NCACMixin(torch.nn.Module):
         self,
         *args: Any,
         **kwargs: Any,
-    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+    ) -> Iterator[tuple[str, torch.nn.Parameter]]:
         """Override :meth:`named_parameters()` to intercept parameter names.
 
         remove all occurrences of ``_CHECKPOINT_PREFIX``.
