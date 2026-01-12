@@ -13,7 +13,7 @@
 from copy import copy
 from itertools import chain
 
-# warning inventory last evaluated w/ PT 2.7.0.dev20250201 and Lightning commit efe311cd (2.6.0dev)
+# warning inventory last updated w/ PT 2.10.0 and Lightning commit affee288
 
 WORKER_WARNING = "does not have many workers"
 
@@ -21,11 +21,11 @@ BASE_WARNINGS = [
     "GPU available but",
     "`max_epochs` was not",
     "The dirpath has changed from",
-    "unless they are explicitly allowlisted", # required for oldest pytorch (2.5.0) with Lightning 2.5.6
+    "unless they are explicitly allowlisted",
     "Conversion of an array with ndim > 0",
-    "Please use the new API settings to control TF32 behavior",  # TODO: temporarily required with 20250811 nightly
-    "treespec, LeafSpec",  # TODO: required temporarily while lightning uses deprecated PT pytree API
-    "torch.jit.script",  # TODO: required temporarily with PT 2.10 nightly 20251124 due to upstream import
+    "Please use the new API settings to control TF32 behavior",
+    "treespec, LeafSpec",
+    "torch.jit.script",
     WORKER_WARNING,
 ]
 
@@ -54,14 +54,12 @@ BASE_DYNAMO_EXPECTED_WARNS = [
 ]
 
 distributed_warnings = [
-    # "using the device under current context",  # required w/ PT 2.9 stable  # TODO: Safe to remove
-    # "This get_root_mesh API",  # temporarily required with PT 2.10 nightly 20251017  # TODO: Safe to remove
-    "Using the current device set by the user",  # required starting with PT 2.7
+    "Using the current device set by the user",
     "of Tensor.pin_memory",
     "Tensor.is_pinned",
     "when logging on epoch level in distributed",
     "The number of training batches",
-    "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch", # TODO: investigate, required w/ PT 20251124
+    "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch",
 ]
 
 # FSDP specific warnings
@@ -69,7 +67,7 @@ additional_fsdp_warns = [
     "FSDP.state_dict_type",
     "Deallocating Tensor ",
     "`_get_pg_default_device` will be deprecated",
-    "enables computation in lower precision"  # new warning with Lightning 2.6
+    "enables computation in lower precision",
 ]
 
 DISTRIBUTED_WARNS = extend_warns(BASE_EXPECTED_WARNS, distributed_warnings)
@@ -79,32 +77,19 @@ FSDP_DYNAMO_EXPECTED_WARNS = [DYNAMO_PHASE_WARNING]
 
 # Model parallel warnings
 additional_model_parallel_warns = [
-   "Profiler clears events at the end of each cycle.",  # with PT 2.10 nightly 20251124
+   "Profiler clears events at the end of each cycle.",
 ]  # for future use, currently empty
 MODEL_PARALLEL_BASE_WARNS = extend_warns(DISTRIBUTED_WARNS, additional_model_parallel_warns)
 MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
 
 # Example warnings
 EXAMPLE_BASE_WARNS = [
-    # "This get_root_mesh API",  # temporarily required with PT 2.10 nightly 20251017  # TODO: Safe to remove
     "in eval mode at the start of training", # required starting with Lightning #21446
-    # "using the device under current context",  # required w/ PT 2.9 stable  # TODO: Safe to remove
-    # "Using the current device set by the user",  # required starting with PT 2.7  # TODO: Safe to remove
     "sentencepiece tokenizer that you are converting",
-    # "co_lnotab is deprecated, use co_lines instead.",  # TODO: Safe to remove - not found in any test context
-    "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch", # TODO: investigate, required with PT 20251124
-    #"`resume_download` is deprecated",
-    #"distutils Version classes are deprecated",
-    #"Please use torch.utils._pytree.register_pytree_node",
-    #"We are importing from `pydantic`",
-    #"`TorchScript` support for functional optimizers is",
-    #"`is_compiling` is deprecated",
-    #"You are using `torch.load` with `weights_only=False`",
-    #"is multi-threaded, use of fork"
+    "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch",
 ]
 
 ALL_EXAMPLE_EXPECTED = [
-    # "Use timezone-aware",  # TODO: Safe to remove - not found in any test context
     "is smaller than the logging interval",
     WORKER_WARNING,
 ]
