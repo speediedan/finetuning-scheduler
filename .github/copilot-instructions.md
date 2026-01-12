@@ -342,42 +342,53 @@ tail -f `ls -rt /tmp/gen_fts_coverage_fts_* | tail -1`
 **Common coverage commands:**
 
 ```bash
+# Note: Both --repo-home and --repo_home work (backward compatible)
+
 # Generate coverage with rebuild (fts_latest with stable PyTorch)
 ~/repos/finetuning-scheduler/scripts/manage_standalone_processes.sh --use-nohup \
   ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh \
-  --repo_home=${HOME}/repos/finetuning-scheduler \
-  --target_env_name=fts_latest \
+  --repo-home=${HOME}/repos/finetuning-scheduler \
+  --target-env-name=fts_latest \
   --venv-dir=/mnt/cache/${USER}/.venvs
 
 # Generate coverage without rebuild
 ~/repos/finetuning-scheduler/scripts/manage_standalone_processes.sh --use-nohup \
   ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh \
-  --repo_home=${HOME}/repos/finetuning-scheduler \
-  --target_env_name=fts_latest \
+  --repo-home=${HOME}/repos/finetuning-scheduler \
+  --target-env-name=fts_latest \
   --venv-dir=/mnt/cache/${USER}/.venvs \
-  --no_rebuild_base
+  --no-rebuild-base
 
 # Include experimental patch tests
 ~/repos/finetuning-scheduler/scripts/manage_standalone_processes.sh --use-nohup \
   ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh \
-  --repo_home=${HOME}/repos/finetuning-scheduler \
-  --target_env_name=fts_latest \
+  --repo-home=${HOME}/repos/finetuning-scheduler \
+  --target-env-name=fts_latest \
   --venv-dir=/mnt/cache/${USER}/.venvs \
-  --include_experimental
+  --include-experimental
+
+# Run all example tests (comprehensive validation)
+~/repos/finetuning-scheduler/scripts/manage_standalone_processes.sh --use-nohup \
+  ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh \
+  --repo-home=${HOME}/repos/finetuning-scheduler \
+  --target-env-name=fts_latest \
+  --venv-dir=/mnt/cache/${USER}/.venvs \
+  --no-rebuild-base \
+  --run-all-and-examples
 
 # Generate coverage with oldest dependencies (Python 3.10, mirrors CI oldest matrix)
 ~/repos/finetuning-scheduler/scripts/manage_standalone_processes.sh --use-nohup \
   ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh \
-  --repo_home=${HOME}/repos/finetuning-scheduler \
-  --target_env_name=fts_oldest \
+  --repo-home=${HOME}/repos/finetuning-scheduler \
+  --target-env-name=fts_oldest \
   --venv-dir=/mnt/cache/${USER}/.venvs \
   --oldest
 
 # Generate coverage with oldest deps, skip special tests (faster CI-like run)
 ~/repos/finetuning-scheduler/scripts/manage_standalone_processes.sh --use-nohup \
   ~/repos/finetuning-scheduler/scripts/gen_fts_coverage.sh \
-  --repo_home=${HOME}/repos/finetuning-scheduler \
-  --target_env_name=fts_oldest \
+  --repo-home=${HOME}/repos/finetuning-scheduler \
+  --target-env-name=fts_oldest \
   --venv-dir=/mnt/cache/${USER}/.venvs \
   --oldest \
   --no-special
@@ -387,6 +398,8 @@ tail -f `ls -rt /tmp/gen_fts_coverage_fts_* | tail -1`
 
 - `--oldest`: Uses Python 3.10 and `requirements/ci/requirements-oldest.txt` (mirrors CI oldest matrix)
 - `--no-special`: Skips `special_tests.sh` standalone and experimental patch tests (faster iteration)
+- `--run-all-and-examples`: Runs all example tests (both non-standalone and standalone marked)
+- `--allow-failures`: Continues test execution after failures (useful for validation workflows)
 - `--venv-dir`: Base directory for venvs (recommended: `/mnt/cache/${USER}/.venvs` for hardlink performance)
 
 ## Special Dependencies and Known Issues

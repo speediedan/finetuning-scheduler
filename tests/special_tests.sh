@@ -15,10 +15,12 @@ set -eo pipefail  # only disable this when debugging to allow more context
 
 unset mark_type
 unset log_file
+unset log_dir
 unset filter_pattern
 unset experiments_list
 unset experiment_patch_mask
 unset collect_dir
+unset allow_failures
 unset PL_RUN_STANDALONE_TESTS
 unset FTS_RUN_STANDALONE_TESTS
 unset FTS_EXPERIMENTAL_PATCH_TESTS
@@ -30,10 +32,12 @@ usage(){
 Usage: $0
    [ --mark_type input]
    [ --log_file input]
+   [ --log-dir input]            # Directory for all test logs (default: /tmp)
    [ --filter_pattern input]
    [ --experiments_list input]
    [ --experiment_patch_mask input]
    [ --collect_dir input]
+   [ --allow-failures ]          # Continue running tests after failures
    [ --help ]
    Examples:
 	# run all standalone tests (but not experimental ones, note --mark_type defaults to 'standalone' ):
@@ -53,7 +57,7 @@ EOF
 exit 1
 }
 
-args=$(getopt -o '' --long mark_type:,log_file:,filter_pattern:,experiments_list:,experiment_patch_mask:,collect_dir:,help -- "$@")
+args=$(getopt -o '' --long mark_type:,log_file:,log-dir:,filter_pattern:,experiments_list:,experiment_patch_mask:,collect_dir:,allow-failures,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -65,10 +69,12 @@ do
   case $1 in
     --mark_type)  mark_type=$2    ; shift 2  ;;
     --log_file)  log_file=$2    ; shift 2  ;;
+    --log-dir)  log_dir=$2    ; shift 2  ;;
     --filter_pattern)  filter_pattern=$2    ; shift 2  ;;
     --experiments_list)  experiments_list=$2    ; shift 2  ;;
     --experiment_patch_mask) experiment_patch_mask+=($2) ; shift 2  ;;
     --collect_dir)  collect_dir=$2    ; shift 2  ;;
+    --allow-failures)  allow_failures=1    ; shift  ;;
     --help)    usage      ; shift   ;;
     --) shift; break ;;
     *) >&2 echo Unsupported option: $1
@@ -77,7 +83,7 @@ do
 done
 
 d=`date +%Y%m%d%H%M%S`
-tmp_log_dir="/tmp"
+tmp_log_dir="${log_dir:-/tmp}"
 mark_type=${mark_type:-"standalone"}
 experiments_list=${experiments_list:-$(dirname "$0")/.experiments}
 if [ -s "${experiments_list}" ]; then
@@ -138,4 +144,4 @@ trap 'show_test_results "$special_test_session_log" "$test_session_tmp_log"' EXI
 ## Special coverage collection flow
 define_configuration
 collect_tests "$collect_defaults" "$special_test_session_log"
-execute_tests "$exec_defaults" "$special_test_session_log" "$test_session_tmp_log"
+execute_tests "$exec_defaults" "$special_test_session_log" "$test_session_tmp_log" "${allow_failures:-0}"

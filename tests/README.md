@@ -80,14 +80,21 @@ The `gen_fts_coverage.sh` script orchestrates environment building/rebuilding, r
 ```bash
 cd ${FTS_REPO_DIR}
 
+# Note: Both --repo-home and --repo_home work (backward compatible)
 # Generate coverage with environment rebuild (builds/rebuilds environment automatically)
-./scripts/gen_fts_coverage.sh --repo_home=${PWD} --target_env_name=fts_latest
+./scripts/gen_fts_coverage.sh --repo-home=${PWD} --target-env-name=fts_latest
 
 # Generate coverage without rebuilding environment (faster if env already set up)
-./scripts/gen_fts_coverage.sh --repo_home=${PWD} --target_env_name=fts_latest --no_rebuild_base
+./scripts/gen_fts_coverage.sh --repo-home=${PWD} --target-env-name=fts_latest --no-rebuild-base
 
 # Skip standalone/special tests for faster iteration
-./scripts/gen_fts_coverage.sh --repo_home=${PWD} --target_env_name=fts_latest --no_rebuild_base --no-special
+./scripts/gen_fts_coverage.sh --repo-home=${PWD} --target-env-name=fts_latest --no-rebuild-base --no-special
+
+# Run all example tests (comprehensive validation, includes both non-standalone and standalone marked tests)
+./scripts/gen_fts_coverage.sh --repo-home=${PWD} --target-env-name=fts_latest --no-rebuild-base --run-all-and-examples
+
+# Allow tests to continue after failures (useful for validation workflows)
+./scripts/gen_fts_coverage.sh --repo-home=${PWD} --target-env-name=fts_latest --no-rebuild-base --allow-failures
 ```
 
 **Using nohup wrapper for long-running coverage collection:**
@@ -96,31 +103,40 @@ cd ${FTS_REPO_DIR}
 # Generate coverage using nohup wrapper (recommended for full coverage runs)
 ${FTS_REPO_DIR}/scripts/manage_standalone_processes.sh --use-nohup \
   ${FTS_REPO_DIR}/scripts/gen_fts_coverage.sh \
-  --repo_home=${FTS_REPO_DIR} \
-  --target_env_name=fts_latest \
+  --repo-home=${FTS_REPO_DIR} \
+  --target-env-name=fts_latest \
   --venv-dir=${FTS_VENV_BASE}
 
 # Include experimental patch tests
 ${FTS_REPO_DIR}/scripts/manage_standalone_processes.sh --use-nohup \
   ${FTS_REPO_DIR}/scripts/gen_fts_coverage.sh \
-  --repo_home=${FTS_REPO_DIR} \
-  --target_env_name=fts_latest \
+  --repo-home=${FTS_REPO_DIR} \
+  --target-env-name=fts_latest \
   --venv-dir=${FTS_VENV_BASE} \
-  --include_experimental
+  --include-experimental
+
+# Run all example tests (comprehensive validation)
+${FTS_REPO_DIR}/scripts/manage_standalone_processes.sh --use-nohup \
+  ${FTS_REPO_DIR}/scripts/gen_fts_coverage.sh \
+  --repo-home=${FTS_REPO_DIR} \
+  --target-env-name=fts_latest \
+  --venv-dir=${FTS_VENV_BASE} \
+  --no-rebuild-base \
+  --run-all-and-examples
 
 # Generate coverage with oldest dependencies (Python 3.10, mirrors CI oldest matrix)
 ${FTS_REPO_DIR}/scripts/manage_standalone_processes.sh --use-nohup \
   ${FTS_REPO_DIR}/scripts/gen_fts_coverage.sh \
-  --repo_home=${FTS_REPO_DIR} \
-  --target_env_name=fts_oldest \
+  --repo-home=${FTS_REPO_DIR} \
+  --target-env-name=fts_oldest \
   --venv-dir=${FTS_VENV_BASE} \
   --oldest
 
 # Generate coverage with oldest deps, skip special tests (faster CI-like run)
 ${FTS_REPO_DIR}/scripts/manage_standalone_processes.sh --use-nohup \
   ${FTS_REPO_DIR}/scripts/gen_fts_coverage.sh \
-  --repo_home=${FTS_REPO_DIR} \
-  --target_env_name=fts_oldest \
+  --repo-home=${FTS_REPO_DIR} \
+  --target-env-name=fts_oldest \
   --venv-dir=${FTS_VENV_BASE} \
   --oldest \
   --no-special

@@ -54,14 +54,14 @@ BASE_DYNAMO_EXPECTED_WARNS = [
 ]
 
 distributed_warnings = [
-        "using the device under current context",  # required w/ PT 2.9 stable
-        "This get_root_mesh API",  # temporarily required with PT 2.10 nightly 20251017
-        "Using the current device set by the user",  # required starting with PT 2.7
+    # "using the device under current context",  # required w/ PT 2.9 stable  # TODO: Safe to remove
+    # "This get_root_mesh API",  # temporarily required with PT 2.10 nightly 20251017  # TODO: Safe to remove
+    "Using the current device set by the user",  # required starting with PT 2.7
         "of Tensor.pin_memory",
         "Tensor.is_pinned",
         "when logging on epoch level in distributed",
         "The number of training batches",
-        "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch", # TODO: investigate, required w/ PT 20251124
+    "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch", # TODO: investigate, required w/ PT 20251124
 ]
 
 # FSDP specific warnings
@@ -86,12 +86,12 @@ MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
 
 # Example warnings
 EXAMPLE_BASE_WARNS = [
-    "This get_root_mesh API",  # temporarily required with PT 2.10 nightly 20251017
+    # "This get_root_mesh API",  # temporarily required with PT 2.10 nightly 20251017  # TODO: Safe to remove
     "in eval mode at the start of training", # required starting with Lightning #21446
-    "using the device under current context",  # required w/ PT 2.9 stable
-    "Using the current device set by the user",  # required starting with PT 2.7
+    # "using the device under current context",  # required w/ PT 2.9 stable  # TODO: Safe to remove
+    # "Using the current device set by the user",  # required starting with PT 2.7  # TODO: Safe to remove
     "sentencepiece tokenizer that you are converting",
-    "co_lnotab is deprecated, use co_lines instead.",
+    # "co_lnotab is deprecated, use co_lines instead.",  # TODO: Safe to remove - not found in any test context
     "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch", # TODO: investigate, required with PT 20251124
     #"`resume_download` is deprecated",
     #"distutils Version classes are deprecated",
@@ -104,7 +104,7 @@ EXAMPLE_BASE_WARNS = [
 ]
 
 ALL_EXAMPLE_EXPECTED = [
-    "Use timezone-aware",
+    # "Use timezone-aware",  # TODO: Safe to remove - not found in any test context
     "is smaller than the logging interval",
     WORKER_WARNING,
 ]
