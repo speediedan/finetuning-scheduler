@@ -121,7 +121,7 @@ sanity-checked prior to training initiation.
 Both lr scheduler and optimizer reinitialization configurations are only supported for phases >= ``1``. This is because
 for fine-tuning phase ``0``, training component configurations will be the ones the user initiated the training
 session with, usually via the ``configure_optimizer`` method of
-:external+pl:class:`~lightning.pytorch.core.module.LightningModule`.
+:py:class:`~lightning.pytorch.core.module.LightningModule`.
 
 As you can observe in the explicit mode :ref:`optimizer reinitialization example<advanced-fine-tuning-optimizer-example>`
 below, optimizers specified in different fine-tuning phases can be of differing types.
@@ -176,7 +176,7 @@ phase transitions. In implicit mode, the optimizer reconfiguration should be sup
 :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_optim_cfg` parameter of
 :class:`~finetuning_scheduler.fts.FinetuningScheduler`.
 
-For example, configuring this dictionary via the :external+pl:class:`~lightning.pytorch.cli.LightningCLI`, one
+For example, configuring this dictionary via the :py:class:`~lightning.pytorch.cli.LightningCLI`, one
 could use:
 
 .. code-block:: yaml
@@ -202,7 +202,7 @@ could use:
                 ...
 
 Note that an initial optimizer configuration should also still be provided per usual (again, typically via the
-``configure_optimizer`` method of :external+pl:class:`~lightning.pytorch.core.module.LightningModule`) and the initial
+``configure_optimizer`` method of :py:class:`~lightning.pytorch.core.module.LightningModule`) and the initial
 optimizer configuration can differ in optimizer type and configuration from the configuration specified in
 :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_optim_cfg` applied at each phase transition. As with
 explicit mode, concurrent :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_lr_cfg` configurations can
@@ -245,9 +245,9 @@ for three different training phases. In this case, there are also distinctly con
   :alt: Phase 0
   :width: 75%
 
-* The :ref:`configured phase 0<explicit-phase-0-config>` in :yellow-highlight:`yellow` uses an :external+torch:class:`~torch.optim.AdamW` optimizer and :external+torch:class:`~torch.optim.lr_scheduler.LinearLR` scheduler with the initial lr and optimizer defined via the shared initial optimizer configuration.
-* The :ref:`configured phase 1<explicit-phase-1-config>` in :blue-highlight:`blue` uses a :external+torch:class:`~torch.optim.SGD` optimizer and :external+torch:class:`~torch.optim.lr_scheduler.StepLR` scheduler, including the specified initial lr for the existing parameter groups (``2.0e-06``).
-* The :ref:`configured phase 2<explicit-phase-2-config>` in :green-highlight:`green` switches back to an :external+torch:class:`~torch.optim.AdamW` optimizer but uses a :external+torch:class:`~torch.optim.lr_scheduler.CosineAnnealingWarmRestarts` scheduler, with an assigned initial lr for each of the parameter groups.
+* The :ref:`configured phase 0<explicit-phase-0-config>` in :yellow-highlight:`yellow` uses an :py:class:`~torch.optim.AdamW` optimizer and :py:class:`~torch.optim.lr_scheduler.LinearLR` scheduler with the initial lr and optimizer defined via the shared initial optimizer configuration.
+* The :ref:`configured phase 1<explicit-phase-1-config>` in :blue-highlight:`blue` uses a :py:class:`~torch.optim.SGD` optimizer and :py:class:`~torch.optim.lr_scheduler.StepLR` scheduler, including the specified initial lr for the existing parameter groups (``2.0e-06``).
+* The :ref:`configured phase 2<explicit-phase-2-config>` in :green-highlight:`green` switches back to an :py:class:`~torch.optim.AdamW` optimizer but uses a :py:class:`~torch.optim.lr_scheduler.CosineAnnealingWarmRestarts` scheduler, with an assigned initial lr for each of the parameter groups.
 
 
 Because we turned on DEBUG-level logging to trace reinitializations, we observe the following in our training log upon
@@ -265,8 +265,8 @@ the phase ``1`` optimizer reinitialization:
   New optimizer state: SGD
   ... (followed by parameter group initial config details, note existing lr state or user directives may subsequently override the `lr`s in this initial config)
 
-In the implicitly defined schedule scenario, we begin using the :external+torch:class:`~torch.optim.AdamW` optimizer
-but the :external+torch:class:`~torch.optim.SGD` optimizer and :external+torch:class:`~torch.optim.lr_scheduler.StepLR`
+In the implicitly defined schedule scenario, we begin using the :py:class:`~torch.optim.AdamW` optimizer
+but the :py:class:`~torch.optim.SGD` optimizer and :py:class:`~torch.optim.lr_scheduler.StepLR`
 lr scheduler are specified via :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_optim_cfg` and
 :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_lr_cfg` respectively. Both training components are
 reinitialized at each phase transition and applied to all optimizer parameter groups.
@@ -310,7 +310,7 @@ reinitialized at each phase transition and applied to all optimizer parameter gr
    :alt: Phase 0
    :width: 75%
 
-   LR log for parameter group 1 reflecting repeated reinitialization of the :external+torch:class:`~torch.optim.SGD` optimizer and :external+torch:class:`~torch.optim.lr_scheduler.StepLR` lr scheduler (initial target lr = ``1.0e-05``) at each phase transition.
+   LR log for parameter group 1 reflecting repeated reinitialization of the :py:class:`~torch.optim.SGD` optimizer and :py:class:`~torch.optim.lr_scheduler.StepLR` lr scheduler (initial target lr = ``1.0e-05``) at each phase transition.
    The behavioral impact of ``use_current_optimizer_pg_lrs`` (line 28 above) on the lr scheduler reinitializations can be clearly observed.
 
 Note that we have disabled :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.restore_best` in both examples for

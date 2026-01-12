@@ -20,7 +20,7 @@ foundation model experimentation with flexible fine-tuning schedules. Training w
    If you're exploring using the :class:`~finetuning_scheduler.fts.FinetuningScheduler`, this is a great place
    to start!
    You may also find the `notebook-based tutorial <https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html>`_
-   useful and for those using the :external+pl:class:`~lightning.pytorch.cli.LightningCLI`, there is a
+   useful and for those using the :py:class:`~lightning.pytorch.cli.LightningCLI`, there is a
    :ref:`CLI-based<scheduled-fine-tuning-superglue>` example at the bottom of this introduction.
 
 Setup
@@ -52,7 +52,7 @@ tasks during transfer learning [#]_ [#]_ [#]_ .
 of models via a fine-tuning schedule that is either implicitly generated (the default) or explicitly provided by the user
 (more computationally efficient). fine-tuning phase transitions are driven by
 :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria (a multi-phase
-extension of :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`),
+extension of :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`),
 user-specified epoch transitions or a composition of the two (the default mode). A
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` training session completes when the
 final phase of the schedule has its stopping criteria met. See
@@ -79,8 +79,8 @@ and :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks with
     (:class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` and
     :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint`) with default configurations and ``monitor=val_loss``.
     If the user provides base versions of these dependencies (e.g.
-    :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`,
-    :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`) the provided configuration of
+    :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`,
+    :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`) the provided configuration of
     those callbacks will be used to instantiate their FTS analogs instead.
 
 .. _default schedule:
@@ -107,7 +107,7 @@ either integers or convertible to integers via ``int()``.
 
 1. First, generate the default schedule (output to :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.log_dir`,
    defaults to ``Trainer.log_dir``). It will be named after your
-   :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass with the suffix ``_ft_schedule.yaml``.
+   :py:class:`~lightning.pytorch.core.module.LightningModule` subclass with the suffix ``_ft_schedule.yaml``.
 
 .. code-block:: python
 
@@ -253,7 +253,7 @@ Resumption of scheduled fine-tuning training is identical to the continuation of
 have been saved by a :class:`~finetuning_scheduler.fts.FinetuningScheduler` session.
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` uses
 :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` (an extension of
-:external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`) to maintain schedule state with
+:py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`) to maintain schedule state with
 special metadata.
 
 
@@ -286,7 +286,7 @@ sessions.
         trainer.fit(...)
 
     Note that similar to the behavior of
-    :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`, when resuming training
+    :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`, when resuming training
     with a different :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` ``dirpath`` from the provided
     checkpoint, the new training session's checkpoint state will be re-initialized at the resumption depth with the
     provided checkpoint being set as the best checkpoint.
@@ -308,10 +308,10 @@ configurations.
    .. hlist::
       :columns: 2
 
-      * :external+pl:class:`~lightning.pytorch.strategies.ddp.DDPStrategy`:``ddp``,
+      * :py:class:`~lightning.pytorch.strategies.ddp.DDPStrategy`:``ddp``,
         ``ddp_find_unused_parameters_false``, ``ddp_find_unused_parameters_true``, ``ddp_spawn``, ``ddp_fork``,
         ``ddp_notebook``
-      * :external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`:
+      * :py:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`:
         ``fsdp``, ``fsdp_cpu_offload``
 
 .. _supported_lr_schedulers:
@@ -323,16 +323,16 @@ configurations.
    .. hlist::
       :columns: 2
 
-      * :external+torch:class:`~torch.optim.lr_scheduler.StepLR`
-      * :external+torch:class:`~torch.optim.lr_scheduler.MultiStepLR`
-      * :external+torch:class:`~torch.optim.lr_scheduler.CosineAnnealingWarmRestarts`
-      * :external+torch:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau`
-      * :external+torch:class:`~torch.optim.lr_scheduler.LambdaLR`
-      * :external+torch:class:`~torch.optim.lr_scheduler.ConstantLR`
-      * :external+torch:class:`~torch.optim.lr_scheduler.LinearLR`
-      * :external+torch:class:`~torch.optim.lr_scheduler.ExponentialLR`
-      * :external+torch:class:`~torch.optim.lr_scheduler.CosineAnnealingLR`
-      * :external+torch:class:`~torch.optim.lr_scheduler.MultiplicativeLR`
+      * :py:class:`~torch.optim.lr_scheduler.StepLR`
+      * :py:class:`~torch.optim.lr_scheduler.MultiStepLR`
+      * :py:class:`~torch.optim.lr_scheduler.CosineAnnealingWarmRestarts`
+      * :py:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau`
+      * :py:class:`~torch.optim.lr_scheduler.LambdaLR`
+      * :py:class:`~torch.optim.lr_scheduler.ConstantLR`
+      * :py:class:`~torch.optim.lr_scheduler.LinearLR`
+      * :py:class:`~torch.optim.lr_scheduler.ExponentialLR`
+      * :py:class:`~torch.optim.lr_scheduler.CosineAnnealingLR`
+      * :py:class:`~torch.optim.lr_scheduler.MultiplicativeLR`
 
 .. _supported_reinit_optimizers:
 
@@ -340,7 +340,7 @@ configurations.
    :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports reinitializing all PyTorch optimizers (or subclasses
    thereof) `provided in torch.optim <https://pytorch.org/docs/stable/optim.html#algorithms>`_ in the context of all
    supported training strategies (including FSDP). Use of
-   :external+torch:class:`~torch.distributed.optim.ZeroRedundancyOptimizer` is also supported, but currently only
+   :py:class:`~torch.distributed.optim.ZeroRedundancyOptimizer` is also supported, but currently only
    outside the context of optimizer reinitialization.
 
 .. tip::
@@ -357,11 +357,11 @@ configurations.
     (:class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter`) to be written before support can be added,
     while ``tpu_spawn`` would require an override of the current broadcast method to include python objects.
 
-    Regarding lr schedulers, :external+torch:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
-    :external+torch:class:`~torch.optim.lr_scheduler.SequentialLR` are examples of schedulers not currently supported
+    Regarding lr schedulers, :py:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
+    :py:class:`~torch.optim.lr_scheduler.SequentialLR` are examples of schedulers not currently supported
     due to the configuration complexity and semantic conflicts supporting them would introduce. If a supported torch lr
     scheduler does not meet your requirements, one can always subclass a supported lr scheduler and modify it as
-    required (e.g. :external+torch:class:`~torch.optim.lr_scheduler.LambdaLR` is especially useful for this). PRs are
+    required (e.g. :py:class:`~torch.optim.lr_scheduler.LambdaLR` is especially useful for this). PRs are
     also always welcome!
 
 ----------
@@ -375,7 +375,7 @@ A demonstration of the scheduled fine-tuning callback
 `RTE <https://huggingface.co/datasets/viewer/?dataset=super_glue&config=rte>`_ and
 `BoolQ <https://github.com/google-research-datasets/boolean-questions>`_ tasks of the
 `SuperGLUE <https://paperswithcode.com/dataset/superglue>`_ benchmark and the
-:external+pl:class:`~lightning.pytorch.cli.LightningCLI` is available under ``./fts_examples``.
+:py:class:`~lightning.pytorch.cli.LightningCLI` is available under ``./fts_examples``.
 
 Since this CLI-based example requires a few additional packages (e.g. ``transformers``, ``sentencepiece``), you
 should install them using the ``[examples]`` extra:
@@ -486,9 +486,9 @@ Footnotes
  tune? adapting pretrained representations to diverse tasks. arXiv preprint arXiv:1903.05987.
 
 .. seealso::
-    - :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`
-    - :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`
-    - :external+pl:class:`~lightning.pytorch.callbacks.finetuning.BaseFinetuning`
+    - :py:class:`~lightning.pytorch.trainer.trainer.Trainer`
+    - :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`
+    - :py:class:`~lightning.pytorch.callbacks.finetuning.BaseFinetuning`
 
 .. raw:: html
 

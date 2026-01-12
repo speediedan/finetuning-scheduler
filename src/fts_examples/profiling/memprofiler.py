@@ -15,9 +15,11 @@ MemProfiler
 
 A powerful memory profiling utility that synthesizes numerous complementary profiling methods.
 """
+from __future__ import annotations
+
 import os
 import pickle
-from typing import Any, Tuple, DefaultDict, Callable, Set
+from typing import Any, DefaultDict, Callable
 from dataclasses import dataclass, field, fields, asdict
 from contextlib import redirect_stdout, contextmanager, ExitStack
 from collections import defaultdict
@@ -102,7 +104,7 @@ class MemProfiler:
         self._state.base_collect_func_set = self._all_base_collect_funcs()
         self.memprofiler_cfg.retain_hooks_for_funcs = self._state.base_collect_func_set  # conservatively wait for all
 
-    def _all_base_collect_funcs(self) -> Set:
+    def _all_base_collect_funcs(self) -> set:
         funcs = self.memprofiler_cfg.collect_funcs
         return set(chain(*[funcs.cuda_allocator_history, funcs.cuda, funcs.cpu]))
 
@@ -193,7 +195,7 @@ class MemProfiler:
         self.memprof_log_dir = Path(self.memprof_log_dir)  # ensure the dir is a Path
         self.memprof_log_dir.mkdir(exist_ok=True, parents=True)
 
-    def cuda_allocator_history_snap(self, snap_key: Tuple) -> None:
+    def cuda_allocator_history_snap(self, snap_key: tuple) -> None:
         """Dumps a snapshot of the CUDA memory allocator history.
 
         The snapshot is saved to a file named ``cuda_alloc_rank_<snap_key>.pickle`` in the directory specified by
@@ -272,7 +274,7 @@ class MemProfiler:
             self.remove_memprofiler_hooks()
             self.memprofiler_cfg.enable_memory_hooks = False
 
-    def gen_snap_keys(self, fn_name: str, iter_ctx: str, iter_idx: int | None = None) -> tuple[int, int, Tuple]:
+    def gen_snap_keys(self, fn_name: str, iter_ctx: str, iter_idx: int | None = None) -> tuple[int, int, tuple]:
         """Generates the MemProfiler snapshot key for a given function and iteration context.
 
         Args:
@@ -438,7 +440,7 @@ class MemProfiler:
 
     @contextmanager
     @staticmethod
-    def memprofile_fsdp_ctx(memprofiler, fn_name: str, track_inputs_target: Tuple | None = None):
+    def memprofile_fsdp_ctx(memprofiler, fn_name: str, track_inputs_target: tuple | None = None):
         """Sets the FSDP memory tracker context manager if ``fsdp_mem_tracker_enabled`` is ``True``.
 
         This context manager takes care of calling the `update_collect_state` and `reset_mod_stats`
@@ -560,9 +562,9 @@ class _MemProfInternalState:
     configured_hooks: dict[str, Any] = field(default_factory=dict)
     hook_handles: DefaultDict[str, list[Any]] = field(default_factory=lambda: defaultdict(list))
     done_prof_funcs: list[str] = field(default_factory=list)
-    base_collect_func_set: Set | None = None
+    base_collect_func_set: set | None = None
     _iter_idx: int | None = None
-    _snap_key: Tuple | None = None
+    _snap_key: tuple | None = None
     _iter_incremented: dict[str, int] = field(default_factory=dict)
 
     def maybe_init_iter_state(self, fn_name: str, iter_ctx: str) -> None:

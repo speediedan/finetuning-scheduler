@@ -1,5 +1,6 @@
-sphinx>5.0,<6.0
-myst-parser==0.18.1
+# we pin these for docs build stability
+sphinx==7.3.7
+myst-parser==4.0.1
 nbsphinx>=0.8.5
 pandoc>=1.0
 docutils>=0.16

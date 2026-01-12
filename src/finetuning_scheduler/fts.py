@@ -56,7 +56,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
 
     Fine-tuning phase transitions are driven by
     :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria (a multi-phase
-    extension of :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`), user-specified epoch
+    extension of :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`), user-specified epoch
     transitions or a composition of the two (the default mode). A
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` training session completes
     when the final phase of the schedule has its stopping criteria met. See
@@ -85,13 +85,13 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
     .. note::
 
        While :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the use of
-       :external+torch:class:`~torch.distributed.optim.ZeroRedundancyOptimizer`, setting ``overlap_with_ddp`` to
+       :py:class:`~torch.distributed.optim.ZeroRedundancyOptimizer`, setting ``overlap_with_ddp`` to
        ``True`` is not supported because that optimizer mode only supports a single parameter group.
 
     .. note::
 
        While :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the use of
-       :external+torch:class:`~torch.distributed.optim.ZeroRedundancyOptimizer`, setting ``overlap_with_ddp`` to
+       :py:class:`~torch.distributed.optim.ZeroRedundancyOptimizer`, setting ``overlap_with_ddp`` to
        ``True`` is not supported because that optimizer mode only supports a single parameter group.
     """
     pl_module: pl.LightningModule
@@ -128,7 +128,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 :ref:`LR Scheduler Reinitialization<explicit-lr-reinitialization-schedule>` for more complex
                 schedule configurations (including per-phase LR scheduler reinitialization). If a schedule is not
                 provided, will generate and execute a default fine-tuning schedule using the provided
-                :external+pl:class:`~lightning.pytorch.core.module.LightningModule`. See
+                :py:class:`~lightning.pytorch.core.module.LightningModule`. See
                 :ref:`the default schedule<index:The Default Fine-Tuning Schedule>`. Defaults to ``None``.
             max_depth: Maximum schedule depth to which the defined fine-tuning schedule should be executed. Specifying
                 -1 or an integer > (number of defined schedule layers) will result in the entire fine-tuning schedule
@@ -141,7 +141,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 before fine-tuning depth transitions. Defaults to ``True``.
             gen_ft_sched_only: If ``True``, generate the default fine-tuning schedule to
                 :attr:`~finetuning_scheduler.fts.FinetuningScheduler.log_dir` (it will be named after your
-                :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass with
+                :py:class:`~lightning.pytorch.core.module.LightningModule` subclass with
                 the suffix ``_ft_schedule.yaml``) and exit without training. Typically used to generate a default
                 schedule that will be adjusted by the user before training. Defaults to ``False``.
             epoch_transitions_only: If ``True``, use epoch-driven stopping criteria exclusively (rather than composing
@@ -156,7 +156,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 instantiated. Optionally, an ``init_args`` dictionary of arguments with which to initialize the
                 optimizer may be included. A ``reinit_lr_cfg`` configuration can also be specified concurrently. By way
                 of example, one could configure this dictionary via the
-                :external+pl:class:`~lightning.pytorch.cli.LightningCLI` with the following:
+                :py:class:`~lightning.pytorch.cli.LightningCLI` with the following:
 
                 .. code-block:: yaml
 
@@ -175,7 +175,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 lr scheduler configuration :class:`~lightning.pytorch.utilities.types.LRSchedulerConfig` in the
                 ``pl_lrs_cfg`` dictionary. A ``reinit_optim_cfg`` configuration can also be specified concurrently. By
                 way of example, one could configure this dictionary via the
-                :external+pl:class:`~lightning.pytorch.cli.LightningCLI` with the following:
+                :py:class:`~lightning.pytorch.cli.LightningCLI` with the following:
 
                 .. code-block:: yaml
 
@@ -210,15 +210,15 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                     support can be added (PRs welcome!), while ``tpu_spawn`` would require an override of the current
                     broadcast method to include python objects.
 
-                    Regarding lr schedulers, :external+torch:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
-                    :external+torch:class:`~torch.optim.lr_scheduler.SequentialLR` are examples of schedulers not
+                    Regarding lr schedulers, :py:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
+                    :py:class:`~torch.optim.lr_scheduler.SequentialLR` are examples of schedulers not
                     currently supported due to the configuration complexity and semantic conflicts supporting them would
                     introduce. If a supported torch lr scheduler does not meet your requirements, one can always
                     subclass a supported lr scheduler and modify it as required
-                    (e.g. :external+torch:class:`~torch.optim.lr_scheduler.LambdaLR` is especially useful for this).
+                    (e.g. :py:class:`~torch.optim.lr_scheduler.LambdaLR` is especially useful for this).
             strategy_adapter_cfg: A configuration dictionary that will be applied to the
                 :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` associated with the current training
-                :external+pl:class:`~lightning.pytorch.strategies.Strategy`. See the relevant
+                :py:class:`~lightning.pytorch.strategies.Strategy`. See the relevant
                 :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` documentation for strategy-specific
                 configuration options. Defaults to None.
             custom_strategy_adapters: A dictionary mapping PyTorch Lightning strategy flags (canonical strategy
@@ -255,7 +255,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             _fts_state: The internal :class:`~finetuning_scheduler.fts.FinetuningScheduler` state.
             strategy_adapter_cfg: A configuration dictionary that will be applied to the
                 :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` associated with the current training
-                :external+pl:class:`~lightning.pytorch.strategies.Strategy`.
+                :py:class:`~lightning.pytorch.strategies.Strategy`.
             epoch_transitions_only: Whether to use epoch-driven stopping criteria exclusively.
             base_max_lr: The default maximum learning rate to use for the parameter groups associated with each
                 scheduled fine-tuning depth if not explicitly specified in the fine-tuning schedule. If overridden to
@@ -341,8 +341,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         tuning schedule.
 
         Args:
-            pl_module (:external+pl:class:`~lightning.pytorch.core.module.LightningModule`): The target
-                :external+pl:class:`~lightning.pytorch.core.module.LightningModule` to freeze parameters of
+            pl_module (:py:class:`~lightning.pytorch.core.module.LightningModule`): The target
+                :py:class:`~lightning.pytorch.core.module.LightningModule` to freeze parameters of
         """
         # We avoid overriding `BaseFinetuning`'s `freeze` and `freeze_module` methods at the small marginal cost
         # of conditionally revisiting `BatchNorm` layers to set `track_running_stats` to `True` when we are in
@@ -617,7 +617,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         """Reduce a transition decision across all world processes (effectively a global `any` collective)
 
         Args:
-            strategy (Strategy): The PL :external+pl:class:`~lightning.pytorch.strategies.Strategy` context to use.
+            strategy (Strategy): The PL :py:class:`~lightning.pytorch.strategies.Strategy` context to use.
             decision (bool): The local process decision.
 
         Returns:
@@ -633,8 +633,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         to ``True`` in logging the monitored metric.
 
         Args:
-            trainer (:external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
-                :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            trainer (:py:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
+                :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
         """
         early_stopping_callback = trainer.early_stopping_callback
         assert early_stopping_callback is not None
@@ -655,16 +655,16 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             early_stopping_callback._transition_es_phase()
 
     def _strategy_setup(self, trainer: "pl.Trainer") -> None:
-        """Validate a compatible :external+pl:class:`~lightning.pytorch.strategies.Strategy` strategy is being used
-        and connects the relevant :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`.
+        """Validate a compatible :py:class:`~lightning.pytorch.strategies.Strategy` strategy is being used and
+        connects the relevant :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`.
 
         Args:
-            trainer (:external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
-                :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            trainer (:py:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
+                :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
 
         Raises:
             MisconfigurationException: If the
-                :external+pl:class:`~lightning.pytorch.strategies.Strategy` strategy being used is not currently
+                :py:class:`~lightning.pytorch.strategies.Strategy` strategy being used is not currently
                 compatible with the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback.
         """
         strategy = trainer.strategy
@@ -699,21 +699,21 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.strategy_adapter.connect(self)
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
-        """Validate a compatible :external+pl:class:`~lightning.pytorch.strategies.Strategy` strategy is being used and
+        """Validate a compatible :py:class:`~lightning.pytorch.strategies.Strategy` strategy is being used and
         ensure all :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback dependencies are met. If a valid
         configuration is present, then either dump the default fine-tuning schedule OR
         1. configure the :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping`
         callback (if relevant)
         2. initialize the :attr:`~finetuning_scheduler.fts.FinetuningScheduler._fts_state`
-        3. freeze the target :external+pl:class:`~lightning.pytorch.core.module.LightningModule` parameters
+        3. freeze the target :py:class:`~lightning.pytorch.core.module.LightningModule` parameters
         Finally, initialize the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
         training session in the training environment.
 
         Args:
-            trainer (:external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
-                :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
-            pl_module (:external+pl:class:`~lightning.pytorch.core.module.LightningModule`): The
-                :external+pl:class:`~lightning.pytorch.core.module.LightningModule` object
+            trainer (:py:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
+                :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            pl_module (:py:class:`~lightning.pytorch.core.module.LightningModule`): The
+                :py:class:`~lightning.pytorch.core.module.LightningModule` object
             stage: The ``RunningStage.{SANITY_CHECKING,TRAINING,VALIDATING}``. Defaults to None.
 
         Raises:
@@ -745,10 +745,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         :class:`~finetuning_scheduler.fts.FinetuningScheduler` is present.
 
         Args:
-            trainer (:external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
-                :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
-            pl_module (:external+pl:class:`~lightning.pytorch.core.module.LightningModule`): The
-                :external+pl:class:`~lightning.pytorch.core.module.LightningModule` object
+            trainer (:py:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
+                :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            pl_module (:py:class:`~lightning.pytorch.core.module.LightningModule`): The
+                :py:class:`~lightning.pytorch.core.module.LightningModule` object
 
         Raises:
             MisconfigurationException: If more than 1 optimizers are configured indicates a configuration error
@@ -818,8 +818,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         :attr:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is ``True``)
 
         Args:
-            trainer (:external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
-                :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            trainer (:py:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
+                :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
         """
         assert self.pl_module is not None
         assert isinstance(self.ft_schedule, Dict)
@@ -857,10 +857,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         level and store the updated optimizer configuration before continuing training.
 
         Args:
-            trainer (:external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
-                :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
-            pl_module (:external+pl:class:`~lightning.pytorch.core.module.LightningModule`): The
-                :external+pl:class:`~lightning.pytorch.core.module.LightningModule` object
+            trainer (:py:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
+                :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            pl_module (:py:class:`~lightning.pytorch.core.module.LightningModule`): The
+                :py:class:`~lightning.pytorch.core.module.LightningModule` object
         """
         # if resuming from a ckpt, we need to sync fts_state
         if self._fts_state._resume_fit_from_ckpt:
@@ -907,10 +907,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         taken.
 
         Args:
-            trainer (:external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
-                :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
-            pl_module  (:external+pl:class:`~lightning.pytorch.core.module.LightningModule`): The
-                :external+pl:class:`~lightning.pytorch.core.module.LightningModule` object
+            trainer (:py:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
+                :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            pl_module  (:py:class:`~lightning.pytorch.core.module.LightningModule`): The
+                :py:class:`~lightning.pytorch.core.module.LightningModule` object
             optimizer (:class:`~finetuning_scheduler.types.ParamGroupAddable`): The supported optimizer instance to
                 which parameter groups will be configured and added.
         """
@@ -921,9 +921,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         to ensure final training state is consistent with epoch semantics.
 
         Args:
-            trainer: The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
-            pl_module  (:external+pl:class:`~lightning.pytorch.core.module.LightningModule`): The
-                :external+pl:class:`~lightning.pytorch.core.module.LightningModule` object
+            trainer: The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            pl_module  (:py:class:`~lightning.pytorch.core.module.LightningModule`): The
+                :py:class:`~lightning.pytorch.core.module.LightningModule` object
         """
         assert self._fts_state._ft_sync_objects is not None
         self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)

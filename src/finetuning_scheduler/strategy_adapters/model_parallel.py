@@ -73,7 +73,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` (FTS) to support flexible, multi-phase, scheduled fine-tuning
     with PyTorch's composable distributed (e.g. ``fully_shard``) and Tensor Parallelism APIs.
     FTS augments Lightning's Model Parallel strategy
-    (:external+pl:class:`~lightning.pytorch.strategies.model_parallel.ModelParallelStrategy`) by allowing users to apply
+    (:py:class:`~lightning.pytorch.strategies.model_parallel.ModelParallelStrategy`) by allowing users to apply
     the ``fully_shard`` API using module name/pattern-based configuration instead of manually inspecting modules and
     applying the API in ``LightningModule.configure_model`` (see
     :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan`).
@@ -171,7 +171,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
 
         1. Validate the :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan`
            configuration
-        2. Configure FTS wrapping of the provided :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
+        2. Configure FTS wrapping of the provided :py:class:`~lightning.pytorch.core.module.LightningModule`
            to either use the provided ``LightningModule.configure_model`` method (if present) or a provided
            ``fsdp_plan``.
         """
@@ -232,8 +232,8 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
     def on_before_fts_fit_start(self) -> None:
         """In this hook executed immediately before the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
         :meth:`~finetuning_scheduler.fts.FinetuningScheduler.on_fit_start` hook begins, we ensure the provided
-        fine-tuning schedule and FSDP2 composed :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
-        are appropriately aligned.
+        fine-tuning schedule and FSDP2 composed :py:class:`~lightning.pytorch.core.module.LightningModule` are
+        appropriately aligned.
 
         If the fine-tuning schedule and composed modules yield parameter group configurations that may not be supported
         by some optimizer group operations, detailed feedback on potential remediation is provided to the user.

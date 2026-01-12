@@ -6,7 +6,7 @@ Overview
 ********
 
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` (FTS) now supports flexible, multi-phase, scheduled fine-tuning
-with the :external+pl:class:`~lightning.pytorch.strategies.model_parallel.ModelParallelStrategy` strategy, enabling use
+with the :py:class:`~lightning.pytorch.strategies.model_parallel.ModelParallelStrategy` strategy, enabling use
 of PyTorch's composable distributed (e.g. ``fully_shard``, ``checkpoint``) and Tensor Parallelism (TP) APIs.
 
 FTS augments Lightning's Model Parallel strategy by allowing users to apply the ``fully_shard`` API using module
@@ -22,9 +22,9 @@ FTS 'Auto' FSDP2 Plan Configuration
 ***********************************
 
 As with standard ``fully_shard`` (a.k.a. ``FSDP2``) usage, preparation of a
-:external+pl:class:`~lightning.pytorch.core.module.LightningModule` for ``fully_shard`` training (a.k.a. ``FSDP2``, used
+:py:class:`~lightning.pytorch.core.module.LightningModule` for ``fully_shard`` training (a.k.a. ``FSDP2``, used
 interchangeably in this tutorial) can be performed by providing manual FSDP2 sharding plan directives in the
-``configure_model`` method of :external+pl:class:`~lightning.pytorch.core.module.LightningModule`.
+``configure_model`` method of :py:class:`~lightning.pytorch.core.module.LightningModule`.
 
 Conveniently with FTS though, users can apply the ``fully_shard`` composable API using module name/pattern-based
 configuration instead of manually inspecting modules and applying the API via ``LightningModule.configure_model`` method

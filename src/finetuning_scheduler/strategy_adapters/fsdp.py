@@ -64,11 +64,11 @@ class FSDPStrategyAdapter(StrategyAdapter):
     A :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that extends
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` (FTS) to support flexible, multi-phase, scheduled fine-tuning
     with the Fully Sharded Data Parallel (FSDP) strategy
-    (:external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`).
+    (:py:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`).
 
-    As with standard FSDP usage, FSDP wrapping of a :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
+    As with standard FSDP usage, FSDP wrapping of a :py:class:`~lightning.pytorch.core.module.LightningModule`
     can be performed either by providing an ``auto_wrap_policy`` or (for maximal control) by overriding the
-    ``configure_model`` method of :external+pl:class:`~lightning.pytorch.core.module.LightningModule` and
+    ``configure_model`` method of :py:class:`~lightning.pytorch.core.module.LightningModule` and
     manually wrapping the module.
 
     In order to support multi-phase scheduled fine-tuning with FSDP, FTS's key precondition is that the defined
@@ -95,7 +95,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     .. note::
 
        The ``no_decay`` attribute that FTS supports on
-       :external+pl:class:`~lightning.pytorch.core.module.LightningModule` with the base
+       :py:class:`~lightning.pytorch.core.module.LightningModule` with the base
        :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is not currently supported in the context of
        FSDP fine-tuning.
 
@@ -108,7 +108,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
        :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides` is often the most expedient
        approach to auto-wrapping in alignment with a fine-tuning schedule. As always, if needed, one can override
        ``configure_model`` and manually wrap a given
-       :external+pl:class:`~lightning.pytorch.core.module.LightningModule` to align with a desired fine-tuning schedule.
+       :py:class:`~lightning.pytorch.core.module.LightningModule` to align with a desired fine-tuning schedule.
     """
 
     _fsdp_flat_to_unflat_mapping: dict
@@ -125,13 +125,13 @@ class FSDPStrategyAdapter(StrategyAdapter):
         :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides`, an optional list of
         module names that should be wrapped in separate FSDP instances, complementing the modules that would be
         individually wrapped by ``auto_wrap_policy`` provided in the
-        :external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy` strategy configuration.
+        :py:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy` strategy configuration.
 
         Args:
             awp_overrides (List | None): A list of module names to wrap in separate FSDP instances (i.e.,
                 ``auto_wrap_policy`` overrides). Only applicable when complementing/overriding an ``auto_wrap_policy``
                 provided in the
-                :external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`
+                :py:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`
                 strategy configuration. Override lists will be ignored when manually wrapping modules via a
                 ``configure_model`` method. If the named modules cannot be found, an exception will be thrown.
                 Defaults to None.
@@ -161,7 +161,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         1. Disable Lightning's restoration of the optimizer to allow us to implement special handling
         2. Prune ``no_decay`` specification since it is not currently supported in the context of FSDP fine-tuning
         3. Validate the :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides` configuration
-        4. Configure FTS wrapping of the provided :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
+        4. Configure FTS wrapping of the provided :py:class:`~lightning.pytorch.core.module.LightningModule`
            to either use the provided ``LightningModule.configure_model`` method (if present) or a provided
            ``auto_wrap_policy``.
         """
@@ -196,8 +196,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def on_before_fts_fit_start(self) -> None:
         """In this hook executed immediately before the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
         :meth:`~finetuning_scheduler.fts.FinetuningScheduler.on_fit_start` hook begins, we ensure the provided
-        fine-tuning schedule and FSDP wrapped :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
-        are appropriately aligned and valid. If the fine-tuning schedule and wrapped module are detected to be
+        fine-tuning schedule and FSDP wrapped :py:class:`~lightning.pytorch.core.module.LightningModule` are
+        appropriately aligned and valid. If the fine-tuning schedule and wrapped module are detected to be
         incompatible, detailed feedback is provided to the user (which is why multiple checks are aggregated before
         returning any alignment exceptions).
 
@@ -380,7 +380,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def _prune_nodecay(self) -> None:
         """If the ``no_decay`` attribute is present on the provided.
 
-        :external+pl:class:`~lightning.pytorch.core.module.LightningModule` s remove it (with a warning) because it is
+        :py:class:`~lightning.pytorch.core.module.LightningModule` s remove it (with a warning) because it is
         not currently supported in the context of FSDP fine-tuning.
         """
         if hasattr(self.pl_module, "no_decay") and self.pl_module.no_decay is not None:
@@ -800,8 +800,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
     @override
     def _get_target_bn_modules(self, schedule_phase: int) -> list:
-        """Enumerate the :external+torch:class:`~torch.nn.modules.batchnorm._BatchNorm` modules for a given
-        schedule phase.
+        """Enumerate the :py:class:`~torch.nn.modules.batchnorm._BatchNorm` modules for a given schedule phase.
 
         Args:
             schedule_phase (int): The phase of the schedule to evaluate.

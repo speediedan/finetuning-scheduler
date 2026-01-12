@@ -360,7 +360,7 @@ numpy==2.2.6 ; python_full_version < '3.11'
     #   tensorboardx
     #   torchmetrics
     #   transformers
-numpy==2.4.0 ; python_full_version >= '3.11'
+numpy==2.4.1 ; python_full_version >= '3.11'
     # via
     #   contourpy
     #   datasets
@@ -472,7 +472,7 @@ propcache==0.4.1
     # via
     #   aiohttp
     #   yarl
-protobuf==6.33.2
+protobuf==6.33.4
     # via
     #   databricks-sdk
     #   mlflow-skinny
@@ -596,7 +596,7 @@ scipy==1.15.3 ; python_full_version < '3.11'
     # via
     #   mlflow
     #   scikit-learn
-scipy==1.16.3 ; python_full_version >= '3.11'
+scipy==1.17.0 ; python_full_version >= '3.11'
     # via
     #   mlflow
     #   scikit-learn
@@ -645,7 +645,7 @@ toml==0.10.2
     # via
     #   jupytext
     #   pre-commit
-tomli==2.3.0
+tomli==2.4.0
     # via
     #   alembic
     #   pytest
