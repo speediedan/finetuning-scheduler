@@ -13,14 +13,14 @@ Overview
 
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` (FTS) now supports flexible, multi-phase, scheduled fine-tuning
 with the Fully Sharded Data Parallel (FSDP) strategy (
-:external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`). This tutorial
+:py:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`). This tutorial
 assumes a basic understanding of FSDP training, please see
 `this PyTorch tutorial  <https://pytorch.org/tutorials/intermediate/FSDP_tutorial.html>`_ for a good introduction to
 FSDP training.
 
-As with standard FSDP usage, FSDP wrapping of a :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
+As with standard FSDP usage, FSDP wrapping of a :py:class:`~lightning.pytorch.core.module.LightningModule`
 can be performed either by providing an ``auto_wrap_policy`` or (for maximal control) by overriding the
-``configure_model`` method of :external+pl:class:`~lightning.pytorch.core.module.LightningModule` and
+``configure_model`` method of :py:class:`~lightning.pytorch.core.module.LightningModule` and
 manually wrapping the module.
 
 This tutorial walks through the configuration of an example multi-phase, scheduled FSDP fine-tuning training session and
@@ -146,7 +146,7 @@ the :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overr
 :attr:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter.awp_overrides` is an optional list of module names
 that should be wrapped in separate FSDP instances, complementing the modules that would be individually wrapped by
 ``auto_wrap_policy`` provided in the
-:external+pl:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy` strategy
+:py:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy` strategy
 configuration.
 
 Starting with a defined ``auto_wrap_policy`` and providing module name-based complements/overrides as needed using
@@ -307,13 +307,13 @@ To avoid violating the phase-wise disjointness constraint, we add ``DebertaV2Enc
 While not technically required, we add ``DebertaV2Embeddings`` separately as well for future experimental flexibility.
 
 As always, if needed, one can alternatively override ``configure_model`` and manually wrap a given
-:external+pl:class:`~lightning.pytorch.core.module.LightningModule` to align with a desired fine-tuning schedule.
+:py:class:`~lightning.pytorch.core.module.LightningModule` to align with a desired fine-tuning schedule.
 
 
 .. note::
 
   The ``no_decay`` attribute that FTS supports on
-  :external+pl:class:`~lightning.pytorch.core.module.LightningModule` with the base
+  :py:class:`~lightning.pytorch.core.module.LightningModule` with the base
   :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` is not currently supported in the context of
   FSDP fine-tuning.
 

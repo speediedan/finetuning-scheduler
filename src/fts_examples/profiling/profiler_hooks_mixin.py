@@ -1,4 +1,3 @@
-from typing import Optional
 import torch
 
 from fts_examples.profiling import MemProfiler, MemProfilerCfg
@@ -7,7 +6,7 @@ from fts_examples.profiling import MemProfiler, MemProfilerCfg
 class ProfilerHooksMixin:
     """Initially supporting only MemProfiler but will likely be extended to support more profiling in the
     future."""
-    def __init__(self, memprofiler_cfg: Optional[MemProfilerCfg] = None, *args, **kwargs):
+    def __init__(self, memprofiler_cfg: MemProfilerCfg | None = None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.memprofiler = None
         self.memprofiler_cfg = memprofiler_cfg
@@ -37,12 +36,12 @@ class ProfilerHooksMixin:
         return self.memprofiler and self.memprofiler_cfg.cuda_allocator_history
 
     @property
-    def memprofiler(self) -> Optional[MemProfiler]:
+    def memprofiler(self) -> MemProfiler | None:
         """Returns the MemProfiler instance if it has been initialized, otherwise None."""
         return getattr(self, '_memprofiler', None)
 
     @memprofiler.setter
-    def memprofiler(self, memprofiler: Optional[MemProfiler]) -> None:
+    def memprofiler(self, memprofiler: MemProfiler | None) -> None:
         """Sets the MemProfiler instance if it is not already initialized."""
         if not getattr(self, '_memprofiler', None):
             setattr(self, '_memprofiler', memprofiler)

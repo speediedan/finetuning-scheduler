@@ -15,7 +15,6 @@
 #   materialization (required for `freqs_cis` buffer)
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -27,10 +26,10 @@ class ModelCfg:
     dim: int = 4096
     n_layers: int = 32
     n_heads: int = 32
-    n_kv_heads: Optional[int] = None
+    n_kv_heads: int | None = None
     vocab_size: int = -1  # defined later by tokenizer
     multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
-    ffn_dim_multiplier: Optional[float] = None
+    ffn_dim_multiplier: float | None = None
     norm_eps: float = 1e-5
     rope_theta: float = 10000
     max_batch_size: int = 32
@@ -119,7 +118,7 @@ def apply_rotary_emb(
     xq: torch.Tensor,
     xk: torch.Tensor,
     freqs_cis: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Apply rotary embeddings to input tensors using the given frequency tensor.
 
     This function applies rotary embeddings to the given query 'xq' and key 'xk' tensors using the provided
@@ -133,7 +132,7 @@ def apply_rotary_emb(
         freqs_cis (torch.Tensor): Precomputed frequency tensor for complex exponentials.
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
+        tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
     """
     xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
     xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
@@ -247,7 +246,7 @@ class FeedForward(nn.Module):
         dim (int): Input dimension.
         hidden_dim (int): Hidden dimension of the feedforward layer.
         multiple_of (int): Value to ensure hidden dimension is a multiple of this value.
-        ffn_dim_multiplier (Optional[float]): Custom multiplier for hidden dimension. Defaults to None.
+        ffn_dim_multiplier (float | None): Custom multiplier for hidden dimension. Defaults to None.
 
     Attributes:
         w1 (Linear): Linear transformation for the first layer.
@@ -260,7 +259,7 @@ class FeedForward(nn.Module):
         dim: int,
         hidden_dim: int,
         multiple_of: int,
-        ffn_dim_multiplier: Optional[float],
+        ffn_dim_multiplier: float | None,
     ):
         super().__init__()
         hidden_dim = int(2 * hidden_dim / 3)

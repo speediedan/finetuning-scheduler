@@ -13,6 +13,8 @@ unset venv_dir
 unset dry_run
 unset oldest
 unset no_special
+unset run_all_and_examples
+unset allow_failures
 declare -a from_source_specs=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,37 +23,40 @@ source "${SCRIPT_DIR}/infra_utils.sh"
 usage(){
 >&2 cat << EOF
 Usage: $0
-   [ --repo_home input]
-   [ --target_env_name input ]
-   [ --oldest ]                  # Use oldest CI requirements (Python 3.10, requirements-oldest.txt)
-   [ --no_rebuild_base ]
-   [ --no-special ]              # Skip special tests (standalone/experimental), run only main test suite
-   [ --include_experimental ]
-   [ --uv_install_flags "flags" ]
-   [ --no_commit_pin ]
+   [ --repo-home input]
+   [ --target-env-name input ]
+   [ --oldest ]                     # Use oldest CI requirements (Python 3.10, requirements-oldest.txt)
+   [ --no-rebuild-base ]
+   [ --no-special ]                 # Skip special tests (standalone/experimental), run only main test suite
+   [ --run-all-and-examples ]       # Run all FTS example tests (both standalone and non-standalone)
+   [ --allow-failures ]             # Continue running special tests after failures
+   [ --include-experimental ]
+   [ --uv-install-flags "flags" ]
+   [ --no-commit-pin ]
    [ --venv-dir input ]
    [ --from-source "package:path[:extras][:ENV_VAR=value]" ]
    [ --dry-run ]
    [ --help ]
    Examples:
 	# generate fts_latest coverage without rebuilding the fts_latest base environment:
-	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --no_rebuild_base
+	#   ./gen_fts_coverage.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --no-rebuild-base
 	# generate oldest CI build coverage (matches CI oldest matrix):
-	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_oldest --oldest --no-special --venv-dir=/mnt/cache/\${USER}/.venvs
+	#   ./gen_fts_coverage.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_oldest --oldest --no-special --venv-dir=/mnt/cache/\${USER}/.venvs
 	# generate fts_release coverage, rebuilding the base fts_release environment:
-	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/fts-release --target_env_name=fts_release
-	# generate fts_release coverage, rebuilding the base fts_release environment with PyTorch test channel:
+	#   ./gen_fts_coverage.sh --repo-home=\${HOME}/repos/fts-release --target-env-name=fts_release
 	# generate fts_latest coverage with explicit venv directory (recommended for hardlink performance):
-	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --venv-dir=/mnt/cache/\${USER}/.venvs
+	#   ./gen_fts_coverage.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --venv-dir=/mnt/cache/\${USER}/.venvs
 	# generate fts_release coverage without using CI commit pinning:
-	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/fts-release --target_env_name=fts_release --no_commit_pin
+	#   ./gen_fts_coverage.sh --repo-home=\${HOME}/repos/fts-release --target-env-name=fts_release --no-commit-pin
 	# dry-run mode: setup environment and show what tests would run without executing them:
-	#   ./gen_fts_coverage.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --dry-run
+	#   ./gen_fts_coverage.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --dry-run
+	# run all examples tests (standalone and non-standalone), continuing after failures:
+	#   ./gen_fts_coverage.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --run-all-and-examples --allow-failures
 EOF
 exit 1
 }
 
-args=$(getopt -o '' --long repo_home:,target_env_name:,oldest,no_rebuild_base,no-special,include_experimental,uv_install_flags:,no_commit_pin,venv-dir:,from-source:,dry-run,help -- "$@")
+args=$(getopt -o '' --long repo-home:,repo_home:,target-env-name:,target_env_name:,oldest,no-rebuild-base,no_rebuild_base,no-special,run-all-and-examples,allow-failures,include-experimental:,include_experimental,uv-install-flags:,uv_install_flags:,no-commit-pin,no_commit_pin,venv-dir:,from-source:,dry-run,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -60,14 +65,16 @@ eval set -- ${args}
 while :
 do
   case $1 in
-    --repo_home)  repo_home=$2    ; shift 2  ;;
-    --target_env_name)  target_env_name=$2  ; shift 2 ;;
+    --repo-home|--repo_home)  repo_home=$2    ; shift 2  ;;
+    --target-env-name|--target_env_name)  target_env_name=$2  ; shift 2 ;;
     --oldest)   oldest=1 ; shift  ;;
-    --no_rebuild_base)   no_rebuild_base=1 ; shift  ;;
+    --no-rebuild-base|--no_rebuild_base)   no_rebuild_base=1 ; shift  ;;
     --no-special)   no_special=1 ; shift  ;;
-    --include_experimental)   include_experimental=1 ; shift  ;;
-    --uv_install_flags)   uv_install_flags=$2 ; shift 2 ;;
-    --no_commit_pin)   no_commit_pin=1 ; shift  ;;
+    --run-all-and-examples)   run_all_and_examples=1 ; shift  ;;
+    --allow-failures)   allow_failures=1 ; shift  ;;
+    --include-experimental|--include_experimental)   include_experimental=1 ; shift  ;;
+    --uv-install-flags|--uv_install_flags)   uv_install_flags=$2 ; shift 2 ;;
+    --no-commit-pin|--no_commit_pin)   no_commit_pin=1 ; shift  ;;
     --venv-dir)   venv_dir=$2 ; shift 2 ;;
     --from-source)
         from_source_specs+=("$2")
@@ -215,11 +222,26 @@ collect_env_coverage(){
             if [[ $no_special -eq 1 ]]; then
                 log_msg "Skipping special tests (--no-special flag set)"
             else
+                # Prepare allow_failures flag for special_tests.sh
+                local failures_flag=""
+                if [[ $allow_failures -eq 1 ]]; then
+                    failures_flag="--allow-failures"
+                fi
+
                 log_msg "Running standalone tests (pattern: test_f)"
-                (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f' --log_file=${coverage_session_log} 2>&1 >> ${temp_special_log}) > /dev/null
+                (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f' --log_file=${coverage_session_log} ${failures_flag} 2>&1 >> ${temp_special_log}) > /dev/null
+
+                if [[ $run_all_and_examples -eq 1 ]]; then
+                    log_msg "Running all FTS example tests (non-standalone)"
+                    python -m coverage run --append --source src/finetuning_scheduler -m pytest src/fts_examples/test_examples.py -v 2>&1 >> $coverage_session_log
+
+                    log_msg "Running all FTS example tests (standalone)"
+                    (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_examples' --collect_dir=src/fts_examples --log_file=${coverage_session_log} ${failures_flag} 2>&1 >> ${temp_special_log}) > /dev/null
+                fi
+
                 if [[ $include_experimental -eq 1 ]]; then
                     log_msg "Running tests that require experimental patches using $1"
-                    (./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --log_file=${coverage_session_log} --experiment_patch_mask="1 0 0 1" 2>&1 >> ${temp_special_log}) > /dev/null
+                    (./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --log_file=${coverage_session_log} --experiment_patch_mask="1 0 0 1" ${failures_flag} 2>&1 >> ${temp_special_log}) > /dev/null
                 else
                     log_msg "Skipping tests that require experimental patches."
                 fi

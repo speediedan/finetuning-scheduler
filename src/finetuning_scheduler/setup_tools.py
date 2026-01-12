@@ -14,14 +14,14 @@ import os
 import re
 import warnings
 from pathlib import Path
-from typing import List, Any, Generator
+from typing import Any, Generator
 from contextlib import contextmanager
 
 _PROJECT_ROOT = Path(os.path.dirname(os.path.dirname(__file__))).parent
 _TH = os.path.join(_PROJECT_ROOT, "tests/helpers")
 
 
-def _load_requirements(path_dir: str, file_name: str = "requirements.txt", comment_char: str = "#") -> List[str]:
+def _load_requirements(path_dir: str, file_name: str = "requirements.txt", comment_char: str = "#") -> list[str]:
     """Load requirements from a file.
 
     >>> _load_requirements(_TH, file_name="req.txt")  # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE

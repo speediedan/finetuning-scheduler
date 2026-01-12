@@ -111,7 +111,7 @@ optimizer being wrapped via a list in the ``init_pg_lrs`` key.
 
     It is currently is up to the user to ensure the number of parameter groups listed in ``init_pg_lrs`` matches the
     number of optimizer parameter groups created in previous phases (and if using
-    :external+torch:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau` with a list of ``min_lr`` s, the
+    :py:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau` with a list of ``min_lr`` s, the
     current number parameter groups). This number of groups is dependent on a number of
     factors including the ``no_decay`` mapping of parameters specified in previous phases and isn't yet
     introspected/simulated in the current :class:`~finetuning_scheduler.fts.FinetuningScheduler` version.
@@ -142,7 +142,7 @@ sanity-checked prior to training initiation.
 Note that specifying lr scheduler reinitialization configurations is only supported for phases >= ``1``. This is because
 for fine-tuning phase ``0``, the lr scheduler configuration will be the scheduler that you initiate your training
 session with, usually via the ``configure_optimizer`` method of
-:external+pl:class:`~lightning.pytorch.core.module.LightningModule`.
+:py:class:`~lightning.pytorch.core.module.LightningModule`.
 
 .. tip::
 
@@ -228,7 +228,7 @@ This is predominantly relevant only when training in :paramref:`~finetuning_sche
 .. tip::
 
     If you have specified an lr scheduler with an ``lr_lambdas`` attribute in any phase,
-    (e.g. :external+torch:class:`~torch.optim.lr_scheduler.LambdaLR`) you can have the last configured lambda
+    (e.g. :py:class:`~torch.optim.lr_scheduler.LambdaLR`) you can have the last configured lambda
     automatically applied to new groups in subsequent phases by setting the
     :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.apply_lambdas_new_pgs` parameter to ``True``. Note this
     option will only affect phases without reinitialized lr schedulers. Phases with defined lr scheduler
@@ -244,7 +244,7 @@ phase transitions. In implicit mode, the lr scheduler reconfiguration should be 
 :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_lr_cfg` parameter of
 :class:`~finetuning_scheduler.fts.FinetuningScheduler`.
 
-For example, configuring this dictionary via the :external+pl:class:`~lightning.pytorch.cli.LightningCLI`, one
+For example, configuring this dictionary via the :py:class:`~lightning.pytorch.cli.LightningCLI`, one
 could use:
 
 .. code-block:: yaml
@@ -276,7 +276,7 @@ could use:
                 name: Implicit_Reinit_LR_Scheduler
 
 Note that an initial lr scheduler configuration should also still be provided per usual (again, typically via the
-``configure_optimizer`` method of :external+pl:class:`~lightning.pytorch.core.module.LightningModule`) and the initial
+``configure_optimizer`` method of :py:class:`~lightning.pytorch.core.module.LightningModule`) and the initial
 lr scheduler configuration can differ in lr scheduler type and configuration from the configuration specified in
 :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_lr_cfg` applied at each phase transition. Because the
 same schedule is applied at each phase transition, the ``init_pg_lrs`` list is not supported in an implicit fine-tuning
@@ -314,13 +314,13 @@ training phases:
    :alt: Phase 0
    :width: 75%
 
-   LR log for parameter group 1 (:external+torch:class:`~torch.optim.lr_scheduler.LinearLR` initial target lr
+   LR log for parameter group 1 (:py:class:`~torch.optim.lr_scheduler.LinearLR` initial target lr
    = ``1.0e-05``)
 
 Phase ``0`` in :yellow-highlight:`yellow` (passed to our
-:external+pl:class:`~lightning.pytorch.core.module.LightningModule` via the ``model``
-definition in our :external+pl:class:`~lightning.pytorch.cli.LightningCLI` configuration) uses a
-:external+torch:class:`~torch.optim.lr_scheduler.LinearLR` scheduler (defined in
+:py:class:`~lightning.pytorch.core.module.LightningModule` via the ``model``
+definition in our :py:class:`~lightning.pytorch.cli.LightningCLI` configuration) uses a
+:py:class:`~torch.optim.lr_scheduler.LinearLR` scheduler (defined in
 ``./config/advanced/reinit_lr/fts_explicit_reinit_lr.yaml``) with the initial lr defined via the shared initial optimizer
 configuration (defined in ``./config/fts_defaults.yaml``).
 
@@ -351,7 +351,7 @@ defaults defined in ``./config/fts_defaults.yaml``):
           name: Explicit_Reinit_LR_Scheduler
 
 
-Phase ``1`` in :blue-highlight:`blue` uses a :external+torch:class:`~torch.optim.lr_scheduler.StepLR` scheduler, including the specified
+Phase ``1`` in :blue-highlight:`blue` uses a :py:class:`~torch.optim.lr_scheduler.StepLR` scheduler, including the specified
 initial lr for the existing parameter groups (``2.0e-06``).
 
 .. list-table:: LR log for parameter groups 1 and 3 respectively
@@ -393,7 +393,7 @@ This is the phase ``1`` config (defined in our explicit schedule ``./config/adva
         init_pg_lrs: [2.0e-06, 2.0e-06]
 
 
-Phase ``2`` in :green-highlight:`green` uses a :external+torch:class:`~torch.optim.lr_scheduler.CosineAnnealingWarmRestarts` scheduler, with
+Phase ``2`` in :green-highlight:`green` uses a :py:class:`~torch.optim.lr_scheduler.CosineAnnealingWarmRestarts` scheduler, with
 the assigned initial lr for each of the parameter groups (``1.0e-06`` for pg1 and ``2.0e-06`` for pg3).
 
 .. list-table:: LR log for parameter groups 1 and 3 respectively
@@ -437,7 +437,7 @@ This is the phase ``2`` config (like all non-zero phases, defined in our explici
         init_pg_lrs: [1.0e-06, 1.0e-06, 2.0e-06, 2.0e-06]
 
 
-In the implicitly defined schedule scenario, the :external+torch:class:`~torch.optim.lr_scheduler.StepLR` lr scheduler
+In the implicitly defined schedule scenario, the :py:class:`~torch.optim.lr_scheduler.StepLR` lr scheduler
 specified via :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_lr_cfg` (which happens to be the same as
 the initially defined lr scheduler in this case) is reinitialized at each phase transition and applied to all optimizer
 parameter groups.

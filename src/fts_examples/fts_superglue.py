@@ -34,7 +34,7 @@ adjust the configuration files referenced below as desired for other configurati
 import os
 import warnings
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 import lightning.pytorch as pl
 import torch
@@ -192,10 +192,10 @@ class RteBoolqModule(pl.LightningModule):
     def __init__(
         self,
         model_name_or_path: str,
-        optimizer_init: Dict[str, Any],
-        lr_scheduler_init: Dict[str, Any],
-        pl_lrs_cfg: Optional[Dict[str, Any]] = None,
-        model_cfg: Optional[Dict[str, Any]] = None,
+        optimizer_init: dict[str, Any],
+        lr_scheduler_init: dict[str, Any],
+        pl_lrs_cfg: dict[str, Any] | None = None,
+        model_cfg: dict[str, Any] | None = None,
         task_name: str = DEFAULT_TASK,
         experiment_tag: str = "default",
         log_env_details: bool = True,
@@ -207,9 +207,9 @@ class RteBoolqModule(pl.LightningModule):
 
         Args:
             model_name_or_path (str): Path to pretrained model or identifier `from <https://huggingface.co/models>`_
-            optimizer_init (Dict[str, Any]): The desired optimizer configuration.
-            lr_scheduler_init (Dict[str, Any]): The desired learning rate scheduler config
-            pl_lrs_cfg (Optional[Dict[str, Any]]): Defines custom overrides of pytorch lightning lr_scheduler defaults
+            optimizer_init (dict[str, Any]): The desired optimizer configuration.
+            lr_scheduler_init (dict[str, Any]): The desired learning rate scheduler config
+            pl_lrs_cfg (dict[str, Any] | None): Defines custom overrides of pytorch lightning lr_scheduler defaults
                 defined in :func:`~pytorch_lighting.optimizers._get_default_scheduler_config`
                 Example::
 
@@ -220,7 +220,7 @@ class RteBoolqModule(pl.LightningModule):
                     frequency: 1
                     name: CosineAnnealingWithWarmRestartsLR
 
-            model_cfg (Optional[Dict[str, Any]], optional): Defines overrides of the default model config. Defaults to
+            model_cfg (dict[str, Any] | None, optional): Defines overrides of the default model config. Defaults to
                 ``None``.
             task_name (str, optional): The SuperGLUE task to execute, one of ``'rte'``, ``'boolq'``. Defaults to "rte".
             experiment_tag (str, optional): The tag to use for the experiment and tensorboard logs. Defaults to
@@ -254,7 +254,7 @@ class RteBoolqModule(pl.LightningModule):
         self.no_decay = ["bias", "LayerNorm.weight"]
 
     @property
-    def finetuningscheduler_callback(self) -> Optional[fts.FinetuningScheduler]:  # type: ignore
+    def finetuningscheduler_callback(self) -> fts.FinetuningScheduler | None:  # type: ignore
         fts_callback = [c for c in self.trainer.callbacks if isinstance(c, fts.FinetuningScheduler)]  # type: ignore
         return fts_callback[0] if fts_callback else None
 
@@ -278,7 +278,7 @@ class RteBoolqModule(pl.LightningModule):
         if self.training_step_outputs:
             self.training_step_outputs.clear()
 
-    def validation_step(self, batch: Tensor, batch_idx: int, dataloader_idx=0) -> Optional[STEP_OUTPUT]:
+    def validation_step(self, batch: Tensor, batch_idx: int, dataloader_idx=0) -> STEP_OUTPUT | None:
         outputs = self(**batch)
         val_loss, logits = outputs[:2]
         if self.num_labels >= 1:

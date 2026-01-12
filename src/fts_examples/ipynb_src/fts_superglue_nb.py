@@ -319,18 +319,18 @@ class RteBoolqModule(L.LightningModule):
     def __init__(
         self,
         model_name_or_path: str,
-        optimizer_init: Dict[str, Any],
-        lr_scheduler_init: Dict[str, Any],
-        model_cfg: Optional[Dict[str, Any]] = None,
+        optimizer_init: dict[str, Any],
+        lr_scheduler_init: dict[str, Any],
+        model_cfg: dict[str, Any] | None = None,
         task_name: str = DEFAULT_TASK,
         experiment_tag: str = "default",
     ):
         """
         Args:
             model_name_or_path (str): Path to pretrained model or identifier from https://huggingface.co/models.
-            optimizer_init (Dict[str, Any]): The desired optimizer configuration.
-            lr_scheduler_init (Dict[str, Any]): The desired learning rate scheduler config.
-            model_cfg (Optional[Dict[str, Any]], optional): Defines overrides of the default model config. Defaults to
+            optimizer_init (dict[str, Any]): The desired optimizer configuration.
+            lr_scheduler_init (dict[str, Any]): The desired learning rate scheduler config.
+            model_cfg (dict[str, Any] | None, optional): Defines overrides of the default model config. Defaults to
                 ``None``.
             task_name (str, optional): The SuperGLUE task to execute, one of ``'rte'``, ``'boolq'``. Defaults to "rte".
             experiment_tag (str, optional): The tag to use for the experiment and tensorboard logs. Defaults to

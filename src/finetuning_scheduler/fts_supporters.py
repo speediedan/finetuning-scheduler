@@ -28,11 +28,12 @@ from contextlib import contextmanager
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import KeysView
+from typing import Dict  # Used for runtime isinstance() checks
 from copy import copy, deepcopy
 from dataclasses import dataclass, field, fields
 from functools import reduce
 from pprint import pformat
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union, Set, Iterator
+from typing import Any, Callable, Type, Iterator
 from typing_extensions import TypeAlias, override
 
 import lightning.pytorch as pl
@@ -125,14 +126,14 @@ class FTSState:
     _ft_global_steps: int = 0
     _curr_depth: int = 0
     _best_ckpt_depth: int = 0
-    _ft_sync_props: Tuple = (
+    _ft_sync_props: tuple = (
         ("epoch_progress.current.completed", "_ft_epoch"),
         ("epoch_loop.global_step", "_ft_global_steps"),
     )
-    _ft_sync_objects: Optional[Tuple] = None
-    _ft_init_epoch: Optional[int] = None
-    _curr_thawed_params: List = field(default_factory=list)
-    _fts_ckpt_metadata: Dict = field(default_factory=dict)
+    _ft_sync_objects: tuple | None = None
+    _ft_init_epoch: int | None = None
+    _curr_thawed_params: list = field(default_factory=list)
+    _fts_ckpt_metadata: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._fts_ckpt_metadata = {
@@ -151,8 +152,8 @@ class CallbackResolverMixin(ABC):
 
     def __init__(
         self,
-        callback_attrs: Tuple = CALLBACK_ATTRS,
-        callback_parents: Dict = CALLBACK_DEP_PARENTS,
+        callback_attrs: tuple = CALLBACK_ATTRS,
+        callback_parents: dict = CALLBACK_DEP_PARENTS,
         target_callback_ref: str = TARGET_CALLBACK_REF,
         support_multiple_targets: bool = False,
     ) -> None:
@@ -184,7 +185,7 @@ class CallbackResolverMixin(ABC):
         callback.
 
         Args:
-            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            trainer (pl.Trainer): The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
             reconnect (bool, optional): Whether to check for an updated target callback object even if one is already
                 resolved. Predominantly useful in the context of testing. Defaults to False.
 
@@ -212,13 +213,13 @@ class CallbackResolverMixin(ABC):
 
 
 class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
-    r"""Extends/specializes :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` to
-    facilitate multi-phase scheduled fine-tuning.
+    r"""Extends/specializes :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` to facilitate
+    multi-phase scheduled fine-tuning.
 
     Adds :attr:`es_phase_complete`, :attr:`final_phase` and :attr:`finetuningscheduler_callback` attributes and modifies
     ``EarlyStopping._evaluate_stopping_criteria`` to enable multi-phase behavior. Usage of
     :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` is identical to
-    :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` except the former will evaluate the
+    :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` except the former will evaluate the
     specified early stopping criteria at every scheduled phase.
     :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` will automatically be
     used if a :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is detected
@@ -227,14 +228,14 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
     .. note::
 
        For detailed usage information,
-       see :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`.
+       see :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`.
 
     .. note::
 
        Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the use of one
        :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` callback instance at a time.
     """
-    _check_on_train_epoch_end: Optional[bool]
+    _check_on_train_epoch_end: bool | None
     best_score: Tensor
     wait_count: int
 
@@ -253,7 +254,7 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
                 being synchronized (via ``sync_dist`` being set to ``True`` when logging).
             check_on_train_epoch_end (bool): Whether to run early stopping check at the end of the training epoch. If
                 this is ``False``, then the check runs at the end of the validation. Defaults to ``None`` similar to
-                :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` but is set to
+                :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` but is set to
                 ``False`` during setup unless overridden.
         """
         super().__init__(*args, **kwargs)
@@ -276,9 +277,9 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         over all distributed training processes.
 
         Args:
-            trainer: The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
-            pl_module  (:external+pl:class:`~lightning.pytorch.core.module.LightningModule`): The
-                :external+pl:class:`~lightning.pytorch.core.module.LightningModule` object
+            trainer: The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            pl_module  (:py:class:`~lightning.pytorch.core.module.LightningModule`): The
+                :py:class:`~lightning.pytorch.core.module.LightningModule` object
         """
         if trainer.state.fn == TrainerFn.FITTING:
             self.reduce_transition_decisions = self.finetuningscheduler_callback._check_sync_dist(self.monitor)
@@ -307,14 +308,14 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
             f" {self.finetuningscheduler_callback.curr_depth})"
         )
 
-    def _evaluate_stopping_criteria(self, current: Tensor) -> Tuple[bool, Optional[str]]:
+    def _evaluate_stopping_criteria(self, current: Tensor) -> tuple[bool, str | None]:
         """Evaluate whether and why to stop the current training session.
 
         Args:
             current (Tensor): The current monitored value to be evaluated
 
         Returns:
-            Tuple[bool, Optional[str]]: Whether the training session should stop and if so, the reason why.
+            tuple[bool, str | None]: Whether the training session should stop and if so, the reason why.
         """
         should_stop = False
         reason = None
@@ -369,28 +370,28 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
 
 
 class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
-    r"""Extends/specializes :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` to
-    facilitate multi-phase scheduled fine-tuning. Overrides the ``state_dict`` and ``load_state_dict`` hooks to
-    maintain additional state (:attr:`current_ckpt_depth`, :attr:`best_ckpt_depth`,
-    :attr:`finetuningscheduler_callback`). Usage of :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is
-    identical to :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` and
+    r"""Extends/specializes :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` to facilitate
+    multi-phase scheduled fine-tuning. Overrides the ``state_dict`` and ``load_state_dict`` hooks to maintain
+    additional state (:attr:`current_ckpt_depth`, :attr:`best_ckpt_depth`, :attr:`finetuningscheduler_callback`).
+    Usage of :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` is identical to
+    :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` and
     :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` will automatically be used if a
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback is detected.
 
     .. note::
         For detailed usage information, see
-        :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`.
+        :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`.
 
     .. note::
 
        Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the use of one
        :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callback instance at a time.
     """
-    _save_on_train_epoch_end: Optional[bool]
+    _save_on_train_epoch_end: bool | None
     best_model_path: str
     kth_best_model_path: str
     last_model_path: str
-    best_k_models: Dict
+    best_k_models: dict
     kth_value: Tensor
 
     def __init__(self, *args: Any, **kwargs: Any):
@@ -403,9 +404,9 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             finetuningscheduler_callback (lightning.pytorch.callbacks.Callback):
                 Reference to the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
                 callback being used.
-            save_on_train_epoch_end (Optional[bool]): Whether to run checkpointing at the end of the training epoch.
+            save_on_train_epoch_end (bool | None): Whether to run checkpointing at the end of the training epoch.
                 If this is ``False``, then the check runs at the end of the validation. Defaults to ``None`` similar to
-                :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` but is set to
+                :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` but is set to
                 ``False`` during setup unless overridden.
         """
         super().__init__(*args, **kwargs)
@@ -420,7 +421,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         """Verify a valid callback configuration is present before beginning training.
 
         Args:
-            trainer: The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            trainer: The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
 
         Raises:
             MisconfigurationException:
@@ -455,12 +456,12 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         # note monitor metric validation must be deferred until first ``monitor_candidates`` access
         super().setup(trainer, pl_module, stage)
 
-    def state_dict(self) -> Dict[str, Any]:
-        """Overrides. :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`'s
-        ``state_dict`` method to maintain multi-phase training depth state.
+    def state_dict(self) -> dict[str, Any]:
+        """Overrides. :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`'s ``state_dict``
+        method to maintain multi-phase training depth state.
 
         Returns:
-            Dict[str, Any]: the callback state dictionary that will be saved.
+            dict[str, Any]: the callback state dictionary that will be saved.
         """
         self.current_ckpt_depth = self.finetuningscheduler_callback.curr_depth  # type: ignore[attr-defined]
         # a future enhancement of per-depth best score mapping could allow more fine-grained control of this behavior
@@ -480,8 +481,8 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             "best_ckpt_depth": self.best_ckpt_depth,
         }
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        """Overrides :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`'s
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Overrides :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`'s
         ``load_state_dict`` method to load multi-phase training depth state.
 
         Args:
@@ -530,8 +531,8 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             self._has_depth_metadata_lock = False
 
     @override
-    def _save_topk_checkpoint(self, trainer: "pl.Trainer", monitor_candidates: Dict[str, Tensor]) -> None:
-        """Wrapper around :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`'s
+    def _save_topk_checkpoint(self, trainer: "pl.Trainer", monitor_candidates: dict[str, Tensor]) -> None:
+        """Wrapper around :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`'s
         ``_save_topk_checkpoint`` method.
 
         To avoid altering the checkpoint sorting and saving logic of the superclass while conditionally enriching it
@@ -542,20 +543,20 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             super()._save_topk_checkpoint(trainer, monitor_candidates)
 
     @override
-    def _monitor_candidates(self, trainer: "pl.Trainer") -> Dict[str, Tensor]:
+    def _monitor_candidates(self, trainer: "pl.Trainer") -> dict[str, Tensor]:
         # invoke relevant FTS strategy adapter monitor metric validation prior to first collection of monitor candidates
         if not self._monitor_validated and self.monitor:
             self.finetuningscheduler_callback.strategy_adapter.on_validate_monitor_metric(self.monitor)
             self._monitor_validated = True
         return super()._monitor_candidates(trainer)
 
-FTSCallbackDepType: TypeAlias = Union[Type[FTSEarlyStopping], Type[FTSCheckpoint]]
+FTSCallbackDepType: TypeAlias = Type[FTSEarlyStopping] | Type[FTSCheckpoint]
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
     """Alters SafeLoader to enable duplicate key detection by the SafeConstructor."""
 
-    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> Dict:
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
         """Overrides the construct_mapping method of the SafeConstructor to raise a ValueError if duplicate keys
         are found.
 
@@ -579,16 +580,16 @@ class ScheduleParsingMixin(ABC):
     VALID_REINIT_KEYS = ("new_lr_scheduler", "new_optimizer")
     # proper initialization of these variables should be done in the child class
     pl_module: pl.LightningModule
-    ft_schedule: Optional[Union[str, dict]]
-    reinit_optim_cfg: Optional[Dict]
-    reinit_lr_cfg: Optional[Dict]
+    ft_schedule: str | dict | None
+    reinit_optim_cfg: dict | None
+    reinit_lr_cfg: dict | None
     strategy_adapter: StrategyAdapter  # added to support adapter-based parameter naming
 
-    def _validate_ft_sched(self) -> Tuple[int, int]:
+    def _validate_ft_sched(self) -> tuple[int, int]:
         """Ensure the explicitly specified fine-tuning schedule has a valid configuration.
 
         Returns:
-            Tuple[int, int]: A tuple of ints specifying:
+            tuple[int, int]: A tuple of ints specifying:
                 1. The depth of the final scheduled phase
                 2. The maximum epoch watermark explicitly specified in the schedule
         """
@@ -620,10 +621,9 @@ class ScheduleParsingMixin(ABC):
             self._validate_epoch_transitions()
         return max_phase, max_epoch_wm
 
-    def _update_pl_lrs(self, pl_lrs_cfg: Dict, lrs_class: FTSLRSchedulerType) -> Dict:
+    def _update_pl_lrs(self, pl_lrs_cfg: dict, lrs_class: FTSLRSchedulerType) -> dict:
         """Prune keys not part of a valid PyTorch Lightning lr scheduler configuration (if automatic optimization
-        used) and update configuration if :external+torch:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau` is
-        used.
+        used) and update configuration if :py:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau` is used.
 
         Args:
             pl_lrs_cfg (Dict): User-provided PyTorch Lightning lr scheduler configuration
@@ -652,7 +652,7 @@ class ScheduleParsingMixin(ABC):
 
         return {k: v for k, v in pl_lrs_cfg.items() if k in supported_keys}
 
-    def _pl_lrs_validation(self, pl_lrs_cfg: Dict) -> None:
+    def _pl_lrs_validation(self, pl_lrs_cfg: dict) -> None:
         """Check basic pl lrs config (we aren't instantiating the new scheduler yet so can't validate everything)
         replicating basic PL lr schedule config validation here, originally based on https://bit.ly/3NldbaG.
 
@@ -670,14 +670,14 @@ class ScheduleParsingMixin(ABC):
                     f' but is "{pl_lrs_cfg["interval"]}"'
                 )
 
-    def _common_reinit_key_validation(self, target_sched: Dict, target_key: str, depth: Optional[int] = None) -> None:
+    def _common_reinit_key_validation(self, target_sched: dict, target_key: str, depth: int | None = None) -> None:
         """Key validation common to all reinitialzation configuration dictionaries.
 
         Args:
             target_sched (Dict): The provided reinitialization configuration for either an implicit mode fine-tuning
                 schedule or for a given explicity mode fine-tuning phase.
             target_key (str): The expected reinitialization key for the current parsing context.
-            depth (Optional[int], optional): If parsing an explicit schedule, the current phase. Defaults to None.
+            depth (int | None, optional): If parsing an explicit schedule, the current phase. Defaults to None.
 
         Raises:
             MisconfigurationException: If a valid reinitialization key is missing in the reinitialization configuration.
@@ -698,28 +698,28 @@ class ScheduleParsingMixin(ABC):
                 "for " + phase_specific_msg
             )
 
-    def _optimizer_reinit_key_validation(self, target_sched: Dict, depth: Optional[int] = None) -> None:
+    def _optimizer_reinit_key_validation(self, target_sched: dict, depth: int | None = None) -> None:
         """Validate the keys in a given lr scheduler reinitialization configuration.
 
         Args:
             target_sched (Dict): The provided optimizer reinitialization configuration for either an implicit mode
                 fine-tuning schedule (passed via `reinit_optim_cfg`) or for a given explicity mode fine-tuning phase
                 (passed via `new_optimizer` for a given phase)
-            depth (Optional[int], optional): If parsing an explicit schedule, the current phase. Defaults to None.
+            depth (int | None, optional): If parsing an explicit schedule, the current phase. Defaults to None.
         """
         self._common_reinit_key_validation(target_sched, "optimizer_init", depth)
         optimizer_init = target_sched.get("optimizer_init")
         assert optimizer_init
         self._optimizer_sanity_chk(optimizer_init)
 
-    def _lr_scheduler_reinit_key_validation(self, target_sched: Dict, depth: Optional[int] = None) -> None:
+    def _lr_scheduler_reinit_key_validation(self, target_sched: dict, depth: int | None = None) -> None:
         """Validate the keys in a given lr scheduler reinitialization configuration.
 
         Args:
             target_sched (Dict): The provided lr scheduler reinitialization configuration for either an implicit mode
                 fine-tuning schedule (passed via `reinit_lr_cfg`) or for a given explicity mode fine-tuning phase
                 (passed via `new_lr_scheduler` for a given phase)
-            depth (Optional[int], optional): If parsing an explicit schedule, the current phase. Defaults to None.
+            depth (int | None, optional): If parsing an explicit schedule, the current phase. Defaults to None.
 
         Raises:
             MisconfigurationException: If an `init_pg_lrs` key is provided in implicit mode training
@@ -761,7 +761,7 @@ class ScheduleParsingMixin(ABC):
         assert lr_scheduler_init
         self._lr_scheduler_sanity_chk(lr_scheduler_init, implicit_chk)
 
-    def _reinit_validation(self, reinit_cfg: Dict) -> None:
+    def _reinit_validation(self, reinit_cfg: dict) -> None:
         """Trigger reinitialization configuration validation for all provided configurations. This will be a single
         configuration for implicit mode fine-tuning or n configurations for explicit mode.
 
@@ -829,11 +829,11 @@ class ScheduleParsingMixin(ABC):
                 f"The encountered error was: {value_err}"
             )
 
-    def _rewrite_schedule(self, err_msg: Optional[str] = None) -> None:
+    def _rewrite_schedule(self, err_msg: str | None = None) -> None:
         """Saves a reconfigured schedule to ``self.log_dir`` and optionally raises an error message if specified.
 
         Args:
-            err_msg (Optional[str], optional): The error message that should be raised after saving the transformed
+            err_msg (str | None, optional): The error message that should be raised after saving the transformed
             schedule. Defaults to None.
 
         Raises:
@@ -874,10 +874,10 @@ class ScheduleParsingMixin(ABC):
             self._rewrite_schedule(err_msg=err_msg)
 
     def _validate_epoch_transitions(self) -> None:
-        """If not composing :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` and
-        epoch-driven stopping criteria (the default behavior) but instead specifying exclusively epoch-driven
-        transitions ( :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is
-        ``True``), ensure the specified schedule specifies transitions for every phase.
+        """If not composing :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` and epoch-driven
+        stopping criteria (the default behavior) but instead specifying exclusively epoch-driven transitions (
+        :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is ``True``), ensure the
+        specified schedule specifies transitions for every phase.
 
         Raises:
             MisconfigurationException: If the specified schedule does not include epoch-driven transitions for all
@@ -920,7 +920,7 @@ class ScheduleParsingMixin(ABC):
                 )
                 del self.ft_schedule[depth]["lr"]
 
-    def _parse_phase(self, depth: int, named_params: KeysView, shared_params: Tuple) -> None:
+    def _parse_phase(self, depth: int, named_params: KeysView, shared_params: tuple) -> None:
         """Expand any regex expressions specified in an ft_schedule phase to fully qualified parameter names. If
         any shared parameter copies are explicitly specified in the schedule, the copies will be pruned from the
         schedule with a warning.
@@ -983,7 +983,7 @@ class ScheduleParsingMixin(ABC):
                 f"multiple phases: {', '.join(dup_params)}"
             )
 
-    def _reinit_phase0_pgs(self, thawed_pl: List) -> List:
+    def _reinit_phase0_pgs(self, thawed_pl: list) -> list:
         """Reconstruct the parameter groups associated with phase 0 of the schedule.
 
         Args:
@@ -1015,29 +1015,29 @@ class ScheduleParsingMixin(ABC):
             pgs = [{"params": [p for n, p in self.pl_module.named_parameters() if n in thawed_pl and p.requires_grad]}]
         return pgs
 
-    def _save_pre_reinit_lr_state(self, trainer: pl.Trainer) -> Tuple[Dict, List]:
+    def _save_pre_reinit_lr_state(self, trainer: pl.Trainer) -> tuple[dict, list]:
         """Capture the existing lr state for all parameter groups associated with previous depths to enable
         restoration during the next phase transition.
 
         Args:
-            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            trainer (pl.Trainer): The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
 
         Returns:
-            Tuple[Dict, List]: The lr state to restore from the current lr scheduler and the most recent `lr`s for
+            tuple[Dict, List]: The lr state to restore from the current lr scheduler and the most recent `lr`s for
                 parameter groups associated with the current phases's optimizer.
         """
-        curr_lr_state: Dict = {}
+        curr_lr_state: dict = {}
         if trainer.lr_scheduler_configs:
             curr_lr_state = deepcopy(trainer.lr_scheduler_configs[0].scheduler.state_dict())
         prev_optimizer_lrs = copy([group["lr"] for group in trainer.strategy.optimizers[0].param_groups])
         return curr_lr_state, prev_optimizer_lrs
 
-    def reinit_optimizer(self, new_optimizer: Dict, trainer: pl.Trainer, init_params: List) -> ParamGroupAddable:
+    def reinit_optimizer(self, new_optimizer: dict, trainer: pl.Trainer, init_params: list) -> ParamGroupAddable:
         """Reinitialize the optimizer, using a validated optimizer reinitialization configuration.
 
         Args:
             new_optimizer (Dict): A dictionary defining the new optimizer configuration to be initialized.
-            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            trainer (pl.Trainer): The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
             init_params (List): The list of parameter names with which to initialize the new optimizer.
 
         Returns:
@@ -1062,13 +1062,13 @@ class ScheduleParsingMixin(ABC):
         self._maybe_trace_reinit("optimizer", prev_optim_repr, repr(trainer.strategy.optimizers[0]))
         return new_optimizer_handle  # type:ignore[return-value]
 
-    def reinit_lr_scheduler(self, new_lr_scheduler: Dict, trainer: pl.Trainer, optimizer: ParamGroupAddable) -> None:
+    def reinit_lr_scheduler(self, new_lr_scheduler: dict, trainer: pl.Trainer, optimizer: ParamGroupAddable) -> None:
         """Reinitialize the learning rate scheduler, using a validated learning rate scheduler configuration and
         wrapping the existing optimizer.
 
         Args:
             new_lr_scheduler (Dict): A dictionary defining the new lr scheduler configuration to be initialized.
-            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            trainer (pl.Trainer): The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
             optimizer (:class:`~finetuning_scheduler.types.ParamGroupAddable`): A supported optimizer instance around
                 which the new lr scheduler will be wrapped.
         """
@@ -1122,7 +1122,7 @@ class ScheduleParsingMixin(ABC):
         )
 
     @staticmethod
-    def _parse_reint_pg_lrs(depth: int, init_pg_lrs: List) -> None:
+    def _parse_reint_pg_lrs(depth: int, init_pg_lrs: list) -> None:
         """Parse/Define per-phase base-learning rate overrides for an lr scheduler reinitialization.
 
         Args:
@@ -1169,7 +1169,7 @@ class ScheduleParsingMixin(ABC):
                 )
                 rank_zero_warn(warn_msg)
 
-    def _is_supported_reinit_optimizer(self, optim_class: Union[Any, ParamGroupAddable]) -> None:
+    def _is_supported_reinit_optimizer(self, optim_class: Any | ParamGroupAddable) -> None:
         """Evaulate whether the provided optimizer is currently supported in the context of optimizer
         reinitialization.
 
@@ -1190,8 +1190,8 @@ class ScheduleParsingMixin(ABC):
             raise MisconfigurationException(error_msg)
 
     def _import_reinit_class(
-        self, reinit_cfg: Dict, reinit_target: str
-    ) -> Union[FTSLRSchedulerType, ParamGroupAddable]:
+        self, reinit_cfg: dict, reinit_target: str
+    ) -> FTSLRSchedulerType | ParamGroupAddable:
         """Import the reinitialization class (lr scheduler or optimizer) specified in the provided reinitialization
         configuration.
 
@@ -1203,7 +1203,7 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: If the specified class cannot be imported successfully.
 
         Returns:
-            Union[FTSLRSchedulerType, ParamGroupAddable]: The class to reinitialize.
+            FTSLRSchedulerType | ParamGroupAddable: The class to reinitialize.
         """
         # TODO: refactor this function to enable type narrowing while continuing to share relevant code paths
         try:
@@ -1223,7 +1223,7 @@ class ScheduleParsingMixin(ABC):
         return reinit_class
 
     @staticmethod
-    def _resolve_strategy_adapter(strategy_key: str, adapter_map: Dict[str, str]) -> Type[StrategyAdapter]:
+    def _resolve_strategy_adapter(strategy_key: str, adapter_map: dict[str, str]) -> Type[StrategyAdapter]:
         """Resolve the custom strategy adapter specified in the ``custom_strategy_adapters`` configuration.
 
         Args:
@@ -1273,7 +1273,7 @@ class ScheduleParsingMixin(ABC):
             raise MisconfigurationException(error_msg)
         return custom_strategy_adapter_cls
 
-    def _optimizer_sanity_chk(self, optimizer_init: Dict) -> None:
+    def _optimizer_sanity_chk(self, optimizer_init: dict) -> None:
         """Before beginning execution of defined fine-tuning schedule, perform a sanity check of the specified
         optimizer reinitialization configuration. To the extent reasonable (i.e. without simulating the entire
         training path), if the provided optimizer reinitialization configuration is expected to fail, it is user-
@@ -1304,7 +1304,7 @@ class ScheduleParsingMixin(ABC):
             raise MisconfigurationException(error_msg)
         assert isinstance(test_optimizer, ParamGroupAddable)
 
-    def _lr_scheduler_sanity_chk(self, lr_scheduler_init: Dict, is_implicit_mode: bool = False) -> None:
+    def _lr_scheduler_sanity_chk(self, lr_scheduler_init: dict, is_implicit_mode: bool = False) -> None:
         """Before beginning execution of defined fine-tuning schedule, perform a sanity check of the specified lr
         scheduler reinitialization configuration. To the extent reasonable (i.e. without simulating the entire
         training path), if the provided lr scheduler reinitialization configuration is expected to fail, it is
@@ -1362,12 +1362,12 @@ class ScheduleImplMixin(ABC):
 
     # proper initialization of these variables should be done in the child class
     pl_module: pl.LightningModule
-    ft_schedule: Optional[Union[str, dict]]
-    reinit_optim_cfg: Optional[Dict]
-    reinit_lr_cfg: Optional[Dict]
-    #log_dir: Optional[Union[str, os.PathLike]]
+    ft_schedule: str | dict | None
+    reinit_optim_cfg: dict | None
+    reinit_lr_cfg: dict | None
+    #log_dir: str | os.PathLike | None
     max_depth: int
-    _msg_cache: Set
+    _msg_cache: set
     _fts_state: FTSState
     PHASE_0_DIVERGENCE_MSG = (
         "After executing the provided `configure_optimizers` method, the optimizer state differs from the configuration"
@@ -1454,7 +1454,7 @@ class ScheduleImplMixin(ABC):
             self.trainer.fit_loop.max_epochs = max(max_epoch_wm, self.trainer.max_epochs)
 
     @rank_zero_only
-    def gen_implicit_schedule(self, sched_dir: Union[str, os.PathLike]) -> None:
+    def gen_implicit_schedule(self, sched_dir: str | os.PathLike) -> None:
         """Generate the default schedule, save it to ``sched_dir`` and load it into
         :attr:`~finetuning_scheduler.fts.FinetuningScheduler.ft_schedule`
 
@@ -1469,7 +1469,7 @@ class ScheduleImplMixin(ABC):
 
     @staticmethod
     @rank_zero_only
-    def save_schedule(schedule_name: str, layer_config: Dict, dump_loc: Union[str, os.PathLike]) -> os.PathLike:
+    def save_schedule(schedule_name: str, layer_config: dict, dump_loc: str | os.PathLike) -> os.PathLike:
         """Save loaded or generated schedule to a directory to ensure reproducability.
 
         Args:
@@ -1479,7 +1479,7 @@ class ScheduleImplMixin(ABC):
 
         Returns:
             os.PathLike: The path to the generated schedule, by default ``Trainer.log_dir`` and named after the
-            :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass in use with the suffix
+            :py:class:`~lightning.pytorch.core.module.LightningModule` subclass in use with the suffix
             ``_ft_schedule.yaml``)
         """
         dump_path = pathlib.Path(dump_loc)
@@ -1494,7 +1494,7 @@ class ScheduleImplMixin(ABC):
 
     @staticmethod
     @rank_zero_only
-    def gen_ft_schedule(module: Module, dump_loc: Union[str, os.PathLike]) -> Optional[os.PathLike]:
+    def gen_ft_schedule(module: Module, dump_loc: str | os.PathLike) -> os.PathLike | None:
         """Generate the default fine-tuning schedule using a naive, 2-parameters per-level heuristic.
 
         .. deprecated:: 2.10.0
@@ -1508,7 +1508,7 @@ class ScheduleImplMixin(ABC):
             dump_loc: The directory to which the generated schedule (.yaml) should be written
         Returns:
             os.PathLike: The path to the generated schedule, by default ``Trainer.log_dir`` and named after the
-            :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass in use with the suffix
+            :py:class:`~lightning.pytorch.core.module.LightningModule` subclass in use with the suffix
             ``_ft_schedule.yaml``)
         """
         rank_zero_warn(
@@ -1519,7 +1519,7 @@ class ScheduleImplMixin(ABC):
         return ScheduleImplMixin._gen_ft_schedule_impl(module, dump_loc)
 
     @staticmethod
-    def _gen_ft_schedule_impl(module: Module, dump_loc: Union[str, os.PathLike]) -> Optional[os.PathLike]:
+    def _gen_ft_schedule_impl(module: Module, dump_loc: str | os.PathLike) -> os.PathLike | None:
         """Internal implementation of default fine-tuning schedule generation.
 
         This method contains the actual schedule generation logic shared between the deprecated static method
@@ -1538,8 +1538,8 @@ class ScheduleImplMixin(ABC):
         # introspection to generate default schedules that better accommodate more complex structures and
         # specific architectures if the callback proves sufficiently useful.
         rank_zero_info(f"Proceeding with dumping default fine-tuning schedule for {module.__class__.__name__}")
-        param_lists: List = []
-        cur_group: List = []
+        param_lists: list = []
+        cur_group: list = []
         model_params = list(module.named_parameters())[::-1]
         for i, (n, _) in enumerate(model_params):
             if i % 2 == 0:
@@ -1558,7 +1558,7 @@ class ScheduleImplMixin(ABC):
         return ScheduleImplMixin.save_schedule(schedule_name, layer_config, dump_loc)
 
     @staticmethod
-    def load_yaml_schedule(schedule_yaml_file: os.PathLike) -> Dict:
+    def load_yaml_schedule(schedule_yaml_file: os.PathLike) -> dict:
         """Load a schedule defined in a .yaml file and transform it into a dictionary.
 
         Args:
@@ -1589,7 +1589,7 @@ class ScheduleImplMixin(ABC):
             raise MisconfigurationException(error_msg)
         return schedule_dict
 
-    def thaw_to_depth(self, depth: Optional[int] = None) -> None:
+    def thaw_to_depth(self, depth: int | None = None) -> None:
         """Thaw/unfreeze the current :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.pl_module` to the
         specified fine-tuning depth (aka level)
 
@@ -1628,7 +1628,7 @@ class ScheduleImplMixin(ABC):
         optimizer.optim.param_groups = partition_params()[optimizer.rank]  # type: ignore[index]
         optimizer._sync_param_groups(optimizer.optim.param_groups, optimizer.param_groups)
 
-    def _restore_latest_lr_state(self, curr_lr_state: Dict, prev_optimizer_lrs: List) -> None:
+    def _restore_latest_lr_state(self, curr_lr_state: dict, prev_optimizer_lrs: list) -> None:
         """Adapt the existing lr state for all parameter groups associated with previous depths (new groups for the
         current phase should use the schedule or new optimizer defaults).
 
@@ -1650,9 +1650,9 @@ class ScheduleImplMixin(ABC):
     def add_optimizer_groups(
         module: Module,
         optimizer: ParamGroupAddable,
-        thawed_pl: List,
-        no_decay: Optional[list] = None,
-        lr: Optional[float] = None,
+        thawed_pl: list,
+        no_decay: list | None = None,
+        lr: float | None = None,
         apply_lambdas: bool = False,
     ) -> None:
         """Add optimizer parameter groups associated with the next scheduled fine-tuning depth/level and extend the
@@ -1703,7 +1703,7 @@ class ScheduleImplMixin(ABC):
 
     @staticmethod
     def _add_groups(
-        no_decay: Optional[list], optimizer: ParamGroupAddable, module: Module, thawed_pl: List, phase_lr: float
+        no_decay: list | None, optimizer: ParamGroupAddable, module: Module, thawed_pl: list, phase_lr: float
     ) -> int:
         """The actual addition of optimizer groups is done here, separated from ``add_optimizer_groups`` to
         accommodate corner cases where FTS is being used without an lr scheduler configuration.
@@ -1758,7 +1758,7 @@ class ScheduleImplMixin(ABC):
         return added_pgs
 
     @staticmethod
-    def sync(objs: Tuple, asets: Tuple, agg_func: Callable = max) -> None:
+    def sync(objs: tuple, asets: tuple, agg_func: Callable = max) -> None:
         """Synchronize sets of object attributes using a given aggregation function.
 
         Args:
@@ -1771,7 +1771,7 @@ class ScheduleImplMixin(ABC):
             for o, a in zip(objs, attrs):
                 setattr(o, a, agg)
 
-    def _inspect_fts_opt_state(self) -> Tuple:
+    def _inspect_fts_opt_state(self) -> tuple:
         """Distills relevant initialized optimizer state for validation prior to fit start.
 
         Returns:
@@ -1803,7 +1803,7 @@ class ScheduleImplMixin(ABC):
         return no_grad_cnt, init_ft_cnt, total_ft_cnt, p_diff_summary
 
     @staticmethod
-    def _grad_mismatch_feedback(w_msg: str, param_diff_summary: Dict) -> str:
+    def _grad_mismatch_feedback(w_msg: str, param_diff_summary: dict) -> str:
         """Assemble feedback for the user regarding the current optimizer state's divergence from the state
         expected in scheduled fine-tuning phase 0 (with respect to thawed parameters).
 
@@ -1871,7 +1871,7 @@ class ScheduleImplMixin(ABC):
 class CallbackDepMixin(ABC):
     """Functionality for validating/managing callback dependencies."""
 
-    def __init__(self, callback_dep_parents: Dict = CALLBACK_DEP_PARENTS) -> None:
+    def __init__(self, callback_dep_parents: dict = CALLBACK_DEP_PARENTS) -> None:
         """Arguments used to initialize the user-provided callback dependency validation in accordance with the
         user-provided module configuration:
 
@@ -1883,16 +1883,16 @@ class CallbackDepMixin(ABC):
         super().__init__()
         self.callback_dep_parents = callback_dep_parents
 
-    def _inspect_callback_deps(self, trainer: "pl.Trainer") -> List[bool]:
+    def _inspect_callback_deps(self, trainer: "pl.Trainer") -> list[bool]:
         """Inspect the trainer :paramref:`~pytorch_lighting.trainer.trainer.Trainer.callbacks` for earlystopping
         and scheduled fine-tuning capabilities.
 
         Args:
-            trainer (pl.Trainer):  The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object to
+            trainer (pl.Trainer):  The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object to
                 inspect the callbacks of
 
         Returns:
-            Tuple[bool]: The ascertained :paramref:`~pytorch_lighting.trainer.trainer.Trainer.callbacks` capabilities
+            tuple[bool]: The ascertained :paramref:`~pytorch_lighting.trainer.trainer.Trainer.callbacks` capabilities
         """
         callbacks_inspected = [FTSCheckpoint, ModelCheckpoint, FTSEarlyStopping, EarlyStopping, LearningRateMonitor]
         callback_inspection = []
@@ -1905,13 +1905,13 @@ class CallbackDepMixin(ABC):
         """Validate multiple instances of a given user-provided callback dependency parent are not present.
 
         Args:
-            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object to
+            trainer (pl.Trainer): The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object to
                 inspect the callbacks of
 
         Raises:
             MisconfigurationException: If multiple instances of a callback dependency parent are found
         """
-        dep_callback_cnts: Dict = {}
+        dep_callback_cnts: dict = {}
         dep_callback_errs = []
         err_suffix = "callbacks is not currently supported. Please provide a maximum of one."
         for k, v in self.callback_dep_parents.items():
@@ -1930,7 +1930,7 @@ class CallbackDepMixin(ABC):
             raise MisconfigurationException(dep_callback_errs)
 
     @staticmethod
-    def _reorder_callback_by_type(callbacks: List[Callback], target_callback: type) -> List[Callback]:
+    def _reorder_callback_by_type(callbacks: list[Callback], target_callback: type) -> list[Callback]:
         """Moves all ModelCheckpoint callbacks to the end of the list. The sequential order within the group of
         checkpoint callbacks is preserved, as well as the order of all other callbacks.
 
@@ -1946,15 +1946,15 @@ class CallbackDepMixin(ABC):
         return other_callbacks + target_callbacks
 
     @staticmethod
-    def _extract_base_callback_cfg(trainer: "pl.Trainer", callback_type: BaseCallbackDepType) -> Dict:
+    def _extract_base_callback_cfg(trainer: "pl.Trainer", callback_type: BaseCallbackDepType) -> dict:
         """Extracts the configuration of a user-provided.
 
-        :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` or
-        :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` callback to enable the
+        :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` or
+        :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint` callback to enable the
         subsequent instantiation of a fine-tuning schedule-capable FTS analog with a similar configuration.
 
         Args:
-            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            trainer (pl.Trainer): The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
             callback_type (BaseCallbackDepType): The type of base callback from which to extract the configuration.
 
         Returns:
@@ -1965,11 +1965,11 @@ class CallbackDepMixin(ABC):
         return {k: v for k, v in base_callback.__dict__.items() if k in base_callback_params}
 
     @staticmethod
-    def _add_fts_callback(trainer: "pl.Trainer", fts_cls: FTSCallbackDepType, cfg: Dict) -> None:
+    def _add_fts_callback(trainer: "pl.Trainer", fts_cls: FTSCallbackDepType, cfg: dict) -> None:
         """Adds a fine-tuning schedule-capable FTS callback dependency with a specified configuration.
 
         Args:
-            trainer (pl.Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            trainer (pl.Trainer): The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
             fts_cls (FTSCallbackDepType): The type of FTS callback dependency to instantiate.
             cfg (Dict): The desired FTS callback configuration.
         """
@@ -1983,10 +1983,10 @@ class CallbackDepMixin(ABC):
         and configuring them if necessary.
 
         Args:
-            trainer (:external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
-                :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object
-            pl_module (:external+pl:class:`~lightning.pytorch.core.module.LightningModule`): The
-                :external+pl:class:`~lightning.pytorch.core.module.LightningModule` object
+            trainer (:py:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
+                :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            pl_module (:py:class:`~lightning.pytorch.core.module.LightningModule`): The
+                :py:class:`~lightning.pytorch.core.module.LightningModule` object
             stage: The ``RunningStage.{SANITY_CHECKING,TRAINING,VALIDATING}``. Defaults to None.
         """
         trainer.callbacks, added_es_fts, added_ckpt_fts = self._configure_callback_deps(trainer)
@@ -1997,18 +1997,18 @@ class CallbackDepMixin(ABC):
         if added_es_fts:
             trainer.early_stopping_callback.setup(trainer, pl_module, stage)  # type: ignore[union-attr]
 
-    def _configure_callback_deps(self, trainer: "pl.Trainer") -> Tuple[List[Callback], bool, bool]:
-        """Ensures FTSCheckpoint and :external+pl:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`
+    def _configure_callback_deps(self, trainer: "pl.Trainer") -> tuple[list[Callback], bool, bool]:
+        """Ensures FTSCheckpoint and :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`
         callbacks are present and configured, removing any.
 
-        :external+pl:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`s if present.
+        :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`s if present.
 
         Args:
-            trainer: The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object that may have its
+            trainer: The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object that may have its
                 callbacks list altered.
 
         Returns:
-            List[Callback]: A new callback list that includes at least one FTSCheckpoint and EarlyStopping class,
+            list[Callback]: A new callback list that includes at least one FTSCheckpoint and EarlyStopping class,
                 ensuring the FTSCheckpoint is at the end of list.
             Bool: Whether a :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` callback was added
             Bool: Whether a :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callback was added

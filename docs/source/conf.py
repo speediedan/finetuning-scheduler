@@ -75,15 +75,15 @@ release = about.__version__
 
 # If your documentation needs a minimal Sphinx version, state it here.
 
-needs_sphinx = "5.3"
+needs_sphinx = "6.2"
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    "sphinx.ext.intersphinx",  # keep intersphinx early so external+<proj> roles are registered before autodoc runs
     "sphinx.ext.autodoc",
     "sphinx.ext.doctest",
-    "sphinx.ext.intersphinx",
     "sphinx.ext.todo",
     "sphinx.ext.coverage",
     "sphinx.ext.viewcode",
@@ -142,6 +142,10 @@ exclude_patterns = [
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = None
+
+# Provide a safe default for theme templates that expect `style` (do not override custom theme styles)
+html_context = globals().get('html_context', {})
+html_context.setdefault('style', "")
 
 rst_prolog = """
 .. include:: /_static/fts_cust_roles.rst
@@ -260,7 +264,7 @@ intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "torch": ("http://pytorch.org/docs/stable/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
-    "pl": ("https://pytorch-lightning.readthedocs.io/en/stable/", None),
+    "pl": ("https://lightning.ai/docs/pytorch/stable/", None),
 }
 
 # -- Options for todo extension ----------------------------------------------

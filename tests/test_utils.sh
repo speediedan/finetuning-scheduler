@@ -57,6 +57,7 @@ execute_tests(){
   local execute_def="$1"
   local execute_log="$2"
   local tmp_raw_log="$3"
+  local allow_failures=${4:-0}  # Default to 0 (fail on first error)
   # hardcoded tests to skip - space separated
   blocklist=''
   export report=''
@@ -79,6 +80,13 @@ execute_tests(){
     test_to_find=`echo ${parameterization} | sed 's/\[/\\\[/g; s/\]/\\\]/g'`
     if pass_or_fail=$(grep -E "(PASSED|FAILED|XPASS|XFAIL) .*${test_to_find}" $tmp_raw_log); then
       parameterization_result=`echo $pass_or_fail | awk 'NR==1 {print $2 ": "  $1}'`;
+      # Check if test failed and allow_failures is not set
+      if echo "$parameterization_result" | grep -q "FAILED" && [[ $allow_failures -eq 0 ]]; then
+        echo "Test failed: ${parameterization_result}" | tee -a $execute_log
+        echo "Stopping execution (use --allow-failures to continue after failures)" | tee -a $execute_log
+        report+="Ran\t${parameterization_result}\n"
+        break
+      fi
     elif skipped=$(grep -E "${test_to_find}.*SKIPPED" $tmp_raw_log); then
       parameterization_result=`echo $skipped | awk 'NR==1 {print $1 ": "  $2}'`;
     else

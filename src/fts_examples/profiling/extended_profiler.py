@@ -12,7 +12,6 @@
 
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 
 import torch
 from lightning.fabric.accelerators.cuda import is_cuda_available
@@ -24,12 +23,12 @@ from torch.profiler.profiler import ProfilerActivity
 class ExtendedPyTorchProfiler(PyTorchProfiler):
     def __init__(
         self,
-        dirpath: Optional[Union[str, Path]] = None,
-        filename: Optional[str] = None,
-        schedule_cfg: Dict = None,
-        activities: Optional[List[ProfilerActivity]] = None,
+        dirpath: str | Path | None = None,
+        filename: str | None = None,
+        schedule_cfg: dict = None,
+        activities: list[ProfilerActivity] | None = None,
         max_name_column_width: int = 55,
-        sort_by_key: Optional[str] = "cpu_time_total",
+        sort_by_key: str | None = "cpu_time_total",
         *args,
         **kwargs,
     ) -> None:
@@ -57,8 +56,8 @@ class ExtendedPyTorchProfiler(PyTorchProfiler):
         )
         self.max_name_column_width = max_name_column_width
 
-    def _set_activities(self, kwargs) -> List["ProfilerActivity"]:
-        activities: List["ProfilerActivity"] = []
+    def _set_activities(self, kwargs) -> list["ProfilerActivity"]:
+        activities: list["ProfilerActivity"] = []
         if not _KINETO_AVAILABLE:
             return activities
         activities.append(ProfilerActivity.CPU)

@@ -18,7 +18,7 @@ Base adapter class to extend Fine-Tuning Scheduler support of complex or custom 
 """
 from functools import partialmethod
 from pprint import pformat as pfmt
-from typing import Callable, Iterable, List, Optional, Tuple, Dict, Union, Any
+from typing import Callable, Dict, Iterable, Any  # Dict used for runtime isinstance() checks
 import logging
 import os
 
@@ -38,7 +38,7 @@ class StrategyAdapter:
     r"""Base class for all strategy adapters. Implements the default
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` hooks. Can be subclassed to extend
     :class:`~finetuning_scheduler.fts.FinetuningScheduler` support for a complex or custom
-    :external+pl:class:`~lightning.pytorch.strategies.Strategy` via an associated
+    :py:class:`~lightning.pytorch.strategies.Strategy` via an associated
     :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`.
 
     .. tip::
@@ -50,8 +50,8 @@ class StrategyAdapter:
     """
 
     fts_handle: Callback
-    _ft_schedule_module_map: Dict
-    _unscheduled_params: List
+    _ft_schedule_module_map: dict
+    _unscheduled_params: list
 
     def __init__(self) -> None:
         """The default fine-tuning phase execution function is set on
@@ -73,29 +73,28 @@ class StrategyAdapter:
 
     @property
     def pl_module(self) -> LightningModule:
-        """Convenient access to the :external+pl:class:`~lightning.pytorch.core.module.LightningModule` being fine-
-        tuned.
+        """Convenient access to the :py:class:`~lightning.pytorch.core.module.LightningModule` being fine- tuned.
 
         Returns:
-            LightningModule: The user's :external+pl:class:`~lightning.pytorch.core.module.LightningModule`
+            LightningModule: The user's :py:class:`~lightning.pytorch.core.module.LightningModule`
         """
         return self.fts_handle.pl_module
 
     @property
     def trainer(self) -> Trainer:
-        """Convenient access to the :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` instance.
+        """Convenient access to the :py:class:`~lightning.pytorch.trainer.trainer.Trainer` instance.
 
         Returns:
-            Trainer: The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` instance
+            Trainer: The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` instance
         """
         return self.fts_handle.trainer
 
     @property
     def pls_handle(self) -> Strategy:
-        """Convenient access to the current :external+pl:class:`~lightning.pytorch.strategies.Strategy` in use.
+        """Convenient access to the current :py:class:`~lightning.pytorch.strategies.Strategy` in use.
 
         Returns:
-            Strategy: The :external+pl:class:`~lightning.pytorch.strategies.Strategy` in use.
+            Strategy: The :py:class:`~lightning.pytorch.strategies.Strategy` in use.
         """
         assert self.pl_module._trainer is not None
         return self.pl_module._trainer.strategy
@@ -144,56 +143,56 @@ class StrategyAdapter:
         """Hook executed immediately before :class:`~finetuning_scheduler.fts.FinetuningScheduler` restores
         optimizers and schedulers."""
 
-    def fts_optim_transform(self, orig_pl: List, inspect_only: bool = False) -> List:
+    def fts_optim_transform(self, orig_pl: list, inspect_only: bool = False) -> list:
         """A method that can be overridden by a :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` if
-        a :external+pl:class:`~lightning.pytorch.strategies.Strategy` performs parameter transformations that cause
+        a :py:class:`~lightning.pytorch.strategies.Strategy` performs parameter transformations that cause
         the current optimizer's view of parameter names to diverge from the original parameter names. By default,
         no transformation of schedule parameter names is required for optimizer operations.
 
         Args:
             orig_pl (List): The original parameter name list before a given
-                :external+pl:class:`~lightning.pytorch.strategies.Strategy`'s transformation of them.
+                :py:class:`~lightning.pytorch.strategies.Strategy`'s transformation of them.
             inspect_only (bool): Whether to use the specified transform in read-only (i.e. ``inspect_only``) mode,
                 avoiding any persistent state transformation that may accompany normal usage. Typically useful for state
                 inspection and validation contexts.
 
         Returns:
             List: A transformed parameter name list that matches the current optimizer's view of them after a given
-                :external+pl:class:`~lightning.pytorch.strategies.Strategy`'s transformation of the original parameter
+                :py:class:`~lightning.pytorch.strategies.Strategy`'s transformation of the original parameter
                 names.
         """
         return orig_pl
 
-    def before_restore_model(self, checkpoint: Dict[str, Any]) -> Dict[str, Any]:
+    def before_restore_model(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
         """Adapter hook executed before model restore.
 
         Strategy adapters can override this to modify or translate the checkpoint contents (e.g. for state-dict
         translations) before the model's load path is executed.
 
         Args:
-            checkpoint (Dict[str, Any]): The full checkpoint dict loaded by the Trainer.
+            checkpoint (dict[str, Any]): The full checkpoint dict loaded by the Trainer.
 
         Returns:
-            Dict[str, Any]: The checkpoint dictionary to be used for restore.
+            dict[str, Any]: The checkpoint dictionary to be used for restore.
         """
         return checkpoint
 
-    def logical_param_translation(self, param_names: List) -> List:
+    def logical_param_translation(self, param_names: list) -> list:
         """Effectively the reverse transformation of
         :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.fts_optim_transform`. Can be overridden by a
         :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` if a
-        :external+pl:class:`~lightning.pytorch.strategies.Strategy` performs parameter transformations that cause
-        the original user view of parameter names to diverge from the current optimizer's view. By default, no
+        :py:class:`~lightning.pytorch.strategies.Strategy` performs parameter transformations that cause the
+        original user view of parameter names to diverge from the current optimizer's view. By default, no
         transformation of optimizer parameter names is required.
 
         Args:
             param_names (List): A parameter name list from the current optimizer's view of them after a
-                :external+pl:class:`~lightning.pytorch.strategies.Strategy`'s transformation of the original parameter
+                :py:class:`~lightning.pytorch.strategies.Strategy`'s transformation of the original parameter
                 names.
 
         Returns:
             List: The original parameter name list before a given
-                :external+pl:class:`~lightning.pytorch.strategies.Strategy`'s transformation.
+                :py:class:`~lightning.pytorch.strategies.Strategy`'s transformation.
         """
         return param_names
 
@@ -202,7 +201,7 @@ class StrategyAdapter:
         not present in the fine-tuning schedule grouped together into a single unscheduled phase to facilitate the
         relevant disjointness check."""
         assert isinstance(self.fts_handle.ft_schedule, Dict)
-        module_map: Dict = {}
+        module_map: dict = {}
         for depth in self.fts_handle.ft_schedule.keys():  # type: ignore[union-attr]
             phase_params = self.fts_handle.ft_schedule[depth].get("params", [])  # type: ignore[union-attr]
             module_map[depth] = set()
@@ -218,12 +217,12 @@ class StrategyAdapter:
         ]
 
     @staticmethod
-    def _clean_optim_lr_pgs(trainer: Trainer) -> List:
+    def _clean_optim_lr_pgs(trainer: Trainer) -> list:
         """Delete existing param groups from an optimizer that was found to be misaligned with respect to phase 0
         of the specified fine-tuning schedule.
 
         Args:
-            trainer (Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            trainer (Trainer): The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
 
         Returns:
             List: A list of the number of parameter groups pruned for each optimizer (since only a single optimizer is
@@ -243,7 +242,7 @@ class StrategyAdapter:
         """Reconfigure optimizer state to comport with the scheduled phase 0.
 
         Args:
-            trainer (Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            trainer (Trainer): The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
         """
         if self.using_sharded_optimizer:
             # update the parent (sharded) optimizer defaults with the wrapped optimizer defaults to ensure they are
@@ -257,11 +256,11 @@ class StrategyAdapter:
             # repartition the sharded optimizer state
             self.fts_handle._repartition_sharded_optim(trainer.optimizers[0])
 
-    def _reconfigure_lrs_for_phase0(self, trainer: Trainer, orig_num_pgs: List) -> None:
+    def _reconfigure_lrs_for_phase0(self, trainer: Trainer, orig_num_pgs: list) -> None:
         """Reconfigure lr scheduler state to comport with the scheduled phase 0.
 
         Args:
-            trainer (Trainer): The :external+pl:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
+            trainer (Trainer): The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object.
             orig_num_pgs (List): A list of the number of parameter groups pruned for each optimizer (since only a single
                 optimizer is currently supported by FTS, this list will have only a single element in this version.)
         """
@@ -301,8 +300,8 @@ class StrategyAdapter:
 
     @staticmethod
     def base_ft_phase(
-        module: torch.nn.Module, thaw_pl: List, translation_func: Optional[Callable] = None, init_thaw: bool = False) \
-            -> Tuple[List, List]:
+        module: torch.nn.Module, thaw_pl: list, translation_func: Callable | None = None, init_thaw: bool = False) \
+            -> tuple[list, list]:
         """Thaw/unfreeze the provided list of parameters in the provided :class:`~torch.nn.Module`
 
         Args:
@@ -312,7 +311,7 @@ class StrategyAdapter:
             init_thaw: If ``True``, modifies message to user accordingly. Defaults to ``False``.
 
         Returns:
-            Tuple[List, List]: A Tuple of two lists.
+            tuple[List, List]: A Tuple of two lists.
                 1. The list of newly thawed/unfrozen parameters thawed by this function
                 2. A list of all currently thawed/unfrozen parameters in the target :class:`~torch.nn.Module`
         """
@@ -342,10 +341,10 @@ class StrategyAdapter:
     # dispatching pattern for module-specific handling)
     ####################################################################################################################
 
-    def _module_specific_freezing(self, modules: Union[torch.nn.Module, Iterable[torch.nn.Module]]) -> None:
+    def _module_specific_freezing(self, modules: torch.nn.Module | Iterable[torch.nn.Module]) -> None:
         """Orchestrates module-specific freezing behavior. Currently only
-        :external+torch:class:`~torch.nn.modules.batchnorm._BatchNorm` layers require special handling. Running
-        statistics tracking for frozen `BatchNorm` layers is conditionally re-enabled here based on the
+        :py:class:`~torch.nn.modules.batchnorm._BatchNorm` layers require special handling. Running statistics
+        tracking for frozen `BatchNorm` layers is conditionally re-enabled here based on the
         `frozen_bn_track_running_stats` flag.
 
         Args:
@@ -363,8 +362,8 @@ class StrategyAdapter:
                     mod.track_running_stats = True
 
     def _maybe_set_bn_track_running_stats(self, schedule_phase: int) -> None:
-        """Enable `track_running_stats` for :external+torch:class:`~torch.nn.modules.batchnorm._BatchNorm` modules
-        that may require it based on `frozen_bn_track_running_stats` and a given schedule phase.
+        """Enable `track_running_stats` for :py:class:`~torch.nn.modules.batchnorm._BatchNorm` modules that may
+        require it based on `frozen_bn_track_running_stats` and a given schedule phase.
 
         Args:
             schedule_phase (int): The phase of the schedule to evaluate.
@@ -377,15 +376,14 @@ class StrategyAdapter:
             for _, m in target_bn_modules:
                 m.track_running_stats = True
 
-    def _get_target_bn_modules(self, schedule_phase: int) -> List:
-        """Enumerate the :external+torch:class:`~torch.nn.modules.batchnorm._BatchNorm` modules for a given
-        schedule phase.
+    def _get_target_bn_modules(self, schedule_phase: int) -> list:
+        """Enumerate the :py:class:`~torch.nn.modules.batchnorm._BatchNorm` modules for a given schedule phase.
 
         Args:
             schedule_phase (int): The phase of the schedule to evaluate.
 
         Returns:
-            List[Tuple[str, torch.nn.modules.batchnorm._BatchNorm]]: A list of tuples containing the names and instances
+            list[tuple[str, torch.nn.modules.batchnorm._BatchNorm]]: A list of tuples containing the names and instances
               of `BatchNorm` modules associated with a given schedule phase.
         """
         return [(n, m) for n, m in self.pl_module.named_modules() if
@@ -394,7 +392,7 @@ class StrategyAdapter:
 
     fts_optim_inspect = partialmethod(fts_optim_transform, inspect_only=True)
 
-    def get_named_params_for_schedule_validation(self) -> Dict[str, torch.nn.Parameter]:
+    def get_named_params_for_schedule_validation(self) -> dict[str, torch.nn.Parameter]:
         """Get named parameters for schedule validation.
 
         This method can be overridden by :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`
@@ -416,12 +414,12 @@ class StrategyAdapter:
             method to provide custom parameter names.
 
         Returns:
-            Dict[str, torch.nn.Parameter]: A dictionary mapping parameter names to parameter tensors.
+            dict[str, torch.nn.Parameter]: A dictionary mapping parameter names to parameter tensors.
                 By default, returns the standard ``named_parameters()`` dict.
         """
         return dict(self.pl_module.named_parameters())
 
-    def validate_ft_sched(self) -> Tuple[int, int]:
+    def validate_ft_sched(self) -> tuple[int, int]:
         """Validate the fine-tuning schedule configuration.
 
         This method can be overridden by :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`
@@ -443,7 +441,7 @@ class StrategyAdapter:
             :meth:`get_named_params_for_schedule_validation` to provide custom parameter names.
 
         Returns:
-            Tuple[int, int]: A tuple of ints specifying:
+            tuple[int, int]: A tuple of ints specifying:
                 1. The depth of the final scheduled phase
                 2. The maximum epoch watermark explicitly specified in the schedule
         """
@@ -458,7 +456,7 @@ class StrategyAdapter:
         # Delegate to the mixin's implementation by default.
         return ScheduleParsingMixin._validate_ft_sched(cast(ScheduleParsingMixin, self.fts_handle))
 
-    def gen_ft_schedule(self, dump_loc: Union[str, os.PathLike]) -> Optional[os.PathLike]:
+    def gen_ft_schedule(self, dump_loc: str | os.PathLike) -> os.PathLike | None:
         """Generate the default fine-tuning schedule using a naive, 2-parameters per-level heuristic.
 
         This method can be overridden by :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter`
@@ -470,7 +468,7 @@ class StrategyAdapter:
 
         Returns:
             os.PathLike: The path to the generated schedule, by default ``Trainer.log_dir`` and named after the
-            :external+pl:class:`~lightning.pytorch.core.module.LightningModule` subclass in use with the suffix
+            :py:class:`~lightning.pytorch.core.module.LightningModule` subclass in use with the suffix
             ``_ft_schedule.yaml``)
         """
         # Import here to avoid circular dependency

@@ -23,7 +23,7 @@ jobs:
       - name: Install CI dependencies
         uses: ./.github/actions/install-ci-dependencies
         with:
-          python_version: '3.12'
+          python_version: '3.13'
           show_pip_list: 'true'
 
       - name: Install pre-commit

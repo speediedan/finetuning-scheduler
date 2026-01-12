@@ -1,6 +1,6 @@
 import importlib
 import yaml
-from typing import Dict, List, Any, Union
+from typing import Any
 from dataclasses import dataclass, field, asdict, fields
 
 from transformers import PretrainedConfig
@@ -18,13 +18,13 @@ class ExperimentCfg:
 
 @dataclass
 class OptimizerCfg:
-    class_fqn: Union[str, None] = None
-    args: Dict = field(default_factory=dict)
+    class_fqn: str | None = None
+    args: dict = field(default_factory=dict)
 
 @dataclass
 class LRSchedulerCfg:
-    class_fqn: Union[str, None] = None
-    args: Dict = field(default_factory=dict)
+    class_fqn: str | None = None
+    args: dict = field(default_factory=dict)
 
 @dataclass
 class LightningLRSCfg:
@@ -63,7 +63,7 @@ def _is_overridden(dataclass_instance) -> bool:
             break
     return is_overridden
 
-def resolve_funcs(cfg_obj: Any, func_type: str) -> List:
+def resolve_funcs(cfg_obj: Any, func_type: str) -> list:
     resolved_funcs = []
     funcs_to_resolve = getattr(cfg_obj, func_type)
     if not isinstance(funcs_to_resolve, list):
