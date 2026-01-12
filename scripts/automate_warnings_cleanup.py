@@ -836,7 +836,6 @@ class WarningsCleanupOrchestrator:
         logger.info(f"Running: {' '.join(cmd)}")
 
         # Prepare environment with FTS_VENV_BASE
-        import os
         env = os.environ.copy()
         env["FTS_VENV_BASE"] = str(self.config.venv_base)
 
@@ -886,7 +885,6 @@ class WarningsCleanupOrchestrator:
 
         Returns list of (test_name, warning_context) tuples.
         """
-        import re
 
         failed_tests = []
         lines = log_output.split("\n")

@@ -57,10 +57,10 @@ distributed_warnings = [
     # "using the device under current context",  # required w/ PT 2.9 stable  # TODO: Safe to remove
     # "This get_root_mesh API",  # temporarily required with PT 2.10 nightly 20251017  # TODO: Safe to remove
     "Using the current device set by the user",  # required starting with PT 2.7
-        "of Tensor.pin_memory",
-        "Tensor.is_pinned",
-        "when logging on epoch level in distributed",
-        "The number of training batches",
+    "of Tensor.pin_memory",
+    "Tensor.is_pinned",
+    "when logging on epoch level in distributed",
+    "The number of training batches",
     "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch", # TODO: investigate, required w/ PT 20251124
 ]
 
