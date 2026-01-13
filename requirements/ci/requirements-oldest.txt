@@ -177,7 +177,7 @@ huggingface-hub==0.36.0
     #   transformers
 hydra-core==1.2.0
     # via finetuning-scheduler (pyproject.toml)
-identify==2.6.15
+identify==2.6.16
     # via pre-commit
 idna==3.11
     # via
@@ -464,7 +464,7 @@ pre-commit==2.0.0
     # via
     #   finetuning-scheduler (pyproject.toml:dev)
     #   finetuning-scheduler (pyproject.toml:test)
-prometheus-client==0.23.1
+prometheus-client==0.24.0
     # via notebook
 prompt-toolkit==3.0.52
     # via ipython

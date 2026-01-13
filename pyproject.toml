@@ -48,7 +48,7 @@ classifiers = [
 [project.optional-dependencies]
 # CLI tools for LightningCLI integration
 cli = [
-    "jsonargparse[signatures]>=4.27.7,<4.42.0",
+    "jsonargparse[signatures]>=4.27.7",
     "omegaconf>=2.2.3",
     "hydra-core>=1.2.0",
 ]
@@ -56,7 +56,7 @@ cli = [
 extra = [
     "rich>=12.3.0",
     # Include CLI deps
-    "jsonargparse[signatures]>=4.27.7,<4.42.0",
+    "jsonargparse[signatures]>=4.27.7",
     "omegaconf>=2.2.3",
     "hydra-core>=1.2.0",
 ]
@@ -72,7 +72,7 @@ examples = [
     "psutil>=5.9.0",
     "pip>=21.0.0",  # bc for torch collect_env until it supports uv
     # Include CLI deps
-    "jsonargparse[signatures]>=4.27.7,<4.42.0",
+    "jsonargparse[signatures]>=4.27.7",
     "omegaconf>=2.2.3",
     "hydra-core>=1.2.0",
 ]
@@ -97,7 +97,7 @@ all = [
     # extra
     "rich>=12.3.0",
     # cli
-    "jsonargparse[signatures]>=4.27.7,<4.42.0",
+    "jsonargparse[signatures]>=4.27.7",
     "omegaconf>=2.2.3",
     "hydra-core>=1.2.0",
     # examples

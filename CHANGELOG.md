@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ## [2.10.0] - 2025-XX-XX
 
+### Added
+
+- Add CI testing for Python `3.13` and update CI validation to include Python `3.13`. [#28](https://github.com/speediedan/finetuning-scheduler/pull/28/)
+- Entry-point plugin discovery for strategy adapters and a new `StrategyAdapter.before_restore_model()` hook — allows installing/registering adapter plugins via standard Python entry points (short-name aliases supported); includes tests and docs. [#26](https://github.com/speediedan/finetuning-scheduler/pull/26/)
+- Add `requirements/utils/prune_torch_deps.py` utility to prune torch-only transitive dependencies when generating CI lockfiles and simplify lockfile pruning. [#23](https://github.com/speediedan/finetuning-scheduler/pull/23/)
+
+### Fixed
+
+- Fix Pyright issues surfaced during the type-hints migration and address related CI/test issues. [#26](https://github.com/speediedan/finetuning-scheduler/pull/26/)
+- Fix edge-case LR lambda handling surfaced with PyTorch 2.10. [c043815](https://github.com/speediedan/finetuning-scheduler/commit/c043815)
+- Bump citation metadata and fix Codecov flag syntax. [a26d026](https://github.com/speediedan/finetuning-scheduler/commit/a26d026)
+
+### Changed
+
+- Modernized type hints for Python `3.10+` and completed related Pyright migration steps; automated test warnings cleanup and improved CI/build scripts and docs requirements. [#28](https://github.com/speediedan/finetuning-scheduler/pull/28/)
+- Migrate CI and build infrastructure to use `uv` (locked requirements, `requirements/ci/overrides.txt` for Lightning commit pins, `manage_standalone_processes.sh` process wrapper, improved torch nightly workflow). [#22](https://github.com/speediedan/finetuning-scheduler/pull/22/)
+- Update import semantics and adapter configuration to accept both `module.Class` and `module:Class` forms and support plural `custom_strategy_adapters` mappings. [#26](https://github.com/speediedan/finetuning-scheduler/pull/26/)
+- Simplify and secure CI lockfile generation by pruning torch-only dependencies and documenting security rationale. [#23](https://github.com/speediedan/finetuning-scheduler/pull/23/)
+- Update minimum Python for builds where applicable: drop support for Python `3.9` (minimum Python `3.10`) and add validation for `3.13`. [#22](https://github.com/speediedan/finetuning-scheduler/pull/22/) [#28](https://github.com/speediedan/finetuning-scheduler/pull/28/)
+
+### Deprecated
+
+- Direct calls to `ScheduleImplMixin.gen_ft_schedule()` are deprecated in favor of `StrategyAdapter.gen_ft_schedule()` instance overrides to allow strategy-specific schedule generation and customization; direct calls will be removed in a future release (2.12.0). (see `src/finetuning_scheduler/fts_supporters.py`)
+
+
 ## [2.9.0] - 2025-10-20
 
 ### Added
