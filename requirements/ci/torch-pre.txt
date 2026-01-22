@@ -8,9 +8,9 @@
 #   Line 3: channel type: "test" or "nightly"
 #
 # Example for test/RC channel (currently enabled):
-2.10.0
-cu128
-test
+# 2.10.0
+# cu128
+# test
 
 # Example for nightly (commented out):
 # 2.10.0.dev20251124

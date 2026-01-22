@@ -118,49 +118,50 @@ def parse_lockfile(content: str) -> dict[str, dict]:
     return packages
 
 
-def find_torch_only_packages(packages: dict[str, dict]) -> set[str]:
+def find_torch_only_packages(packages: dict[str, dict], already_pruned: set[str]) -> set[str]:
     """Find packages that are ONLY dependencies of torch (and its exclusive deps).
 
-    Uses iterative approach to handle transitive dependencies:
-    - First pass: find packages where only "torch" is in dependents
-    - Subsequent passes: find packages where only already-pruned packages are dependents
+    A dependent is considered "prunable" if:
+    - It is "torch" (the root we're pruning from)
+    - It has already been pruned in a previous call to this function
+
+    IMPORTANT: We do NOT treat "non-existent in packages dict" as prunable, because
+    when torch is excluded via --no-emit-package, the dependents still list "torch"
+    in comments but torch isn't in the packages dict. If we treated non-existent
+    packages as prunable, we'd incorrectly prune EVERYTHING that depends on torch.
 
     Args:
         packages: Dict from parse_lockfile()
+        already_pruned: Set of packages already pruned in previous iterations
 
     Returns:
-        Set of package names to prune
+        Set of package names to prune in this iteration
     """
-    pruned: set[str] = set()
-    max_iterations = 10  # Safety limit
+    newly_pruned: set[str] = set()
 
-    for _ in range(max_iterations):
-        newly_pruned = set()
+    # Normalize already_pruned for comparison (dependents use underscores)
+    normalized_pruned = {pkg.replace("-", "_") for pkg in already_pruned}
 
-        for pkg_name, pkg_info in packages.items():
-            if pkg_name in pruned:
-                continue
+    for pkg_name, pkg_info in packages.items():
+        if pkg_name in already_pruned:
+            continue
 
-            dependents = pkg_info["dependents"]
-            if not dependents:
-                continue
+        dependents = pkg_info["dependents"]
+        if not dependents:
+            continue
 
-            # Check if all dependents are either "torch" or already pruned
-            # For first-level deps: package is only required by "torch"
-            # For transitive deps: package is only required by already-pruned packages
-            all_dependents_prunable = all(
-                dep == "torch" or dep.replace("-", "_") in pruned for dep in dependents
-            )
+        # Check if ALL dependents are either "torch" or already pruned
+        # A package is only pruned if it has no remaining non-torch dependents
+        # Note: dependents are already normalized (underscores) from parse_lockfile
+        all_dependents_prunable = all(
+            dep == "torch" or dep in normalized_pruned
+            for dep in dependents
+        )
 
-            if all_dependents_prunable:
-                newly_pruned.add(pkg_name)
+        if all_dependents_prunable:
+            newly_pruned.add(pkg_name)
 
-        if not newly_pruned:
-            break
-
-        pruned.update(newly_pruned)
-
-    return pruned
+    return newly_pruned
 
 
 def prune_packages(content: str, packages_to_prune: set[str]) -> str:
@@ -201,6 +202,9 @@ def prune_packages(content: str, packages_to_prune: set[str]) -> str:
 def prune_torch_only_deps(lockfile_path: str) -> list[str]:
     """Main function to prune torch-only dependencies from a lockfile.
 
+    Iterates until no more packages can be pruned, since transitive dependencies
+    may only become prunable after their dependents are removed.
+
     Args:
         lockfile_path: Path to the lockfile to process
 
@@ -208,22 +212,28 @@ def prune_torch_only_deps(lockfile_path: str) -> list[str]:
         List of pruned package names
     """
     path = Path(lockfile_path)
-    content = path.read_text()
+    all_pruned: set[str] = set()
+    max_iterations = 10  # Safety limit
 
-    # Parse the lockfile
-    packages = parse_lockfile(content)
+    for _ in range(max_iterations):
+        content = path.read_text()
 
-    # Find packages to prune
-    to_prune = find_torch_only_packages(packages)
+        # Parse the lockfile fresh each iteration
+        packages = parse_lockfile(content)
 
-    if not to_prune:
-        return []
+        # Find packages to prune this iteration, passing already pruned packages
+        to_prune = find_torch_only_packages(packages, all_pruned)
 
-    # Prune and write back
-    new_content = prune_packages(content, to_prune)
-    path.write_text(new_content)
+        if not to_prune:
+            break
 
-    return sorted(to_prune)
+        # Prune and write back
+        new_content = prune_packages(content, to_prune)
+        path.write_text(new_content)
+
+        all_pruned.update(to_prune)
+
+    return sorted(all_pruned)
 
 
 def main() -> int:

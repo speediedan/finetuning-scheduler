@@ -18,6 +18,7 @@
 # - Without torch-pre.txt:
 #   - Uses stable torch from PyPI
 #   - CI uses --torch-backend=cpu for CPU variant
+#   - Post-processing prunes torch-only dependencies (CUDA packages, etc.) to save cache space
 set -eo pipefail
 
 # Unset UV_OVERRIDE to ensure clean environment for lockfile generation
@@ -28,7 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CI_DIR="${REPO_ROOT}/requirements/ci"
 TORCH_PRE_FILE="${CI_DIR}/torch-pre.txt"
-TORCH_OVERRIDE_FILE="${CI_DIR}/torch_override.txt"
+TORCH_OVERRIDE_FILE="${CI_DIR}/torch-override.txt"
 
 # Ensure output directory exists
 mkdir -p "${CI_DIR}"
@@ -79,15 +80,17 @@ else
 fi
 
 # Prune packages that are ONLY dependencies of torch from the lockfile.
-# This reduces the dependency confusion attack surface when using unsafe-best-match
-# by removing any packages that could potentially be resolved from the nightly index only.
+# This serves two purposes:
+# 1. Security: Reduces dependency confusion attack surface when using unsafe-best-match
+#    by removing packages that could potentially be resolved from the nightly index only
+# 2. Efficiency: Saves cache space on CPU-only runners by removing CUDA packages (nvidia, etc.)
 # See prune_torch_deps.py for detailed documentation and implementation.
 prune_torch_only_deps() {
     local lockfile=$1
     python "${SCRIPT_DIR}/prune_torch_deps.py" "${lockfile}"
 }
 
-# Generate/update torch_override.txt if prerelease is configured, remove if not
+# Generate/update torch-override.txt if prerelease is configured, remove if not
 generate_torch_override() {
     if [[ -n "${TORCH_PRE_VERSION}" ]]; then
         cat > "${TORCH_OVERRIDE_FILE}" << EOF
@@ -193,7 +196,13 @@ generate_lockfile() {
         echo "✓ Generated ${output_file} (torch ${TORCH_PRE_VERSION} excluded, torch-only deps pruned)"
     else
         "${compile_cmd[@]}"
-        echo "✓ Generated ${output_file}"
+
+        # Prune torch-only dependencies (CUDA packages, etc.) to save cache space on CPU-only runners
+        # This is important even for stable torch because the lock file includes CUDA dependencies
+        # that won't be needed on CPU-only runners
+        prune_torch_only_deps "${output_file}"
+
+        echo "✓ Generated ${output_file} (torch-only deps pruned for CPU efficiency)"
     fi
 
     # Return to original directory
@@ -236,7 +245,7 @@ if [[ -n "${TORCH_PRE_VERSION}" ]]; then
     echo "   requirements.txt excludes torch (dependencies resolved against ${TORCH_PRE_CHANNEL})"
     echo ""
     echo "Generated override file:"
-    echo "  - ${CI_DIR}/torch_override.txt (for manual prerelease installation reference)"
+    echo "  - ${CI_DIR}/torch-override.txt (for manual prerelease installation reference)"
     echo ""
     echo "Manual installation with prerelease (two-step approach):"
     echo "  1. uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_PRE_CHANNEL}/cu128"

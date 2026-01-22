@@ -6,7 +6,7 @@ aiohttp==3.13.3
     # via fsspec
 aiosignal==1.4.0
     # via aiohttp
-alembic==1.18.0
+alembic==1.18.1
     # via mlflow
 annotated-doc==0.0.4
     # via fastapi
@@ -90,7 +90,7 @@ cryptography==46.0.3 ; sys_platform == 'linux'
     # via secretstorage
 cycler==0.12.1
     # via matplotlib
-databricks-sdk==0.77.0
+databricks-sdk==0.80.0
     # via mlflow-skinny
 datasets==4.0.0
     # via
@@ -215,7 +215,7 @@ itsdangerous==2.2.0
     # via flask
 jaraco-classes==3.4.0
     # via keyring
-jaraco-context==6.0.2
+jaraco-context==6.1.0
     # via keyring
 jaraco-functools==4.4.0
     # via keyring
@@ -300,8 +300,6 @@ more-itertools==10.8.0
     # via
     #   jaraco-classes
     #   jaraco-functools
-mpmath==1.3.0
-    # via sympy
 multidict==6.7.0
     # via
     #   aiohttp
@@ -333,10 +331,6 @@ nest-asyncio==1.6.0
     # via
     #   jupyter-client
     #   nbclient
-networkx==3.4.2 ; python_full_version < '3.11'
-    # via torch
-networkx==3.6.1 ; python_full_version >= '3.11'
-    # via torch
 nh3==0.3.2
     # via readme-renderer
 nodeenv==1.10.0
@@ -373,41 +367,6 @@ numpy==2.4.1 ; python_full_version >= '3.11'
     #   tensorboardx
     #   torchmetrics
     #   transformers
-nvidia-cublas-cu12==12.4.5.8 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via
-    #   nvidia-cudnn-cu12
-    #   nvidia-cusolver-cu12
-    #   torch
-nvidia-cuda-cupti-cu12==12.4.127 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via torch
-nvidia-cuda-nvrtc-cu12==12.4.127 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via torch
-nvidia-cuda-runtime-cu12==12.4.127 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via torch
-nvidia-cudnn-cu12==9.1.0.70 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via torch
-nvidia-cufft-cu12==11.2.1.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via torch
-nvidia-curand-cu12==10.3.5.147 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via torch
-nvidia-cusolver-cu12==11.6.1.9 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via torch
-nvidia-cusparse-cu12==12.3.1.170 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via
-    #   nvidia-cusolver-cu12
-    #   torch
-nvidia-cusparselt-cu12==0.6.2 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via torch
-nvidia-nccl-cu12==2.21.5 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via torch
-nvidia-nvjitlink-cu12==12.4.127 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via
-    #   nvidia-cufft-cu12
-    #   nvidia-cusolver-cu12
-    #   nvidia-cusparse-cu12
-    #   torch
-nvidia-nvtx-cu12==12.4.127 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via torch
 omegaconf==2.2.3
     # via
     #   finetuning-scheduler (pyproject.toml)
@@ -464,7 +423,7 @@ pre-commit==2.0.0
     # via
     #   finetuning-scheduler (pyproject.toml:dev)
     #   finetuning-scheduler (pyproject.toml:test)
-prometheus-client==0.24.0
+prometheus-client==0.24.1
     # via notebook
 prompt-toolkit==3.0.52
     # via ipython
@@ -489,13 +448,13 @@ pyarrow==20.0.0
     # via
     #   datasets
     #   mlflow
-pyasn1==0.6.1
+pyasn1==0.6.2
     # via
     #   pyasn1-modules
     #   rsa
 pyasn1-modules==0.4.2
     # via google-auth
-pycparser==2.23 ; implementation_name != 'PyPy'
+pycparser==3.0 ; implementation_name != 'PyPy'
     # via cffi
 pydantic==2.12.5
     # via
@@ -509,7 +468,7 @@ pygments==2.19.2
     #   nbconvert
     #   readme-renderer
     #   rich
-pyparsing==3.3.1
+pyparsing==3.3.2
     # via matplotlib
 pyright==1.1.390
     # via
@@ -564,7 +523,7 @@ pyzmq==27.1.0
     #   notebook
 readme-renderer==44.0
     # via twine
-regex==2025.11.3
+regex==2026.1.15
     # via transformers
 requests==2.32.5
     # via
@@ -602,11 +561,11 @@ scipy==1.17.0 ; python_full_version >= '3.11'
     #   scikit-learn
 secretstorage==3.5.0 ; sys_platform == 'linux'
     # via keyring
-send2trash==2.0.0
+send2trash==2.1.0
     # via notebook
 sentencepiece==0.2.0
     # via finetuning-scheduler (pyproject.toml)
-setuptools==80.9.0
+setuptools==80.10.1
     # via
     #   ipython
     #   lightning-utilities
@@ -619,7 +578,7 @@ six==1.17.0
     #   python-dateutil
 smmap==5.0.2
     # via gitdb
-sqlalchemy==2.0.45
+sqlalchemy==2.0.46
     # via
     #   alembic
     #   mlflow
@@ -627,8 +586,6 @@ sqlparse==0.5.5
     # via mlflow-skinny
 starlette==0.50.0
     # via fastapi
-sympy==1.13.1
-    # via torch
 tabulate==0.8.9
     # via finetuning-scheduler (pyproject.toml)
 tensorboardx==2.6.1
@@ -689,8 +646,6 @@ traitlets==5.0.0
     #   notebook
 transformers==4.26.0
     # via finetuning-scheduler (pyproject.toml)
-triton==3.2.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
-    # via torch
 twine==3.2.0
     # via
     #   finetuning-scheduler (pyproject.toml:dev)
@@ -740,7 +695,7 @@ virtualenv==20.36.1
     # via pre-commit
 waitress==3.0.2 ; sys_platform == 'win32'
     # via mlflow
-wcwidth==0.2.14
+wcwidth==0.3.0
     # via prompt-toolkit
 webencodings==0.5.1
     # via bleach

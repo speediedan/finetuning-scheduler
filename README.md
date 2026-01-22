@@ -118,7 +118,7 @@ uv pip install -e ".[all]"
 ```
 
 The nightly version is specified in `requirements/ci/torch-nightly.txt` and documented in
-`requirements/ci/torch_override.txt` for reference.
+`requirements/ci/torch-override.txt` for reference.
 
 #### Install a specific FTS version from source using the standalone `pytorch-lighting` package:
 

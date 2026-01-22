@@ -99,5 +99,5 @@ When ``torch-nightly.txt`` is configured, use a two-step installation approach:
     uv pip install -e ".[all]"
 
 The nightly version is specified in ``requirements/ci/torch-nightly.txt`` and documented in
-``requirements/ci/torch_override.txt`` for reference. The specific Lightning commit is defined in
+``requirements/ci/torch-override.txt`` for reference. The specific Lightning commit is defined in
 ``requirements/ci/overrides.txt``.

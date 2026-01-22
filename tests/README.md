@@ -55,7 +55,7 @@ pytest -xvs .
 ```
 
 The nightly version is specified in `requirements/ci/torch-nightly.txt` and documented in
-`requirements/ci/torch_override.txt` for reference.
+`requirements/ci/torch-override.txt` for reference.
 
 ## Testing Infrastructure
 
