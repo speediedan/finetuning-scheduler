@@ -15,6 +15,7 @@ unset oldest
 unset no_special
 unset run_all_and_examples
 unset allow_failures
+unset torch_backend
 declare -a from_source_specs=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +27,7 @@ Usage: $0
    [ --repo-home input]
    [ --target-env-name input ]
    [ --oldest ]                     # Use oldest CI requirements (Python 3.10, requirements-oldest.txt)
+   [ --torch-backend input ]  (cpu, auto, cu128, etc. default: auto)
    [ --no-rebuild-base ]
    [ --no-special ]                 # Skip special tests (standalone/experimental), run only main test suite
    [ --run-all-and-examples ]       # Run all FTS example tests (both standalone and non-standalone)
@@ -56,7 +58,7 @@ EOF
 exit 1
 }
 
-args=$(getopt -o '' --long repo-home:,repo_home:,target-env-name:,target_env_name:,oldest,no-rebuild-base,no_rebuild_base,no-special,run-all-and-examples,allow-failures,include-experimental:,include_experimental,uv-install-flags:,uv_install_flags:,no-commit-pin,no_commit_pin,venv-dir:,from-source:,dry-run,help -- "$@")
+args=$(getopt -o '' --long repo-home:,repo_home:,target-env-name:,target_env_name:,oldest,torch-backend:,no-rebuild-base,no_rebuild_base,no-special,run-all-and-examples,allow-failures,include-experimental:,include_experimental,uv-install-flags:,uv_install_flags:,no-commit-pin,no_commit_pin,venv-dir:,from-source:,dry-run,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -68,6 +70,7 @@ do
     --repo-home|--repo_home)  repo_home=$2    ; shift 2  ;;
     --target-env-name|--target_env_name)  target_env_name=$2  ; shift 2 ;;
     --oldest)   oldest=1 ; shift  ;;
+    --torch-backend)   torch_backend=$2   ; shift 2 ;;
     --no-rebuild-base|--no_rebuild_base)   no_rebuild_base=1 ; shift  ;;
     --no-special)   no_special=1 ; shift  ;;
     --run-all-and-examples)   run_all_and_examples=1 ; shift  ;;
@@ -143,6 +146,11 @@ env_rebuild(){
     # Add venv-dir flag if specified
     if [[ -n "${venv_dir}" ]]; then
         cmd_args+=("--venv-dir=${venv_dir}")
+    fi
+
+    # Add torch-backend flag if specified
+    if [[ -n "${torch_backend}" ]]; then
+        cmd_args+=("--torch-backend=${torch_backend}")
     fi
 
     # Add from-source parameters

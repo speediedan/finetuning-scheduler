@@ -21,6 +21,7 @@ unset target_env_name
 unset uv_install_flags
 unset no_commit_pin
 unset venv_dir
+unset torch_backend
 unset oldest
 declare -a from_source_specs=()
 
@@ -37,6 +38,7 @@ Usage: $0
    [ --uv_install_flags "flags" ]
    [ --no_commit_pin ]
    [ --venv-dir input ]
+   [ --torch-backend input ]  (cpu, cu128, auto; default: cu128 for CUDA 12.8)
    [ --from-source "package:path[:extras][:ENV_VAR=value]" ]
    [ --help ]
    Examples:
@@ -63,7 +65,7 @@ EOF
 exit 1
 }
 
-args=$(getopt -o '' --long repo_home:,target_env_name:,oldest,uv_install_flags:,no_commit_pin,venv-dir:,from-source:,help -- "$@")
+args=$(getopt -o '' --long repo_home:,target_env_name:,oldest,uv_install_flags:,no_commit_pin,venv-dir:,torch-backend:,from-source:,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -78,6 +80,7 @@ do
     --uv_install_flags)   uv_install_flags=$2 ; shift 2 ;;
     --no_commit_pin)   no_commit_pin=1 ; shift  ;;
     --venv-dir)   venv_dir=$2 ; shift 2 ;;
+    --torch-backend)   torch_backend=$2   ; shift 2 ;;
     --from-source)
         # Accumulate multiple --from-source flags into array, join with semicolon
         from_source_specs+=("$2")
@@ -97,6 +100,9 @@ uv_install_flags=${uv_install_flags:-""}
 # Determine venv path using infra_utils function
 venv_path=$(determine_venv_path "${venv_dir}" "${target_env_name}")
 echo "Target venv path: ${venv_path}"
+
+# Set default torch backend if not specified (auto = auto-detect CUDA/CPU)
+torch_backend=${torch_backend:-"cu128"}
 
 # Join from-source specs with semicolons
 from_source_spec=""
@@ -189,9 +195,9 @@ fts_install(){
         # requirements.txt already has torch filtered during lock generation
         echo "Using requirements without torch (pre-installed ${TORCH_PRE_CHANNEL})"
     else
-        # Use auto torch backend for GPU detection
-        torch_backend_flag="--torch-backend=auto"
-        echo "Using torch backend: auto (GPU auto-detection)"
+        # Install stable torch - use --torch-backend for automatic backend selection
+        echo "Installing stable torch with --torch-backend=${torch_backend}..."
+        uv pip install ${uv_install_flags} torch --torch-backend=${torch_backend}
     fi
 
     uv pip install ${uv_install_flags} -e . -r "${req_file}" ${torch_backend_flag}

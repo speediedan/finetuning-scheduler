@@ -74,18 +74,18 @@ RUN \
     # set particular PyTorch version by default
     if [[ "${CUST_BUILD}" -eq 0 ]]; then \
         CUDA_VERSION_MM=${CUDA_VERSION%.*}; \
-        uv pip install torch --prerelease=allow \
-        --find-links="https://download.pytorch.org/whl/cu${CUDA_VERSION_MM//'.'/''}/torch_stable.html" \
-        --find-links="https://download.pytorch.org/whl/test/cu${CUDA_VERSION_MM//'.'/''}/torch" \
-        --find-links="https://download.pytorch.org/whl/test/cu${CUDA_VERSION_MM//'.'/''}/pytorch-triton"; \
+        uv pip install torch --index-url https://download.pytorch.org/whl/cu${CUDA_VERSION_MM//'.'/''}; \
+        # --find-links="https://download.pytorch.org/whl/cu${CUDA_VERSION_MM//'.'/''}/torch_stable.html" \
+        # --find-links="https://download.pytorch.org/whl/test/cu${CUDA_VERSION_MM//'.'/''}/torch" \
+        # --find-links="https://download.pytorch.org/whl/test/cu${CUDA_VERSION_MM//'.'/''}/pytorch-triton"; \
     else \
         # or target a specific cuda build, by specifying a particular index url w/...
         # ... default channel
-        # uv pip install torch --torch-backend=cu128; \
+        uv pip install torch --torch-backend=cu128; \
         # ... pytorch nightly dev version
         # uv pip install --prerelease=allow torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128; \
         # ... test channel
-        uv pip install --prerelease=allow torch==2.10.0 --index-url https://download.pytorch.org/whl/test/cu128; \
+        # uv pip install --prerelease=allow torch==2.10.0 --index-url https://download.pytorch.org/whl/test/cu128; \
     fi && \
     # We avoid installing Lightning and other dependencies here as they are usually upgraded anyway later in
     # CI but we may re-enable in the future.

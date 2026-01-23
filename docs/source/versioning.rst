@@ -59,7 +59,7 @@ The following table shows the compatibility between Fine-Tuning Scheduler, PyTor
    * - 2.10.x
      - 2.6.0
      - 2.10.0
-     - >= 2.5.0
+     - >= 2.6.0
    * - 2.9.x
      - 2.5.0
      - 2.9.0
