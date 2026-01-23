@@ -3,15 +3,15 @@
 # Utility script to build FTS environments using uv
 # Usage examples:
 # build latest (uses FTS_VENV_BASE or default ~/.venvs):
-#   ./build_fts_env.sh --repo_home=~/repos/finetuning-scheduler --target_env_name=fts_latest
+#   ./build_fts_env.sh --repo-home=~/repos/finetuning-scheduler --target-env-name=fts_latest
 # build latest with explicit venv directory (recommended for hardlink performance):
-#   ./build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --venv-dir=/mnt/cache/${USER}/.venvs
+#   ./build_fts_env.sh --repo-home=${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --venv-dir=/mnt/cache/${USER}/.venvs
 # build oldest (CI oldest build simulation with Python 3.10 and oldest deps):
-#   ./build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_oldest --oldest
+#   ./build_fts_env.sh --repo-home=${HOME}/repos/finetuning-scheduler --target-env-name=fts_oldest --oldest
 # build release:
-#   ./build_fts_env.sh --repo_home=${HOME}/repos/fts-release --target_env_name=fts_release
+#   ./build_fts_env.sh --repo-home=${HOME}/repos/fts-release --target-env-name=fts_release
 # build latest from a package from source:
-#   ./build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --from-source="lightning:${HOME}/repos/lightning:pytorch"
+#   ./build_fts_env.sh --repo-home=${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --from-source="lightning:${HOME}/repos/lightning:pytorch"
 #
 # To configure PyTorch version (nightly/test/stable), edit requirements/ci/torch-pre.txt
 set -eo pipefail
@@ -21,6 +21,7 @@ unset target_env_name
 unset uv_install_flags
 unset no_commit_pin
 unset venv_dir
+unset torch_backend
 unset oldest
 declare -a from_source_specs=()
 
@@ -31,29 +32,30 @@ source "${SCRIPT_DIR}/infra_utils.sh"
 usage(){
 >&2 cat << EOF
 Usage: $0
-   [ --repo_home input]
-   [ --target_env_name input ]
+   [ --repo-home input]
+   [ --target-env-name input ]
    [ --oldest ]                # Use oldest CI requirements (Python 3.10, requirements-oldest.txt)
-   [ --uv_install_flags "flags" ]
-   [ --no_commit_pin ]
+   [ --uv-install-flags "flags" ]
+   [ --no-commit-pin ]
    [ --venv-dir input ]
+   [ --torch-backend input ]  (cpu, cu128, auto; default: cu128 for CUDA 12.8)
    [ --from-source "package:path[:extras][:ENV_VAR=value]" ]
    [ --help ]
    Examples:
     # build latest (uses FTS_VENV_BASE or default ~/.venvs):
-    #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest
+    #   ./build_fts_env.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest
     # build latest with explicit venv directory (recommended for hardlink performance):
-    #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --venv-dir=/mnt/cache/\${USER}/.venvs
+    #   ./build_fts_env.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --venv-dir=/mnt/cache/\${USER}/.venvs
     # build oldest (CI oldest build simulation):
-    #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_oldest --oldest --venv-dir=/mnt/cache/\${USER}/.venvs
+    #   ./build_fts_env.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_oldest --oldest --venv-dir=/mnt/cache/\${USER}/.venvs
     # build release:
-    #   ./build_fts_env.sh --repo_home=\${HOME}/repos/fts-release --target_env_name=fts_release
+    #   ./build_fts_env.sh --repo-home=\${HOME}/repos/fts-release --target-env-name=fts_release
     # build latest with no cache:
-    #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --uv_install_flags="--no-cache"
+    #   ./build_fts_env.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --uv-install-flags="--no-cache"
     # build latest without using CI commit pinning:
-    #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --no_commit_pin
+    #   ./build_fts_env.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --no-commit-pin
     # build latest from Lightning source:
-    #   ./build_fts_env.sh --repo_home=\${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --from-source="lightning:\${HOME}/repos/lightning:pytorch"
+    #   ./build_fts_env.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --from-source="lightning:\${HOME}/repos/lightning:pytorch"
 
     # To configure PyTorch version, edit requirements/ci/torch-pre.txt:
     #   Line 1: torch version (e.g., 2.10.0 for test, 2.10.0.dev20251124 for nightly)
@@ -63,7 +65,7 @@ EOF
 exit 1
 }
 
-args=$(getopt -o '' --long repo_home:,target_env_name:,oldest,uv_install_flags:,no_commit_pin,venv-dir:,from-source:,help -- "$@")
+args=$(getopt -o '' --long repo-home:,repo_home:,target-env-name:,target_env_name:,oldest,uv-install-flags:,uv_install_flags:,no-commit-pin,no_commit_pin,venv-dir:,torch-backend:,from-source:,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -72,12 +74,13 @@ eval set -- ${args}
 while :
 do
   case $1 in
-    --repo_home)  repo_home=$2    ; shift 2  ;;
-    --target_env_name)  target_env_name=$2  ; shift 2 ;;
+    --repo-home|--repo_home)  repo_home=$2    ; shift 2  ;;
+    --target-env-name|--target_env_name)  target_env_name=$2  ; shift 2 ;;
     --oldest)   oldest=1 ; shift  ;;
-    --uv_install_flags)   uv_install_flags=$2 ; shift 2 ;;
-    --no_commit_pin)   no_commit_pin=1 ; shift  ;;
+    --uv-install-flags|--uv_install_flags)   uv_install_flags=$2 ; shift 2 ;;
+    --no-commit-pin|--no_commit_pin)   no_commit_pin=1 ; shift  ;;
     --venv-dir)   venv_dir=$2 ; shift 2 ;;
+    --torch-backend)   torch_backend=$2   ; shift 2 ;;
     --from-source)
         # Accumulate multiple --from-source flags into array, join with semicolon
         from_source_specs+=("$2")
@@ -97,6 +100,9 @@ uv_install_flags=${uv_install_flags:-""}
 # Determine venv path using infra_utils function
 venv_path=$(determine_venv_path "${venv_dir}" "${target_env_name}")
 echo "Target venv path: ${venv_path}"
+
+# Set default torch backend if not specified (auto = auto-detect CUDA/CPU)
+torch_backend=${torch_backend:-"cu128"}
 
 # Join from-source specs with semicolons
 from_source_spec=""
@@ -161,7 +167,7 @@ fts_install(){
     unset PACKAGE_NAME
     cd ${repo_home}
 
-    # Set UV_OVERRIDE for Lightning commit pin, unless --no_commit_pin is specified
+    # Set UV_OVERRIDE for Lightning commit pin, unless --no-commit-pin is specified
     local override_file="${repo_home}/requirements/ci/overrides.txt"
     if [[ -z ${no_commit_pin} ]]; then
         export UV_OVERRIDE="${override_file}"
@@ -189,9 +195,9 @@ fts_install(){
         # requirements.txt already has torch filtered during lock generation
         echo "Using requirements without torch (pre-installed ${TORCH_PRE_CHANNEL})"
     else
-        # Use auto torch backend for GPU detection
-        torch_backend_flag="--torch-backend=auto"
-        echo "Using torch backend: auto (GPU auto-detection)"
+        # Install stable torch - use --torch-backend for automatic backend selection
+        echo "Installing stable torch with --torch-backend=${torch_backend}..."
+        uv pip install ${uv_install_flags} torch --torch-backend=${torch_backend}
     fi
 
     uv pip install ${uv_install_flags} -e . -r "${req_file}" ${torch_backend_flag}

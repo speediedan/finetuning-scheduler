@@ -243,8 +243,8 @@ class WarningsCleanupOrchestrator:
             logger.info(f"Building environment: {env_name}")
             cmd = [
                 str(build_script),
-                f"--repo_home={self.config.repo_home}",
-                f"--target_env_name={env_name}",
+                f"--repo-home={self.config.repo_home}",
+                f"--target-env-name={env_name}",
                 f"--venv-dir={self.config.venv_base}",
                 *extra_args,
             ]

@@ -80,8 +80,15 @@ The `build_fts_env.sh` script automatically handles Lightning commit pinning and
 git clone https://github.com/speediedan/finetuning-scheduler.git
 cd finetuning-scheduler
 
-# Standard development build (handles Lightning pin automatically and builds with PyTorch nightly (if configured in requirements/ci/torch-nightly.txt)
-./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest --venv-dir=/path/to/.venvs
+# Standard development build (handles Lightning pin automatically and installs an optional PyTorch prerelease if configured in `requirements/ci/torch-pre.txt`)
+./scripts/build_fts_env.sh --repo-home=${PWD} --target-env-name=fts_latest --venv-dir=/path/to/.venvs
+
+# To configure PyTorch prerelease used by the build scripts, edit `requirements/ci/torch-pre.txt`:
+#   Line 1: torch version (e.g., 2.10.0 for test/RC or 2.10.0.dev20251203 for nightly)
+#   Line 2: CUDA target (e.g., cu128) — CI uses cpu
+#   Line 3: channel type: "test" or "nightly"
+
+# Note: `manage_standalone_processes.sh` is an optional wrapper to run long-running coverage/build scripts with checks for other concurrent conflicting processes, and run options (--use-nohup etc) — you can also run `build_fts_env.sh` and `gen_fts_coverage.sh` directly.
 
 # Activate (use your venv base path)
 export FTS_VENV_BASE=~/.venvs  # or /mnt/cache/${USER}/.venvs
@@ -100,25 +107,24 @@ export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
 uv pip install -e ".[all]"
 ```
 
-#### Manual installation with PyTorch nightly:
+## Manual installation with a PyTorch prerelease (nightly/test)
 
-When `torch-nightly.txt` is configured, use a two-step installation approach:
+When using a PyTorch prerelease (nightly or test), use a two-step installation approach:
 
 ```bash
 git clone https://github.com/speediedan/finetuning-scheduler.git
 cd finetuning-scheduler
 
-# Step 1: Install PyTorch nightly (adjust version and CUDA target as needed)
-uv pip install --prerelease=if-necessary-or-explicit torch==2.10.0.dev20251124 \
-    --index-url https://download.pytorch.org/whl/nightly/cu128
+# Step 1: Install a PyTorch prerelease (adjust version and CUDA target as needed; see configuration in requirements/ci/torch-pre.txt)
+# Example (nightly):
+uv pip install --prerelease=if-necessary-or-explicit torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128
 
 # Step 2: Install FTS with Lightning commit pin (torch already installed, will be skipped)
 export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
 uv pip install -e ".[all]"
 ```
 
-The nightly version is specified in `requirements/ci/torch-nightly.txt` and documented in
-`requirements/ci/torch-override.txt` for reference.
+The prerelease version is configured via `requirements/ci/torch-pre.txt`. The `lock_ci_requirements.sh` and `build_fts_env.sh` scripts will read this file to determine whether to pre-install a prerelease PyTorch during builds.
 
 #### Install a specific FTS version from source using the standalone `pytorch-lighting` package:
 

@@ -98,8 +98,8 @@ The warnings cleanup automation replaces the manual process previously documente
 
 ```bash
 # Builds/rebuilds test environments
-build_fts_env.sh --repo_home=... --target_env_name=fts_latest
-build_fts_env.sh --repo_home=... --target_env_name=fts_oldest --oldest
+build_fts_env.sh --repo-home=... --target-env-name=fts_latest
+build_fts_env.sh --repo-home=... --target-env-name=fts_oldest --oldest
 ```
 
 ### 2. Test Execution
@@ -347,8 +347,8 @@ When modifying the automation scripts:
 
 ```bash
 # Rebuild environments manually
-./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest
-./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_oldest --oldest
+./scripts/build_fts_env.sh --repo-home=${PWD} --target-env-name=fts_latest
+./scripts/build_fts_env.sh --repo-home=${PWD} --target-env-name=fts_oldest --oldest
 ```
 
 ### "Warnings still unmatched after update"
