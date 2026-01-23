@@ -126,7 +126,7 @@ all_supported_pattern="@($(join_by_pipe "${supported_fts_latest[@]}" "${supporte
 
 env_rebuild(){
     # Build command arguments array
-    local -a cmd_args=("${repo_home}/scripts/build_fts_env.sh" "--repo_home=${repo_home}" "--target_env_name=$1")
+    local -a cmd_args=("${repo_home}/scripts/build_fts_env.sh" "--repo-home=${repo_home}" "--target-env-name=$1")
 
     # Add oldest flag if specified
     if [[ $oldest -eq 1 ]]; then
@@ -135,12 +135,12 @@ env_rebuild(){
 
     # Add uv_install_flags if specified
     if [[ -n "${uv_install_flags}" ]]; then
-        cmd_args+=("--uv_install_flags=${uv_install_flags}")
+        cmd_args+=("--uv-install-flags=${uv_install_flags}")
     fi
 
-    # Add no_commit_pin flag if specified
+    # Add no-commit-pin flag if specified
     if [[ $no_commit_pin -eq 1 ]]; then
-        cmd_args+=("--no_commit_pin")
+        cmd_args+=("--no-commit-pin")
     fi
 
     # Add venv-dir flag if specified

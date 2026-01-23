@@ -177,7 +177,7 @@ To setup a local development environment, install both local and test dependenci
 
 ```bash
 cd ~/repos/finetuning-scheduler
-./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest
+./scripts/build_fts_env.sh --repo-home=${PWD} --target-env-name=fts_latest
 
 # Activate (use your venv base path)
 export FTS_VENV_BASE=~/.venvs
@@ -198,17 +198,16 @@ uv pip install pre-commit
 pre-commit install
 ```
 
-**Manual installation with PyTorch nightly:**
+**Manual installation with a PyTorch prerelease (nightly/test):**
 
-When testing against PyTorch nightly builds, use a two-step installation approach:
+When testing against a PyTorch prerelease (nightly or test), use a two-step installation approach:
 
 ```bash
 cd ~/repos/finetuning-scheduler
 
-# Step 1: Install PyTorch nightly (adjust version and CUDA target as needed)
-# Check requirements/ci/torch-nightly.txt for the current nightly version
-uv pip install --prerelease=if-necessary-or-explicit torch==2.10.0.dev20251124 \
-    --index-url https://download.pytorch.org/whl/nightly/cu128
+# Step 1: Install a PyTorch prerelease (adjust version and CUDA target as needed; see configuration in requirements/ci/torch-pre.txt)
+# Example (nightly):
+uv pip install --prerelease=if-necessary-or-explicit torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128
 
 # Step 2: Install FTS with Lightning commit pin (torch already installed, will be skipped)
 export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt

@@ -23,7 +23,7 @@ FTS supports both standalone and unified Lightning packages:
 
 - When set, installs Lightning from a git commit (specified in `requirements/ci/overrides.txt`)
 - Default in dev/CI builds for consistent testing against latest Lightning changes
-- Can be disabled with `--no_commit_pin` flag in build scripts
+- Can be disabled with `--no-commit-pin` flag in build scripts
 
 ## Code Standards
 
@@ -65,7 +65,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Create development environment (creates traditional venv)
 # The build script handles Lightning commit pinning and optional PyTorch nightly automatically
-./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest
+./scripts/build_fts_env.sh --repo-home=${PWD} --target-env-name=fts_latest
 
 # Activate the environment
 cd ${FTS_REPO_DIR} && \
@@ -86,18 +86,27 @@ export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
 uv pip install -e ".[all]"
 ```
 
-**Manual installation with PyTorch nightly:**
+**Manual installation with a PyTorch prerelease (nightly/test):**
 
 ```bash
 cd ${FTS_REPO_DIR}
 
-# Install PyTorch nightly first (adjust version and CUDA target as needed, see any specified metadata in requirements/ci/torch-nightly.txt or use your preferred one)
-uv pip install torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128
+# Install a PyTorch prerelease first (adjust version and CUDA target as needed; see configuration in requirements/ci/torch-pre.txt)
+# Example (nightly):
+uv pip install --prerelease=allow torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128
 
 # Then install FTS with Lightning commit pin
 export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
 uv pip install -e ".[all]"
 ```
+
+# To configure PyTorch prerelease used by the build scripts and azure pipelines, edit `requirements/ci/torch-pre.txt`:
+
+# Line 1: torch version (e.g., 2.10.0 for test/RC or 2.10.0.dev20251203 for nightly)
+
+# Line 2: CUDA target for local builds (e.g., cu128) — CI uses cpu
+
+# Line 3: channel type: "test" or "nightly"
 
 ### Development Environment Scripts
 
@@ -105,25 +114,25 @@ Use the provided build script for automated setup:
 
 ```bash
 # Standard development build (uses FTS_VENV_BASE or default ~/.venvs)
-./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest
+./scripts/build_fts_env.sh --repo-home=${PWD} --target-env-name=fts_latest
 
 # Build with explicit venv directory (recommended for hardlink performance)
-./scripts/build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --venv-dir=/mnt/cache/${USER}/.venvs
+./scripts/build_fts_env.sh --repo-home=${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --venv-dir=/mnt/cache/${USER}/.venvs
 
 # Build without Lightning commit pinning (use PyPI release)
-./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest --no_commit_pin
+./scripts/build_fts_env.sh --repo-home=${PWD} --target-env-name=fts_latest --no-commit-pin
 
 # Build with specific PyTorch nightly version
-./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest --torch_dev_ver=dev20240201
+./scripts/build_fts_env.sh --repo-home=${PWD} --target-env-name=fts_latest --torch_dev_ver=dev20240201
 
 # Build with PyTorch test channel
-./scripts/build_fts_env.sh --repo_home=${PWD} --target_env_name=fts_latest --torch_test_channel
+./scripts/build_fts_env.sh --repo-home=${PWD} --target-env-name=fts_latest --torch_test_channel
 
 # Build from Lightning source
-./scripts/build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_latest --from-source="lightning:${HOME}/repos/lightning"
+./scripts/build_fts_env.sh --repo-home=${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --from-source="lightning:${HOME}/repos/lightning"
 
 # Build with oldest compatible dependencies (Python 3.10, mirrors CI oldest matrix)
-./scripts/build_fts_env.sh --repo_home=${HOME}/repos/finetuning-scheduler --target_env_name=fts_oldest --oldest
+./scripts/build_fts_env.sh --repo-home=${HOME}/repos/finetuning-scheduler --target-env-name=fts_oldest --oldest
 ```
 
 **Venv Location Options:**
