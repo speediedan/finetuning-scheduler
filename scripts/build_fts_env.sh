@@ -38,7 +38,7 @@ Usage: $0
    [ --uv-install-flags "flags" ]
    [ --no-commit-pin ]
    [ --venv-dir input ]
-   [ --torch-backend input ]  (cpu, cu128, auto; default: cu128 for CUDA 12.8)
+   [ --torch-backend input ]  (cpu, cu130, auto; default: cu130 for CUDA 12.8)
    [ --from-source "package:path[:extras][:ENV_VAR=value]" ]
    [ --help ]
    Examples:
@@ -58,8 +58,8 @@ Usage: $0
     #   ./build_fts_env.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --from-source="lightning:\${HOME}/repos/lightning:pytorch"
 
     # To configure PyTorch version, edit requirements/ci/torch-pre.txt:
-    #   Line 1: torch version (e.g., 2.10.0 for test, 2.10.0.dev20251124 for nightly)
-    #   Line 2: CUDA target (e.g., cu128)
+    #   Line 1: torch version (e.g., 2.11.0 for test, 2.11.0.dev20260121 for nightly)
+    #   Line 2: CUDA target (e.g., cu130)
     #   Line 3: channel type (test or nightly)
 EOF
 exit 1
@@ -102,7 +102,7 @@ venv_path=$(determine_venv_path "${venv_dir}" "${target_env_name}")
 echo "Target venv path: ${venv_path}"
 
 # Set default torch backend if not specified (auto = auto-detect CUDA/CPU)
-torch_backend=${torch_backend:-"cu128"}
+torch_backend=${torch_backend:-"cu130"}
 
 # Join from-source specs with semicolons
 from_source_spec=""
@@ -147,7 +147,7 @@ base_env_build(){
         echo "Using torch stable from requirements-oldest.txt for oldest build"
     elif [[ -n "${TORCH_PRE_VERSION}" ]]; then
         # Prerelease (nightly or test) configured in torch-pre.txt
-        local cuda_target="${TORCH_PRE_CUDA:-cu128}"  # Default to cu128 if not specified
+        local cuda_target="${TORCH_PRE_CUDA:-cu130}"  # Default to cu130 if not specified
         local torch_pkg="torch==${TORCH_PRE_VERSION}"
         local torch_index_url=$(get_torch_index_url "${TORCH_PRE_CHANNEL}" "${cuda_target}")
 

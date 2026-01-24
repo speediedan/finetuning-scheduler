@@ -53,7 +53,7 @@ LIGHTNING_PACKAGES = {
 # Note: For visibility, minimum versions are also documented in pyproject.toml
 # under [tool.fts.min-versions] (informational only).
 BASE_DEPENDENCIES = [
-    "torch>=2.6.0",
+    "torch>=2.7.0",
 ]
 
 # Files to exclude from modification to prevent self-modification

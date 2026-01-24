@@ -132,7 +132,7 @@ all = [
 # Actual minimum versions are enforced in src/finetuning_scheduler/dynamic_versioning/utils.py
 # The build system (setup.py) reads from utils.py to populate the dynamic dependencies.
 [tool.fts.min-versions]
-torch = ">=2.6.0"
+torch = ">=2.7.0"
 lightning = ">=2.6.0,<2.6.1"
 python = "3.10"  # Defined in pyproject.toml requires-python
 
@@ -294,7 +294,7 @@ override-dependencies = [
 
 # PyTorch index configuration is handled via --torch-backend flag
 # For CI (CPU-only): use --torch-backend=cpu
-# For local dev (CUDA): use --torch-backend=auto or UV_TORCH_BACKEND=cu128
+# For local dev (CUDA): use --torch-backend=auto or UV_TORCH_BACKEND=cu130
 # See: https://docs.astral.sh/uv/guides/integration/pytorch/
 # Note: We don't define explicit indices or sources here because --torch-backend
 # configures everything automatically and allows flexibility between CPU/CUDA builds

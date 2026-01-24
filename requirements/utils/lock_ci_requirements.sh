@@ -99,14 +99,14 @@ generate_torch_override() {
 #
 # Manual installation with prerelease (two-step approach for security):
 #   Step 1: Install PyTorch prerelease (edit torch-pre.txt to configure channel)
-#   uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/nightly/cu128
+#   uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/nightly/cu130
 #
 #   Step 2: Install FTS with Lightning commit pin (torch already installed, will be skipped)
 #   export UV_OVERRIDE=\${PWD}/requirements/ci/overrides.txt
 #   uv pip install -e ".[all]"
 #
 # Or with locked requirements:
-#   uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/nightly/cu128
+#   uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/nightly/cu130
 #   UV_OVERRIDE=\${PWD}/requirements/ci/overrides.txt uv pip install -e . -r requirements/ci/requirements.txt
 
 torch==${TORCH_PRE_VERSION}
@@ -248,15 +248,15 @@ if [[ -n "${TORCH_PRE_VERSION}" ]]; then
     echo "  - ${CI_DIR}/torch-override.txt (for manual prerelease installation reference)"
     echo ""
     echo "Manual installation with prerelease (two-step approach):"
-    echo "  1. uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_PRE_CHANNEL}/cu128"
+    echo "  1. uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_PRE_CHANNEL}/cu130"
     echo "  2. UV_OVERRIDE=requirements/ci/overrides.txt uv pip install -e \".[all]\""
     echo ""
     echo "Or with locked requirements:"
-    echo "  1. uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_PRE_CHANNEL}/cu128"
+    echo "  1. uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_PRE_CHANNEL}/cu130"
     echo "  2. UV_OVERRIDE=requirements/ci/overrides.txt uv pip install -e . -r requirements/ci/requirements.txt"
     echo ""
     echo "Docker image installation (CUDA):"
-    echo "  Ensure Dockerfile installs: torch==${TORCH_PRE_VERSION} from ${TORCH_PRE_CHANNEL}/cu128 index"
+    echo "  Ensure Dockerfile installs: torch==${TORCH_PRE_VERSION} from ${TORCH_PRE_CHANNEL}/cu130 index"
     echo ""
     echo "Azure Pipelines (Docker with pre-installed torch):"
     echo "  UV_OVERRIDE=requirements/ci/overrides.txt uv pip install -e . -r requirements/ci/requirements.txt"

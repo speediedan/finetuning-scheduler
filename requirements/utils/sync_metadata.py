@@ -22,7 +22,7 @@ def extract_torch_version(utils_content: str) -> str:
         utils_content: Content of utils.py
 
     Returns:
-        Full torch version constraint (e.g., ">=2.6.0")
+        Full torch version constraint (e.g., ">=2.7.0")
     """
     # Look for: BASE_DEPENDENCIES = [..., "torch>=X.Y.Z", ...]
     match = re.search(r'BASE_DEPENDENCIES\s*=\s*\[.*?"torch(>=?[0-9.]+(?:,[<>=0-9.]+)?)"', utils_content, re.DOTALL)

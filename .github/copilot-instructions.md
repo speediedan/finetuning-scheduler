@@ -7,7 +7,7 @@
 **Key Technologies:**
 
 - Python 3.9+ (CI tests on 3.10 and 3.13)
-- PyTorch 2.6.0+ with PyTorch Lightning ecosystem
+- PyTorch 2.7.0+ with PyTorch Lightning ecosystem
 - Core deps: pytorch-lightning (standalone) or lightning (unified package), transformers
 
 **Repository Size:** ~100 files, primarily Python, with YAML configs and shell scripts
@@ -93,7 +93,7 @@ cd ${FTS_REPO_DIR}
 
 # Install a PyTorch prerelease first (adjust version and CUDA target as needed; see configuration in requirements/ci/torch-pre.txt)
 # Example (nightly):
-uv pip install --prerelease=allow torch==2.10.0.dev20251124 --index-url https://download.pytorch.org/whl/nightly/cu128
+uv pip install --prerelease=allow torch==2.11.0.dev20260121 --index-url https://download.pytorch.org/whl/nightly/cu130
 
 # Then install FTS with Lightning commit pin
 export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
@@ -102,9 +102,9 @@ uv pip install -e ".[all]"
 
 # To configure PyTorch prerelease used by the build scripts and azure pipelines, edit `requirements/ci/torch-pre.txt`:
 
-# Line 1: torch version (e.g., 2.10.0 for test/RC or 2.10.0.dev20251203 for nightly)
+# Line 1: torch version (e.g., 2.11.0 for test/RC or 2.11.0.dev20260121 for nightly)
 
-# Line 2: CUDA target for local builds (e.g., cu128) — CI uses cpu
+# Line 2: CUDA target for local builds (e.g., cu130) — CI uses cpu
 
 # Line 3: channel type: "test" or "nightly"
 
@@ -423,7 +423,7 @@ tail -f `ls -rt /tmp/gen_fts_coverage_fts_* | tail -1`
 
 ### Dependency Constraints
 
-- **torch** requires 2.6.0+ (oldest tested)
+- **torch** requires 2.7.0+ (oldest tested)
 - **pytorch-lightning** / **lightning** requires compatible version
 
 ### Import Dependencies

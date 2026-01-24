@@ -76,6 +76,7 @@ def restore_env_variables():
         "TORCHINDUCTOR_CACHE_DIR", # leaked by torch inductor
         "MLFLOW_TRACKING_URI",  # leaked by mlflow
         "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR",  # leaked by torch.compile
+        "TRITON_PTXAS_PATH",  # required starting torch 2.11.0
     }
     leaked_vars.difference_update(allowlist)
     assert not leaked_vars, f"test is leaking environment variable(s): {set(leaked_vars)}"
