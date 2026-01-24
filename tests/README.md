@@ -13,8 +13,8 @@ cd finetuning-scheduler
 
 # Activate and run tests (use your venv base path)
 export FTS_VENV_BASE=~/.venvs  # or /mnt/cache/${USER}/.venvs
-export FTS_VENV_NAME=fts_latest
-source ${FTS_VENV_BASE}/${FTS_VENV_NAME}/bin/activate
+export FTS_TARGET_VENV=fts_latest
+source ${FTS_VENV_BASE}/${FTS_TARGET_VENV}/bin/activate
 pytest -xvs .
 ```
 

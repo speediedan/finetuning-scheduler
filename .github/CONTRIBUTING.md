@@ -152,8 +152,8 @@ Run these commands (from the repository root):
 ```bash
 cd ~/repos/finetuning-scheduler
 export FTS_VENV_BASE=~/.venvs  # or your venv base path
-export FTS_VENV_NAME=fts_latest
-source ${FTS_VENV_BASE}/${FTS_VENV_NAME}/bin/activate
+export FTS_TARGET_VENV=fts_latest
+source ${FTS_VENV_BASE}/${FTS_TARGET_VENV}/bin/activate
 make clean
 cd docs
 make html
@@ -181,8 +181,8 @@ cd ~/repos/finetuning-scheduler
 
 # Activate (use your venv base path)
 export FTS_VENV_BASE=~/.venvs
-export FTS_VENV_NAME=fts_latest
-source ${FTS_VENV_BASE}/${FTS_VENV_NAME}/bin/activate
+export FTS_TARGET_VENV=fts_latest
+source ${FTS_VENV_BASE}/${FTS_TARGET_VENV}/bin/activate
 pre-commit install
 ```
 
