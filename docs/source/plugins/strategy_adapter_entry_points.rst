@@ -233,9 +233,12 @@ Test your adapter with FTS by:
 3. Testing checkpoint save/restore if you override those methods
 4. Ensuring your adapter works with both explicit and implicit schedules
 
+|
 
 Community adapters and feedback on the plugin system are welcome! Please share your use cases
 and suggestions on the `GitHub repository <https://github.com/speediedan/finetuning-scheduler/issues>`_.
+
+----
 
 See Also
 ********
