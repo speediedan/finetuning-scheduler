@@ -303,7 +303,7 @@ class RteBoolqDataModule(L.LightningDataModule):
         """
         text_pairs = list(zip(example_batch[self.text_fields[0]], example_batch[self.text_fields[1]]))
         # Tokenize the text/text pairs
-        features = self.tokenizer.batch_encode_plus(
+        features = self.tokenizer(
             text_pairs, max_length=self.hparams.max_seq_length, padding="longest", truncation=True
         )
         # Rename label to labels to make it easier to pass to model forward

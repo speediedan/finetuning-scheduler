@@ -86,8 +86,10 @@ coverage==6.4
     #   finetuning-scheduler (pyproject.toml:dev)
     #   finetuning-scheduler (pyproject.toml:test)
     #   nbval
-cryptography==46.0.3 ; sys_platform == 'linux'
-    # via secretstorage
+cryptography==46.0.3
+    # via
+    #   google-auth
+    #   secretstorage
 cycler==0.12.1
     # via matplotlib
 databricks-sdk==0.80.0
@@ -152,7 +154,7 @@ gitdb==4.0.12
     # via gitpython
 gitpython==3.1.46
     # via mlflow-skinny
-google-auth==2.47.0
+google-auth==2.48.0
     # via databricks-sdk
 graphene==3.4.3
     # via mlflow
@@ -162,7 +164,7 @@ graphql-core==3.2.7
     #   graphql-relay
 graphql-relay==3.2.0
     # via graphene
-greenlet==3.3.0 ; platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64'
+greenlet==3.3.1 ; platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64'
     # via sqlalchemy
 gunicorn==23.0.0 ; sys_platform != 'win32'
     # via mlflow
@@ -300,7 +302,7 @@ more-itertools==10.8.0
     # via
     #   jaraco-classes
     #   jaraco-functools
-multidict==6.7.0
+multidict==6.7.1
     # via
     #   aiohttp
     #   yarl
@@ -565,7 +567,7 @@ send2trash==2.1.0
     # via notebook
 sentencepiece==0.2.0
     # via finetuning-scheduler (pyproject.toml)
-setuptools==80.10.1
+setuptools==80.10.2
     # via
     #   ipython
     #   lightning-utilities
@@ -695,7 +697,7 @@ virtualenv==20.36.1
     # via pre-commit
 waitress==3.0.2 ; sys_platform == 'win32'
     # via mlflow
-wcwidth==0.3.0
+wcwidth==0.4.0
     # via prompt-toolkit
 webencodings==0.5.1
     # via bleach
