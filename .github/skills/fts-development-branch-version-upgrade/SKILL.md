@@ -30,7 +30,7 @@ Before running this skill, gather the following information:
 1. **New PyTorch minimum version** (e.g., 2.7.0) - oldest PyTorch version to support (support 4-5 minor versions)
 1. **New PyTorch maximum version** (e.g., 2.11.0) - latest PyTorch version to test
 1. **New PyTorch nightly version** (e.g., dev20260121) - target nightly build for development
-1. **New CUDA version** (e.g., 13.0.0) - CUDA toolkit version for Docker images
+1. **New CUDA version** (e.g., 13.0.2) - CUDA toolkit version for Docker images
 1. **\[Optional\] Updated TORCH_CUDA_ARCH_LIST** (e.g., "7.5;8.0;8.6;9.0;10.0;12.0+PTX") - mirror upstream PyTorch
 1. **\[Optional\] New Lightning min/max versions** - if Lightning compatibility changes
 1. **\[Optional\] Report output location** - defaults to `~/repos/distributed-insight/project_admin/finetuning-scheduler/handoff_docs/` or `/tmp/`

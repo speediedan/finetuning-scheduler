@@ -11,7 +11,7 @@
 # limitations under the License.
 # initially based on https://bit.ly/3pdAf1G
 
-ARG CUDA_VERSION=13.0.0
+ARG CUDA_VERSION=13.0.2
 ARG OS_VER=ubuntu22.04
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
@@ -28,7 +28,7 @@ ENV \
     TZ=US/Pacific \
     PATH="$PATH:/root/.local/bin" \
     CUDA_TOOLKIT_ROOT_DIR="/usr/local/cuda" \
-    TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9;9.0;10.0;12.0+PTX" \
+    TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX" \
     MKL_THREADING_LAYER=${MKL_THREADING_LAYER} \
     MAKEFLAGS="-j2" \
     UV_HTTP_TIMEOUT=120
@@ -90,7 +90,9 @@ RUN \
     # uv pip install -r requirements/devel.txt && \
     # Update six
     uv pip install -U six && \
-    rm -rf requirements.* requirements/
+    rm -rf requirements.* requirements/ && \
+    # Diagnostic: Check CUDA architecture support
+    python -c "import torch; print(f'PyTorch {torch.__version__} CUDA archs: {torch.cuda.get_arch_list()}')"
 
 RUN \
     set -x && \
