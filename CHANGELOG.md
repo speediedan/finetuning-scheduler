@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Deprecated
 
-## [2.10.0] - 2026-01-25
+## [2.10.0] - 2026-01-26
 
 ### Added
 
@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Bumped gh-action-pypi-publish to version that fully supports PEP 639 (this is the change that required the post0 release)
 - Fix Pyright issues surfaced during the type-hints migration and address related CI/test issues. [#26](https://github.com/speediedan/finetuning-scheduler/pull/26/)
 - Fix edge-case LR lambda handling surfaced with PyTorch 2.10. [c043815](https://github.com/speediedan/finetuning-scheduler/commit/c043815)
 - Bump citation metadata and fix Codecov flag syntax. [a26d026](https://github.com/speediedan/finetuning-scheduler/commit/a26d026)
