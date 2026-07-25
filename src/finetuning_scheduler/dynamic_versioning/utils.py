@@ -26,7 +26,7 @@ from collections.abc import ValuesView
 # [tool.fts.min-versions] (informational only - not used during installation).
 
 # Shared version constraint for all Lightning packages
-LIGHTNING_VERSION = ">=2.6.0,<2.6.1"
+LIGHTNING_VERSION = ">=2.6.0,<2.7.0"
 
 LIGHTNING_PACKAGE_MAPPING = {
     "lightning.pytorch": "pytorch_lightning",

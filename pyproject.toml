@@ -133,7 +133,7 @@ all = [
 # The build system (setup.py) reads from utils.py to populate the dynamic dependencies.
 [tool.fts.min-versions]
 torch = ">=2.7.0"
-lightning = ">=2.6.0,<2.6.1"
+lightning = ">=2.6.0,<2.7.0"
 python = "3.10"  # Defined in pyproject.toml requires-python
 
 [project.urls]

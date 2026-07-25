@@ -2947,3 +2947,86 @@ def test_fts_multi_ddp_fork(tmpdir):
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_fork", devices=2)
     trainer.fit(model)
     assert trainer.callback_metrics["val_loss"] < 0.1
+
+
+def test_add_groups_excludes_params_already_in_optimizer():
+    """Validate ``ScheduleImplMixin._add_groups`` does not re-add parameters an existing optimizer parameter group
+    already owns.
+
+    On resume the optimizer state (and hence its parameter groups) is restored before the schedule phases are
+    replayed, so re-adding raised ``ValueError: some parameters appear in more than one parameter group``. See
+    https://github.com/speediedan/finetuning-scheduler/issues/30
+    """
+    from finetuning_scheduler.fts_supporters import ScheduleImplMixin
+
+    model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 2))
+    thawed_pl = [n for n, _ in model.named_parameters()]
+    # seed the optimizer with a parameter that is also in ``thawed_pl``, mirroring the restored-state case
+    optimizer = torch.optim.SGD([next(model.parameters())], lr=0.1)
+
+    added = ScheduleImplMixin._add_groups(None, optimizer, model, thawed_pl, 1e-3)
+    assert added == 1
+    # the seeded parameter must not have been duplicated into the new group
+    all_params = [p for group in optimizer.param_groups for p in group["params"]]
+    assert len(all_params) == len({id(p) for p in all_params})
+
+    # replaying the same phase is a no-op rather than an error, and reports 0 so the caller does not extend
+    # ``base_lrs``/``min_lrs``/``lr_lambdas`` for groups that were never created
+    pgs_before = len(optimizer.param_groups)
+    assert ScheduleImplMixin._add_groups(None, optimizer, model, thawed_pl, 1e-3) == 0
+    assert len(optimizer.param_groups) == pgs_before
+
+
+def test_add_groups_excludes_existing_params_with_no_decay():
+    """Validate the ``no_decay`` branch of ``ScheduleImplMixin._add_groups`` also filters already-owned parameters.
+
+    See https://github.com/speediedan/finetuning-scheduler/issues/30
+    """
+    from finetuning_scheduler.fts_supporters import ScheduleImplMixin
+
+    model = nn.Sequential(nn.Linear(4, 4))
+    thawed_pl = [n for n, _ in model.named_parameters()]
+    optimizer = torch.optim.SGD([next(model.parameters())], lr=0.1)
+
+    assert ScheduleImplMixin._add_groups(["bias"], optimizer, model, thawed_pl, 1e-3) == 2
+    pgs_before = len(optimizer.param_groups)
+    assert ScheduleImplMixin._add_groups(["bias"], optimizer, model, thawed_pl, 1e-3) == 0
+    assert len(optimizer.param_groups) == pgs_before
+
+
+def test_fts_ckpt_load_state_dict_epoch_transitions_only_no_es(tmpdir):
+    """Validate ``FTSCheckpoint.load_state_dict`` does not require an ``FTSEarlyStopping`` callback when the
+    schedule is configured with ``epoch_transitions_only=True``.
+
+    FTS deliberately does not attach an ``FTSEarlyStopping`` callback in that mode, so asserting on it
+    unconditionally made otherwise-valid checkpoints unloadable. See
+    https://github.com/speediedan/finetuning-scheduler/issues/29
+    """
+    ckpt = FTSCheckpoint(monitor="val_loss", dirpath=tmpdir)
+    ckpt.best_ckpt_depth = 0
+    fts_callback = MagicMock()
+    fts_callback.curr_depth = 1  # > best_ckpt_depth, so the wait_count reset branch is reachable
+    fts_callback.epoch_transitions_only = True
+    fts_callback._fts_state._resume_fit_from_ckpt = False
+    fts_callback.pl_module.trainer.early_stopping_callback = None  # not attached in epoch_transitions_only mode
+    ckpt.finetuningscheduler_callback = fts_callback
+
+    ckpt.load_state_dict({"current_ckpt_depth": 1, "best_ckpt_depth": 0, "best_model_path": ""})
+
+
+def test_fts_ckpt_load_state_dict_resets_wait_count_with_es(tmpdir):
+    """Validate the ``wait_count`` reset still occurs when an ``FTSEarlyStopping`` callback is attached and the
+    schedule is not in ``epoch_transitions_only`` mode (guards the issue #29 fix against over-correction)."""
+    ckpt = FTSCheckpoint(monitor="val_loss", dirpath=tmpdir)
+    ckpt.best_ckpt_depth = 0
+    early_stopping = FTSEarlyStopping(monitor="val_loss")
+    early_stopping.wait_count = 3
+    fts_callback = MagicMock()
+    fts_callback.curr_depth = 1
+    fts_callback.epoch_transitions_only = False
+    fts_callback._fts_state._resume_fit_from_ckpt = False
+    fts_callback.pl_module.trainer.early_stopping_callback = early_stopping
+    ckpt.finetuningscheduler_callback = fts_callback
+
+    ckpt.load_state_dict({"current_ckpt_depth": 1, "best_ckpt_depth": 0, "best_model_path": ""})
+    assert early_stopping.wait_count == 0
