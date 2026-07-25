@@ -132,6 +132,12 @@ generate_lockfile() {
     # Change to repo root for dependency group resolution
     pushd "${REPO_ROOT}" > /dev/null
 
+    # uv records the --output-file argument verbatim in the generated header. Passing an absolute path
+    # bakes the generating machine's checkout location into the committed lockfile, which makes the file
+    # differ on every other checkout (notably a CI runner's /home/runner/work/...) even when the resolved
+    # pins are identical. Pass a repo-relative path instead so the header is reproducible anywhere.
+    local rel_output_file="${output_file#${REPO_ROOT}/}"
+
     # Build the base compile command
     local compile_cmd=(
         uv pip compile
@@ -139,7 +145,7 @@ generate_lockfile() {
         --extra all
         --group dev
         --group test
-        --output-file "${output_file}"
+        --output-file "${rel_output_file}"
         --upgrade
         --no-strip-extras
         --resolution "${resolution}"
