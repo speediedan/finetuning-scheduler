@@ -409,6 +409,7 @@ packaging==25.0
     #   matplotlib
     #   mlflow-skinny
     #   pytest
+    #   pytest-rerunfailures
     #   pytorch-lightning
     #   tensorboardx
     #   torchmetrics
@@ -499,7 +500,7 @@ pytest==7.0.0
     #   finetuning-scheduler (pyproject.toml:test)
     #   nbval
     #   pytest-rerunfailures
-pytest-rerunfailures==10.2
+pytest-rerunfailures==11.0
     # via
     #   finetuning-scheduler (pyproject.toml:dev)
     #   finetuning-scheduler (pyproject.toml:test)
@@ -589,7 +590,6 @@ sentencepiece==0.2.0
 setuptools==83.0.0
     # via
     #   ipython
-    #   pytest-rerunfailures
     #   torch
     #   triton
     #   twine

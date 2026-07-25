@@ -263,7 +263,7 @@ dev = [
     # Development dependencies include test group
     "coverage>=6.4",
     "pytest>=7.0.0",
-    "pytest-rerunfailures>=10.2",
+    "pytest-rerunfailures>=11.0",  # 10.x imports pkg_resources, removed in setuptools 81+
     "twine>=3.2.0",
     "pyright>=1.1.390",
     "pre-commit>=2.0.0",
@@ -272,7 +272,7 @@ dev = [
 test = [
     "coverage>=6.4",
     "pytest>=7.0.0",
-    "pytest-rerunfailures>=10.2",
+    "pytest-rerunfailures>=11.0",  # 10.x imports pkg_resources, removed in setuptools 81+
     "twine>=3.2.0",
     "pyright>=1.1.390",
     "pre-commit>=2.0.0",
