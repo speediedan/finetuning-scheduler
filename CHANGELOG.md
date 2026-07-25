@@ -30,6 +30,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Fixed the generated CI lockfiles embedding the absolute path of the generating checkout in their uv header, which made them differ on every other checkout even when the resolved pins were identical. The lockfile trailing newline is now normalized for the same reason, so regeneration is diff-stable.
 
+- Raised the `pytest-rerunfailures` floor to `11.0`. `10.x` imports `pkg_resources` at module scope, which `setuptools` `81+` no longer provides, breaking collection on the `oldest` CI leg. Test-only dependency, so the supported install surface for users is unaffected.
+
 ### Changed
 
 - Modernized type hints for Python `3.10+` by bumping the `pyupgrade` pre-commit hook to `--py310-plus`.
