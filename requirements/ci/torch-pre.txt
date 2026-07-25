@@ -7,12 +7,12 @@
 #   Line 2: CUDA target for local builds (e.g., cu130) - CI always uses cpu
 #   Line 3: channel type: "test" or "nightly"
 #
-# Example for test/RC channel (currently enabled):
+# Example for test/RC channel (commented out):
 # 2.11.0
 # cu130
 # test
 
 # Example for nightly (commented out):
-2.11.0.dev20260121
-cu130
-nightly
+# 2.11.0.dev20260121
+# cu130
+# nightly

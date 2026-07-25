@@ -58,7 +58,7 @@ EOF
 exit 1
 }
 
-args=$(getopt -o '' --long repo-home:,target-env-name:,oldest,torch-backend:,no-rebuild-base,no-special,run-all-and-examples,allow-failures,include-experimental:,uv-install-flags:,no-commit-pin,venv-dir:,from-source:,dry-run,help -- "$@")
+args=$(getopt -o '' --long repo-home:,target-env-name:,oldest,torch-backend:,no-rebuild-base,no-special,run-all-and-examples,allow-failures,include-experimental,uv-install-flags:,no-commit-pin,venv-dir:,from-source:,dry-run,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi

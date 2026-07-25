@@ -76,7 +76,10 @@ execute_tests(){
 
     # run the test
     echo "Running ${parameterization}" | tee -a $execute_log
-    (python ${execute_def} ${parameterization} 2>&1 | sed "s,\x1b\[[0-9;]*[a-zA-Z],,g" >> $tmp_raw_log) > /dev/null
+    # capture the exit code rather than letting the outer `set -eo pipefail` abort here, otherwise the
+    # result parsing below (and --allow-failures) is unreachable for any failing parameterization
+    test_rc=0
+    (set -o pipefail; python ${execute_def} ${parameterization} 2>&1 | sed "s,\x1b\[[0-9;]*[a-zA-Z],,g" >> $tmp_raw_log) > /dev/null || test_rc=$?
     test_to_find=`echo ${parameterization} | sed 's/\[/\\\[/g; s/\]/\\\]/g'`
     if pass_or_fail=$(grep -E "(PASSED|FAILED|XPASS|XFAIL) .*${test_to_find}" $tmp_raw_log); then
       parameterization_result=`echo $pass_or_fail | awk 'NR==1 {print $2 ": "  $1}'`;
@@ -89,6 +92,12 @@ execute_tests(){
       fi
     elif skipped=$(grep -E "${test_to_find}.*SKIPPED" $tmp_raw_log); then
       parameterization_result=`echo $skipped | awk 'NR==1 {print $1 ": "  $2}'`;
+    elif [[ $test_rc -eq 0 ]] && grep -qE "SKIPPED \[[0-9]+\] $(echo "${parameterization%%::*}" | sed 's/[][]/\\&/g'):" $tmp_raw_log; then
+      # pytest's short-summary SKIPPED lines cite file:LINE (not ::testname), and the progress
+      # line's SKIPPED tag can be separated from the test id by interleaved live-log output
+      # (e.g. a skip raised mid-test after log capture) — fall back to the file-scoped summary,
+      # gated on pytest exit 0 so a crashed test can never be misclassified as a skip
+      parameterization_result="${parameterization}: SKIPPED"
     else
       echo "Could not parse result!" | tee -a $execute_log
       parameterization_result="UNKNOWN: see $tmp_raw_log"
