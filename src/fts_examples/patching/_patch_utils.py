@@ -1,6 +1,6 @@
 import operator
 import sys
-from typing import Callable
+from collections.abc import Callable
 import importlib.metadata
 from packaging.version import Version
 from functools import lru_cache

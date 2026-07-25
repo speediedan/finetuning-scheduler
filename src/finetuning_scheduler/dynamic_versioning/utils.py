@@ -13,7 +13,7 @@
 import os
 import re
 from pathlib import Path
-from typing import ValuesView
+from collections.abc import ValuesView
 
 # -----------------------------------------------------------------------------
 # Lightning Configuration

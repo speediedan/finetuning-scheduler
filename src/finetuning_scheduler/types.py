@@ -16,8 +16,8 @@ Fine-Tuning Scheduler Types
 Type definitions required for Fine-Tuning Scheduler.
 
 """
-from typing import Any, Protocol, runtime_checkable, Type
-from typing_extensions import TypeAlias
+from typing import Any, Protocol, runtime_checkable
+from typing import TypeAlias
 from enum import Enum
 
 import torch
@@ -48,9 +48,9 @@ supported_lrs = [
     "LinearLR",
 ]
 FTSLRSchedulerTypeTuple = tuple(getattr(torch.optim.lr_scheduler, lr_class) for lr_class in supported_lrs)
-FTSLRSchedulerType = Type[LRScheduler] | Type[ReduceLROnPlateau]
+FTSLRSchedulerType = type[LRScheduler] | type[ReduceLROnPlateau]
 
-BaseCallbackDepType: TypeAlias = Type[EarlyStopping] | Type[ModelCheckpoint]
+BaseCallbackDepType: TypeAlias = type[EarlyStopping] | type[ModelCheckpoint]
 
 class AutoStrEnum(Enum):
     def _generate_next_value_(name, start, count, last_values) -> str:  # type: ignore

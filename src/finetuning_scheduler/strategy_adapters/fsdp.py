@@ -27,7 +27,8 @@ from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
 from functools import partial, partialmethod, wraps
 from pprint import pformat
-from typing import TYPE_CHECKING, Any, Callable, Dict, Generator, Iterable, cast  # Dict used for isinstance() checks
+from typing import TYPE_CHECKING, Any, cast  # Dict used for isinstance() checks
+from collections.abc import Callable, Generator, Iterable
 from typing_extensions import override
 
 import torch
@@ -732,7 +733,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
     def _after_configure_model(self) -> None:
         """Generate the parameter-level bi-directional translations the FTS FSDP adapter requires and then execute
         the previously deferred first fine-tuning phase."""
-        assert isinstance(self.fts_handle.ft_schedule, Dict)  # TODO: move/consolidate ft_schedule assertions
+        assert isinstance(self.fts_handle.ft_schedule, dict)  # TODO: move/consolidate ft_schedule assertions
         self._init_fsdp_param_map()
         self._maybe_set_bn_track_running_stats(0)
         _, self.fts_handle._fts_state._curr_thawed_params = self.exec_ft_phase(

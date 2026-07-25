@@ -42,7 +42,7 @@ repos:
     rev: v3.17.0
     hooks:
       - id: pyupgrade
-        args: [--py37-plus]
+        args: [--py310-plus]
         name: Upgrade code
 
   # update rev for docformatter after 1.7.6 available, using below commit on master branch until then

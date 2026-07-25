@@ -18,7 +18,8 @@ Base adapter class to extend Fine-Tuning Scheduler support of complex or custom 
 """
 from functools import partialmethod
 from pprint import pformat as pfmt
-from typing import Callable, Dict, Iterable, Any  # Dict used for runtime isinstance() checks
+from typing import Any  # Dict used for runtime isinstance() checks
+from collections.abc import Callable, Iterable
 import logging
 import os
 
@@ -200,7 +201,7 @@ class StrategyAdapter:
         """Generate a module-level mapping of the modules associated with each fine-tuning phase, including modules
         not present in the fine-tuning schedule grouped together into a single unscheduled phase to facilitate the
         relevant disjointness check."""
-        assert isinstance(self.fts_handle.ft_schedule, Dict)
+        assert isinstance(self.fts_handle.ft_schedule, dict)
         module_map: dict = {}
         for depth in self.fts_handle.ft_schedule.keys():  # type: ignore[union-attr]
             phase_params = self.fts_handle.ft_schedule[depth].get("params", [])  # type: ignore[union-attr]

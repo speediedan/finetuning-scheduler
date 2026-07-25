@@ -28,13 +28,14 @@ from contextlib import contextmanager
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import KeysView
-from typing import Dict  # Used for runtime isinstance() checks
 from copy import copy, deepcopy
 from dataclasses import dataclass, field, fields
 from functools import reduce
 from pprint import pformat
-from typing import Any, Callable, Type, Iterator
-from typing_extensions import TypeAlias, override
+from typing import Any
+from collections.abc import Callable, Iterator
+from typing_extensions import override
+from typing import TypeAlias
 
 import lightning.pytorch as pl
 import torch
@@ -550,7 +551,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
             self._monitor_validated = True
         return super()._monitor_candidates(trainer)
 
-FTSCallbackDepType: TypeAlias = Type[FTSEarlyStopping] | Type[FTSCheckpoint]
+FTSCallbackDepType: TypeAlias = type[FTSEarlyStopping] | type[FTSCheckpoint]
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
@@ -605,7 +606,7 @@ class ScheduleParsingMixin(ABC):
             max_phase = max(max_phase, depth)
             self._parse_phase(depth, named_params, msp_ref)
             if depth > 0:
-                assert isinstance(self.ft_schedule, Dict)
+                assert isinstance(self.ft_schedule, dict)
                 curr_max_epoch = self.ft_schedule[depth]["max_transition_epoch"]
                 if 0 <= curr_max_epoch <= max_epoch_wm:
                     es_addendum = " depending upon EarlyStopping criteria."
@@ -785,7 +786,7 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: If a `new_optimizer` or `new_lr_scheduler` configuration is passed to the initial
                 training phase.
         """
-        assert isinstance(self.ft_schedule, Dict)
+        assert isinstance(self.ft_schedule, dict)
         reinit_cfg = {}
         for reinit_k, attr in zip(ScheduleParsingMixin.VALID_REINIT_KEYS, ScheduleParsingMixin.VALID_REINIT_ATTR):
             reinit_cfg[reinit_k] = getattr(self, attr) or {
@@ -812,7 +813,7 @@ class ScheduleParsingMixin(ABC):
         Raises:
             MisconfigurationException: If the phase keys provided in the schedule are not convertible to integers.
         """
-        assert isinstance(self.ft_schedule, Dict)
+        assert isinstance(self.ft_schedule, dict)
         try:
             orig_keys = set(self.ft_schedule.keys())
             self.ft_schedule = {int(k): v for k, v in self.ft_schedule.items()}
@@ -842,7 +843,7 @@ class ScheduleParsingMixin(ABC):
         """
         assert self.trainer is not None
         assert self.log_dir is not None
-        assert isinstance(self.ft_schedule, Dict)
+        assert isinstance(self.ft_schedule, dict)
         rewrite_dest = None
         # write the reconfigured schedule to our log directory to allow user validation
         rewrite_dest = ScheduleImplMixin.save_schedule(
@@ -864,7 +865,7 @@ class ScheduleParsingMixin(ABC):
         """
         assert self.trainer is not None
         assert self.log_dir is not None
-        assert isinstance(self.ft_schedule, Dict)
+        assert isinstance(self.ft_schedule, dict)
         self._convert_phase_keys()
         contiguous = len(self.ft_schedule.keys()) == (max(self.ft_schedule.keys()) + 1)
         if not contiguous:
@@ -883,7 +884,7 @@ class ScheduleParsingMixin(ABC):
             MisconfigurationException: If the specified schedule does not include epoch-driven transitions for all
                 phases.
         """
-        assert isinstance(self.ft_schedule, Dict)
+        assert isinstance(self.ft_schedule, dict)
         missing_transitions = [d for d in self.ft_schedule.keys() if self.ft_schedule[d]["max_transition_epoch"] < 0]
         if missing_transitions:
             raise MisconfigurationException(
@@ -901,7 +902,7 @@ class ScheduleParsingMixin(ABC):
         Raises:
             MisconfigurationException: If the specified per-phase learning rate is not convertable to a float.
         """
-        assert isinstance(self.ft_schedule, Dict)
+        assert isinstance(self.ft_schedule, dict)
         if depth > 0:
             self.ft_schedule[depth].setdefault("lr", self.base_max_lr)  # type: ignore[attr-defined]
             try:
@@ -934,7 +935,7 @@ class ScheduleParsingMixin(ABC):
         Raises:
             MisconfigurationException: If a specified parameter or regex does not resolve to at least one parameter.
         """
-        assert isinstance(self.ft_schedule, Dict)
+        assert isinstance(self.ft_schedule, dict)
         self.ft_schedule[depth].setdefault("max_transition_epoch", -1)
         self._parse_phase_lr(depth)
         orig_params = self.ft_schedule[depth].get("params", [])
@@ -971,7 +972,7 @@ class ScheduleParsingMixin(ABC):
         Raises:
             MisconfigurationException: Provides a list of the parameters specified in more than one phase.
         """
-        assert isinstance(self.ft_schedule, Dict)
+        assert isinstance(self.ft_schedule, dict)
         phase_lists = [self.ft_schedule[d]["params"] for d in self.ft_schedule.keys()]
         params = Counter(list(itertools.chain(*phase_lists)))
         unique_params = Counter(list(set().union(*phase_lists)))
@@ -1223,7 +1224,7 @@ class ScheduleParsingMixin(ABC):
         return reinit_class
 
     @staticmethod
-    def _resolve_strategy_adapter(strategy_key: str, adapter_map: dict[str, str]) -> Type[StrategyAdapter]:
+    def _resolve_strategy_adapter(strategy_key: str, adapter_map: dict[str, str]) -> type[StrategyAdapter]:
         """Resolve the custom strategy adapter specified in the ``custom_strategy_adapters`` configuration.
 
         Args:
@@ -1415,7 +1416,7 @@ class ScheduleImplMixin(ABC):
         if self.ft_schedule:  # thaw according to an explicit schedule
             self.ft_schedule = (
                 self.load_yaml_schedule(pathlib.Path(self.ft_schedule))
-                if not isinstance(self.ft_schedule, Dict)
+                if not isinstance(self.ft_schedule, dict)
                 else self.ft_schedule
             )
             # save the parsed schedule to our log directory to ensure reproducibility
@@ -1435,7 +1436,7 @@ class ScheduleImplMixin(ABC):
         Broadcast the schedule to ensure it is available for use in a distributed context.
         """
         self.gen_or_load_sched()
-        assert isinstance(self.ft_schedule, Dict)
+        assert isinstance(self.ft_schedule, dict)
         if self.max_depth == -1:
             self.max_depth = len(self.ft_schedule) - 1
         else:
@@ -1777,7 +1778,7 @@ class ScheduleImplMixin(ABC):
         Returns:
             Tuple: Distilled optimizer state to be validated.
         """
-        assert isinstance(self.ft_schedule, Dict)
+        assert isinstance(self.ft_schedule, dict)
         opt = self.trainer.optimizers[0]
         sched = self.ft_schedule
         no_grad_cnt = len([p for pg in opt.param_groups for p in pg["params"] if not p.requires_grad])
