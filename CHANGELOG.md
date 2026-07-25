@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Added `scripts/verify_version_consistency.py`, a dependency-free audit of the torch/CUDA/Lightning/Python version declarations that are duplicated across the Dockerfiles, both `dockers/docker_images_*.sh` scripts, the Azure pipeline image tag and the `release-docker.yml` matrix. Exits non-zero on any disagreement and flags the outlier.
 
+- Added CI requirement regeneration drift detection: a report-only workflow (`regen-ci-req-report.yml`) that comments on PRs when the pinned lockfiles are stale, and a scheduled workflow (`regen-ci-req-check.yml`) that can open a PR with refreshed pins. Includes the `regen-ci-reqs` and `check-file-diffs` composite actions and `scripts/regen_summary.py`.
+
 ### Fixed
 
 - Fixed `ScheduleImplMixin._add_groups` adding duplicate parameter groups on resume, which raised `ValueError: some parameters appear in more than one parameter group`. Parameters already owned by an existing optimizer parameter group are now excluded, and `0` is returned when no candidates remain so the caller does not extend `base_lrs`/`min_lrs`/`lr_lambdas` for groups that were never created. Resolves [#30](https://github.com/speediedan/finetuning-scheduler/issues/30).
@@ -24,6 +26,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Corrected `dockers/docker_images_release.sh` declaring Lightning `2.5` while every other version declaration specified `2.6`.
 
+- Fixed five `pytest.mark.parametrize` decorators that declared a single argname with a stray trailing comma (e.g. `"ckpt,"`). `pytest` 9.1 treats the trailing comma as the tuple form and attempts to unpack each parameter value, producing a collection error.
+
+- Fixed the generated CI lockfiles embedding the absolute path of the generating checkout in their uv header, which made them differ on every other checkout even when the resolved pins were identical. The lockfile trailing newline is now normalized for the same reason, so regeneration is diff-stable.
+
 ### Changed
 
 - Modernized type hints for Python `3.10+` by bumping the `pyupgrade` pre-commit hook to `--py310-plus`.
@@ -31,6 +37,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Reset `requirements/ci/torch-pre.txt` to the stable channel; it had a stale nightly stanza uncommented, so local environment builds resolved an outdated torch nightly rather than stable torch.
 
 - Removed dead `.actions/` references from the pytest `addopts` and the CI workflow path filters.
+
+- Regenerated the pinned CI lockfiles after approximately six months without a refresh. Notable movement: `lightning`/`pytorch-lightning` `2.6.0` → `2.6.5`, `transformers` `5.0.0` → `5.14.1`, `torchmetrics` `1.8.2` → `1.9.0`, `pytest` `9.0.2` → `9.1.1`. `requirements/ci/requirements.txt` now pins `torch` again (it is only excluded on the prerelease code path), and `requirements/ci/torch-override.txt` is removed since it only exists while a prerelease channel is active.
 
 ### Deprecated
 
