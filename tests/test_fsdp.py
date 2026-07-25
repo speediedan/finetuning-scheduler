@@ -13,7 +13,7 @@ from copy import deepcopy
 from functools import partial
 from logging import DEBUG
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -67,7 +67,7 @@ DISABLE_USE_ORIG = {"use_orig_params": False}
 ##########################
 
 @pytest.fixture(scope="module")
-def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
+def fsdp_ft_schedules(tmpdir_factory) -> tuple[Path, dict]:
     """Generates a default fine-tuning schedule for 'implicit' testing, a modified one for 'explicit' mode and an
     epoch-driven transitions only one for epoch_transitions_only testing."""
     seed_everything(42)
@@ -169,7 +169,7 @@ def fsdp_ft_schedules(tmpdir_factory) -> Tuple[Path, Dict]:
 
 
 @pytest.fixture(scope="module", params=[True, False], ids=["use_orig", "no_use_orig"])
-def fsdp_ckpt(tmpdir_factory, fsdp_ft_schedules, request) -> Tuple[Dict, bool]:
+def fsdp_ckpt(tmpdir_factory, fsdp_ft_schedules, request) -> tuple[dict, bool]:
     """A fixture that generates a checkpoint with a sharded model."""
     seed_everything(42)
     test_model_cfg = {"fsdp_mask": {"wrapped_mods": list(range(6)), "unwrapped_mods": [7]}}
@@ -204,7 +204,7 @@ def fsdp_ckpt(tmpdir_factory, fsdp_ft_schedules, request) -> Tuple[Dict, bool]:
 
 class FTSBaseFSDPModel(FinetuningSchedulerBoringModel):
     def __init__(
-        self, fsdp_mask: Dict, outer_is_wrapped: bool = True, precision_key: Optional[str] = None, *args, **kwargs
+        self, fsdp_mask: dict, outer_is_wrapped: bool = True, precision_key: str | None = None, *args, **kwargs
     ):
         super().__init__(*args, **kwargs)
         self.fsdp_mask = fsdp_mask
@@ -451,7 +451,7 @@ class FTSSharedParamFSDPModel(FTSBaseFSDPModel):
 
 
 class FSDPTestFinetuningScheduler(TestFinetuningScheduler):
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         return super(TestFinetuningScheduler, self).state_dict()
 
     def restore_best_ckpt(self) -> None:

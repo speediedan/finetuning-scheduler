@@ -1,5 +1,6 @@
 import os
-from typing import Any, Callable, Dict, Optional, Tuple, KeysView, Union
+from typing import Any
+from collections.abc import Callable, KeysView
 from copy import deepcopy
 from logging import DEBUG
 from pathlib import Path
@@ -82,7 +83,7 @@ class FSDPStateInspectMixin:
             else:
                 assert not issubclass(type(m), FSDPModule)  # orig module should not be composed with FSDPModule
 
-    def _inspect_composable_fsdp_state(self, m: nn.Module, precision: Optional[torch.dtype] = None) -> None:
+    def _inspect_composable_fsdp_state(self, m: nn.Module, precision: torch.dtype | None = None) -> None:
             assert issubclass(type(m), FSDPModule)  # orig module should be composed with FSDPModule
             mod_fsdp_state = m._get_fsdp_state()
             mixed_prec_state = mod_fsdp_state._mp_policy
@@ -96,7 +97,7 @@ class FSDPStateInspectMixin:
                 dp_dim0 = self.trainer.strategy.device_mesh['data_parallel'].shape[0]
                 assert fsdp_p.sharded_size[0] == fsdp_p._orig_size[0] // dp_dim0
 
-    def _collect_fsdp_mod_states(self, fsdp_keys: KeysView) -> Dict[Any, Dict]:
+    def _collect_fsdp_mod_states(self, fsdp_keys: KeysView) -> dict[Any, dict]:
         fsdp_mod_states = {}
         if len(fsdp_keys) > 0:
             for n, m in self.pl_module.named_modules():
@@ -120,10 +121,10 @@ class FSDPStateInspectMixin:
 ################################################################################
 
 class FTSBaseModelParallel(FinetuningSchedulerBoringModel):
-    def __init__(self, cm_fsdp_plan: Dict, cm_tp_plan: Union[Dict, Callable],
+    def __init__(self, cm_fsdp_plan: dict, cm_tp_plan: dict | Callable,
                  module_cls: nn.Module = FTSToyTransformer, loss_parallel: bool = True,
-                 tt_cfg: Optional[TestModelArgs] = None,
-                 precision_key: Optional[str] = None,
+                 tt_cfg: TestModelArgs | None = None,
+                 precision_key: str | None = None,
                  monitor_sync_dist: bool = True,
                  *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -144,7 +145,7 @@ class FTSBaseModelParallel(FinetuningSchedulerBoringModel):
             loss = F.cross_entropy(output.reshape(-1, output.size(-1)), target.reshape(-1))
         return loss
 
-    def forward(self, inputs: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+    def forward(self, inputs: Tensor, mask: Tensor | None = None) -> Tensor:
         return self.model(inputs, mask=mask)
 
     def backward(self, *args, **kwargs):
@@ -161,7 +162,7 @@ class FTSBaseModelParallel(FinetuningSchedulerBoringModel):
         self.training_step_outputs.append(loss)
         return {"loss": loss}
 
-    def validation_step(self, batch: Tensor, batch_idx: int) -> Optional[STEP_OUTPUT]:
+    def validation_step(self, batch: Tensor, batch_idx: int) -> STEP_OUTPUT | None:
         inputs, target = batch
         output = self(inputs)
         # TODO: for now, not using diverge_on_epoch for simplicity
@@ -223,11 +224,11 @@ class FTSCmModelParallel(FTSBaseModelParallel):
 
 class ModelParallelTestFTS(FSDPStateInspectMixin, TestFinetuningScheduler):
 
-    def __init__(self, ext_tensor_details: Optional[bool] = False, *args, **kwargs):
+    def __init__(self, ext_tensor_details: bool | None = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.ext_tensor_details = ext_tensor_details
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         return super(TestFinetuningScheduler, self).state_dict()
 
     def restore_best_ckpt(self) -> None:
@@ -251,7 +252,7 @@ class ModelParallelTestFTS(FSDPStateInspectMixin, TestFinetuningScheduler):
                 lrs_state = None
                 self.inspect_or_assert(current_state, lrs_state, state_key)
 
-    def _collect_p_states(self, tp_keys: KeysView) -> Dict[Any, Dict]:
+    def _collect_p_states(self, tp_keys: KeysView) -> dict[Any, dict]:
         p_states = {}
         if len(tp_keys) > 0:
             for n, p in self.pl_module.named_parameters():
@@ -263,7 +264,7 @@ class ModelParallelTestFTS(FSDPStateInspectMixin, TestFinetuningScheduler):
                         p_states = self._extended_tensor_details(p_states, n, p)
         return p_states
 
-    def _extended_tensor_details(self, p_states: Dict, n: str, p: Tensor) -> None:
+    def _extended_tensor_details(self, p_states: dict, n: str, p: Tensor) -> None:
         p_states[n]['dtype'] = p.dtype
         p_states[n]['orig_shape'] = p.shape
         if p_states[n]['is_DTensor']:
@@ -286,7 +287,7 @@ class ModelParallelTestFTS(FSDPStateInspectMixin, TestFinetuningScheduler):
 ################################################################################
 
 @pytest.fixture(scope="module")
-def model_parallel_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
+def model_parallel_ft_schedule(tmpdir_factory) -> tuple[Path, dict]:
     """Generates a default fine-tuning schedule for 'implicit' testing, a modified one for 'explicit' mode and an
     epoch-driven transitions only one for epoch_transitions_only testing."""
     seed_everything(42)
@@ -452,22 +453,22 @@ bf16 = {"precision": "bf16-true"}
 class ModParallelTestCfg:
     model_cfg_key: str
     model_cls: Callable
-    model_cfg: Dict = field(default_factory=dict)
-    trainer_cfg: Dict = field(default_factory=lambda: {'max_epochs': 3})
-    strategy_cfg: Dict = field(default_factory=lambda: dp2_tp1)
-    strategy_adapter_cfg: Dict = field(default_factory=dict)
-    precision_opts: Dict = field(default_factory=lambda: {'precision': '32-true'})
+    model_cfg: dict = field(default_factory=dict)
+    trainer_cfg: dict = field(default_factory=lambda: {'max_epochs': 3})
+    strategy_cfg: dict = field(default_factory=lambda: dp2_tp1)
+    strategy_adapter_cfg: dict = field(default_factory=dict)
+    precision_opts: dict = field(default_factory=lambda: {'precision': '32-true'})
     use_dynamo: bool = False
     use_implicit_replication: bool = False
     fts_cls: Callable = ModelParallelTestFTS
-    fts_cfg: Dict = field(default_factory=dict)
+    fts_cfg: dict = field(default_factory=dict)
     ft_sched_idx: int = 1
     es_cls: Callable = FTSEarlyStopping
-    es_cfg: Dict = field(default_factory=lambda: {"patience": 1})
-    ckpt_cfg: Dict = field(default_factory=lambda: {"save_top_k": 3})
+    es_cfg: dict = field(default_factory=lambda: {"patience": 1})
+    ckpt_cfg: dict = field(default_factory=lambda: {"save_top_k": 3})
     ckpt_cls: Callable = FTSCheckpoint
     expected_results: ExpectedResults = ExpectedResults()
-    runif_alias: Optional[str] = None
+    runif_alias: str | None = None
 
     def __post_init__(self):
         self.default_fts_cfg = {
