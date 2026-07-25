@@ -1,0 +1,26 @@
+{
+  "skill_name": "az-pipelines-debug",
+  "evals": [
+    {
+      "id": 0,
+      "name": "stuck-build-triage",
+      "prompt": "the multi-gpu azure build for my PR hasn't started, its been sitting there like 20 min now. can you figure out whats going on and tell me what to do",
+      "expected_output": "Identifies whether the build is approval-gated, queue-blocked behind the shared interpretune pool, or a dispatch failure. Checks the pending-approvals endpoint for the finetuning-scheduler project, the agent's online status on pool id 1, and the agent diag logs. Reports the actual current state (pool idle, agent online, zero pending approvals) rather than guessing.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "gpu-only-test-failure",
+      "prompt": "the 'Testing: standalone multi-gpu' step failed on the azure run but when I run pytest locally everything passes. why would that be and how do I reproduce it",
+      "expected_output": "Explains that plain pytest does not collect standalone tests at all — they are selected by tests/special_tests.sh via RunIf-generated skipif marker kwargs, not pytest markers. Gives the correct reproduction command (special_tests.sh --mark_type=standalone --filter_pattern='test_f' or PL_RUN_STANDALONE_TESTS=1 pytest for a single test), and notes the 2-GPU requirement.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "exit-137-diagnosis",
+      "prompt": "azure gpu build just died partway through with exit code 137. is that an OOM? what should I check",
+      "expected_output": "Identifies 137 as SIGKILL / OOM-class, ties it to the runner's 62 GiB RAM and 2 GiB swap with systemd MemoryMax, notes that multi-GPU standalone tests each spawn a fresh process. Recommends checking the agent diag log, reaping orphaned processes via scripts/manage_standalone_processes.sh, and restart-stack.sh as recovery. Should distinguish infra failure from a genuine test failure.",
+      "files": []
+    }
+  ]
+}

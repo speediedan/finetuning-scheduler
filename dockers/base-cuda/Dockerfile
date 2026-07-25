@@ -11,13 +11,13 @@
 # limitations under the License.
 # initially based on https://bit.ly/3pdAf1G
 
-ARG CUDA_VERSION=13.0.2
+ARG CUDA_VERSION=13.0.3
 ARG OS_VER=ubuntu22.04
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
 ARG PYTHON_VERSION=3.13
-ARG PYTORCH_VERSION=2.11.0
+ARG PYTORCH_VERSION=2.13.0
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
 

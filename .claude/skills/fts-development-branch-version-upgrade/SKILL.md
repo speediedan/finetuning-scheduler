@@ -148,6 +148,29 @@ Update the following files with version changes:
    nightly
    ```
 
+#### Determining the target CUDA version
+
+If the user did not supply `New CUDA version`, derive it rather than guessing — `RELEASE.md` prose has
+been observed to be incomplete (it omits CUDA 12.9 for 2.13 despite cu129 Linux wheels existing).
+
+1. **`CUDA_STABLE`** in `.github/scripts/generate_binary_build_matrix.py` **at the target release tag**
+   (not `main`) is authoritative: it drives both the primary-tested CI version and the PyPI wheel.
+1. **Confirm against published wheels** by enumerating `https://download.pytorch.org/whl/torch/` for
+   `torch-<version>%2B(cu\d+)-` variants.
+1. **Take the toolkit patch version from torch's own pin** — this is what the Docker base image must
+   match:
+   ```bash
+   python -c "from importlib.metadata import requires; print([r for r in requires('torch') if 'cuda-toolkit' in r])"
+   # torch 2.13.0 -> cuda-toolkit[...]==13.0.3  =>  ARG CUDA_VERSION=13.0.3
+   ```
+1. **Mirror `TORCH_CUDA_ARCH_LIST`** from `TORCH_CUDA_ARCH_LIST_TABLE` in
+   `.ci/manywheel/build_env_setup.py` for that CUDA version, `x86_64`. CUDA 13.0/13.2 → `{75, 80, 86, 90, 100, 120}` → `"7.5;8.0;8.6;9.0;10.0;12.0+PTX"`. **Do not drop `7.5`** — the CI host has an
+   RTX 2070 SUPER (sm_75).
+
+The per-release decision is announced in a dedicated RFC issue (2.11 → pytorch#172663,
+2.12 → pytorch#178665, 2.14 → pytorch#190355). Check the issue for the target release; if it is still
+open, surface that to the user rather than assuming.
+
 #### Docker Configuration Files
 
 7. **`dockers/base-cuda/Dockerfile`**:
