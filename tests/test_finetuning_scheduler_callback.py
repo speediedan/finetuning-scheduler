@@ -1417,8 +1417,8 @@ def ckpt_resume_launch(ckpt_set_fixture: object, diff_dirpath: bool, ckpt: str, 
     trainer.fit(model)
     return finetuningscheduler_callback, resume_callbacks, trainer
 
-@pytest.mark.parametrize("diff_dirpath,", [True, False], ids=["diffdirpath", "samedirpath"])
-@pytest.mark.parametrize("ckpt,", ["best", "kth", "last"], ids=["best", "kth", "last"])
+@pytest.mark.parametrize("diff_dirpath", [True, False], ids=["diffdirpath", "samedirpath"])
+@pytest.mark.parametrize("ckpt", ["best", "kth", "last"], ids=["best", "kth", "last"])
 def test_fts_callback_resume_last(tmpdir, ckpt_set_last, recwarn, diff_dirpath: bool, ckpt: str):
     """Validate scheduled fine-tuning resumption functions as expected from both 'best' and 'kth'(not-best)
     checkpoints in both train/val stage check modes with and without max_depth specified."""
@@ -1433,9 +1433,9 @@ def test_fts_callback_resume_last(tmpdir, ckpt_set_last, recwarn, diff_dirpath: 
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
-@pytest.mark.parametrize("diff_dirpath,", [True, False], ids=["diffdirpath", "samedirpath"])
-@pytest.mark.parametrize("train_chk_mode,", [None, True], ids=["defaultchk", "trainchk"])
-@pytest.mark.parametrize("ckpt,", ["best", "kth"], ids=["best", "kth"])
+@pytest.mark.parametrize("diff_dirpath", [True, False], ids=["diffdirpath", "samedirpath"])
+@pytest.mark.parametrize("train_chk_mode", [None, True], ids=["defaultchk", "trainchk"])
+@pytest.mark.parametrize("ckpt", ["best", "kth"], ids=["best", "kth"])
 @pytest.mark.parametrize("max_depth", [-1, 1], ids=["nomaxdepth", "maxdepth1"])
 def test_fts_callback_resume(tmpdir, ckpt_set, recwarn, diff_dirpath: bool, train_chk_mode: bool | None, ckpt: str,
                              max_depth: int):
