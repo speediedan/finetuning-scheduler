@@ -211,6 +211,14 @@ generate_lockfile() {
         echo "✓ Generated ${output_file} (torch-only deps pruned for CPU efficiency)"
     fi
 
+    # uv emits the lockfile without a trailing newline, but the end-of-file-fixer pre-commit hook adds
+    # one. Left alone, that guarantees a one-byte diff between a freshly generated file and the committed
+    # one on every single regeneration, which would make an automated drift check permanently report
+    # drift. Normalize here so generated output matches what is committed.
+    if [[ -s "${output_file}" && -n "$(tail -c 1 "${output_file}")" ]]; then
+        printf '\n' >> "${output_file}"
+    fi
+
     # Return to original directory
     popd > /dev/null
 }
