@@ -1,0 +1,110 @@
+name: Regen CI Requirements (scheduled PR)
+
+# Scheduled counterpart to regen-ci-req-report.yml. Regenerates the pinned CI lockfiles and, if they
+# drift, opens a PR with the refreshed pins so CI can validate them.
+#
+# REQUIRES the repo secret REGEN_PR_TOKEN (a repo-scoped PAT with contents:write + pull-requests:write).
+# The default GITHUB_TOKEN can open the PR but will NOT trigger downstream workflows on it, which defeats
+# the purpose here -- a pin bump is only useful once ci_test-full and the Azure GPU pipeline have run
+# against it. The job therefore no-ops with an explanatory notice when the secret is absent rather than
+# opening an unvalidated PR or failing on a schedule.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # 00:00 UTC on the 1st and 15th. Deliberately not more frequent: each run can produce a PR that needs
+    # GPU CI, and the Azure agent pool is shared with interpretune.
+    - cron: '0 0 1,15 * *'
+
+jobs:
+  regen:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for PR token
+        id: token_check
+        env:
+          REGEN_PR_TOKEN: ${{ secrets.REGEN_PR_TOKEN }}
+        run: |
+          if [ -n "${REGEN_PR_TOKEN}" ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "::notice::REGEN_PR_TOKEN is not configured; running regen in report-only mode. Add a repo-scoped PAT named REGEN_PR_TOKEN to enable automatic PRs."
+          fi
+
+      # Skip entirely when the prerelease channel is active: the nightly index changes daily, so a
+      # scheduled regen would churn the lockfile (and open a PR) on essentially every run.
+      - name: Check torch prerelease channel
+        id: prerelease_check
+        run: |
+          PRE_FILE="requirements/ci/torch-pre.txt"
+          if [ -f "${PRE_FILE}" ] && grep -qv '^\s*\(#\|$\)' "${PRE_FILE}"; then
+            echo "active=true" >> $GITHUB_OUTPUT
+            echo "::notice::torch-pre.txt is populated (prerelease channel active); skipping scheduled regen to avoid daily nightly churn."
+          else
+            echo "active=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run regen and compute patch
+        if: steps.prerelease_check.outputs.active != 'true'
+        uses: ./.github/actions/regen-ci-reqs
+        id: regen_ci_reqs
+        with:
+          python_version: '3.13'
+          patch_path: /tmp/regen_diff.patch
+
+      - name: Compute top-5 package-change summary
+        if: steps.regen_ci_reqs.outputs.changed == 'true'
+        run: python scripts/regen_summary.py /tmp/regen_diff.patch regen_summary.txt
+
+      - name: Create Pull Request
+        if: steps.regen_ci_reqs.outputs.changed == 'true' && steps.token_check.outputs.available == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.REGEN_PR_TOKEN }}
+          commit-message: "regenerate pinned CI requirements"
+          title: "[auto] regen pinned CI requirements"
+          # Restrict the commit to generated dependency state. FTS's lock script also runs
+          # sync_metadata.py (which can rewrite pyproject.toml) and setup.py's import rewriting is a
+          # latent hazard, so never let this commit pick up arbitrary working-tree changes.
+          add-paths: |
+            requirements/ci/requirements.txt
+            requirements/ci/requirements-oldest.txt
+            requirements/ci/torch-override.txt
+            pyproject.toml
+          branch: regen/pinned-requirements-${{ github.run_id }}
+          delete-branch: true
+          labels: |
+            automated
+            dependencies
+          body: |
+            Automated regeneration of the pinned CI lockfiles via
+            `requirements/utils/lock_ci_requirements.sh`.
+
+            Review notes:
+            - Check whether `torch` moved. A torch bump needs the Azure GPU pipeline to pass before merge,
+              and may also require updating the Docker image declarations
+              (`python scripts/verify_version_consistency.py`).
+            - Check whether `lightning` / `pytorch-lightning` moved together. They are separate
+              distributions of the same codebase; a split between them in `requirements-oldest.txt` is
+              expected under `lowest-direct` resolution but worth a sanity check.
+            - `requirements/ci/torch-override.txt` is generated from `torch-pre.txt` and is deleted when
+              the stable channel is in use. Its removal in this diff is expected on stable.
+
+      - name: Log summary
+        if: always()
+        run: |
+          if [ "${{ steps.prerelease_check.outputs.active }}" = "true" ]; then
+            echo "Skipped: torch prerelease channel active."
+          elif [ "${{ steps.regen_ci_reqs.outputs.changed }}" != "true" ]; then
+            echo "No pin drift detected."
+          elif [ "${{ steps.token_check.outputs.available }}" != "true" ]; then
+            echo "Pin drift detected but REGEN_PR_TOKEN is absent; no PR opened."
+          else
+            echo "Pin drift detected; PR opened."
+          fi
