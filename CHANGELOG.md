@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [2.13.0] - 2026-XX-XX
+## [2.13.0] - 2026-07-26
 
 ### Added
 
@@ -18,13 +18,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Fixed `FTSCheckpoint.load_state_dict` unconditionally asserting that an `FTSEarlyStopping` callback is attached, which made checkpoints unloadable when configured with `epoch_transitions_only=True` (a mode in which FTS deliberately does not attach one). The callback is now resolved only within the branch that dereferences it. Resolves [#29](https://github.com/speediedan/finetuning-scheduler/issues/29).
 
-- Fixed the Lightning version constraint (`LIGHTNING_VERSION`) excluding every published Lightning patch release. The ceiling was `<2.6.1`, pinning users to `2.6.0` with no path to Lightning bug fixes; it now excludes the next minor (`<2.7.0`). Validated against Lightning `2.6.5`.
-
-- Fixed the broken `--include-experimental` option in `scripts/gen_fts_coverage.sh` (declared as requiring an argument in the `getopt` long-opts string while handled as a bare flag, making it unusable in both spellings and leaving the experimental-patch coverage partition unreachable).
-
-- Fixed `--allow-failures` being unreachable in `tests/test_utils.sh`: the test invocation ran bare under the outer `set -eo pipefail`, aborting the script before the result parsing and failure-tolerance branch could run.
-
-- Corrected `dockers/docker_images_release.sh` declaring Lightning `2.5` while every other version declaration specified `2.6`.
+- Relaxed (`LIGHTNING_VERSION`) `<2.6.1` to allow patch-level upgrades, now excluding only the next minor (`<2.7.0`). Validated against Lightning `2.6.5`.
 
 - Fixed five `pytest.mark.parametrize` decorators that declared a single argname with a stray trailing comma (e.g. `"ckpt,"`). `pytest` 9.1 treats the trailing comma as the tuple form and attempts to unpack each parameter value, producing a collection error.
 
@@ -35,8 +29,6 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 ### Changed
 
 - Modernized type hints for Python `3.10+` by bumping the `pyupgrade` pre-commit hook to `--py310-plus`.
-
-- Reset `requirements/ci/torch-pre.txt` to the stable channel; it had a stale nightly stanza uncommented, so local environment builds resolved an outdated torch nightly rather than stable torch.
 
 - Removed dead `.actions/` references from the pytest `addopts` and the CI workflow path filters.
 
