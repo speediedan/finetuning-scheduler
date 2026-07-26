@@ -338,6 +338,52 @@ a stale probe silently stops checking that file.
 Note the audit deliberately does **not** cover `CITATION.cff` or `__about__.py`: on a development branch
 those are *expected* to disagree (see Phase 2, Core Version Files).
 
+### Phase 2c: Verify the coverage badge actually renders (MANDATORY GATE)
+
+The README coverage badge is flag-filtered (`badge.svg?flag=gpu`) and fails **silently** — it renders the
+word "unknown" rather than erroring, so a broken badge can sit on the README indefinitely. Check it
+directly rather than trusting the rendered README:
+
+```bash
+for f in gpu cpu pytest; do
+  printf "flag=%s -> " "$f"
+  curl -sS "https://codecov.io/gh/speediedan/finetuning-scheduler/branch/main/graph/badge.svg?flag=${f}" \
+    | grep -oE ">[a-z0-9%]+</text>" | tail -1
+done
+# also the unfiltered total:
+curl -sS "https://codecov.io/gh/speediedan/finetuning-scheduler/branch/main/graph/badge.svg" \
+  | grep -oE ">[a-z0-9%]+</text>" | tail -1
+```
+
+Repeat for the release branch, URL-encoding the slash: `branch/release%2F2.13.x`.
+
+**Expected:** every flag resolves to a percentage, and `gpu` is at or near the coverage the Azure
+pipeline reports (100% at the time of writing). **"unknown" for any flag is a failure.**
+
+Interpretation when something is wrong:
+
+| Symptom                                                    | Likely cause                                                                                                                                                                                                                |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gpu` unknown, `cpu` fine                                  | The branch HEAD has no GPU upload and carryforward is off. Codecov's branch badge reflects the **HEAD commit**, and Azure runs less often than the CPU matrix. Fix: `flags: {gpu: {carryforward: true}}` in `.codecov.yml`. |
+| All flags unknown                                          | Upload credential or slug problem.                                                                                                                                                                                          |
+| Total much lower than the GPU pipeline's reported coverage | The GPU report is not merging into the branch total — same carryforward cause.                                                                                                                                              |
+
+To distinguish a credential problem from a carryforward problem, upload a throwaway flag manually
+against the branch HEAD; if it appears, the credential and CLI invocation are fine:
+
+```bash
+set -a && . ./.env && set +a       # CODECOV_TOKEN (upload token, NOT an API token)
+/tmp/codecov upload-process --slug 'speediedan/finetuning-scheduler' -t "${CODECOV_TOKEN}" \
+  --commit-sha "$(git rev-parse origin/main)" --git-service 'github' \
+  -n "token-diagnostic" -F tokencheck -f 'coverage.xml'
+```
+
+Validate any `.codecov.yml` change before committing — it accepts unknown keys silently otherwise:
+
+```bash
+curl --data-binary @.codecov.yml https://codecov.io/validate
+```
+
 ### Phase 3: Regenerate CI Requirements
 
 After updating version files, regenerate locked requirements:
@@ -647,6 +693,7 @@ If any unexpected issues were encountered, suggest updates to this skill:
 After completing all phases, verify:
 
 1. **Version consistency**: `python scripts/verify_version_consistency.py` exits 0 (see Phase 2b)
+1. **Coverage badge**: every flag renders a percentage, not "unknown" (see Phase 2c)
 1. **Build success**: Environment builds without errors
 1. **Test status**: Coverage collected (failures documented)
 1. **Documentation**: Builds cleanly with no warnings
