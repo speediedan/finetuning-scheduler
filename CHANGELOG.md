@@ -40,6 +40,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Removed dead `.actions/` references from the pytest `addopts` and the CI workflow path filters.
 
+- Enabled Codecov carryforward for the `gpu`, `cpu` and `pytest` flags. GPU coverage is uploaded by the Azure pipeline, which runs less often than the GitHub Actions CPU matrix, so any branch HEAD without a GPU upload previously had no `gpu` flag data at all — rendering the README coverage badge as "unknown" and reporting the branch total as CPU-only coverage rather than the full 100%.
+
 - Regenerated the pinned CI lockfiles after approximately six months without a refresh. Notable movement: `lightning`/`pytorch-lightning` `2.6.0` → `2.6.5`, `transformers` `5.0.0` → `5.14.1`, `torchmetrics` `1.8.2` → `1.9.0`, `pytest` `9.0.2` → `9.1.1`. `requirements/ci/requirements.txt` now pins `torch` again (it is only excluded on the prerelease code path), and `requirements/ci/torch-override.txt` is removed since it only exists while a prerelease channel is active.
 
 ### Deprecated
