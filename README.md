@@ -17,7 +17,7 @@ ______________________________________________________________________
 [![PyPI Status](https://badge.fury.io/py/finetuning-scheduler.svg)](https://badge.fury.io/py/finetuning-scheduler)\
 [![codecov](https://codecov.io/gh/speediedan/finetuning-scheduler/branch/main/graph/badge.svg?flag=gpu)](https://codecov.io/gh/speediedan/finetuning-scheduler)
 [![ReadTheDocs](https://readthedocs.org/projects/finetuning-scheduler/badge/?version=latest)](https://finetuning-scheduler.readthedocs.io/en/stable/)
-[![DOI](https://zenodo.org/badge/455666112.svg)](https://zenodo.org/badge/latestdoi/455666112)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.6463952.svg)](https://doi.org/10.5281/zenodo.6463952)
 [![license](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/speediedan/finetuning-scheduler/blob/master/LICENSE)
 
 </div>
