@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [2.11.0] - 2026-XX-XX
+## [2.13.0] - 2026-XX-XX
 
 ### Added
 
@@ -45,6 +45,13 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 ### Deprecated
 
 - The removal target for direct calls to `ScheduleImplMixin.gen_ft_schedule()` has been restated from `2.12.0` to `2.14.0`. No `2.11.0` or `2.12.0` release was published (see below), so the original target was never reachable; `2.14.0` restores a real migration window for downstream consumers.
+
+- **Advance notice:** the minimum supported PyTorch version will be raised to `2.11.0` in the `2.14.0` release, restoring the strict "latest 4 PyTorch minor releases" support window documented in `docs/source/versioning.rst`. `2.13.0` retains a minimum of `2.7.0`.
+
+### Contributors
+
+Thanks to the following users/contributors for their feedback and/or contributions in this release:
+@DimitrisMantas
 
 ## [2.11.0] and [2.12.0] - not released
 
