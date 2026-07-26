@@ -23,7 +23,12 @@ runs:
         rc=0
         # NB: --exit-code returns 1 when there are differences, so the failure is expected and handled;
         # any other nonzero code is a real git error and is propagated.
-        git --no-pager diff --exit-code ${{ inputs.compare_paths }} > ${{ inputs.patch_path }} 2> file_diff.err || rc=$?
+        # The `--` is load-bearing: without it, git treats the arguments as revisions-or-paths and fails
+        # with exit 128 ("no such path in the working tree") when any listed path is absent. That is a
+        # legitimate state here -- requirements/ci/torch-override.txt only exists while a torch
+        # prerelease channel is configured -- so the paths must be passed as pathspecs, which tolerate
+        # non-matching entries.
+        git --no-pager diff --exit-code -- ${{ inputs.compare_paths }} > ${{ inputs.patch_path }} 2> file_diff.err || rc=$?
         if [ "$rc" -eq 0 ]; then
           echo "changed=false" >> $GITHUB_OUTPUT
           rm -f file_diff.err || true
