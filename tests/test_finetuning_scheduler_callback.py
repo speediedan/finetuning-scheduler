@@ -17,7 +17,7 @@ from copy import deepcopy, copy
 from logging import DEBUG
 from pathlib import Path
 from unittest import mock
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -163,10 +163,10 @@ class FinetuningSchedulerBoringModel(BoringModel):
     def __init__(
         self,
         diverge_on_epoch: int = 3,
-        no_decay: Optional[List] = None,
+        no_decay: list | None = None,
         weight_decay: float = 1.0e-06,
         init_lr_key: str = None,
-        p0_params: Optional[List] = None,
+        p0_params: list | None = None,
         monitor_metric: str = None,
     ):
         super().__init__()
@@ -306,10 +306,10 @@ class TestFinetuningScheduler(FinetuningScheduler):
 
     def __init__(
         self,
-        expected_state: Optional[Dict] = None,
-        lrs_state: Optional[Dict] = None,
-        mock_strategy: Optional[str] = None,
-        state_log_dir: Optional[str] = None,  # used to generate results from test config changes (w/o state assertions)
+        expected_state: dict | None = None,
+        lrs_state: dict | None = None,
+        mock_strategy: str | None = None,
+        state_log_dir: str | None = None,  # used to generate results from test config changes (w/o state assertions)
         *args,
         **kwargs,
     ):
@@ -323,7 +323,7 @@ class TestFinetuningScheduler(FinetuningScheduler):
         self.dev_expected_states = {}
         self.dev_lrs_states = {}
 
-    def setup(self, trainer, pl_module, stage: Optional[str] = None) -> None:
+    def setup(self, trainer, pl_module, stage: str | None = None) -> None:
         if self.mock_strategy:
             trainer._accelerator_connector._strategy_flag = MOCK_STRATEGY_MAPPING[self.mock_strategy][0]
             self.allow_untested = MOCK_STRATEGY_MAPPING[self.mock_strategy][1]
@@ -337,7 +337,7 @@ class TestFinetuningScheduler(FinetuningScheduler):
         if self.allow_untested:
             raise SystemExit(0)
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         self.best_ckpt_test_weight = self.pl_module._modules["model"]._modules["3"].bias.data.detach().clone()
         return super().state_dict()
 
@@ -432,7 +432,7 @@ class BNInspectFTS(TestFinetuningScheduler):
         current_state, lrs_state, state_key = self.sample_bn_state(trainer, pl_module)
         self.inspect_or_assert(current_state, lrs_state, state_key)
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         return super(TestFinetuningScheduler, self).state_dict()
 
     def restore_best_ckpt(self) -> None:
@@ -533,7 +533,7 @@ class EnforcePhase0CfgOptimBoringModel(FinetuningSchedulerBoringModel):
 
 
 class FTSZeroRedundancyOptimizerModel(FinetuningSchedulerBoringModel):
-    def __init__(self, test_overlap: Optional[bool] = False, enf_p0: Optional[bool] = False, *args, **kwargs):
+    def __init__(self, test_overlap: bool | None = False, enf_p0: bool | None = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.test_overlap = test_overlap
         self.enf_p0 = enf_p0
@@ -572,7 +572,7 @@ class NonDynamicLossBoringModel(FinetuningSchedulerBoringModel):
 
 
 class ExplicitLossFTSCheckpoint(FTSCheckpoint):
-    def _monitor_candidates(self, trainer: Trainer) -> Dict[str, Tensor]:
+    def _monitor_candidates(self, trainer: Trainer) -> dict[str, Tensor]:
         # monitor_candidates = deepcopy(trainer.callback_metrics)
         # set loss to improve by a little bit every epoch
         monitor_candidates = {"val_loss": torch.tensor((trainer.max_epochs - trainer.current_epoch) * 0.99)}
@@ -592,7 +592,7 @@ class NonDynamicPhase0EnforceModel(NonDynamicLossBoringModel):
         return [optimizer], [lr_scheduler]
 
 
-def ckpt_set_setup(save_top_k: int, save_last: Optional[bool] = None) -> Dict:
+def ckpt_set_setup(save_top_k: int, save_last: bool | None = None) -> dict:
     seed_everything(42)
     callbacks = [
         FinetuningScheduler(max_depth=1),
@@ -604,7 +604,7 @@ def ckpt_set_setup(save_top_k: int, save_last: Optional[bool] = None) -> Dict:
 
 
 @pytest.fixture(scope="function")
-def ckpt_set_last(tmpdir_factory) -> Dict:
+def ckpt_set_last(tmpdir_factory) -> dict:
     """A fixture that generates a 'best', 'kth' and 'last' checkpoint to be used in scheduled fine-tuning
     resumption testing."""
     callbacks, model = ckpt_set_setup(save_top_k=3, save_last=True)
@@ -615,7 +615,7 @@ def ckpt_set_last(tmpdir_factory) -> Dict:
 
 
 @pytest.fixture(scope="function")
-def ckpt_set(tmpdir_factory) -> Dict:
+def ckpt_set(tmpdir_factory) -> dict:
     """A fixture that generates a 'best' and 'kth' checkpoint to be used in scheduled fine-tuning resumption
     testing."""
     callbacks, model = ckpt_set_setup(save_top_k=2)
@@ -633,7 +633,7 @@ def get_sched_fixture_tmpdir(tmpfactory_handle):
     return tmpdir, rank
 
 @pytest.fixture(scope="function")
-def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
+def boring_ft_schedule(tmpdir_factory) -> tuple[Path, dict]:
     """Generates a default fine-tuning schedule for 'implicit' testing, a modified one for 'explicit' mode and an
     epoch-driven transitions only one for epoch_transitions_only testing."""
     seed_everything(42)
@@ -778,7 +778,7 @@ def boring_ft_schedule(tmpdir_factory) -> Tuple[Path, Dict]:
 
 
 @pytest.fixture(scope="function")
-def invalid_schedules(tmpdir_factory) -> Dict:
+def invalid_schedules(tmpdir_factory) -> dict:
     """A fixture that generates a dictionary of invalid schedules for testing."""
     valid_sched_start = """
 0:
@@ -1089,7 +1089,7 @@ class ComplexNestedModel(LightningModule):
     ],
     ids=["dist_boring", "Boring", "ParityRNN", "ComplexNested"],
 )
-def test_fts_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expected: Tuple):
+def test_fts_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, expected: tuple):
     """Validate the default fine-tuning schedule generation."""
     seed_everything(42)
     callbacks = [FinetuningScheduler(gen_ft_sched_only=True)]
@@ -1106,7 +1106,7 @@ def test_fts_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, 
         assert os.path.isfile(ft_schedule)
         with open(ft_schedule) as f:
             test_schedule = yaml.safe_load(f.read())
-        assert isinstance(test_schedule, Dict)
+        assert isinstance(test_schedule, dict)
         assert len(test_schedule) == expected[0]
         assert test_schedule[1]["params"] == expected[1]
         assert test_schedule[next(reversed(list(test_schedule.keys())))]["params"] == expected[2]
@@ -1130,7 +1130,7 @@ def test_fts_gen_ft_schedule_deprecation_warning(tmpdir):
     assert os.path.isfile(schedule_path)
     with open(schedule_path) as f:
         test_schedule = yaml.safe_load(f.read())
-    assert isinstance(test_schedule, Dict)
+    assert isinstance(test_schedule, dict)
     assert len(test_schedule) > 0
 
 @pytest.mark.skipif(not _MLFLOW_AVAILABLE, reason="test requires MLflow")
@@ -1398,7 +1398,7 @@ EXPECTED_RESUME_RESULTS = {
 
 
 def ckpt_resume_launch(ckpt_set_fixture: object, diff_dirpath: bool, ckpt: str, max_depth: int, tmpdir: Path,
-                       save_on_train_epoch_end: Optional[bool] = None) -> None:
+                       save_on_train_epoch_end: bool | None = None) -> None:
     dirpath = None if diff_dirpath else Path(ckpt_set_fixture["best"]).parent
     resume_callbacks = [
         FTSEarlyStopping(monitor="val_loss", patience=1, min_delta=0.001),
@@ -1417,8 +1417,8 @@ def ckpt_resume_launch(ckpt_set_fixture: object, diff_dirpath: bool, ckpt: str, 
     trainer.fit(model)
     return finetuningscheduler_callback, resume_callbacks, trainer
 
-@pytest.mark.parametrize("diff_dirpath,", [True, False], ids=["diffdirpath", "samedirpath"])
-@pytest.mark.parametrize("ckpt,", ["best", "kth", "last"], ids=["best", "kth", "last"])
+@pytest.mark.parametrize("diff_dirpath", [True, False], ids=["diffdirpath", "samedirpath"])
+@pytest.mark.parametrize("ckpt", ["best", "kth", "last"], ids=["best", "kth", "last"])
 def test_fts_callback_resume_last(tmpdir, ckpt_set_last, recwarn, diff_dirpath: bool, ckpt: str):
     """Validate scheduled fine-tuning resumption functions as expected from both 'best' and 'kth'(not-best)
     checkpoints in both train/val stage check modes with and without max_depth specified."""
@@ -1433,11 +1433,11 @@ def test_fts_callback_resume_last(tmpdir, ckpt_set_last, recwarn, diff_dirpath: 
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
-@pytest.mark.parametrize("diff_dirpath,", [True, False], ids=["diffdirpath", "samedirpath"])
-@pytest.mark.parametrize("train_chk_mode,", [None, True], ids=["defaultchk", "trainchk"])
-@pytest.mark.parametrize("ckpt,", ["best", "kth"], ids=["best", "kth"])
+@pytest.mark.parametrize("diff_dirpath", [True, False], ids=["diffdirpath", "samedirpath"])
+@pytest.mark.parametrize("train_chk_mode", [None, True], ids=["defaultchk", "trainchk"])
+@pytest.mark.parametrize("ckpt", ["best", "kth"], ids=["best", "kth"])
 @pytest.mark.parametrize("max_depth", [-1, 1], ids=["nomaxdepth", "maxdepth1"])
-def test_fts_callback_resume(tmpdir, ckpt_set, recwarn, diff_dirpath: bool, train_chk_mode: Optional[bool], ckpt: str,
+def test_fts_callback_resume(tmpdir, ckpt_set, recwarn, diff_dirpath: bool, train_chk_mode: bool | None, ckpt: str,
                              max_depth: int):
     """Validate scheduled fine-tuning resumption functions as expected from both 'best' and 'kth'(not-best)
     checkpoints in both train/val stage check modes with and without max_depth specified."""
@@ -2281,7 +2281,7 @@ class MockDistFTS(TestFinetuningScheduler):
     ids=["default", "nondef_es", "def_es", "extract_base_callback_cfg", "missing_monitor"," nondef_ftsckpt", "no_sync"],
 )
 def test_fts_callback_warns(
-    tmpdir, recwarn, callbacks: List[Callback], cust_monitor: Optional[str], dist_mode: str, expected: Tuple[str]
+    tmpdir, recwarn, callbacks: list[Callback], cust_monitor: str | None, dist_mode: str, expected: tuple[str]
 ):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` warnings that require a
     :class:`~pytorch_lighting.trainer.Trainer` to be defined are properly issued."""
@@ -2388,7 +2388,7 @@ class TestConnectWarn(Callback, CallbackResolverMixin):
         "imp_reinit_rlrop_mlr",
     ],
 )
-def test_fts_misconfiguration(tmpdir, callbacks: List[Callback], expected: str):
+def test_fts_misconfiguration(tmpdir, callbacks: list[Callback], expected: str):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly
     raised."""
     model = FinetuningSchedulerBoringModel()
@@ -2416,7 +2416,7 @@ def test_fts_misconfiguration(tmpdir, callbacks: List[Callback], expected: str):
     ],
     ids=["allow_untested_lrs", "unsupported_lrs"],
 )
-def test_fts_init_lrs_misconfiguration(tmpdir, callbacks: List[Callback], cust_mod_args: Optional[Dict], expected: str):
+def test_fts_init_lrs_misconfiguration(tmpdir, callbacks: list[Callback], cust_mod_args: dict | None, expected: str):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` initial lr scheduler misconfiguration exceptions
     and warnings are properly raised."""
     model = FTSCustLRModel(**cust_mod_args)
@@ -2485,7 +2485,7 @@ def test_fts_init_lrs_misconfiguration(tmpdir, callbacks: List[Callback], cust_m
         "non_contig",
     ],
 )
-def test_fts_invalid_schedules(tmpdir, invalid_schedules, schedule_key: str, expected: Tuple):
+def test_fts_invalid_schedules(tmpdir, invalid_schedules, schedule_key: str, expected: tuple):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly
     raised."""
     if schedule_key in ("cflict_reinit"):
@@ -2597,7 +2597,7 @@ def test_fts_distributed_compat(tmpdir, strategy, devices, accelerator, strategy
     ids=["zeroopt_overlap", "multi_opt"],
 )
 def test_fts_optimizer_compat(
-    monkeypatch, tmpdir, test_model: LightningModule, dist_mode: str, excepts: Tuple[BaseException], expected: str
+    monkeypatch, tmpdir, test_model: LightningModule, dist_mode: str, excepts: tuple[BaseException], expected: str
 ):
     """Validate :class:`~finetuning_scheduler.FinetuningScheduler` misconfiguration exceptions are properly raised
     for multi-optimizer configurations."""
@@ -2717,7 +2717,7 @@ def test_fts_zero_opt_support(monkeypatch, tmpdir, strategy, enf_p0):
     [(True, (5, 0, 3, 1, 1, 0)), (False,  (6, 2, 1, 1, 1, 0))],
     ids=["constant_loss", "normal_loss"],
 )
-def test_fts_constant_loss(tmpdir, constant_loss: bool, expected_state: Tuple):
+def test_fts_constant_loss(tmpdir, constant_loss: bool, expected_state: tuple):
     """Validate scheduled fine-tuning works as expected in edge cases where the monitored loss value is constant
     across multiple depths, exercising the logic necessary to disambiguate the current best checkpoint metadata."""
     seed_everything(42)
@@ -2743,7 +2743,7 @@ def test_fts_constant_loss(tmpdir, constant_loss: bool, expected_state: Tuple):
     [(True, ((0, 2, 6, 8, 3, 3), "extraneous EarlyS", "maximum phase-specified")), (False, (None, "missing a max_"))],
     ids=["eponly", "noeponly"],
 )
-def test_fts_epoch_trans_only(tmpdir, boring_ft_schedule, epoch_only_cfg: bool, expected_state: Tuple):
+def test_fts_epoch_trans_only(tmpdir, boring_ft_schedule, epoch_only_cfg: bool, expected_state: tuple):
     """Validate scheduled fine-tuning works as expected in 'epoch_transitions_only' mode while raising the
     appropriate exception/warning with respect to epoch_transitions_only scheduling and early stopping
     respectively."""
@@ -2947,3 +2947,86 @@ def test_fts_multi_ddp_fork(tmpdir):
     trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, strategy="ddp_fork", devices=2)
     trainer.fit(model)
     assert trainer.callback_metrics["val_loss"] < 0.1
+
+
+def test_add_groups_excludes_params_already_in_optimizer():
+    """Validate ``ScheduleImplMixin._add_groups`` does not re-add parameters an existing optimizer parameter group
+    already owns.
+
+    On resume the optimizer state (and hence its parameter groups) is restored before the schedule phases are
+    replayed, so re-adding raised ``ValueError: some parameters appear in more than one parameter group``. See
+    https://github.com/speediedan/finetuning-scheduler/issues/30
+    """
+    from finetuning_scheduler.fts_supporters import ScheduleImplMixin
+
+    model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 2))
+    thawed_pl = [n for n, _ in model.named_parameters()]
+    # seed the optimizer with a parameter that is also in ``thawed_pl``, mirroring the restored-state case
+    optimizer = torch.optim.SGD([next(model.parameters())], lr=0.1)
+
+    added = ScheduleImplMixin._add_groups(None, optimizer, model, thawed_pl, 1e-3)
+    assert added == 1
+    # the seeded parameter must not have been duplicated into the new group
+    all_params = [p for group in optimizer.param_groups for p in group["params"]]
+    assert len(all_params) == len({id(p) for p in all_params})
+
+    # replaying the same phase is a no-op rather than an error, and reports 0 so the caller does not extend
+    # ``base_lrs``/``min_lrs``/``lr_lambdas`` for groups that were never created
+    pgs_before = len(optimizer.param_groups)
+    assert ScheduleImplMixin._add_groups(None, optimizer, model, thawed_pl, 1e-3) == 0
+    assert len(optimizer.param_groups) == pgs_before
+
+
+def test_add_groups_excludes_existing_params_with_no_decay():
+    """Validate the ``no_decay`` branch of ``ScheduleImplMixin._add_groups`` also filters already-owned parameters.
+
+    See https://github.com/speediedan/finetuning-scheduler/issues/30
+    """
+    from finetuning_scheduler.fts_supporters import ScheduleImplMixin
+
+    model = nn.Sequential(nn.Linear(4, 4))
+    thawed_pl = [n for n, _ in model.named_parameters()]
+    optimizer = torch.optim.SGD([next(model.parameters())], lr=0.1)
+
+    assert ScheduleImplMixin._add_groups(["bias"], optimizer, model, thawed_pl, 1e-3) == 2
+    pgs_before = len(optimizer.param_groups)
+    assert ScheduleImplMixin._add_groups(["bias"], optimizer, model, thawed_pl, 1e-3) == 0
+    assert len(optimizer.param_groups) == pgs_before
+
+
+def test_fts_ckpt_load_state_dict_epoch_transitions_only_no_es(tmpdir):
+    """Validate ``FTSCheckpoint.load_state_dict`` does not require an ``FTSEarlyStopping`` callback when the
+    schedule is configured with ``epoch_transitions_only=True``.
+
+    FTS deliberately does not attach an ``FTSEarlyStopping`` callback in that mode, so asserting on it
+    unconditionally made otherwise-valid checkpoints unloadable. See
+    https://github.com/speediedan/finetuning-scheduler/issues/29
+    """
+    ckpt = FTSCheckpoint(monitor="val_loss", dirpath=tmpdir)
+    ckpt.best_ckpt_depth = 0
+    fts_callback = MagicMock()
+    fts_callback.curr_depth = 1  # > best_ckpt_depth, so the wait_count reset branch is reachable
+    fts_callback.epoch_transitions_only = True
+    fts_callback._fts_state._resume_fit_from_ckpt = False
+    fts_callback.pl_module.trainer.early_stopping_callback = None  # not attached in epoch_transitions_only mode
+    ckpt.finetuningscheduler_callback = fts_callback
+
+    ckpt.load_state_dict({"current_ckpt_depth": 1, "best_ckpt_depth": 0, "best_model_path": ""})
+
+
+def test_fts_ckpt_load_state_dict_resets_wait_count_with_es(tmpdir):
+    """Validate the ``wait_count`` reset still occurs when an ``FTSEarlyStopping`` callback is attached and the
+    schedule is not in ``epoch_transitions_only`` mode (guards the issue #29 fix against over-correction)."""
+    ckpt = FTSCheckpoint(monitor="val_loss", dirpath=tmpdir)
+    ckpt.best_ckpt_depth = 0
+    early_stopping = FTSEarlyStopping(monitor="val_loss")
+    early_stopping.wait_count = 3
+    fts_callback = MagicMock()
+    fts_callback.curr_depth = 1
+    fts_callback.epoch_transitions_only = False
+    fts_callback._fts_state._resume_fit_from_ckpt = False
+    fts_callback.pl_module.trainer.early_stopping_callback = early_stopping
+    ckpt.finetuningscheduler_callback = fts_callback
+
+    ckpt.load_state_dict({"current_ckpt_depth": 1, "best_ckpt_depth": 0, "best_model_path": ""})
+    assert early_stopping.wait_count == 0

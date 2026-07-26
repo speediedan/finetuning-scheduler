@@ -132,6 +132,12 @@ generate_lockfile() {
     # Change to repo root for dependency group resolution
     pushd "${REPO_ROOT}" > /dev/null
 
+    # uv records the --output-file argument verbatim in the generated header. Passing an absolute path
+    # bakes the generating machine's checkout location into the committed lockfile, which makes the file
+    # differ on every other checkout (notably a CI runner's /home/runner/work/...) even when the resolved
+    # pins are identical. Pass a repo-relative path instead so the header is reproducible anywhere.
+    local rel_output_file="${output_file#${REPO_ROOT}/}"
+
     # Build the base compile command
     local compile_cmd=(
         uv pip compile
@@ -139,7 +145,7 @@ generate_lockfile() {
         --extra all
         --group dev
         --group test
-        --output-file "${output_file}"
+        --output-file "${rel_output_file}"
         --upgrade
         --no-strip-extras
         --resolution "${resolution}"
@@ -203,6 +209,14 @@ generate_lockfile() {
         prune_torch_only_deps "${output_file}"
 
         echo "✓ Generated ${output_file} (torch-only deps pruned for CPU efficiency)"
+    fi
+
+    # uv emits the lockfile without a trailing newline, but the end-of-file-fixer pre-commit hook adds
+    # one. Left alone, that guarantees a one-byte diff between a freshly generated file and the committed
+    # one on every single regeneration, which would make an automated drift check permanently report
+    # drift. Normalize here so generated output matches what is committed.
+    if [[ -s "${output_file}" && -n "$(tail -c 1 "${output_file}")" ]]; then
+        printf '\n' >> "${output_file}"
     fi
 
     # Return to original directory

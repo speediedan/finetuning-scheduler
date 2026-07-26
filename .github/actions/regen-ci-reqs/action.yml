@@ -1,0 +1,77 @@
+name: Regen CI reqs runner
+description: >
+  Regenerate the pinned CI lockfiles with requirements/utils/lock_ci_requirements.sh and produce a patch
+  if the committed files differ. Assumes the caller has already run actions/checkout.
+inputs:
+  python_version:
+    description: 'Python version used to run the lock script (uv resolves for --python-version 3.10 regardless)'
+    required: false
+    default: '3.13'
+  compare_paths:
+    description: Space-separated list of files/paths to compare with git diff
+    required: false
+    # NB: unlike interpretune's, FTS's lock script also rewrites requirements-oldest.txt, deletes/creates
+    # torch-override.txt depending on the torch-pre.txt channel, and runs sync_metadata.py which can
+    # rewrite pyproject.toml. All of those must be in scope or drift goes undetected.
+    default: "requirements/ci/requirements.txt requirements/ci/requirements-oldest.txt requirements/ci/torch-override.txt pyproject.toml"
+  patch_path:
+    description: Path to write the patch file
+    required: false
+    default: regen_diff.patch
+runs:
+  using: composite
+  steps:
+    # Use the same uv/python provisioning as install-ci-dependencies rather than the raw curl installer,
+    # so a real `python` is on PATH for prune_torch_deps.py and sync_metadata.py.
+    - name: Install uv and set Python version
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: ${{ inputs.python_version }}
+        activate-environment: true
+        enable-cache: true
+        cache-suffix: regen-${{ inputs.python_version }}
+
+    - name: Run lock regeneration
+      shell: bash
+      env:
+        # FTS declares dependencies dynamically, so `uv pip compile pyproject.toml` invokes the PEP 517
+        # backend and therefore runs setup.py -- which rewrites lightning imports across src/, tests/ and
+        # requirements/ in place when PACKAGE_NAME is set. Unset it so a regen can never flip the tree
+        # into standalone mode. USE_CI_COMMIT_PIN/UV_OVERRIDE are unset for determinism: the Lightning
+        # commit pin must not leak into a lockfile (the script also unsets UV_OVERRIDE defensively).
+        PACKAGE_NAME: ""
+        USE_CI_COMMIT_PIN: ""
+        UV_OVERRIDE: ""
+      run: |
+        set -euo pipefail
+        unset PACKAGE_NAME USE_CI_COMMIT_PIN UV_OVERRIDE
+        bash requirements/utils/lock_ci_requirements.sh
+
+    # Guard against the setup.py in-place import rewrite leaving the tree dirty. If it did, the diff
+    # scope below would miss it but a downstream create-pull-request would happily commit it.
+    - name: Assert no source tree rewrite
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! git --no-pager diff --quiet -- src tests; then
+          echo "::error::lock regeneration modified src/ or tests/ -- setup.py import rewriting was triggered." >&2
+          git --no-pager diff --stat -- src tests >&2
+          exit 1
+        fi
+        echo "src/ and tests/ unchanged, as expected"
+
+    - id: check
+      name: Check for diffs and write patch
+      uses: ./.github/actions/check-file-diffs
+      with:
+        compare_paths: ${{ inputs.compare_paths }}
+        patch_path: ${{ inputs.patch_path }}
+        error_message: "CI requirements have changed and need to be regenerated"
+
+outputs:
+  changed:
+    description: 'true if files differ'
+    value: ${{ steps.check.outputs.changed }}
+  patch_path:
+    description: 'path to generated patch file'
+    value: ${{ steps.check.outputs.patch_path }}

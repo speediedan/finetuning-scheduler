@@ -8,11 +8,51 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Added `scripts/verify_version_consistency.py`, a dependency-free audit of the torch/CUDA/Lightning/Python version declarations that are duplicated across the Dockerfiles, both `dockers/docker_images_*.sh` scripts, the Azure pipeline image tag and the `release-docker.yml` matrix. Exits non-zero on any disagreement and flags the outlier.
+
+- Added CI requirement regeneration drift detection: a report-only workflow (`regen-ci-req-report.yml`) that comments on PRs when the pinned lockfiles are stale, and a scheduled workflow (`regen-ci-req-check.yml`) that can open a PR with refreshed pins. Includes the `regen-ci-reqs` and `check-file-diffs` composite actions and `scripts/regen_summary.py`.
+
 ### Fixed
+
+- Fixed `ScheduleImplMixin._add_groups` adding duplicate parameter groups on resume, which raised `ValueError: some parameters appear in more than one parameter group`. Parameters already owned by an existing optimizer parameter group are now excluded, and `0` is returned when no candidates remain so the caller does not extend `base_lrs`/`min_lrs`/`lr_lambdas` for groups that were never created. Resolves [#30](https://github.com/speediedan/finetuning-scheduler/issues/30).
+
+- Fixed `FTSCheckpoint.load_state_dict` unconditionally asserting that an `FTSEarlyStopping` callback is attached, which made checkpoints unloadable when configured with `epoch_transitions_only=True` (a mode in which FTS deliberately does not attach one). The callback is now resolved only within the branch that dereferences it. Resolves [#29](https://github.com/speediedan/finetuning-scheduler/issues/29).
+
+- Fixed the Lightning version constraint (`LIGHTNING_VERSION`) excluding every published Lightning patch release. The ceiling was `<2.6.1`, pinning users to `2.6.0` with no path to Lightning bug fixes; it now excludes the next minor (`<2.7.0`). Validated against Lightning `2.6.5`.
+
+- Fixed the broken `--include-experimental` option in `scripts/gen_fts_coverage.sh` (declared as requiring an argument in the `getopt` long-opts string while handled as a bare flag, making it unusable in both spellings and leaving the experimental-patch coverage partition unreachable).
+
+- Fixed `--allow-failures` being unreachable in `tests/test_utils.sh`: the test invocation ran bare under the outer `set -eo pipefail`, aborting the script before the result parsing and failure-tolerance branch could run.
+
+- Corrected `dockers/docker_images_release.sh` declaring Lightning `2.5` while every other version declaration specified `2.6`.
+
+- Fixed five `pytest.mark.parametrize` decorators that declared a single argname with a stray trailing comma (e.g. `"ckpt,"`). `pytest` 9.1 treats the trailing comma as the tuple form and attempts to unpack each parameter value, producing a collection error.
+
+- Fixed the generated CI lockfiles embedding the absolute path of the generating checkout in their uv header, which made them differ on every other checkout even when the resolved pins were identical. The lockfile trailing newline is now normalized for the same reason, so regeneration is diff-stable.
+
+- Raised the `pytest-rerunfailures` floor to `11.0`. `10.x` imports `pkg_resources` at module scope, which `setuptools` `81+` no longer provides, breaking collection on the `oldest` CI leg. Test-only dependency, so the supported install surface for users is unaffected.
 
 ### Changed
 
+- Modernized type hints for Python `3.10+` by bumping the `pyupgrade` pre-commit hook to `--py310-plus`.
+
+- Reset `requirements/ci/torch-pre.txt` to the stable channel; it had a stale nightly stanza uncommented, so local environment builds resolved an outdated torch nightly rather than stable torch.
+
+- Removed dead `.actions/` references from the pytest `addopts` and the CI workflow path filters.
+
+- Regenerated the pinned CI lockfiles after approximately six months without a refresh. Notable movement: `lightning`/`pytorch-lightning` `2.6.0` → `2.6.5`, `transformers` `5.0.0` → `5.14.1`, `torchmetrics` `1.8.2` → `1.9.0`, `pytest` `9.0.2` → `9.1.1`. `requirements/ci/requirements.txt` now pins `torch` again (it is only excluded on the prerelease code path), and `requirements/ci/torch-override.txt` is removed since it only exists while a prerelease channel is active.
+
 ### Deprecated
+
+- The removal target for direct calls to `ScheduleImplMixin.gen_ft_schedule()` has been restated from `2.12.0` to `2.14.0`. No `2.11.0` or `2.12.0` release was published (see below), so the original target was never reachable; `2.14.0` restores a real migration window for downstream consumers.
+
+## [2.11.0] and [2.12.0] - not released
+
+No FTS `2.11.0` or `2.12.0` release was published. PyTorch `2.11.0` (2026-03-18) and `2.12.0`
+(2026-05-13) shipped without corresponding FTS releases; rather than back-fill releases that no user
+could retroactively depend on, FTS resumed its PyTorch-aligned cadence with a single catch-up release.
+Because that release retains a minimum supported PyTorch of `2.7.0`, every PyTorch version a `2.11.0` or
+`2.12.0` release would have targeted remains supported. See `docs/source/versioning.rst`.
 
 ## [2.10.0] - 2026-01-26
 

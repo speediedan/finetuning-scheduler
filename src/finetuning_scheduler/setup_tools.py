@@ -14,7 +14,8 @@ import os
 import re
 import warnings
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
+from collections.abc import Generator
 from contextlib import contextmanager
 
 _PROJECT_ROOT = Path(os.path.dirname(os.path.dirname(__file__))).parent

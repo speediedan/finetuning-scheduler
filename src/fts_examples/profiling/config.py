@@ -15,7 +15,7 @@ MemProfiler Configuration Dataclasses
 
 This module defines the configuration dataclasses for the MemProfiler.
 """
-from typing import Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 

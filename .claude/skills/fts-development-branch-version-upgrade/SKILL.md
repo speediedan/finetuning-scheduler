@@ -83,11 +83,12 @@ Update the following files with version changes:
    __version__ = "{new_version}.dev0"
    ```
 
-1. **`CITATION.cff`**:
+1. **`CITATION.cff`** — **do NOT bump during a development-branch upgrade.**
 
-   ```yaml
-   version: {new_version}
-   ```
+   `CITATION.cff` describes the most recent *published* release and is what citation tooling resolves
+   against. It must only ever be advanced as part of cutting an actual release, never when moving the
+   development branch to a new `.dev0` version. A mismatch between `CITATION.cff` (e.g. `2.13.0`) and
+   `__about__.py` (e.g. `2.14.0.dev0`) on `main` is **expected and correct** — do not "fix" it.
 
 1. **`CHANGELOG.md`**:
 
@@ -115,11 +116,28 @@ Update the following files with version changes:
    ]
    ```
 
+1. **`src/finetuning_scheduler/dynamic_versioning/utils.py`** — the Lightning constraint:
+
+   ```python
+   LIGHTNING_VERSION = ">={lightning_min},<{lightning_ceiling}"
+   ```
+
+   ⚠️ **Ceiling trap.** This constraint is the real install-time gate for both `lightning` and
+   `pytorch-lightning`. A ceiling like `<2.6.1` excludes *every* Lightning patch release in the series
+   (2.6.1, 2.6.4, 2.6.5, …), silently pinning users to the `.0`. Unless there is a specific known
+   incompatibility, the ceiling should exclude the next **minor** (e.g. `>=2.6.0,<2.7.0`), not the next
+   patch. Verify against the actual published versions before choosing:
+
+   ```bash
+   pip index versions lightning
+   ```
+
 1. **`pyproject.toml`**:
 
    ```toml
    [tool.fts.min-versions]
    torch = ">={new_pytorch_min}"
+   lightning = ">={lightning_min},<{lightning_ceiling}"   # must mirror LIGHTNING_VERSION exactly
    ```
 
 1. **`requirements/ci/torch-pre.txt`**:
@@ -129,6 +147,29 @@ Update the following files with version changes:
    cu{cuda_major}{cuda_minor}0
    nightly
    ```
+
+#### Determining the target CUDA version
+
+If the user did not supply `New CUDA version`, derive it rather than guessing — `RELEASE.md` prose has
+been observed to be incomplete (it omits CUDA 12.9 for 2.13 despite cu129 Linux wheels existing).
+
+1. **`CUDA_STABLE`** in `.github/scripts/generate_binary_build_matrix.py` **at the target release tag**
+   (not `main`) is authoritative: it drives both the primary-tested CI version and the PyPI wheel.
+1. **Confirm against published wheels** by enumerating `https://download.pytorch.org/whl/torch/` for
+   `torch-<version>%2B(cu\d+)-` variants.
+1. **Take the toolkit patch version from torch's own pin** — this is what the Docker base image must
+   match:
+   ```bash
+   python -c "from importlib.metadata import requires; print([r for r in requires('torch') if 'cuda-toolkit' in r])"
+   # torch 2.13.0 -> cuda-toolkit[...]==13.0.3  =>  ARG CUDA_VERSION=13.0.3
+   ```
+1. **Mirror `TORCH_CUDA_ARCH_LIST`** from `TORCH_CUDA_ARCH_LIST_TABLE` in
+   `.ci/manywheel/build_env_setup.py` for that CUDA version, `x86_64`. CUDA 13.0/13.2 → `{75, 80, 86, 90, 100, 120}` → `"7.5;8.0;8.6;9.0;10.0;12.0+PTX"`. **Do not drop `7.5`** — the CI host has an
+   RTX 2070 SUPER (sm_75).
+
+The per-release decision is announced in a dedicated RFC issue (2.11 → pytorch#172663,
+2.12 → pytorch#178665, 2.14 → pytorch#190355). Check the issue for the target release; if it is still
+open, surface that to the user rather than assuming.
 
 #### Docker Configuration Files
 
@@ -160,14 +201,21 @@ Update the following files with version changes:
 1. **`dockers/docker_images_main.sh`**:
 
    ```bash
-   declare -A iv=(["cuda"]="{new_cuda_version}" ["pytorch"]="{new_pytorch_max}" ...)
+   declare -A iv=(["cuda"]="{new_cuda_version}" ["python"]="{new_python_version}" \
+                  ["pytorch"]="{new_pytorch_max}" ["lightning"]="{lightning_minor}" ["cust_build"]="1")
    ```
 
 1. **`dockers/docker_images_release.sh`**:
 
    ```bash
-   declare -A iv=(["cuda"]="{new_cuda_version}" ["pytorch"]="{new_pytorch_max}" ...)
+   declare -A iv=(["cuda"]="{new_cuda_version}" ["python"]="{new_python_version}" \
+                  ["pytorch"]="{new_pytorch_max}" ["lightning"]="{lightning_minor}" ["cust_build"]="0")
    ```
+
+   ⚠️ **Every key must be updated in BOTH scripts.** These two files differ only in `cust_build`; any
+   other divergence is drift. Historically the `lightning` key was updated in `docker_images_main.sh`
+   but missed in `docker_images_release.sh`, leaving `2.5` against `2.6` everywhere else. Phase 2b
+   catches exactly this.
 
 #### GitHub Workflows and CI Files
 
@@ -201,10 +249,12 @@ Update the following files with version changes:
     - Update example torch version in comments
     - Update CUDA target examples
 
-01. **`.github/copilot-instructions.md`**:
+01. **`CLAUDE.md`**:
 
-    - Update minimum PyTorch version in "Key Technologies"
+    - Update minimum PyTorch version references
     - Update example installation commands with new versions
+
+    (`.github/copilot-instructions.md` is superseded by `CLAUDE.md`. Update it too only while it still exists.)
 
 01. **`README.md`**:
 
@@ -243,13 +293,58 @@ Update the following files with version changes:
 
     - Update comments with new CUDA targets in manual installation examples
 
+#### Dependency Pins
+
+1. **`requirements/ci/overrides.txt`**:
+
+   - Retarget the Lightning git commit pin (`lightning @ git+https://github.com/Lightning-AI/lightning.git@<sha>`)
+     if the upgrade tracks a new Lightning commit. This pin is applied via `UV_OVERRIDE` and is easy to miss
+     because it lives outside `pyproject.toml`.
+
+1. **`requirements/ci/torch-override.txt`**:
+
+   - Regenerated by Phase 3, but its header comments hardcode the torch prerelease version and CUDA target.
+     Update those so they don't contradict the regenerated content.
+
+1. **`pyproject.toml`** `[tool.fts.min-versions]`:
+
+   - The `lightning` entry lives in the same table as `torch`. If Lightning min/max changed, update it here
+     too. Note this table is informational only — the enforced values are in `dynamic_versioning/utils.py`.
+
+### Phase 2b: Verify cross-file version consistency (MANDATORY GATE)
+
+Several of the versions above are declared in six or seven places that must agree. Updating some and
+missing others is the single most common defect in this process, and it is invisible until a Docker
+build or Azure job pulls a tag that was never built. Run the audit before proceeding:
+
+```bash
+python scripts/verify_version_consistency.py
+```
+
+It prints every declaration side by side, flags the outlier with `!`, and exits non-zero on any
+disagreement. **Do not proceed to Phase 3 until it exits 0.** Example of the failure it catches:
+
+```
+lightning: MISMATCH -> ['2.5', '2.6']
+    fts-az-base Dockerfile       2.6
+    docker_images_main.sh        2.6
+  ! docker_images_release.sh     2.5      <- the file that was missed
+```
+
+If a probe reports `<not found>`, a file was restructured and the probe in
+`scripts/verify_version_consistency.py` needs updating — treat that as a real failure, not noise, since
+a stale probe silently stops checking that file.
+
+Note the audit deliberately does **not** cover `CITATION.cff` or `__about__.py`: on a development branch
+those are *expected* to disagree (see Phase 2, Core Version Files).
+
 ### Phase 3: Regenerate CI Requirements
 
 After updating version files, regenerate locked requirements:
 
 ```bash
-cd ~/repos/finetuning-scheduler
-source /mnt/cache/${USER}/.venvs/fts_latest/bin/activate
+cd ${FTS_REPO_DIR}
+source ${FTS_VENV_BASE}/${FTS_TARGET_VENV}/bin/activate
 ./requirements/utils/lock_ci_requirements.sh
 ```
 
@@ -332,6 +427,24 @@ tail -f $(ls -rt /tmp/gen_fts_coverage_fts_* | tail -1)
 - Document all errors in the upgrade report
 - Most errors should be addressed manually post-upgrade
 - Include error messages, affected tests, and potential fixes
+
+### Phase 5b: Type Check
+
+A PyTorch or Lightning bump is exactly when new type errors surface, and `code-checks.yml` gates on this:
+
+```bash
+cd ${FTS_REPO_DIR} && source ${FTS_VENV_BASE}/${FTS_TARGET_VENV}/bin/activate
+pyright -p pyproject.toml
+```
+
+Pyright covers `src/finetuning_scheduler` only (`tests`, `docs`, `build`, `dist` are excluded). Record any
+new diagnostics in the upgrade report; resolve them before opening the version-bump PR.
+
+Also run the full pre-commit suite once the metadata edits are in:
+
+```bash
+pre-commit run --all-files
+```
 
 ### Phase 6: Rebuild and Validate Documentation
 
@@ -533,7 +646,7 @@ If any unexpected issues were encountered, suggest updates to this skill:
 
 After completing all phases, verify:
 
-1. **Version consistency**: All files reference new version correctly
+1. **Version consistency**: `python scripts/verify_version_consistency.py` exits 0 (see Phase 2b)
 1. **Build success**: Environment builds without errors
 1. **Test status**: Coverage collected (failures documented)
 1. **Documentation**: Builds cleanly with no warnings

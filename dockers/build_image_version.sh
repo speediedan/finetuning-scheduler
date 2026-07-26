@@ -21,7 +21,17 @@ build_version(){
 }
 
 maybe_deactivate(){
+    # `deactivate` is a shell function defined by a venv's activate script, so it only exists if this
+    # shell sourced one. A non-interactive invocation can inherit the exported VIRTUAL_ENV without the
+    # function, in which case calling it aborts the build under `set -e`. Fall back to unsetting the
+    # venv from PATH/env by hand.
     if [ -n "$VIRTUAL_ENV" ]; then
-        deactivate
+        if declare -F deactivate > /dev/null 2>&1; then
+            deactivate
+        else
+            PATH=$(echo "$PATH" | tr ':' '\n' | grep -vxF "${VIRTUAL_ENV}/bin" | paste -sd: -)
+            export PATH
+            unset VIRTUAL_ENV VIRTUAL_ENV_PROMPT PYTHONHOME
+        fi
     fi
 }

@@ -14,7 +14,6 @@ on:  # Trigger the workflow on push or pull request, but only for the main branc
       - "requirements/**"
       - ".github/workflows/ci_test-full.yml"
       - ".github/actions/**"
-      - ".actions/**"
       - "scripts/infra_utils.sh"
   pull_request:
     branches: [main, "release/*"]
@@ -29,7 +28,6 @@ on:  # Trigger the workflow on push or pull request, but only for the main branc
       - "requirements/**"
       - ".github/workflows/ci_test-full.yml"
       - ".github/actions/**"
-      - ".actions/**"
       - "scripts/infra_utils.sh"
 
 concurrency:

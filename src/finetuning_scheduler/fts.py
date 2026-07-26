@@ -17,7 +17,8 @@ import logging
 import os
 from copy import deepcopy
 from pprint import pformat
-from typing import Any, Dict, Sequence  # Dict is used for runtime isinstance() checks
+from typing import Any  # Dict is used for runtime isinstance() checks
+from collections.abc import Sequence
 from typing_extensions import override
 
 import lightning.pytorch as pl
@@ -765,7 +766,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         if trainer.lr_scheduler_configs:
             self._is_supported_lr(type(trainer.lr_scheduler_configs[0].scheduler))
         if self.curr_depth == 0:
-            assert isinstance(self.ft_schedule, Dict)
+            assert isinstance(self.ft_schedule, dict)
             self._validate_opt_init()
         super().on_fit_start(trainer, pl_module)
 
@@ -822,7 +823,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
         """
         assert self.pl_module is not None
-        assert isinstance(self.ft_schedule, Dict)
+        assert isinstance(self.ft_schedule, dict)
         early_stopping_callback = trainer.early_stopping_callback
         curr_max_epoch = (
             self.ft_schedule[self.curr_depth]["max_transition_epoch"]

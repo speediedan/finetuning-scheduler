@@ -17,7 +17,8 @@ A :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that extends 
 for PyTorch's distributed composable and Tensor Parallel APIs.
 
 """
-from typing import Any, Callable, Dict, Sequence  # Dict used for runtime isinstance() checks
+from typing import Any  # Dict used for runtime isinstance() checks
+from collections.abc import Callable, Sequence
 from functools import wraps
 from copy import deepcopy
 import re
@@ -284,7 +285,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         if self.fsdp_default_kwargs:  # pragma: no cover
             self.fsdp_default_kwargs = ModelParallelStrategyAdapter._resolve_cfg_aliases(self.fsdp_default_kwargs)
         named_modules = dict(self.pl_module.named_modules()).keys()
-        resolved_modules: dict[str, Dict] = {}
+        resolved_modules: dict[str, dict] = {}
         for plan_n, kwargs in self.fsdp_plan.items():
             module_resolved = False
             if plan_n in named_modules:

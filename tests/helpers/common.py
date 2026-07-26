@@ -13,7 +13,8 @@ import re
 import os
 from copy import copy
 from functools import partial
-from typing import List, Optional, Tuple, NamedTuple, Dict, Iterable, Union
+from typing import NamedTuple
+from collections.abc import Iterable
 from warnings import WarningMessage
 
 import pytest
@@ -35,11 +36,11 @@ def default_fts_sanity_chk(trainer):
     #assert finetuningscheduler_callback.curr_depth == 2
     assert finetuningscheduler_callback.curr_depth == finetuningscheduler_callback.max_depth
 
-def nones(num_n) -> Tuple:  # to help dedup config
+def nones(num_n) -> tuple:  # to help dedup config
     return (None,) * num_n
 
-def multiwarn_check(rec_warns: List, expected_warns: List, expected_mode: bool = False, raw_warns: bool = False
-                    ) -> List[Optional[WarningMessage]]:
+def multiwarn_check(rec_warns: list, expected_warns: list, expected_mode: bool = False, raw_warns: bool = False
+                    ) -> list[WarningMessage | None]:
 
     # Print warning details if FTS_WARN_DETAILS environment variable is set
     if os.environ.get('FTS_WARN_DETAILS'):
@@ -62,16 +63,16 @@ unexpected_warns = partial(multiwarn_check, expected_mode=False)
 unmatched_warns = partial(multiwarn_check, expected_mode=True)
 
 class ExpectedResults(NamedTuple):
-    expected_state: Optional[Dict] = None
-    warns_expected: Optional[Tuple] = None
-    exceptions_expected: Optional[Tuple] = None
+    expected_state: dict | None = None
+    warns_expected: tuple | None = None
+    exceptions_expected: tuple | None = None
 
 class DeviceMeshSummary(NamedTuple):
     tensor_ndim: int
     mesh_ndim: int
-    mesh_shape: Tuple
-    mesh_dim_names: Tuple
-    placement_summary: List[Optional[Union[str,int]]]
+    mesh_shape: tuple
+    mesh_dim_names: tuple
+    placement_summary: list[str |int | None]
 
 def pytest_param_factory(test_cfgs: Iterable):
     return [
@@ -79,8 +80,8 @@ def pytest_param_factory(test_cfgs: Iterable):
                      marks=RunIf(**RUNIF_MAP[cfg.runif_alias]) if RUNIF_MAP.get(cfg.runif_alias, None) else tuple(),)
                      for cfg in test_cfgs ]
 
-def fts_check_warns(recwarn, expected_warns: List, warns_expected: Optional[List] = None,
-                          expected_warns_dynamo: Optional[List] = None, use_dynamo: bool = False):
+def fts_check_warns(recwarn, expected_warns: list, warns_expected: list | None = None,
+                          expected_warns_dynamo: list | None = None, use_dynamo: bool = False):
     expected_warns = copy(expected_warns)
     if use_dynamo:
        expected_warns.extend(expected_warns_dynamo)

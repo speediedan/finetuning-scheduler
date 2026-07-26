@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import os
 import pickle
-from typing import Any, DefaultDict, Callable
+from typing import Any, DefaultDict
+from collections.abc import Callable
 from dataclasses import dataclass, field, fields, asdict
 from contextlib import redirect_stdout, contextmanager, ExitStack
 from collections import defaultdict

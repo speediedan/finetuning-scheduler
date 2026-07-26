@@ -133,7 +133,7 @@ all = [
 # The build system (setup.py) reads from utils.py to populate the dynamic dependencies.
 [tool.fts.min-versions]
 torch = ">=2.7.0"
-lightning = ">=2.6.0,<2.6.1"
+lightning = ">=2.6.0,<2.7.0"
 python = "3.10"  # Defined in pyproject.toml requires-python
 
 [project.urls]
@@ -245,7 +245,7 @@ norecursedirs = [
 ]
 
 addopts = """--strict-markers --doctest-modules --color=yes --ignore-glob='src/fts_examples/ipynb_src/*.py' \
---ignore='.actions/assistant.py' --disable-pytest-warnings"""
+--disable-pytest-warnings"""
 
 junit_duration_report = "call"
 
@@ -263,7 +263,7 @@ dev = [
     # Development dependencies include test group
     "coverage>=6.4",
     "pytest>=7.0.0",
-    "pytest-rerunfailures>=10.2",
+    "pytest-rerunfailures>=11.0",  # 10.x imports pkg_resources, removed in setuptools 81+
     "twine>=3.2.0",
     "pyright>=1.1.390",
     "pre-commit>=2.0.0",
@@ -272,7 +272,7 @@ dev = [
 test = [
     "coverage>=6.4",
     "pytest>=7.0.0",
-    "pytest-rerunfailures>=10.2",
+    "pytest-rerunfailures>=11.0",  # 10.x imports pkg_resources, removed in setuptools 81+
     "twine>=3.2.0",
     "pyright>=1.1.390",
     "pre-commit>=2.0.0",

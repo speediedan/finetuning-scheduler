@@ -1,7 +1,7 @@
 import os
 import sys
 from collections import namedtuple
-from typing import Any, Dict
+from typing import Any
 from datetime import datetime
 
 import torch
@@ -149,7 +149,7 @@ def get_env_info():
     return collect_env.SystemEnv(**systemenv_kwargs)
 
 
-def collect_env_info() -> Dict:
+def collect_env_info() -> dict:
     """Collect environmental details, logging versions of salient packages for improved reproducibility.
 
     Returns:

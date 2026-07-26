@@ -13,7 +13,6 @@
 """Test deprecated functionality which will be removed in vX.Y.Z."""
 import sys
 from contextlib import contextmanager
-from typing import Optional, Type
 
 import pytest
 
@@ -25,7 +24,7 @@ def _soft_unimport_module(str_module):
 
 
 @contextmanager
-def no_warning_call(expected_warning: Type[Warning] = UserWarning, match: Optional[str] = None):
+def no_warning_call(expected_warning: type[Warning] = UserWarning, match: str | None = None):
     with pytest.warns(None) as record:
         yield
 
@@ -47,6 +46,6 @@ def no_warning_call(expected_warning: Type[Warning] = UserWarning, match: Option
 
 
 @contextmanager
-def no_deprecated_call(match: Optional[str] = None):
+def no_deprecated_call(match: str | None = None):
     with no_warning_call(expected_warning=DeprecationWarning, match=match):
         yield

@@ -1,6 +1,7 @@
 import os
 from enum import Enum
-from typing import NamedTuple, Callable
+from typing import NamedTuple
+from collections.abc import Callable
 
 class OSEnvToggle(NamedTuple):
     env_var_name: str

@@ -348,7 +348,12 @@ class RteBoolqModule(L.LightningModule):
         self.init_hparams = {
             "optimizer_init": optimizer_init,
             "lr_scheduler_init": lr_scheduler_init,
-            "model_config": self.model.config,
+            # NB: .to_dict() rather than the PretrainedConfig itself -- transformers 5.x made
+            # PretrainedConfig a dataclass, so omegaconf treats it as a structured config and calls
+            # get_type_hints() on it, which raises NameError for annotations referencing torch that
+            # the defining module only imports under TYPE_CHECKING. Matches what the YAML representer
+            # in cfg_utils.py already does.
+            "model_config": self.model.config.to_dict(),
             "model_name_or_path": model_name_or_path,
             "task_name": task_name,
             "experiment_id": f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{experiment_tag}",

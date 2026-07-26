@@ -8,12 +8,12 @@ This document describes the versioning policy for Fine-Tuning Scheduler (FTS) an
 Release Versioning
 ******************
 
-Starting with the **2.9 minor release**, Fine-Tuning Scheduler is pivoting from tight Lightning version alignment to **core PyTorch version alignment**. This strategic change enables FTS to more flexibly integrate with the latest core PyTorch functionality that is increasingly important in research and reduces maintenance burden while continuing to support a stable API and robust Lightning integration.
+Fine-Tuning Scheduler minor releases are aligned with **core PyTorch** minor releases rather than Lightning releases. This enables FTS to more flexibly integrate with the latest core PyTorch functionality that is increasingly important in research and reduces maintenance burden while continuing to support a stable API and robust Lightning integration.
 
 Motivation for PyTorch Alignment
 =================================
 
-This versioning policy change is driven by:
+This alignment is driven by:
 
 1. **Evolving Lightning Release Cadence**: The Lightning project's release cadence has evolved, with minor releases increasingly driven by key upstream PyTorch deprecations and features rather than synchronized with PyTorch minor releases. See `Lightning Issue #21073 <https://github.com/Lightning-AI/pytorch-lightning/issues/21073>`_ and the associated `versioning documentation update PR #21107 <https://github.com/Lightning-AI/pytorch-lightning/pull/21107>`_ for details.
 
@@ -28,7 +28,7 @@ PyTorch Compatibility Policy
 
 Fine-Tuning Scheduler strives to officially support **at least the latest 4 PyTorch minor releases**. This provides a balance between API stability and the ability to leverage new PyTorch features while reducing maintenance overhead.
 
-For example, when PyTorch 2.9 was released, FTS was guaranteed to support PyTorch >= 2.6 at a minimum. In practice, FTS may support additional earlier PyTorch versions (e.g. FTS 2.9 supports PyTorch 2.5), but support for the most recent 4 versions is the target commitment.
+For example, with PyTorch 2.13 released, FTS is guaranteed to support PyTorch >= 2.10 at a minimum. In practice, FTS may support additional earlier PyTorch versions (e.g. FTS 2.13 supports PyTorch 2.7), but support for the most recent 4 versions is the target commitment.
 
 .. note::
    This is a target policy rather than a strict requirement, providing the project latitude to support additional versions when feasible.
@@ -36,7 +36,7 @@ For example, when PyTorch 2.9 was released, FTS was guaranteed to support PyTorc
 Lightning Compatibility Policy
 ===============================
 
-While FTS is pivoting to PyTorch version alignment, it continues to maintain compatibility with Lightning. This policy change is expected to be transparent to, or a net benefit for, the vast majority of Lightning ecosystem users.
+While FTS versioning is aligned with PyTorch, it continues to maintain compatibility with Lightning. This is expected to be transparent to, or a net benefit for, the vast majority of Lightning ecosystem users.
 FTS will continue to:
 
 - Support the stable Lightning API
@@ -94,7 +94,7 @@ The following table shows the compatibility between Fine-Tuning Scheduler, PyTor
      - >= 2.0.0
 
 .. note::
-   Prior to version 2.9, FTS minor releases were paired with Lightning minor releases (e.g., FTS 2.0 → Lightning 2.0). Starting with 2.9, FTS versioning is decoupled from Lightning and aligned with PyTorch instead.
+   Rows prior to 2.9.x reflect FTS's earlier policy, under which each minor release was paired with a Lightning minor release (e.g., FTS 2.0 → Lightning 2.0). From 2.9.x onward the table reflects PyTorch alignment.
 
 Version Numbering
 *****************
@@ -102,8 +102,8 @@ Version Numbering
 Fine-Tuning Scheduler follows `Semantic Versioning <https://semver.org/>`_:
 
 - **Major version** (e.g., 2.x.x → 3.x.x): Breaking API changes
-- **Minor version** (e.g., 2.9.x → 2.10.x): New features, aligned with PyTorch minor releases when significant features are added
-- **Patch version** (e.g., 2.9.0 → 2.9.1): Bug fixes and minor improvements
+- **Minor version** (e.g., 2.12.x → 2.13.x): New features, aligned with PyTorch minor releases when significant features are added
+- **Patch version** (e.g., 2.13.0 → 2.13.1): Bug fixes and minor improvements
 
 API Evolution Policy
 ********************
@@ -169,8 +169,6 @@ For development and CI, FTS may pin Lightning to a specific commit (similar to P
 
 Release Cadence
 ***************
-
-Starting with version 2.9:
 
 - **Minor releases** are typically aligned with significant PyTorch minor releases that introduce features relevant to fine-tuning workflows
 - **Patch releases** occur as needed for bug fixes and minor improvements

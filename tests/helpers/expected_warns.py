@@ -82,11 +82,24 @@ additional_model_parallel_warns = [
 MODEL_PARALLEL_BASE_WARNS = extend_warns(DISTRIBUTED_WARNS, additional_model_parallel_warns)
 MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS = []
 
+# Upstream deprecations emitted from `lightning.pytorch.cli` because Lightning still calls jsonargparse
+# APIs deprecated in jsonargparse v4.49.0. Nothing in FTS drives these; they will disappear when Lightning
+# migrates, and should be removed here at that point.
+LIGHTNING_JSONARGPARSE_DEPRECATIONS = [
+    "By default only one JsonargparseDeprecationWarning per type is shown",
+    "``ArgumentParser.add_instantiator`` was deprecated in v4.49.0",
+    "``instantiate_classes`` was deprecated in v4.49.0",
+    "skip_none parameter was deprecated in v4.49.0",
+]
+
 # Example warnings
 EXAMPLE_BASE_WARNS = [
     "in eval mode at the start of training", # required starting with Lightning #21446
     "sentencepiece tokenizer that you are converting",
     "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch",
+    # torch deprecation surfaced via a transformers import path; not driven by FTS
+    "`torch.jit.interface` is deprecated",
+    *LIGHTNING_JSONARGPARSE_DEPRECATIONS,
 ]
 
 ALL_EXAMPLE_EXPECTED = [

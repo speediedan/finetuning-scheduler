@@ -10,7 +10,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Initially based on https://bit.ly/3oQ8Vqf
-from typing import List, Optional, Tuple, Union
 from dataclasses import dataclass
 from pathlib import Path
 from contextlib import ExitStack, contextmanager
@@ -128,7 +127,7 @@ class BoringModel(LightningModule):
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
 
-    def loss(self, preds: Tensor, labels: Optional[Tensor] = None) -> Tensor:
+    def loss(self, preds: Tensor, labels: Tensor | None = None) -> Tensor:
         if labels is None:
             labels = torch.ones_like(preds)
         # An arbitrary loss to have a loss that updates the model weights during `Trainer.fit` calls
@@ -145,14 +144,14 @@ class BoringModel(LightningModule):
     def training_step_end(self, training_step_output: STEP_OUTPUT) -> STEP_OUTPUT:
         return training_step_output
 
-    def validation_step(self, batch: Tensor, batch_idx: int) -> Optional[STEP_OUTPUT]:
+    def validation_step(self, batch: Tensor, batch_idx: int) -> STEP_OUTPUT | None:
         return {"x": self.step(batch)}
 
 
-    def test_step(self, batch: Tensor, batch_idx: int) -> Optional[STEP_OUTPUT]:
+    def test_step(self, batch: Tensor, batch_idx: int) -> STEP_OUTPUT | None:
         return {"y": self.step(batch)}
 
-    def configure_optimizers(self) -> Tuple[List[torch.optim.Optimizer], List[LRScheduler]]:
+    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[LRScheduler]]:
         optimizer = torch.optim.SGD(self.model.parameters(), lr=0.1)
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
         return [optimizer], [lr_scheduler]
@@ -175,10 +174,10 @@ class BoringDataModule(LightningDataModule):
         super().__init__()
         self.data_dir = data_dir
         self.non_picklable = None
-        self.checkpoint_state: Optional[str] = None
+        self.checkpoint_state: str | None = None
         self.random_full = RandomDataset(32, 64 * 4)
 
-    def setup(self, stage: Optional[str] = None):
+    def setup(self, stage: str | None = None):
         if stage == "fit" or stage is None:
             self.random_train = Subset(self.random_full, indices=range(64))
 
@@ -244,7 +243,7 @@ class TestModelArgs:
     use_attn_mask: bool = True
     weight_tying: bool = False  # True
     checkpoint_activations: bool = False
-    avail_sdp_backends: Optional[Union[List[SDPBackend], SDPBackend]] = None
+    avail_sdp_backends: list[SDPBackend] | SDPBackend | None = None
     sdp_use_implicit_replication: bool = False
 
 
@@ -345,7 +344,7 @@ class FTSToyTransformer(torch.nn.Module):
         self.avail_sdp_backends = args.avail_sdp_backends
         self.sdp_use_implicit_replication = args.sdp_use_implicit_replication
 
-    def forward(self, tokens, mask: Optional[torch.Tensor] = None):
+    def forward(self, tokens, mask: torch.Tensor | None = None):
         _bsz, seq_len = tokens.size()
         assert seq_len <= self.max_seq_len
         h = self.tok_embeddings(tokens)

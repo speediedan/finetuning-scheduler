@@ -1,0 +1,123 @@
+name: Regen CI Requirements (report-only)
+
+# Regenerates the pinned CI lockfiles and reports drift. Report-only: it never writes to the repo and
+# never fails the build on drift, so it is safe to run on every relevant PR. The counterpart scheduled
+# workflow (regen-ci-req-check.yml) is what actually opens PRs.
+#
+# Why this exists: FTS lockfiles went ~6 months without regeneration, during which three PyTorch minor
+# releases shipped. When they were finally regenerated (2026-07-25) the refresh surfaced a pytest 9.1
+# incompatibility that had been latent the whole time. Surfacing that drift continuously, in a PR
+# comment, is much cheaper than discovering it during a release.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main, "release/*"]
+    paths:
+      - "setup.*"
+      - "pyproject.toml"
+      - "requirements/**"
+      - ".github/workflows/regen-ci-req-report.yml"
+      - ".github/actions/regen-ci-reqs/**"
+      - ".github/actions/check-file-diffs/**"
+      - "scripts/regen_summary.py"
+  pull_request:
+    branches: [main, "release/*"]
+    types: [opened, reopened, ready_for_review, synchronize]
+    paths:
+      - "setup.*"
+      - "pyproject.toml"
+      - "requirements/**"
+      - ".github/workflows/regen-ci-req-report.yml"
+      - ".github/actions/regen-ci-reqs/**"
+      - ".github/actions/check-file-diffs/**"
+      - "scripts/regen_summary.py"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  report:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run regen and compute patch
+        uses: ./.github/actions/regen-ci-reqs
+        id: regen_ci_reqs
+        with:
+          python_version: '3.13'
+          patch_path: /tmp/regen_diff.patch
+
+      - name: Upload regen diff (if present)
+        if: steps.regen_ci_reqs.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: regen-pins-diff
+          path: /tmp/regen_diff.patch
+
+      - name: Compute top-5 package-change summary
+        if: steps.regen_ci_reqs.outputs.changed == 'true'
+        run: python scripts/regen_summary.py /tmp/regen_diff.patch regen_summary.txt
+
+      - name: Create or update PR comment (single-comment)
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        env:
+          CHANGED: ${{ steps.regen_ci_reqs.outputs.changed }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const marker = '<!-- regen-check-pins -->';
+            let summary = '';
+            try {
+              const fs = require('fs');
+              if (fs.existsSync('regen_summary.txt')) {
+                summary = fs.readFileSync('regen_summary.txt', 'utf8').trim();
+              }
+            } catch (e) {
+              console.warn('Failed to read regen_summary.txt:', e && e.message ? e.message : String(e));
+            }
+            const changed = process.env.CHANGED || 'false';
+            const bodyText = changed === 'true'
+              ? `${marker}\n**regen-ci-req-report** detected changes to the pinned CI requirements and uploaded a patch artifact named \`regen-pins-diff\`.\n\n${summary ? summary + '\n\n' : ''}This workflow is report-only — it will not open a PR and does not block merge. Regenerate locally with \`./requirements/utils/lock_ci_requirements.sh\` if you want these pins in this PR; otherwise the scheduled regen workflow will propose them separately.`
+              : `${marker}\nNo CI pin drift detected by regen-ci-req-report.`;
+            const pr = context.payload.pull_request && context.payload.pull_request.number;
+            if (!pr) {
+              console.log('No pull_request payload found; skipping comment.');
+              return;
+            }
+            // Fork PRs get a read-only GITHUB_TOKEN, so commenting would 403. Skip rather than fail.
+            const headFullName = context.payload.pull_request.head?.repo?.full_name;
+            const baseFullName = context.payload.repository?.full_name;
+            if (!baseFullName || headFullName !== baseFullName) {
+              console.log(`Skipping comment: head repo (${headFullName}) is not the base repo (${baseFullName}).`);
+              return;
+            }
+            try {
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: pr });
+              const existing = comments.find(c => c.body && c.body.includes(marker));
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body: bodyText });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo, issue_number: pr, body: bodyText });
+              }
+            } catch (err) {
+              console.warn(`Failed to create/update PR comment: ${err && err.message ? err.message : String(err)}`);
+            }
+
+      - name: Log summary
+        run: |
+          if [ "${{ steps.regen_ci_reqs.outputs.changed }}" = "true" ]; then
+            echo "Regen detected pin drift; patch uploaded as artifact 'regen-pins-diff'."
+            echo "Report-only workflow: no PR opened, build not failed."
+          else
+            echo "Regen found no pin drift."
+          fi
