@@ -46,6 +46,23 @@ coverage:
         threshold: 5% # allow this much decrease on patch
     changes: false
 
+# Flag carryforward.
+#
+# GPU coverage is uploaded by the Azure pipeline, which runs less often than the GitHub Actions CPU
+# matrix and skips commits that touch none of its trigger paths. Without carryforward, any branch HEAD
+# that lacks a GPU upload has no `gpu` flag data at all -- which makes the README's
+# `badge.svg?flag=gpu` render "unknown" and drops the branch total to CPU-only coverage. Carryforward
+# reuses the most recent report for a flag when the current commit has no upload for it.
+#
+# https://docs.codecov.com/docs/carryforward-flags
+flags:
+  gpu:
+    carryforward: true
+  cpu:
+    carryforward: true
+  pytest:
+    carryforward: true
+
 # https://docs.codecov.com/docs/github-checks#disabling-github-checks-patch-annotations
 github_checks:
     annotations: false
