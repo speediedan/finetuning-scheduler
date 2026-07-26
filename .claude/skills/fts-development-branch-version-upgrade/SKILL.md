@@ -90,6 +90,19 @@ Update the following files with version changes:
    development branch to a new `.dev0` version. A mismatch between `CITATION.cff` (e.g. `2.13.0`) and
    `__about__.py` (e.g. `2.14.0.dev0`) on `main` is **expected and correct** — do not "fix" it.
 
+   **But do verify it is not STALE.** Phase 2b deliberately excludes `CITATION.cff`, so nothing else
+   catches the failure mode where it names a version that was never published (observed: it read `2.11.0`
+   for months after that release was skipped). It must equal the newest git tag:
+
+   ```bash
+   echo "CITATION.cff: $(grep '^version:' CITATION.cff | awk '{print $2}')"
+   echo "newest tag  : $(git tag --sort=-v:refname | head -1 | sed 's/^v//')"
+   ```
+
+   If they disagree, `CITATION.cff` is stale — correct it to the newest tag *before* proceeding, as a
+   separate concern from this upgrade. Also confirm the release's Zenodo DOI was added under
+   `identifiers:` (post-release, per `release_flow.md` step 14).
+
 1. **`CHANGELOG.md`**:
 
    - Add new version section at top:
@@ -105,6 +118,18 @@ Update the following files with version changes:
      ### Deprecated
      ```
    - Update previous version release date if not set
+
+   ⚠️ **If you are SKIPPING one or more versions** (e.g. 2.11.0.dev0 → 2.13.0 because PyTorch 2.11 and
+   2.12 shipped without matching FTS releases), do **not** add a new section — the existing unreleased
+   section already holds the accumulated work. Instead:
+
+   - **Retitle** the existing unreleased heading to the new version.
+   - Add a `## [X.Y.Z] and [X.Y+1.Z] - not released` stanza below it recording which versions were skipped
+     and why, and noting that the retained min-torch means every version they would have targeted is
+     still supported.
+
+   Set the date to `2026-XX-XX` when bumping the dev branch, and to the real date only when the release is
+   actually cut (`release_flow.md` step 2).
 
 #### PyTorch Version Files
 
@@ -147,6 +172,30 @@ Update the following files with version changes:
    cu{cuda_major}{cuda_minor}0
    nightly
    ```
+
+   ⚠️ **Only if the target is actually a prerelease.** This file is *data* — three lines parsed by both
+   the CI action and the build scripts — and all-commented means "use stable torch from PyPI".
+
+   - **Stable/catch-up release** (target torch is already GA): leave the file **fully commented out**.
+     Populating it pins CI to a nightly that will be pruned from the index within weeks, at which point
+     env builds fail to resolve. Note this also changes lockfile generation: `--no-emit-package torch` is
+     passed *only* on the prerelease path, so a stable target makes `requirements.txt` pin `torch`
+     and removes `torch-override.txt`. Both are expected.
+   - **Prerelease target**: populate it, and pick the nightly deliberately rather than taking the newest.
+     Enumerate what exists and confirm the wheels are complete across every target CI exercises
+     (`cu*`/`cpu` × min and max Python) — a nightly missing any of them will fail some matrix leg:
+     ```bash
+     python -c "
+     import urllib.request, re
+     h = urllib.request.urlopen('https://download.pytorch.org/whl/nightly/cu130/torch/').read().decode()
+     print(sorted(set(re.findall(r'torch-(2\.14\.0\.dev\d{8})%2Bcu130-cp313-', h)))[-8:])"
+     ```
+     Prefer one a couple of days old so obvious upstream regressions have had time to surface. Expect to
+     re-pin nearer feature freeze and then switch to the `test` (RC) channel once RC1 lands.
+
+   The **same nightly must also be set in `dockers/base-cuda/Dockerfile`**, where exactly one of the
+   stable / nightly / test install lines may be uncommented. A stale hardcoded nightly there broke the
+   image build once the old nightly was pruned.
 
 #### Determining the target CUDA version
 
@@ -243,6 +292,11 @@ open, surface that to the user rather than assuming.
         - {new_pytorch_max}
         - >= {lightning_min}
       ```
+
+    ⚠️ **Check whether the top row is speculative before adding.** The table documents *released*
+    versions. If the current top row describes a version that was never published (it will exist if a
+    previous dev-branch bump added it), **replace** that row rather than adding a new one — otherwise the
+    matrix advertises support for a release users cannot install.
 
 01. **`docs/source/install/dynamic_versioning.rst`**:
 
@@ -385,6 +439,13 @@ curl --data-binary @.codecov.yml https://codecov.io/validate
 ```
 
 ### Phase 3: Regenerate CI Requirements
+
+> **Skip Phases 3-6 if the dependency work is already done.** A version bump that follows a completed
+> currency PR (lockfiles already regenerated, env already rebuilt, coverage already collected, docs
+> already verified) only needs the metadata edits plus the Phase 2b/2c gates. Re-running these phases is
+> not harmful, just slow — ~40 minutes of rebuild and coverage for no new information. Decide by checking
+> whether `git log` since the last release already contains a lockfile regeneration, and whether
+> `./requirements/utils/lock_ci_requirements.sh` produces a clean `git diff`.
 
 After updating version files, regenerate locked requirements:
 
