@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [2.14.0] - 2026-XX-XX
+
+### Added
+
+### Fixed
+
+- Fixed `make linkcheck`, which reported 18 broken links. 17 were false positives: PyTorch's documentation site renders API anchors client-side, so `linkcheck` cannot resolve fragments like `#torch.nn.Module` even though the pages resolve. Added `linkcheck_anchors_ignore_for_url` for `pytorch.org` in `docs/source/conf.py`. The remaining failure was a genuine 404 — a historical changelog entry linked `jsonargparse` PR #205 as an issue, and that repository has issues disabled.
+
+### Changed
+
+- Raised the minimum supported PyTorch version to `2.11.0`, restoring the strict "latest 4 PyTorch minor releases" support window documented in `docs/source/versioning.rst`. This was announced as advance notice in `2.13.0`.
+
+### Deprecated
+
 ## [2.13.0] - 2026-07-26
 
 ### Added
@@ -422,7 +436,7 @@ name/pattern-based configuration instead of manually inspecting modules and appl
 
 ### Changed
 
-- pinned `jsonargparse` dependency to <4.18.0 until [#205](https://github.com/omni-us/jsonargparse/issues/205) is fixed
+- pinned `jsonargparse` dependency to <4.18.0 until [#205](https://github.com/omni-us/jsonargparse/pull/205) is fixed
 
 ## [0.3.2] - 2022-11-18
 

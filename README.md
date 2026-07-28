@@ -129,7 +129,7 @@ The prerelease version is configured via `requirements/ci/torch-pre.txt`. The `l
 #### Install a specific FTS version from source using the standalone `pytorch-lighting` package:
 
 ```bash
-export FTS_VERSION=2.13.0
+export FTS_VERSION=2.14.0
 export PACKAGE_NAME=pytorch
 git clone -b v${FTS_VERSION} https://github.com/speediedan/finetuning-scheduler
 cd finetuning-scheduler
@@ -230,16 +230,17 @@ See the [versioning documentation](https://finetuning-scheduler.readthedocs.io/e
 <details>
   <summary>Current build statuses for Fine-Tuning Scheduler </summary>
 
-| System / (PyTorch/Python ver) |                                                                                                        2.7.0/3.10                                                                                                        |                                                                                                             2.13.0/3.10, 2.13.0/3.13                                                                                                             |
+| System / (PyTorch/Python ver) |                                                                                                       2.11.0/3.10                                                                                                        |                                                                                                         2.14.0.dev/3.10, 2.14.0.dev/3.13                                                                                                         |
 | :---------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
 |      Linux \[GPUs\*\*\]       |                                                                                                            -                                                                                                             | [![Build Status](https://dev.azure.com//speediedan/finetuning-scheduler/_apis/build/status/Multi-GPU%20&%20Example%20Tests?branchName=main)](https://dev.azure.com/speediedan/finetuning-scheduler/_build/latest?definitionId=1&branchName=main) |
 |     Linux (Ubuntu 22.04)      | [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml) |             [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml)             |
 |           OSX (14)            | [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml) |             [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml)             |
 |        Windows (2022)         | [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml) |             [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml)             |
 
-- The left column is the **oldest** supported PyTorch version, the right column the **latest** tested. PyTorch `2.7.0` is only exercised with Python `3.10`; `2.13.0` is exercised with both `3.10` and `3.13`.
+- The left column is the **oldest** supported PyTorch version, the right column the **latest** tested. PyTorch `2.11.0` is only exercised with Python `3.10`; the latest is exercised with both `3.10` and `3.13`.
+- The `main` branch tracks the **PyTorch 2.14 development cycle**, so the latest column is currently a nightly (`2.14.0.dev20260724`) rather than a released version. Released FTS versions always pin a stable PyTorch; see the [compatibility table](https://finetuning-scheduler.readthedocs.io/en/stable/versioning.html).
 - All GitHub Actions legs above are **CPU-only** (no CUDA).
-- \*\* Multi-GPU tests run on Azure Pipelines against **PyTorch `2.13.0` / CUDA `13.0` (toolkit `13.0.3`) / Python `3.13`**, on one RTX 4090 and one RTX 2070 SUPER.
+- \*\* Multi-GPU tests run on Azure Pipelines against **PyTorch `2.14.0.dev` / CUDA `13.0` (toolkit `13.0.3`) / Python `3.13`**, on one RTX 4090 and one RTX 2070 SUPER.
 
 </details>
 

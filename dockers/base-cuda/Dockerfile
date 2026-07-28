@@ -17,7 +17,7 @@ ARG OS_VER=ubuntu22.04
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
 ARG PYTHON_VERSION=3.13
-ARG PYTORCH_VERSION=2.13.0
+ARG PYTORCH_VERSION=2.14.0
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
 
@@ -79,13 +79,13 @@ RUN \
         # NB: exactly ONE of the following must be uncommented. Prefer the stable line below unless
         # deliberately building against a prerelease; a hardcoded nightly goes stale quickly because
         # old nightlies are pruned from the index, and the build then fails to resolve.
-        # ... stable channel, pinned to the image's PYTORCH_VERSION (default)
-        CUDA_VERSION_MM=${CUDA_VERSION%.*}; \
-        uv pip install torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cu${CUDA_VERSION_MM//'.'/''}; \
+        # ... stable channel, pinned to the image's PYTORCH_VERSION
+        # CUDA_VERSION_MM=${CUDA_VERSION%.*}; \
+        # uv pip install torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cu${CUDA_VERSION_MM//'.'/''}; \
         # ... default channel
         # uv pip install torch --torch-backend=cu130; \
-        # ... pytorch nightly dev version (keep in sync with requirements/ci/torch-pre.txt)
-        # uv pip install --prerelease=allow torch==2.14.0.devYYYYMMDD --index-url https://download.pytorch.org/whl/nightly/cu130; \
+        # ... pytorch nightly dev version (keep in sync with requirements/ci/torch-pre.txt) (active)
+        uv pip install --prerelease=allow torch==2.14.0.dev20260724 --index-url https://download.pytorch.org/whl/nightly/cu130; \
         # ... test channel
         # uv pip install --prerelease=allow torch==2.14.0 --index-url https://download.pytorch.org/whl/test/cu130; \
     fi && \
