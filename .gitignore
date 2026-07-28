@@ -32,9 +32,6 @@ timit_data/
 grid_generated*
 grid_ori*
 
-# we don't have repo-specific prompts at this juncture
-.github/prompts/
-
 # C extensions
 *.so
 
@@ -174,3 +171,10 @@ cifar-10-batches-py
 # ctags
 tags
 .tags
+
+# editor/tool backups
+*.bak
+
+# Claude Code personal (untracked) instructions
+CLAUDE.local.md
+.claude/settings.local.json
