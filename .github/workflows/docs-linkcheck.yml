@@ -1,0 +1,141 @@
+name: Docs Link Check
+
+# Scheduled Sphinx `linkcheck`. Nothing else in CI runs it, which is how 18 broken links accumulated
+# unnoticed before 2.14.0 (17 of them false-positive anchor failures against pytorch.org, since fixed via
+# `linkcheck_anchors_ignore_for_url`; one a genuine 404).
+#
+# Two distinct failure classes, deliberately handled differently:
+#   * the docs BUILD failing (`make html -W`) is a real regression -> fail the job loudly.
+#   * an external link rotting is normal entropy outside our control -> open/update a tracking issue and
+#     leave the job green, so a rotted third-party URL never masks a genuine build regression.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # 06:00 UTC every Monday. Weekly is deliberate: link rot is slow, and each run does a full docs build.
+    - cron: '0 6 * * 1'
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+env:
+  USE_CI_COMMIT_PIN: "1"
+
+jobs:
+  linkcheck:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install apt packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends pandoc
+
+      - name: Install CI Dependencies
+        uses: ./.github/actions/install-ci-dependencies
+        with:
+          python_version: "3.13"
+          use_commit_pin: "true"
+
+      - name: Install docs requirements
+        shell: bash
+        run: |
+          export UV_OVERRIDE="${PWD}/requirements/ci/overrides.txt"
+          uv pip install -r requirements/docs.txt
+          uv pip install -e ".[examples]"
+
+      # A build failure here is ours. `-W` matches Read the Docs (`fail_on_warning: true`), so this also
+      # guards against the docs silently breaking on RTD.
+      - name: Build docs (warnings are errors)
+        shell: bash
+        run: |
+          cd docs && make html --debug SPHINXOPTS="-W --keep-going"
+
+      # Report-only: `linkcheck` exits non-zero on any broken link, which is expected entropy here.
+      - name: Run linkcheck
+        id: linkcheck
+        shell: bash
+        run: |
+          cd docs
+          set +e
+          make linkcheck SPHINXOPTS="--keep-going" > /tmp/linkcheck_run.log 2>&1
+          echo "linkcheck exited $?"
+          set -e
+          OUT=docs/build/linkcheck/output.txt
+          cd ..
+          if [[ ! -f "${OUT}" ]]; then
+            echo "::error::linkcheck produced no output.txt; see the build log."
+            tail -50 /tmp/linkcheck_run.log
+            exit 1
+          fi
+          grep '\[broken\]' "${OUT}" > /tmp/broken.txt || true
+          COUNT=$(wc -l < /tmp/broken.txt | tr -d ' ')
+          echo "count=${COUNT}" >> $GITHUB_OUTPUT
+          echo "Broken links: ${COUNT}"
+          cat /tmp/broken.txt || true
+
+      - name: Build issue body
+        if: steps.linkcheck.outputs.count != '0'
+        shell: bash
+        run: |
+          {
+            echo "Sphinx \`linkcheck\` found **${{ steps.linkcheck.outputs.count }}** broken link(s) on \`${{ github.ref_name }}\`."
+            echo
+            echo "Run: [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) · $(date -u +%Y-%m-%dT%H:%MZ)"
+            echo
+            echo '```'
+            cat /tmp/broken.txt
+            echo '```'
+            echo
+            echo "Triage notes:"
+            echo "- \`Anchor '...' not found\` against a site that renders anchors client-side is a **false positive**."
+            echo "  Add the URL pattern to \`linkcheck_anchors_ignore_for_url\` in \`docs/source/conf.py\` rather than editing the reference."
+            echo "- A \`404\` is usually real. Check whether the target moved (a GitHub \`/issues/N\` that 404s while"
+            echo "  \`/pull/N\` resolves means the repo has issues disabled)."
+            echo "- Reproduce locally with: \`cd docs && make linkcheck SPHINXOPTS=\"--keep-going\"\`"
+          } > /tmp/issue_body.md
+          cat /tmp/issue_body.md
+
+      # Update a single long-lived issue rather than opening a new one weekly, so link rot does not
+      # generate a stream of duplicates.
+      - name: Open or update tracking issue
+        if: steps.linkcheck.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: "[auto] Broken documentation links detected"
+        run: |
+          # List directly rather than using --search: GitHub's search index is eventually consistent,
+          # so a recently-created issue can be missed and duplicates opened.
+          EXISTING=$(gh issue list --state open --limit 100 \
+            --json number,title --jq "[.[] | select(.title == env.TITLE)][0].number // empty")
+          if [ -n "${EXISTING}" ]; then
+            echo "Updating existing issue #${EXISTING}"
+            gh issue comment "${EXISTING}" --body-file /tmp/issue_body.md
+          else
+            echo "Opening new tracking issue"
+            gh issue create --title "${TITLE}" --body-file /tmp/issue_body.md --label automated || \
+              gh issue create --title "${TITLE}" --body-file /tmp/issue_body.md
+          fi
+
+      - name: Close tracking issue when clean
+        if: steps.linkcheck.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: "[auto] Broken documentation links detected"
+        run: |
+          # List directly rather than using --search: GitHub's search index is eventually consistent,
+          # so a recently-created issue can be missed and duplicates opened.
+          EXISTING=$(gh issue list --state open --limit 100 \
+            --json number,title --jq "[.[] | select(.title == env.TITLE)][0].number // empty")
+          if [ -n "${EXISTING}" ]; then
+            gh issue close "${EXISTING}" \
+              --comment "All documentation links resolve as of run [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). Closing automatically."
+          else
+            echo "No broken links and no open tracking issue."
+          fi
