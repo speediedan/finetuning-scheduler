@@ -103,16 +103,33 @@ gpu_lease_reexec() {
 
 ci_gpu_lease_acquire() {
     local dir="${1:?lease dir}" pidfile="${2:?pidfile}" timeout="${3:-2700}" label="${4:-ci-job}"
+    # Fail open ONLY when the host does not use leases at all (directory not mounted). Any other failure
+    # below is a real misconfiguration and is reported as such -- see the note on the permission trap.
     if [[ ! -d "$dir" ]]; then
-        echo "ci_gpu_lease: '${dir}' not present; proceeding without a lease (fail-open)." >&2
+        echo "ci_gpu_lease: '${dir}' not mounted; this host does not use GPU leases. Proceeding." >&2
         return 0
     fi
     local lock="${dir}/gpu.lock" ready="${pidfile}.ready"
     rm -f "$pidfile" "$ready"
-    : > "$lock" 2>/dev/null || { echo "ci_gpu_lease: cannot write ${lock}; fail-open." >&2; return 0; }
+    # The lock is opened READ-ONLY. Under rootless docker with userns remapping this container's uid is a
+    # host subuid that does not own the lock file, so opening it read-write fails with EACCES. flock(2)
+    # places a lock regardless of the fd's open mode, so a read-only fd gives full mutual exclusion and
+    # sidesteps ownership entirely. Opening read-write here previously caused a silent fail-open that
+    # defeated serialization completely -- the job ran GPU tests alongside a local suite.
+    if [[ ! -e "$lock" ]]; then
+        : > "$lock" 2>/dev/null || {
+            echo "##vso[task.logissue type=error]ci_gpu_lease: ${lock} is missing and cannot be created." >&2
+            return 1; }
+    fi
+    if [[ ! -r "$lock" ]]; then
+        echo "##vso[task.logissue type=error]ci_gpu_lease: ${lock} is not readable; cannot serialize." >&2
+        echo "  The lease directory is mounted, so this is a misconfiguration rather than an opt-out." >&2
+        echo "  Un-mount ${dir} to disable GPU leasing deliberately." >&2
+        return 1
+    fi
     setsid bash -c '
         lock="$1"; pidfile="$2"; ready="$3"; tmo="$4"
-        exec {fd}<>"$lock" || exit 1
+        exec {fd}<"$lock" || exit 1
         flock -x -w "$tmo" "$fd" || exit 75
         echo $$ > "$pidfile"; : > "$ready"
         while :; do sleep 3600; done
