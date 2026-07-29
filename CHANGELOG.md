@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Added `docs-linkcheck.yml`, a weekly scheduled Sphinx `linkcheck`. No workflow ran `linkcheck` previously, which is how 18 broken links accumulated unnoticed. A docs *build* failure fails the job (matching Read the Docs' `fail_on_warning`), while broken external links instead open or update a single long-lived tracking issue and leave the job green, so third-party link rot cannot mask a genuine build regression.
+
 ### Fixed
 
 - Fixed `make linkcheck`, which reported 18 broken links. 17 were false positives: PyTorch's documentation site renders API anchors client-side, so `linkcheck` cannot resolve fragments like `#torch.nn.Module` even though the pages resolve. Added `linkcheck_anchors_ignore_for_url` for `pytorch.org` in `docs/source/conf.py`. The remaining failure was a genuine 404 — a historical changelog entry linked `jsonargparse` PR #205 as an issue, and that repository has issues disabled.
