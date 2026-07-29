@@ -21,6 +21,10 @@ declare -a from_source_specs=()
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/infra_utils.sh"
 
+# Serialize the whole coverage run against other GPU work on the host (no-op unless GPU_LEASE_CMD
+# is set). Held once for the entire run; the nested special_tests.sh calls inherit it.
+gpu_lease_reexec "$0" "$@"
+
 usage(){
 >&2 cat << EOF
 Usage: $0

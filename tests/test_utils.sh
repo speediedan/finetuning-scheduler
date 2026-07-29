@@ -2,6 +2,12 @@
 # Test infra utility functions
 # Note we use local variables for many of these to allow more usage flexibility in different contexts
 
+
+# Optional GPU-lease serialization (no-op unless GPU_LEASE_CMD is set). See scripts/gpu_lease_wrap.sh.
+_gpu_lease_wrap="$(dirname "${BASH_SOURCE[0]}")/../scripts/gpu_lease_wrap.sh"
+# shellcheck source=../scripts/gpu_lease_wrap.sh
+[[ -r "${_gpu_lease_wrap}" ]] && source "${_gpu_lease_wrap}"
+type maybe_gpu_lease &>/dev/null || maybe_gpu_lease() { "$@"; }
 source $(dirname "$0")/../scripts/infra_utils.sh
 
 toggle_experimental_patches() {
