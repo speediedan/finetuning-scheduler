@@ -267,6 +267,17 @@ intersphinx_mapping = {
     "pl": ("https://lightning.ai/docs/pytorch/stable/", None),
 }
 
+# -- Options for linkcheck builder -------------------------------------------
+
+# PyTorch's documentation site renders API anchors client-side, so ``linkcheck`` cannot resolve
+# fragments like ``#torch.nn.Module`` even though the pages themselves are reachable. Check that those
+# URLs resolve, but skip their anchors -- otherwise every intersphinx-style torch reference reports as
+# broken and drowns out real failures.
+linkcheck_anchors_ignore_for_url = [
+    r"https://pytorch\.org/docs/.*",
+    r"https://docs\.pytorch\.org/docs/.*",
+]
+
 # -- Options for todo extension ----------------------------------------------
 
 # If true, `todo` and `todoList` produce output, else they produce nothing.

@@ -12,7 +12,8 @@
 # cu130
 # test
 
-# Example for nightly (commented out):
-# 2.11.0.dev20260121
-# cu130
-# nightly
+# Active: nightly channel, tracking the torch 2.14 development cycle.
+# Re-pin nearer the 2.14.0 feature freeze (2026-08-07), then move to the `test` channel after RC1.
+2.14.0.dev20260724
+cu130
+nightly
