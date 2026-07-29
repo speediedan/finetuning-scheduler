@@ -26,10 +26,12 @@ Azure DevOps organization, so the infrastructure half transfers verbatim; the pi
 - PR-triggered runs are approval-gated and will sit pending until released (see Step 2). `drafts: false`,
   so draft PRs do not trigger at all.
 - Auth is `AZURE_DEVOPS_EXT_PAT` in the environment.
-- Runner: host `speediedl`, 62 GiB RAM / 2 GiB swap, systemd `MemoryMax`, rootless Docker on cgroups v2.
+- Runner: host `speediedl`, 62 GiB RAM / 2 GiB swap, rootless Docker on cgroups v2. The systemd unit sets
+  `OOMScoreAdjust=-900`; it does **not** set `MemoryMax`/`MemoryHigh` (an earlier version of this file
+  claimed it did — verified absent 2026-07-29, no drop-in exists).
 - The pipeline hard-asserts `>= 2` CUDA GPUs (`gpu-tests.yml`, the "Env details" step). A single-GPU agent
   fails there, not in the tests.
-- Container image `speediedan/finetuning-scheduler:py3.13-pt2.11.0-pl2.6-azpl-init`, in-container venv
+- Container image `speediedan/finetuning-scheduler:py3.13-pt2.14.0-pl2.6-azpl-init`, in-container venv
   `/tmp/venvs/fts_dev`, `--gpus all --shm-size=512m`.
 - Only `CODECOV_TOKEN` is mapped. There are no HuggingFace or gated-model secrets in this pipeline.
 
@@ -52,6 +54,42 @@ step. The steps, in order:
 
 `timeoutInMinutes: 100`. Marks are `standalone` and `exp_patch` only — there is no `profile_ci` mark, and
 no `--reruns` flags, so a flaky test fails the build on first occurrence.
+
+## GPU lease: how this pipeline interacts with local GPU work
+
+The self-hosted agent runs **one Azure job at a time**, so two pipeline runs never collide with each
+other. The real collision risk is a pipeline job landing on top of a **local** multi-GPU run (this host is
+shared with interpretune, and both are worked on interactively).
+
+Since 2.14 the job participates in the host GPU lease:
+
+- `container.volumes` bind-mounts `/tmp/di_leases:/gpu_leases`. `flock` operates on the inode, so the
+  lock file interlocks between the container and host processes. **Nothing about the agent installation
+  changes** — no hooks, no systemd edits, no wrapper around the agent.
+- The first step (`Acquire host GPU lease`) parks a detached holder for the life of the job, waiting up to
+  **2400s**. A step-scoped `flock` would not work: each step is a separate shell, so the lease would be
+  dropped as soon as the acquiring step ended.
+- The `Cleaning up agent workspace` step (`condition: always()`) releases it. This is belt-and-braces
+  only: if the job is cancelled or the container is torn down, every process inside dies and the kernel
+  frees the lease automatically. **There is no stale-lock path.**
+- It **fails open**. If `/gpu_leases` is not mounted, the step logs and continues unserialized — a missing
+  convenience must never break the build.
+
+Debugging:
+
+```bash
+gpu_lease.sh --status     # a CI holder shows project=azure-<buildId> and a [container] tag
+gpu_lease.sh --doctor     # flags stale metadata, dead holders, and GPU users holding no lease
+gpu_lease.sh --reset      # clears stale metadata for FREE leases only
+gpu_lease.sh --reset --force   # kills the holder of a genuinely held lease
+```
+
+⚠ **If the holder is a CI job, do not `--reset --force`.** The holder pid lives in the container's PID
+namespace and is not meaningful on the host. Cancel the pipeline run instead — container teardown
+releases the lease. Never kill the agent to free a lease.
+
+If a job times out waiting, the log names the current holder. That is a genuine local/CI conflict: let the
+local run finish and re-queue, rather than disabling the lease.
 
 ## Step 1: Verify Auth and Build State
 
@@ -136,7 +174,7 @@ CONTAINER_NAME=$(/usr/bin/docker create -t --name test_ci_container --gpus all \
   --label test_net --network local_test_net --shm-size=512m \
   -v "/var/run/user/1000/docker.sock":"/var/run/docker.sock" \
   -v "/usr/bin/docker":"/tmp/docker:ro" \
-  speediedan/finetuning-scheduler:py3.13-pt2.11.0-pl2.6-azpl-init)
+  speediedan/finetuning-scheduler:py3.13-pt2.14.0-pl2.6-azpl-init)
 docker start $CONTAINER_NAME && docker exec -i -t $CONTAINER_NAME bash
 ```
 
