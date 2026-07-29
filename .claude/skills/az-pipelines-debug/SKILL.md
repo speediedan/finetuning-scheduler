@@ -84,9 +84,35 @@ gpu_lease.sh --reset      # clears stale metadata for FREE leases only
 gpu_lease.sh --reset --force   # kills the holder of a genuinely held lease
 ```
 
-⚠ **If the holder is a CI job, do not `--reset --force`.** The holder pid lives in the container's PID
-namespace and is not meaningful on the host. Cancel the pipeline run instead — container teardown
-releases the lease. Never kill the agent to free a lease.
+### ⛔ Never reset a lease held by CI — either project's CI
+
+`gpu_lease.sh --reset --force` **kills the holder process**. That is the right escape hatch for a wedged
+*local* run and the wrong tool for a pipeline job, for two reasons:
+
+1. **The holder pid is meaningless on the host.** A CI holder lives in the job container's PID namespace,
+   so `--force` either fails to kill it or, worse, kills an unrelated host process that happens to share
+   that pid number. `--status` marks these holders with a `[container]` tag and `project=azure-<buildId>`
+   (interpretune: `azure-it-<buildId>`) — treat either as read-only.
+1. **The lease is already self-healing for CI.** Container teardown kills every process inside the job, and
+   the kernel releases the lease. There is no stale-lock path to clean up.
+
+**The host and pool are shared between finetuning-scheduler and interpretune**, so a lease you did not
+expect may legitimately belong to the *other* project's pipeline job or local suite. Check `project=`
+before assuming it is stale.
+
+Correct responses:
+
+| Situation                                       | Do this                                                           |
+| ----------------------------------------------- | ----------------------------------------------------------------- |
+| Lease held by a CI job you want to stop         | **Cancel the pipeline run.** Teardown frees the lease.            |
+| Lease held by the other project                 | Leave it. Wait, or coordinate — do not reset.                     |
+| CI job timed out waiting for the lease          | A genuine conflict. Let the local run finish and re-queue.        |
+| Lease looks stale (`--status` flags an anomaly) | `gpu_lease.sh --doctor`, then plain `--reset` (free leases only). |
+| Genuinely wedged **local** run                  | `--reset --force` is appropriate here.                            |
+
+**Never kill or restart the agent to free a lease.** `restart-stack.sh` is for a wedged agent, not for lease
+recovery, and restarting it mid-job strands the run without releasing anything the kernel would not have
+released anyway.
 
 If a job times out waiting, the log names the current holder. That is a genuine local/CI conflict: let the
 local run finish and re-queue, rather than disabling the lease.
