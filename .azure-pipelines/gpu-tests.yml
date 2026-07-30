@@ -57,12 +57,26 @@ jobs:
       mapDockerSocket: false
       volumes:
       - /var/run/user/998/docker.sock:/var/run/docker.sock
+      # Host GPU-lease rendezvous directory. `flock` works on the inode, so a bind-mounted lock file
+      # interlocks between this container and processes on the host -- which is what lets this job
+      # serialize against local multi-GPU runs WITHOUT any change to the agent installation itself.
+      # Absent on hosts that do not use the lease; the acquire step fails open in that case.
+      - /tmp/di_leases:/gpu_leases
       options: --gpus all --shm-size=512m
 
     workspace:
       clean: outputs
 
     steps:
+
+    # Serialize this job against any local multi-GPU run on the self-hosted host. The agent already
+    # guarantees one Azure job at a time, so this exists purely to avoid colliding with interactive/agent
+    # sessions -- a collision that previously surfaced as OOM or flaky timing rather than a clear error.
+    # Fails open if the lease directory is not mounted, so it can never break a host that lacks it.
+    - bash: |
+        source scripts/gpu_lease_wrap.sh
+        ci_gpu_lease_acquire /gpu_leases /tmp/azp_gpu_lease.pid 2400 "azure-$(Build.BuildId)"
+      displayName: 'Acquire host GPU lease'
 
     - bash: |
         set -e  # Exit on any error
@@ -154,6 +168,10 @@ jobs:
         sudo chmod -R 775 /__w/1/s || true
         echo "Cleaning up ephemeral directories..."
         sudo rm -rf /__w/1/s/.pytest_cache || true
+        # Release the host GPU lease. Belt-and-braces only: if this job dies or its container is torn
+        # down, every process inside it dies too and the kernel frees the lease automatically.
+        source scripts/gpu_lease_wrap.sh 2>/dev/null && \
+          ci_gpu_lease_release /gpu_leases /tmp/azp_gpu_lease.pid || true
         echo 'Agent workspace cleanup completed'
       condition: always()
       displayName: 'Cleaning up agent workspace'

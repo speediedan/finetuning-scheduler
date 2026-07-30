@@ -27,6 +27,10 @@ unset FTS_EXPERIMENTAL_PATCH_TESTS
 
 source $(dirname "$0")/test_utils.sh
 
+# Serialize this run against other GPU work on the host (no-op unless GPU_LEASE_CMD is set).
+# Done before arg parsing so the whole suite is covered by a single lease acquisition.
+gpu_lease_reexec "$0" "$@"
+
 usage(){
 >&2 cat << EOF
 Usage: $0

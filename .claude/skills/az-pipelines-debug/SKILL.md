@@ -26,10 +26,23 @@ Azure DevOps organization, so the infrastructure half transfers verbatim; the pi
 - PR-triggered runs are approval-gated and will sit pending until released (see Step 2). `drafts: false`,
   so draft PRs do not trigger at all.
 - Auth is `AZURE_DEVOPS_EXT_PAT` in the environment.
-- Runner: host `speediedl`, 62 GiB RAM / 2 GiB swap, systemd `MemoryMax`, rootless Docker on cgroups v2.
+- Runner: a self-hosted agent on a GPU host, running rootless Docker on cgroups v2. The systemd unit sets
+  `OOMScoreAdjust=-900`; it does **not** set `MemoryMax`/`MemoryHigh` (an earlier version of this file
+  claimed it did — verified absent 2026-07-29, no drop-in exists).
+
+> **Host-specific values live in `CLAUDE.local.md`, not here.** This skill is deliberately
+> host-independent. Agent hostname, RAM/swap, GPU models, the agent install directory and the agent's uid
+> all vary by machine, so the commands below use `$AGENT_HOME` and illustrative example values. Substitute
+> from `CLAUDE.local.md` (or `.github/copilot-instructions.md`'s successor) for the machine you are on:
+>
+> ```bash
+> AGENT_HOME=${AGENT_HOME:-/opt/az_pipeline_agent}   # example default
+> AGENT_UID=${AGENT_UID:-998}                        # example; the uid the agent runs as
+> ```
+
 - The pipeline hard-asserts `>= 2` CUDA GPUs (`gpu-tests.yml`, the "Env details" step). A single-GPU agent
   fails there, not in the tests.
-- Container image `speediedan/finetuning-scheduler:py3.13-pt2.11.0-pl2.6-azpl-init`, in-container venv
+- Container image `speediedan/finetuning-scheduler:py3.13-pt2.14.0-pl2.6-azpl-init`, in-container venv
   `/tmp/venvs/fts_dev`, `--gpus all --shm-size=512m`.
 - Only `CODECOV_TOKEN` is mapped. There are no HuggingFace or gated-model secrets in this pipeline.
 
@@ -52,6 +65,68 @@ step. The steps, in order:
 
 `timeoutInMinutes: 100`. Marks are `standalone` and `exp_patch` only — there is no `profile_ci` mark, and
 no `--reruns` flags, so a flaky test fails the build on first occurrence.
+
+## GPU lease: how this pipeline interacts with local GPU work
+
+The self-hosted agent runs **one Azure job at a time**, so two pipeline runs never collide with each
+other. The real collision risk is a pipeline job landing on top of a **local** multi-GPU run (this host is
+shared with interpretune, and both are worked on interactively).
+
+Since 2.14 the job participates in the host GPU lease:
+
+- `container.volumes` bind-mounts `/tmp/di_leases:/gpu_leases`. `flock` operates on the inode, so the
+  lock file interlocks between the container and host processes. **Nothing about the agent installation
+  changes** — no hooks, no systemd edits, no wrapper around the agent.
+- The first step (`Acquire host GPU lease`) parks a detached holder for the life of the job, waiting up to
+  **2400s**. A step-scoped `flock` would not work: each step is a separate shell, so the lease would be
+  dropped as soon as the acquiring step ended.
+- The `Cleaning up agent workspace` step (`condition: always()`) releases it. This is belt-and-braces
+  only: if the job is cancelled or the container is torn down, every process inside dies and the kernel
+  frees the lease automatically. **There is no stale-lock path.**
+- It **fails open**. If `/gpu_leases` is not mounted, the step logs and continues unserialized — a missing
+  convenience must never break the build.
+
+Debugging:
+
+```bash
+gpu_lease.sh --status     # a CI holder shows project=azure-<buildId> and a [container] tag
+gpu_lease.sh --doctor     # flags stale metadata, dead holders, and GPU users holding no lease
+gpu_lease.sh --reset      # clears stale metadata for FREE leases only
+gpu_lease.sh --reset --force   # kills the holder of a genuinely held lease
+```
+
+### ⛔ Never reset a lease held by CI — either project's CI
+
+`gpu_lease.sh --reset --force` **kills the holder process**. That is the right escape hatch for a wedged
+*local* run and the wrong tool for a pipeline job, for two reasons:
+
+1. **The holder pid is meaningless on the host.** A CI holder lives in the job container's PID namespace,
+   so `--force` either fails to kill it or, worse, kills an unrelated host process that happens to share
+   that pid number. `--status` marks these holders with a `[container]` tag and `project=azure-<buildId>`
+   (interpretune: `azure-it-<buildId>`) — treat either as read-only.
+1. **The lease is already self-healing for CI.** Container teardown kills every process inside the job, and
+   the kernel releases the lease. There is no stale-lock path to clean up.
+
+**The host and pool are shared between finetuning-scheduler and interpretune**, so a lease you did not
+expect may legitimately belong to the *other* project's pipeline job or local suite. Check `project=`
+before assuming it is stale.
+
+Correct responses:
+
+| Situation                                       | Do this                                                           |
+| ----------------------------------------------- | ----------------------------------------------------------------- |
+| Lease held by a CI job you want to stop         | **Cancel the pipeline run.** Teardown frees the lease.            |
+| Lease held by the other project                 | Leave it. Wait, or coordinate — do not reset.                     |
+| CI job timed out waiting for the lease          | A genuine conflict. Let the local run finish and re-queue.        |
+| Lease looks stale (`--status` flags an anomaly) | `gpu_lease.sh --doctor`, then plain `--reset` (free leases only). |
+| Genuinely wedged **local** run                  | `--reset --force` is appropriate here.                            |
+
+**Never kill or restart the agent to free a lease.** `restart-stack.sh` is for a wedged agent, not for lease
+recovery, and restarting it mid-job strands the run without releasing anything the kernel would not have
+released anyway.
+
+If a job times out waiting, the log names the current holder. That is a genuine local/CI conflict: let the
+local run finish and re-queue, rather than disabling the lease.
 
 ## Step 1: Verify Auth and Build State
 
@@ -96,8 +171,8 @@ watch -n 30 'az pipelines build show --id <build_id> \
   --organization https://dev.azure.com/speediedan --project finetuning-scheduler \
   --query "{status:status,result:result,startTime:startTime,finishTime:finishTime}" -o json'
 
-tail -f /opt/az_pipeline_agent/_diag/Agent_*.log
-ls -1t /opt/az_pipeline_agent/_diag/Worker_*.log | head
+tail -f "$AGENT_HOME"/_diag/Agent_*.log
+ls -1t "$AGENT_HOME"/_diag/Worker_*.log | head
 
 # pool is shared — this lists agents serving BOTH projects
 az pipelines agent list --organization https://dev.azure.com/speediedan --pool-id 1 -o table
@@ -112,11 +187,12 @@ an interpretune build holds the agent before touching anything.
 approval was actually released. Re-check Step 1's approvals endpoint.
 
 **Infra / runner** — exit `137`, "shutdown signal", agent log shows a restart, or Docker socket errors.
-Memory pressure on a 62 GiB box with 2 GiB swap is the usual cause; multi-GPU standalone tests each spawn a
-fresh process. Recovery:
+Memory pressure is the usual cause, especially on a host with little swap relative to RAM (the current
+host is an example: roughly 62 GiB RAM against 2 GiB swap). Multi-GPU standalone tests each spawn a fresh
+process, so peak usage scales with parallelism. Recovery:
 
 ```bash
-sudo /opt/az_pipeline_agent/restart-stack.sh
+sudo "$AGENT_HOME"/restart-stack.sh
 ```
 
 Check for orphaned processes from an interrupted standalone run before re-queuing —
@@ -134,9 +210,9 @@ Reproduce the pipeline's exact environment by running the same image. Full walkt
 docker network create --label test_net local_test_net
 CONTAINER_NAME=$(/usr/bin/docker create -t --name test_ci_container --gpus all \
   --label test_net --network local_test_net --shm-size=512m \
-  -v "/var/run/user/1000/docker.sock":"/var/run/docker.sock" \
+  -v "/var/run/user/$(id -u)/docker.sock":"/var/run/docker.sock" \
   -v "/usr/bin/docker":"/tmp/docker:ro" \
-  speediedan/finetuning-scheduler:py3.13-pt2.11.0-pl2.6-azpl-init)
+  speediedan/finetuning-scheduler:py3.13-pt2.14.0-pl2.6-azpl-init)
 docker start $CONTAINER_NAME && docker exec -i -t $CONTAINER_NAME bash
 ```
 
@@ -149,8 +225,8 @@ export UV_OVERRIDE="${PWD}/requirements/ci/overrides.txt"
 uv pip install -e . -r requirements/ci/requirements.txt --excludes /tmp/venvs/fts_dev/torch-excludes.txt
 ```
 
-Note the socket path differs from the pipeline's (`/var/run/user/998/docker.sock`, the agent's uid). That
-divergence is intentional for local use — do not "fix" it.
+Note the socket path differs from the pipeline's (`/var/run/user/$AGENT_UID/docker.sock`, the agent's own
+uid — e.g. `998`). Using your own uid locally is intentional — do not "fix" it to match the pipeline.
 
 Always tear down:
 
