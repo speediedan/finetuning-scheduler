@@ -70,6 +70,39 @@ autouse fixture in `tests/conftest.py` rather than working around the failure.
 Full local coverage (~30 min) is orchestrated by `scripts/gen_fts_coverage.sh`; wrap long multi-GPU runs
 in `scripts/manage_standalone_processes.sh --use-nohup` (VS Code kills plain nohup jobs).
 
+## Serializing GPU work on a shared host
+
+A multi-GPU host is often shared by more than one consumer: several interactive/agent sessions in this
+repo, sessions in a sibling project (`interpretune` shares this project's host and CI agent), and the
+self-hosted Azure Pipelines agent, which can dispatch a GPU job as soon as one is approved. Two GPU suites
+running at once contend **silently** — it surfaces as OOM, flaky timing, or mutual slowdown rather than an
+obvious error, so it is easy to misread as a real test failure.
+
+`scripts/gpu_lease_wrap.sh` provides an **opt-in** `flock`-based lease for this. It is a **complete no-op
+unless `GPU_LEASE_CMD` points at a lease implementation**, so contributors and GitHub CI are unaffected and
+nothing here is required to work on FTS.
+
+```bash
+export GPU_LEASE_CMD=/path/to/gpu_lease.sh   # opt in for this shell
+./tests/special_tests.sh --mark_type=standalone   # now serialized
+```
+
+Once opted in:
+
+- `tests/special_tests.sh` and `scripts/gen_fts_coverage.sh` **self re-exec** under the lease, so a whole
+  suite is covered by one acquisition. Per-test acquisition would let another consumer interleave
+  mid-suite.
+- **Waiting is normal, not a failure.** A run may sit at `'gpu' lease is held; waiting...` for the length
+  of whatever holds it (a full standalone suite is ~26 min; a CI job ~37 min). Let it queue — do not
+  disable the lease or kill the holder to get moving.
+- The lease is held only while its owning process lives, so a killed run releases it automatically. There
+  is no stale-lock cleanup step.
+- Nested acquisition is safe: the lease exports `GPU_LEASE_HELD` (pid-tagged) and both helpers honor it, so
+  a coverage run invoking `special_tests.sh` will not deadlock on its own lease.
+- The Azure GPU pipeline participates too, by bind-mounting the lease directory into the job container
+  (`flock` works on the inode, so container and host processes interlock). See the `az-pipelines-debug`
+  skill — in particular, **never force-reset a lease held by a CI job**; cancel the pipeline run instead.
+
 ## Checks required before a change is done
 
 1. `pre-commit run --all-files`
