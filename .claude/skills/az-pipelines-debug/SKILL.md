@@ -26,9 +26,20 @@ Azure DevOps organization, so the infrastructure half transfers verbatim; the pi
 - PR-triggered runs are approval-gated and will sit pending until released (see Step 2). `drafts: false`,
   so draft PRs do not trigger at all.
 - Auth is `AZURE_DEVOPS_EXT_PAT` in the environment.
-- Runner: host `speediedl`, 62 GiB RAM / 2 GiB swap, rootless Docker on cgroups v2. The systemd unit sets
+- Runner: a self-hosted agent on a GPU host, running rootless Docker on cgroups v2. The systemd unit sets
   `OOMScoreAdjust=-900`; it does **not** set `MemoryMax`/`MemoryHigh` (an earlier version of this file
   claimed it did — verified absent 2026-07-29, no drop-in exists).
+
+> **Host-specific values live in `CLAUDE.local.md`, not here.** This skill is deliberately
+> host-independent. Agent hostname, RAM/swap, GPU models, the agent install directory and the agent's uid
+> all vary by machine, so the commands below use `$AGENT_HOME` and illustrative example values. Substitute
+> from `CLAUDE.local.md` (or `.github/copilot-instructions.md`'s successor) for the machine you are on:
+>
+> ```bash
+> AGENT_HOME=${AGENT_HOME:-/opt/az_pipeline_agent}   # example default
+> AGENT_UID=${AGENT_UID:-998}                        # example; the uid the agent runs as
+> ```
+
 - The pipeline hard-asserts `>= 2` CUDA GPUs (`gpu-tests.yml`, the "Env details" step). A single-GPU agent
   fails there, not in the tests.
 - Container image `speediedan/finetuning-scheduler:py3.13-pt2.14.0-pl2.6-azpl-init`, in-container venv
@@ -160,8 +171,8 @@ watch -n 30 'az pipelines build show --id <build_id> \
   --organization https://dev.azure.com/speediedan --project finetuning-scheduler \
   --query "{status:status,result:result,startTime:startTime,finishTime:finishTime}" -o json'
 
-tail -f /opt/az_pipeline_agent/_diag/Agent_*.log
-ls -1t /opt/az_pipeline_agent/_diag/Worker_*.log | head
+tail -f "$AGENT_HOME"/_diag/Agent_*.log
+ls -1t "$AGENT_HOME"/_diag/Worker_*.log | head
 
 # pool is shared — this lists agents serving BOTH projects
 az pipelines agent list --organization https://dev.azure.com/speediedan --pool-id 1 -o table
@@ -176,11 +187,12 @@ an interpretune build holds the agent before touching anything.
 approval was actually released. Re-check Step 1's approvals endpoint.
 
 **Infra / runner** — exit `137`, "shutdown signal", agent log shows a restart, or Docker socket errors.
-Memory pressure on a 62 GiB box with 2 GiB swap is the usual cause; multi-GPU standalone tests each spawn a
-fresh process. Recovery:
+Memory pressure is the usual cause, especially on a host with little swap relative to RAM (the current
+host is an example: roughly 62 GiB RAM against 2 GiB swap). Multi-GPU standalone tests each spawn a fresh
+process, so peak usage scales with parallelism. Recovery:
 
 ```bash
-sudo /opt/az_pipeline_agent/restart-stack.sh
+sudo "$AGENT_HOME"/restart-stack.sh
 ```
 
 Check for orphaned processes from an interrupted standalone run before re-queuing —
@@ -198,7 +210,7 @@ Reproduce the pipeline's exact environment by running the same image. Full walkt
 docker network create --label test_net local_test_net
 CONTAINER_NAME=$(/usr/bin/docker create -t --name test_ci_container --gpus all \
   --label test_net --network local_test_net --shm-size=512m \
-  -v "/var/run/user/1000/docker.sock":"/var/run/docker.sock" \
+  -v "/var/run/user/$(id -u)/docker.sock":"/var/run/docker.sock" \
   -v "/usr/bin/docker":"/tmp/docker:ro" \
   speediedan/finetuning-scheduler:py3.13-pt2.14.0-pl2.6-azpl-init)
 docker start $CONTAINER_NAME && docker exec -i -t $CONTAINER_NAME bash
@@ -213,8 +225,8 @@ export UV_OVERRIDE="${PWD}/requirements/ci/overrides.txt"
 uv pip install -e . -r requirements/ci/requirements.txt --excludes /tmp/venvs/fts_dev/torch-excludes.txt
 ```
 
-Note the socket path differs from the pipeline's (`/var/run/user/998/docker.sock`, the agent's uid). That
-divergence is intentional for local use — do not "fix" it.
+Note the socket path differs from the pipeline's (`/var/run/user/$AGENT_UID/docker.sock`, the agent's own
+uid — e.g. `998`). Using your own uid locally is intentional — do not "fix" it to match the pipeline.
 
 Always tear down:
 
