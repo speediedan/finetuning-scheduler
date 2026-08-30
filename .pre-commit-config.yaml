@@ -65,6 +65,11 @@ repos:
         args: [--line-length=120]
         additional_dependencies: [black==22.12]
 
+  # `.claude/skills/gpu-lease/SKILL.md` is single-sourced from distributed-insight and its stored form is
+  # normalized against THIS pin and plugin set, so this hook is a no-op on it. Changing `rev` or the
+  # plugins (including via `pre-commit autoupdate`) may reformat the file, which silently re-creates drift
+  # against the master. After any such bump: re-normalize the master, re-push it, then confirm this hook
+  # leaves the file unmodified. See project_admin/shared_admin_scripts/sync-shared-skills.sh in that repo.
   - repo: https://github.com/executablebooks/mdformat
     rev: 0.7.17
     hooks:

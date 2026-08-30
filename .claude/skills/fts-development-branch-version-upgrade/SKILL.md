@@ -303,12 +303,12 @@ open, surface that to the user rather than assuming.
     - Update example torch version in comments
     - Update CUDA target examples
 
-01. **`CLAUDE.md`**:
+01. **`AGENTS.md`**:
 
     - Update minimum PyTorch version references
     - Update example installation commands with new versions
 
-    (`.github/copilot-instructions.md` is superseded by `CLAUDE.md`. Update it too only while it still exists.)
+    (`.github/copilot-instructions.md` is superseded by `AGENTS.md`. Update it too only while it still exists.)
 
 01. **`README.md`**:
 
