@@ -153,8 +153,56 @@ curl -sS -u ":${AZ_PAT}" "${ORG}/${PROJECT}/_apis/build/builds/<id>?api-version=
   "the build succeeded" is not evidence that each phase did. Verify at task level when a specific phase
   is the one you care about.
 
+## A build that fails at `Checkout` in seconds, and then every build after it
+
+Distinct from the three `notStarted` causes above, because this build DID dispatch. It fails in the
+checkout task, before any step of the pipeline runs, on a path the previous run left behind:
+
+```
+System.UnauthorizedAccessException: Access to the path '.../s/.pytest_cache/v/cache/nodeids' is denied
+warning: Unable to run "git clean -ffdx" and "git reset --hard HEAD" successfully,
+         delete source folder instead
+```
+
+**Mechanism.** A containerised job under rootless docker with userns remapping writes into the mapped
+workspace as the container's host **subuid**, not as the agent's uid. The agent begins the next build
+with `git clean -ffdx` and `git reset --hard` **as itself**, cannot remove those files, and falls back
+to deleting the source folder, which fails the same way.
+
+**It is self-perpetuating, and that is the part that surprises people.** Every later build on that
+definition fails identically, and none can fix it, because the cleanup would have to run inside a build
+that cannot start. A GREEN run is what creates the condition, so the failure appears immediately after
+a success and looks unrelated to it.
+
+Two things are needed and they are not interchangeable:
+
+1. **Clear the existing leftover once, with host privileges.** Only someone who can act as root on the
+   agent host can remove files owned by a container subuid. Nothing inside a pipeline can do it, and no
+   amount of re-running helps.
+
+1. **Stop it recurring**, with a step that runs INSIDE the container, where that uid still owns what it
+   wrote, under `condition: always()` so a failed run cleans up too:
+
+   ```yaml
+   - bash: |
+       sudo chmod -R 775 <workspace sources dir> || true
+       sudo rm -rf <workspace sources dir>/.pytest_cache || true
+     displayName: "Normalize workspace ownership"
+     condition: always()
+   ```
+
+   The sources dir is the agent's per-definition work path and differs by definition, so take it from
+   the job rather than hardcoding one repo's. `.pytest_cache` is the usual culprit; the `chmod` covers
+   whatever else a run leaves behind.
+
+**Any containerised job on a self-hosted agent wants step 2 from the day it is written.** Adding it
+after the first occurrence still needs a privileged human to clear the backlog first.
+
 ## What not to do
 
+- **Do not omit the workspace-ownership cleanup from a new containerised job.** It costs four lines up
+  front. Without it the first green run arms a failure that blocks every later build on that definition
+  and can only be cleared by someone with root on the agent host.
 - **Do not restart the agent to clear a stuck build** until the timeline has ruled out approval and
   authorization. Restarting strands the run without fixing a permission. Once the timeline shows no
   checkpoint records, a genuinely wedged agent IS the remaining cause and restarting it is correct;

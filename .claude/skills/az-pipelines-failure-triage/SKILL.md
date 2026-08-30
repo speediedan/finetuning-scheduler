@@ -68,6 +68,11 @@ numbers are local to each half; the pointers above and below are what connect th
 - Container image `speediedan/finetuning-scheduler:py3.13-pt2.14.0-pl2.6-azpl-init`, in-container venv
   `/tmp/venvs/fts_dev`, `--gpus all --shm-size=512m`.
 - Only `CODECOV_TOKEN` is mapped. There are no HuggingFace or gated-model secrets in this pipeline.
+- The workspace-ownership cleanup described in `az-pipelines-ops` is **already present here**: the
+  `Cleaning up agent workspace` step (`condition: always()`) chmods `/__w/1/s` and clears
+  `.pytest_cache` from inside the container. Do not remove or "simplify" it. Without it a green run
+  arms a `Checkout` failure that blocks every later build on this definition and needs root on the
+  agent host to clear.
 
 ### The step split
 
