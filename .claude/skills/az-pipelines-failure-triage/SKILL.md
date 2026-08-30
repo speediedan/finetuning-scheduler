@@ -15,8 +15,9 @@ FTS-specific, which is why it lives here rather than in a shared skill.
 | GPU serialization, a lease wait, a lease that looks stuck                                    | `gpu-lease` (shared, vendored)        |
 | A build that **started and failed**                                                          | this skill                            |
 
-**The steps below are numbered from 4 deliberately.** Steps 1 to 3, driving the pipeline, live in
-`az-pipelines-ops`. The pair is one sequence and the numbering is what keeps that visible.
+**This half is self-contained and its steps start at 1.** Driving the pipeline, from authorization
+through gates to dispatch, is its own procedure in `az-pipelines-ops`, also numbered from 1. Step
+numbers are local to each half; the pointers above and below are what connect them.
 
 > ⛔ **Do not diagnose a `notStarted` build here.** Start at `az-pipelines-ops` Step 1, which reads the
 > build timeline first. The approvals API cannot see a build blocked on resource authorization, so an
@@ -96,7 +97,7 @@ and fails open when the directory is absent. The mechanics are commented inline 
 **For everything else about the lease, including the hard rule that a CI-held lease is never
 force-reset, use the `gpu-lease` skill.**
 
-## Step 4: Triage the Failure Class
+## Step 1: Triage the Failure Class
 
 **Queue / approval** — the build never left `notStarted`. This is not a triage case; go to
 `az-pipelines-ops` Step 1 and read the timeline. Do not conclude anything from the approvals endpoint
@@ -121,10 +122,10 @@ sudo "$AGENT_HOME"/restart-stack.sh
 Check for orphaned processes from an interrupted standalone run before re-queuing —
 `scripts/manage_standalone_processes.sh` is the tool for reaping them.
 
-**Test failure** — reproduce locally (Step 5). Note which step failed: a `Testing: standard` failure is
+**Test failure** — reproduce locally (Step 2). Note which step failed: a `Testing: standard` failure is
 usually reproducible on any machine; a `standalone multi-gpu` or `Multi-GPU Examples` failure usually is not.
 
-## Step 5: Reproduce Locally
+## Step 2: Reproduce Locally
 
 Reproduce the pipeline's exact environment by running the same image. Full walkthrough in the private
 `fts_azure_pipeline_local.md`; the essentials:
@@ -173,7 +174,7 @@ bash ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
 sed -i 's/set -e/set +e/g' ./tests/special_tests.sh   # revert before committing
 ```
 
-## Step 6: Narrowing Multi-GPU Failures
+## Step 3: Narrowing Multi-GPU Failures
 
 FTS's heavy GPU surface is FSDP and model-parallel, and both assert against recorded expected states in
 `tests/fsdp_expected_paths.py` and `tests/model_parallel_expected_paths.py`. When one of those fails:
