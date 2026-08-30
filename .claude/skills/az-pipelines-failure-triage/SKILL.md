@@ -1,31 +1,51 @@
 ---
-name: az-pipelines-debug
-description: Debug and operate the finetuning-scheduler self-hosted Azure GPU pipeline — PAT-backed approval release, queue triage, worker dispatch checks, per-step failure diagnosis, and local reproduction of a failing GPU step. Use when an FTS Azure build is stuck, unapproved, or failing in a way that plain pytest does not reproduce.
+name: az-pipelines-failure-triage
+description: Diagnose a finetuning-scheduler Azure GPU build that started and went wrong - attribute the failure to runner infra, a genuine test failure, or expected-path drift, reproduce a GPU-only failure locally, and narrow FSDP/model-parallel assertions. Use when an FTS build is red. For a build that has not started (gated, unauthorized, or never dispatched), use `az-pipelines-ops` instead.
 license: Apache-2.0
 ---
 
-# Debugging the FTS Azure GPU Pipeline
+# Triaging FTS Azure GPU Pipeline Failures
 
-Adapted from the interpretune skill of the same name. Both projects share one self-hosted agent and one
-Azure DevOps organization, so the infrastructure half transfers verbatim; the pipeline shape does not.
+This skill covers **what goes wrong in this repo once a job is running**. The failure taxonomy is
+FTS-specific, which is why it lives here rather than in a shared skill.
+
+| You need                                                                                     | Use                                   |
+| -------------------------------------------------------------------------------------------- | ------------------------------------- |
+| A build that has **not started**: gated, waiting on resource authorization, never dispatched | `az-pipelines-ops` (shared, vendored) |
+| GPU serialization, a lease wait, a lease that looks stuck                                    | `gpu-lease` (shared, vendored)        |
+| A build that **started and failed**                                                          | this skill                            |
+
+**The steps below are numbered from 4 deliberately.** Steps 1 to 3, driving the pipeline, live in
+`az-pipelines-ops`. The pair is one sequence and the numbering is what keeps that visible.
+
+> ⛔ **Do not diagnose a `notStarted` build here.** Start at `az-pipelines-ops` Step 1, which reads the
+> build timeline first. The approvals API cannot see a build blocked on resource authorization, so an
+> empty approvals response reads as an all-clear and routes you to inspect the agent. That is a
+> documented path from a permissions problem to restarting a healthy runner this project shares with
+> `interpretune`.
 
 ## When to Use This Skill
 
-- An FTS build sits in `notStarted` and you need to find out whether it is queue-blocked or approval-gated
-- The agent is online but no `Worker_*.log` appears
 - A step dies with exit `137` or a shutdown signal (OOM / agent restart)
-- You want to approve, reject, or monitor a run from the shell instead of the web UI
+- A step fails on the agent that passes under plain local `pytest`
+- An FSDP or model-parallel expected-path assertion fails and you need to tell a real behavioral change
+  from benign upstream drift
 - A GPU-only failure needs to be reproduced locally
 
 ## Constraints and Ground Truth
 
 - Pipeline definition: `.azure-pipelines/gpu-tests.yml`, org `https://dev.azure.com/speediedan`,
-  project `finetuning-scheduler`, definition id **1**, name **"Multi-GPU & Example Tests"**.
+  project `finetuning-scheduler`, definition id **1**, name **"Multi-GPU & Example Tests"**. These are
+  the values to substitute for `${ORG}` and `${PROJECT}` when following `az-pipelines-ops`.
 - **The pool is shared with interpretune.** Org pool id 1 (`Default`, self-hosted) serves both projects, so
-  a queued interpretune build will block FTS. Always check the pool, not just the FTS project.
-- PR-triggered runs are approval-gated and will sit pending until released (see Step 2). `drafts: false`,
-  so draft PRs do not trigger at all.
+  a queued interpretune build will block FTS. Always check the pool, not just the FTS project. Note that
+  the pool id is not the queue id; see `az-pipelines-ops` Step 1 for why that distinction bites.
+- PR-triggered runs are approval-gated and will sit pending until released. `drafts: false`, so draft PRs
+  do not trigger at all.
 - Auth is `AZURE_DEVOPS_EXT_PAT` in the environment.
+- Approvals can be driven with the shared
+  `project_admin/shared_admin_scripts/az_pipeline_agent_scripts/manage-approvals.sh` in the private admin
+  repo (`-o speediedan -p finetuning-scheduler`), or with the REST calls in `az-pipelines-ops` Step 2.
 - Runner: a self-hosted agent on a GPU host, running rootless Docker on cgroups v2. The systemd unit sets
   `OOMScoreAdjust=-900`; it does **not** set `MemoryMax`/`MemoryHigh` (an earlier version of this file
   claimed it did — verified absent 2026-07-29, no drop-in exists).
@@ -33,7 +53,7 @@ Azure DevOps organization, so the infrastructure half transfers verbatim; the pi
 > **Host-specific values live in `CLAUDE.local.md`, not here.** This skill is deliberately
 > host-independent. Agent hostname, RAM/swap, GPU models, the agent install directory and the agent's uid
 > all vary by machine, so the commands below use `$AGENT_HOME` and illustrative example values. Substitute
-> from `CLAUDE.local.md` (or `.github/copilot-instructions.md`'s successor) for the machine you are on:
+> from `CLAUDE.local.md` for the machine you are on:
 >
 > ```bash
 > AGENT_HOME=${AGENT_HOME:-/opt/az_pipeline_agent}   # example default
@@ -66,130 +86,33 @@ step. The steps, in order:
 `timeoutInMinutes: 100`. Marks are `standalone` and `exp_patch` only — there is no `profile_ci` mark, and
 no `--reruns` flags, so a flaky test fails the build on first occurrence.
 
-## GPU lease: how this pipeline interacts with local GPU work
+## GPU lease
 
-The self-hosted agent runs **one Azure job at a time**, so two pipeline runs never collide with each
-other. The real collision risk is a pipeline job landing on top of a **local** multi-GPU run (this host is
-shared with interpretune, and both are worked on interactively).
+This pipeline participates in the host GPU lease: it bind-mounts the lease directory into the job
+container, acquires in the first step for the life of the job, releases in `Cleaning up agent workspace`,
+and fails open when the directory is absent. The mechanics are commented inline in
+`.azure-pipelines/gpu-tests.yml`, and AGENTS.md carries the repo-level summary and the CI lease tag shape.
 
-Since 2.14 the job participates in the host GPU lease:
-
-- `container.volumes` bind-mounts `/tmp/di_leases:/gpu_leases`. `flock` operates on the inode, so the
-  lock file interlocks between the container and host processes. **Nothing about the agent installation
-  changes** — no hooks, no systemd edits, no wrapper around the agent.
-- The first step (`Acquire host GPU lease`) parks a detached holder for the life of the job, waiting up to
-  **2400s**. A step-scoped `flock` would not work: each step is a separate shell, so the lease would be
-  dropped as soon as the acquiring step ended.
-- The `Cleaning up agent workspace` step (`condition: always()`) releases it. This is belt-and-braces
-  only: if the job is cancelled or the container is torn down, every process inside dies and the kernel
-  frees the lease automatically. **There is no stale-lock path.**
-- It **fails open**. If `/gpu_leases` is not mounted, the step logs and continues unserialized — a missing
-  convenience must never break the build.
-
-Debugging:
-
-```bash
-gpu_lease.sh --status     # a CI holder shows project=azure-<buildId> and a [container] tag
-gpu_lease.sh --doctor     # flags stale metadata, dead holders, and GPU users holding no lease
-gpu_lease.sh --reset      # clears stale metadata for FREE leases only
-gpu_lease.sh --reset --force   # kills the holder of a genuinely held lease
-```
-
-### ⛔ Never reset a lease held by CI — either project's CI
-
-`gpu_lease.sh --reset --force` **kills the holder process**. That is the right escape hatch for a wedged
-*local* run and the wrong tool for a pipeline job, for two reasons:
-
-1. **The holder pid is meaningless on the host.** A CI holder lives in the job container's PID namespace,
-   so `--force` either fails to kill it or, worse, kills an unrelated host process that happens to share
-   that pid number. `--status` marks these holders with a `[container]` tag and `project=azure-<buildId>`
-   (interpretune: `azure-it-<buildId>`) — treat either as read-only.
-1. **The lease is already self-healing for CI.** Container teardown kills every process inside the job, and
-   the kernel releases the lease. There is no stale-lock path to clean up.
-
-**The host and pool are shared between finetuning-scheduler and interpretune**, so a lease you did not
-expect may legitimately belong to the *other* project's pipeline job or local suite. Check `project=`
-before assuming it is stale.
-
-Correct responses:
-
-| Situation                                       | Do this                                                           |
-| ----------------------------------------------- | ----------------------------------------------------------------- |
-| Lease held by a CI job you want to stop         | **Cancel the pipeline run.** Teardown frees the lease.            |
-| Lease held by the other project                 | Leave it. Wait, or coordinate — do not reset.                     |
-| CI job timed out waiting for the lease          | A genuine conflict. Let the local run finish and re-queue.        |
-| Lease looks stale (`--status` flags an anomaly) | `gpu_lease.sh --doctor`, then plain `--reset` (free leases only). |
-| Genuinely wedged **local** run                  | `--reset --force` is appropriate here.                            |
-
-**Never kill or restart the agent to free a lease.** `restart-stack.sh` is for a wedged agent, not for lease
-recovery, and restarting it mid-job strands the run without releasing anything the kernel would not have
-released anyway.
-
-If a job times out waiting, the log names the current holder. That is a genuine local/CI conflict: let the
-local run finish and re-queue, rather than disabling the lease.
-
-## Step 1: Verify Auth and Build State
-
-```bash
-printenv AZURE_DEVOPS_EXT_PAT | wc -c
-
-az pipelines build show --id <build_id> \
-  --organization https://dev.azure.com/speediedan --project finetuning-scheduler -o table
-
-curl -sS -u ":${AZURE_DEVOPS_EXT_PAT}" \
-  "https://dev.azure.com/speediedan/finetuning-scheduler/_apis/pipelines/approvals?state=pending&api-version=7.1-preview.1"
-```
-
-An empty `{"count":0,"value":[]}` means nothing is awaiting approval — the build is queue-blocked or
-already dispatched, so go to Step 3.
-
-## Step 2: Release or Reject a Gated Run
-
-Prefer the shared script (it is already `-o`/`-p` parameterized, so pass the FTS project):
-
-```bash
-cd ~/repos/distributed-insight/project_admin/shared_admin_scripts/az_pipeline_agent_scripts
-./manage-approvals.sh -o speediedan -p finetuning-scheduler -m list
-./manage-approvals.sh -o speediedan -p finetuning-scheduler -m approve -i "<approval_id>" -c "Approved via CLI for self-hosted GPU validation."
-./manage-approvals.sh -o speediedan -p finetuning-scheduler -m reject -i "<approval_id>"   # terminates the gated build
-./manage-approvals.sh -o speediedan -p finetuning-scheduler -m reject-all                  # dispose all stale pending gates
-```
-
-REST fallback:
-
-```bash
-curl -sS -X PATCH -u ":${AZURE_DEVOPS_EXT_PAT}" \
-  -H "Content-Type: application/json" \
-  -d '[{"approvalId":"<approval_id>","status":"approved","comment":"Approved via CLI for self-hosted GPU validation."}]' \
-  "https://dev.azure.com/speediedan/finetuning-scheduler/_apis/pipelines/approvals?api-version=7.1-preview.1"
-```
-
-## Step 3: Monitor Dispatch and Runner Activity
-
-```bash
-watch -n 30 'az pipelines build show --id <build_id> \
-  --organization https://dev.azure.com/speediedan --project finetuning-scheduler \
-  --query "{status:status,result:result,startTime:startTime,finishTime:finishTime}" -o json'
-
-tail -f "$AGENT_HOME"/_diag/Agent_*.log
-ls -1t "$AGENT_HOME"/_diag/Worker_*.log | head
-
-# pool is shared — this lists agents serving BOTH projects
-az pipelines agent list --organization https://dev.azure.com/speediedan --pool-id 1 -o table
-```
-
-Approved but no `Worker_*.log` within a minute or two means dispatch failed, not the tests. Check whether
-an interpretune build holds the agent before touching anything.
+**For everything else about the lease, including the hard rule that a CI-held lease is never
+force-reset, use the `gpu-lease` skill.**
 
 ## Step 4: Triage the Failure Class
 
-**Queue / approval** — build never leaves `notStarted`, no worker log. Confirm the pool is idle and the
-approval was actually released. Re-check Step 1's approvals endpoint.
+**Queue / approval** — the build never left `notStarted`. This is not a triage case; go to
+`az-pipelines-ops` Step 1 and read the timeline. Do not conclude anything from the approvals endpoint
+alone.
 
 **Infra / runner** — exit `137`, "shutdown signal", agent log shows a restart, or Docker socket errors.
 Memory pressure is the usual cause, especially on a host with little swap relative to RAM (the current
 host is an example: roughly 62 GiB RAM against 2 GiB swap). Multi-GPU standalone tests each spawn a fresh
-process, so peak usage scales with parallelism. Recovery:
+process, so peak usage scales with parallelism. Read the agent's own logs before concluding:
+
+```bash
+tail -f "$AGENT_HOME"/_diag/Agent_*.log
+ls -1t "$AGENT_HOME"/_diag/Worker_*.log | head
+```
+
+Recovery, **only once `az-pipelines-ops` Step 1 has ruled out approval and authorization**:
 
 ```bash
 sudo "$AGENT_HOME"/restart-stack.sh
@@ -269,13 +192,13 @@ FTS's heavy GPU surface is FSDP and model-parallel, and both assert against reco
 
 - Don't re-queue a build to "see if it passes" before checking the agent log — if the agent is wedged,
   every re-queue burns a 100-minute timeout slot on a pool interpretune also needs.
-- Don't approve stale pending gates in bulk without listing them first; `reject-all` disposes of real
-  pending runs too.
+- Don't restart the agent on the strength of an empty approvals response. See the warning at the top.
 - Don't edit expected-path modules to make a test green without establishing which side actually changed.
 - Don't commit the `set +e` patch to `special_tests.sh`.
 
 ## Expected Outcome
 
-- The failure is attributed to one of: queue/approval, runner infra, or a genuine test failure.
+- The failure is attributed to one of: runner infra, or a genuine test failure. A build that never
+  started is not attributed here at all; it belongs to `az-pipelines-ops`.
 - Genuine test failures are reproduced locally, in-container if image-specific.
 - Infra failures end with a stack restart and a re-queued build, not a code change.
