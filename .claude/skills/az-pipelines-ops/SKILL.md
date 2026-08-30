@@ -174,6 +174,13 @@ definition fails identically, and none can fix it, because the cleanup would hav
 that cannot start. A GREEN run is what creates the condition, so the failure appears immediately after
 a success and looks unrelated to it.
 
+**After a manual clear, the FIRST build you run must carry the prevention step.** This is the trap,
+and the natural instinct is the wrong order: revalidating the default branch first feels like the safe
+confirmation, and if that branch does not yet contain the cleanup step, a green run re-arms the
+failure and recreates by hand exactly what was just cleared by hand. Approve the branch carrying the
+fix first, precisely because it is the one that cleans up after itself. Only once the fix is on the
+default branch is revalidating it safe.
+
 Two things are needed and they are not interchangeable:
 
 1. **Clear the existing leftover once, with host privileges.** Only someone who can act as root on the
