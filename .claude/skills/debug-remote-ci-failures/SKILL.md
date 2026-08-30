@@ -6,8 +6,9 @@ license: Apache-2.0
 
 # Debugging FTS Remote CI Failures
 
-Covers the GitHub Actions legs only. For the self-hosted Azure GPU pipeline, use the
-`az-pipelines-debug` skill.
+Covers the GitHub Actions legs only. For the self-hosted Azure GPU pipeline, use
+`az-pipelines-failure-triage` for a build that started and failed, or `az-pipelines-ops` for one that
+never started.
 
 Adapted from the interpretune skill of the same name; the interpretune-specific failure taxonomy
 (analysis fixtures, nnsight, HuggingFace dataset fingerprinting) has no FTS analog and was dropped rather
