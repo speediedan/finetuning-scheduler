@@ -13,6 +13,16 @@ before diagnosing a red build, because the failure taxonomy is repo-specific and
 GPU serialization is a separate concern with its own skill. If this host uses a lease, see `gpu-lease`
 rather than anything here.
 
+**Most of what goes wrong here is order, not ignorance.** Each step below is a correct action that
+produces a wrong answer when taken before the one that scopes it: querying approvals before reading
+the timeline, or approving a gate before identifying which build it belongs to. Both were real
+incidents. Treat the sequence as the content.
+
+**Step references:** a bare "Step N" means a step in THIS skill. A reference to a step in a
+repository's own companion skill is always qualified by that skill's name. Where a skill is split into
+a shared half and a repo-local half, both halves number from 1, so an unqualified number is ambiguous
+unless this rule is followed.
+
 ## When to use this skill
 
 - A build stays `notStarted` after a pull request becomes ready for review.
@@ -61,12 +71,33 @@ exactly what it wants.
 
 ## Step 2: Release or reject a gated run
 
-Once the timeline shows `Checkpoint.Approval` pending, the approvals API becomes the right tool:
+Once the timeline shows `Checkpoint.Approval` pending, the approvals API becomes the right tool. But
+**identify each gate before releasing it.**
+
+**A pending-approvals query is not scoped to your work.** Approvals are per PROJECT, and several
+pipelines commonly share one project, so the result set includes gates belonging to other people and
+other repositories. The obvious loop, `for id in $(...); do approve $id; done`, releases all of them.
+That has happened, twice, and neither instance caused harm by design.
+
+It matters beyond tidiness because an approval is often held deliberately. On a shared host the person
+holding it may be waiting for a GPU lease to free or for the machine to go quiet, since approving
+dispatches a heavy job immediately. That precondition protects the HOST, not just their run, so
+releasing their gate bypasses a safety check that was never yours to waive.
+
+The payload carries the build id under `$expand=steps`, so identification is cheap:
 
 ```bash
 curl -sS -u ":${AZ_PAT}" \
-  "${ORG}/${PROJECT}/_apis/pipelines/approvals?state=pending&api-version=7.1-preview.1"
+  "${ORG}/${PROJECT}/_apis/pipelines/approvals?state=pending&\$expand=steps&api-version=7.1-preview.1"
+# value[].pipeline.owner._links.web.href ends in buildId=<n>
 
+az pipelines build show --id <n> --organization "${ORG}" --project "${PROJECT}" \
+  --query "{def:definition.name,branch:sourceBranch}"
+```
+
+Then release only the gates you identified as yours:
+
+```bash
 curl -sS -X PATCH -u ":${AZ_PAT}" -H "Content-Type: application/json" \
   -d '[{"approvalId":"<id>","status":"approved","comment":"<why>"}]' \
   "${ORG}/${PROJECT}/_apis/pipelines/approvals?api-version=7.1-preview.1"

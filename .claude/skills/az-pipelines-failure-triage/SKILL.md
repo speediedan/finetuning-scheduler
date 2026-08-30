@@ -47,6 +47,8 @@ numbers are local to each half; the pointers above and below are what connect th
 - Approvals can be driven with the shared
   `project_admin/shared_admin_scripts/az_pipeline_agent_scripts/manage-approvals.sh` in the private admin
   repo (`-o speediedan -p finetuning-scheduler`), or with the REST calls in `az-pipelines-ops` Step 2.
+  **Identify each gate before releasing it**, per that step. The script's `-m reject-all` and any
+  approve loop act on the whole project's pending set, which is not scoped to your work.
 - Runner: a self-hosted agent on a GPU host, running rootless Docker on cgroups v2. The systemd unit sets
   `OOMScoreAdjust=-900`; it does **not** set `MemoryMax`/`MemoryHigh` (an earlier version of this file
   claimed it did — verified absent 2026-07-29, no drop-in exists).
@@ -194,6 +196,11 @@ FTS's heavy GPU surface is FSDP and model-parallel, and both assert against reco
 - Don't re-queue a build to "see if it passes" before checking the agent log — if the agent is wedged,
   every re-queue burns a 100-minute timeout slot on a pool interpretune also needs.
 - Don't restart the agent on the strength of an empty approvals response. See the warning at the top.
+- Don't approve or dispose of pending gates in bulk. `manage-approvals.sh -m reject-all`, and the
+  obvious approve-everything loop, act on every gate in the project, not just yours. On this host an
+  approval is often held deliberately while someone waits for the GPU lease to free, because approving
+  dispatches a heavy job immediately, so releasing another project's gate waives a precondition
+  protecting the host rather than just that run. List and identify first: `az-pipelines-ops` Step 2.
 - Don't edit expected-path modules to make a test green without establishing which side actually changed.
 - Don't commit the `set +e` patch to `special_tests.sh`.
 
