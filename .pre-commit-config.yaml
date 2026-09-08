@@ -97,3 +97,19 @@ repos:
         args:
           - "--fix"
           #- "--force-exclude"
+
+  # `always_run: true` is load-bearing, not boilerplate. The repo-level `exclude` above applies to EVERY
+  # hook, including this one, so without it pre-commit hands this hook an empty file list and reports
+  # `(no files to check) Skipped` - a green result indistinguishable from a real pass, on the one check
+  # whose entire job is to notice edits to the files that exclusion hides. Verify both directions after
+  # touching either this block or `exclude`: a one-byte edit to a vendored skill must report `Failed` and
+  # name the file, and a clean tree must report `Passed`, never `Skipped`.
+  # `pass_filenames: false` because the script reads `.shared-skills.sha256` itself rather than a file list.
+  - repo: local
+    hooks:
+      - id: check-vendored-skills
+        name: Vendored skills unmodified
+        entry: python scripts/check_vendored_skills.py
+        language: python
+        always_run: true
+        pass_filenames: false
