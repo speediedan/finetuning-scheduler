@@ -133,6 +133,39 @@ It evaluates the pull request's diff as a whole. Three consequences that all sur
 The practical rule on a gated pipeline is to batch pushes and approve last, rather than approving as
 soon as a gate appears.
 
+### When the queued build should not run at all, CANCEL it
+
+The three points above explain why a build you did not want gets queued. They do not say what to do
+about it, and leaving it is not neutral. A queued build on a self-hosted pool holds a place in a queue
+that other work is waiting in, and on a single-agent pool it will eventually occupy the agent and, if
+the job takes one, the host GPU lease. **Declining to approve is not the same as cancelling**: an
+unapproved build sits in the queue indefinitely, and its gate is then a trap for anyone running a
+batch approval.
+
+So when a pull request or push queues a build whose diff cannot affect the result -- a comment-only
+change, a documentation edit, a rename with no behavioural content -- cancel the build rather than
+approving it or ignoring it:
+
+```bash
+curl -sS -X PATCH -u ":${AZ_PAT}" -H "Content-Type: application/json" \
+  -d '{"status":"cancelling"}' \
+  "${ORG}/${PROJECT}/_apis/build/builds/<id>?api-version=7.1"
+```
+
+Two things worth knowing:
+
+- **A merge queues its own build.** Cancelling the PR's build and then merging leaves a second build,
+  on the target branch, for the same content. Check again after merging.
+- **Cancel, then dispose of any gate.** If the build had already reached a pending approval, cancelling
+  the build may leave the approval pending; reject it with a reason so a later batch approve cannot
+  release a run nobody wants.
+
+**This is a judgement about CONTENT, and path filters cannot make it.** Filters match paths, so a
+one-word comment fix inside a pipeline definition is indistinguishable to them from a rewrite of the
+same file. Adding excludes to compensate is the wrong lever: it would suppress builds for real changes
+to those paths too. The filter is doing its job; the human or agent merging is the one who knows the
+change is inert.
+
 ## Step 3: Confirm the agent actually picked it up
 
 Only reach this step when the timeline showed no checkpoint records.

@@ -13,6 +13,15 @@
 default_language_version:
   python: python3
 
+# .claude/skills: vendored copies of skills whose canonical form lives in speediedan/skills. Linting
+# them is not merely unnecessary, it is actively wrong three ways: the hooks REWRITE them (docformatter
+# and ruff reflow the bundled scripts, and blacken-docs rewrites python blocks inside the markdown),
+# which desyncs `.shared-skills.sha256` whose entire purpose is to assert the copies match the master;
+# the rewrite is discarded at the next sync, so the churn buys nothing; and this repo's docstring rules
+# would impose its authoring standards on a repo-neutral master shared with other consumers.
+# Corrections belong upstream, never to the vendored copy.
+exclude: '\.claude/skills/.*'
+
 ci:
   autofix_prs: true
   autoupdate_commit_msg: '[pre-commit.ci] pre-commit suggestions'
