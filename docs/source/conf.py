@@ -117,6 +117,23 @@ nbsphinx_requirejs_path = ""
 # https://github.com/executablebooks/MyST-Parser/issues/394
 myst_update_mathjax = False
 
+# MyST enables NO extensions by default, so `$x^2$` in a .md page renders as the literal characters
+# until dollarmath is on. The mathjax handling above already assumes math is wanted; this is what
+# actually delivers it.
+myst_enable_extensions = ["dollarmath"]
+
+# Harden against a prose `$` opening an equation that swallows the rest of the line. These stop a
+# SPACED pair (`$HOME and $PATH`); they do not stop an ADJACENT one (`$TMPDIR/$SLURM_JOB_ID`), so they
+# reduce the blast radius rather than closing it.
+#
+# The pages this governs are NOT the ones under docs/: every .md there is build-generated and
+# gitignored. MyST only ever sees the copies made above from `.github/*.md` and `CHANGELOG.md`, so
+# those are the files to re-scan before adding math-adjacent prose; the .rst pages are not MyST-parsed
+# at all. Both sources scanned clean before enablement:
+#   python .claude/skills/cross-platform-latex/scripts/check_math.py --collision-scan .github --strict
+myst_dmath_allow_space = False
+myst_dmath_allow_digits = False
+
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #

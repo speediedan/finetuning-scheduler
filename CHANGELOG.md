@@ -10,11 +10,15 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Added `docs-linkcheck.yml`, a weekly scheduled Sphinx `linkcheck`. No workflow ran `linkcheck` previously, which is how 18 broken links accumulated unnoticed. A docs *build* failure fails the job (matching Read the Docs' `fail_on_warning`), while broken external links instead open or update a single long-lived tracking issue and leave the job green, so third-party link rot cannot mask a genuine build regression.
 
+- Vendored the `cross-platform-latex` skill from [speediedan/skills](https://github.com/speediedan/skills) and added `scripts/check_vendored_skills.py`, a dependency-free pre-commit guard asserting the vendored copies still match `.claude/skills/.shared-skills.sha256`. A repo-level `exclude` stops the formatting hooks rewriting those files, since a rewrite would desync the very manifest that asserts they match the master.
+
 ### Fixed
 
 - Fixed `make linkcheck`, which reported 18 broken links. 17 were false positives: PyTorch's documentation site renders API anchors client-side, so `linkcheck` cannot resolve fragments like `#torch.nn.Module` even though the pages resolve. Added `linkcheck_anchors_ignore_for_url` for `pytorch.org` in `docs/source/conf.py`. The remaining failure was a genuine 404 — a historical changelog entry linked `jsonargparse` PR #205 as an issue, and that repository has issues disabled.
 
 ### Changed
+
+- Enabled MyST's `dollarmath` extension in the docs build. `myst_update_mathjax = False` was already set, so the build was configured as though it rendered math while `myst_enable_extensions` was absent entirely, meaning `$x^2$` in a Markdown page rendered as the literal characters. Also set `myst_dmath_allow_space = False` and `myst_dmath_allow_digits = False`, which stop a spaced dollar pair in prose being captured as an equation.
 
 - Raised the minimum supported PyTorch version to `2.11.0`, restoring the strict "latest 4 PyTorch minor releases" support window documented in `docs/source/versioning.rst`. This was announced as advance notice in `2.13.0`.
 

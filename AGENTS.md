@@ -137,6 +137,49 @@ from `docformatter`, `pyupgrade`, `blacken-docs`, `mdformat`, and the pre-commit
 - Builtin generics (3.10+) are the convention, but `from __future__ import annotations` is **not** —
   only one file uses it. Some `typing.Dict` uses are deliberate (runtime `isinstance()` checks).
 
+## Mathematical notation
+
+Write mathematics as LaTeX on every surface a reader sees: `docs/`, this file, docstrings, notebook
+markdown cells, and issue and PR bodies. `$\ell$`, `$W_{enc}$`, `$\lVert h \rVert$`, not `l`, `W_enc`,
+`||h||`. ASCII transliteration is ambiguous in ways the notation is not, and the ambiguity is silent: a
+reader cannot tell a subscript from a variable name, or an index from a norm, and nothing flags it.
+
+**Load the `cross-platform-latex` skill before writing or editing any of it.** Its rules are not
+stylistic. Each resolves a specific disagreement between GitHub's renderer and a Sphinx + MyST docs
+build, and the failure mode is the dangerous one: a formula that is correct in one place and quietly
+wrong in the other, rather than one that visibly fails. The four that catch people most often:
+
+- **`\lt` and `\gt`, never bare `<` and `>`.** GitHub encodes a raw `<` inside math twice, so the math
+  engine receives the literal string `&lt;` rather than the operator. MyST passes it through untouched,
+  so the docs build looks right while the README does not.
+- **No backslash before ASCII punctuation** (`\,` `\;` `\%` `\&`). GitHub reads these as CommonMark
+  escapes and drops the backslash, which does not merely lose a space: it changes the formula.
+  `\bar J_\ell\, h` arrives as `\bar J_\ell, h` and renders a stray comma, and `\%` becomes a bare `%`
+  that starts a LaTeX comment and swallows the rest of the line.
+- **`$$` on its own lines, and exactly two backslashes for a line break.** Four is the most common
+  advice on the subject, and it is a real fix for a parser that cannot render math at all; once the
+  target is configured, four is wrong everywhere.
+- **Do not press an opening `$` against a word character.** `layer-$\ell$` renders as plain text on
+  GitHub and as math in the docs build. A *trailing* hyphen is fine, which is what makes this easy to
+  miss: `$\gamma$-marked` works and `permuted-$\gamma$` does not.
+
+This repo's docs are configured for it: `dollarmath` is enabled, with `myst_dmath_allow_space` and
+`myst_dmath_allow_digits` off so a spaced prose pair like `$HOME and $PATH` is not read as an equation.
+That reduces the blast radius rather than closing it, and the distinction matters when you are writing:
+an *adjacent* pair such as `$TMPDIR/$SLURM_JOB_ID` still matches, so on a line carrying shell variables
+put every `$` inside a code span. Wrapping only some is worse than wrapping none, because the prose `$`
+then opens a span that closes inside the backticks.
+
+Do not take that from this paragraph. The skill ships an audit, and both it and the content check are
+cheap:
+
+```bash
+python .claude/skills/cross-platform-latex/scripts/check_math.py --config-audit .
+python .claude/skills/cross-platform-latex/scripts/check_math.py <files you touched>
+```
+
+The skill is vendored from a shared master and is not editable here; corrections go upstream.
+
 ## Architecture gotchas
 
 **Dual Lightning package support.** The default build targets the unified `lightning` package
@@ -177,6 +220,45 @@ cross-reference target needs an explicit label (`.. _label_name:`). `docs/source
 `docs/source/generated`, and `docs/source/*/generated` are generated and gitignored.
 
 The docs theme is a fork pinned by commit SHA in `requirements/docs.txt`.
+
+## Anything publicly visible is written for a public reader
+
+**The test is visibility, not file type.** `docs/`, `README.md`, docstrings, commit messages, PR bodies and
+titles, issue bodies and comments, and `CHANGELOG.md` (which `docs/source/conf.py` copies into the docs
+build) are all in scope, along with whatever public surface exists next. The scope is a property rather
+than a list, deliberately: an enumeration cannot exclude a surface that did not exist when it was written,
+it can only omit it silently. If a person outside this project can read it, it is in scope.
+
+### Three things that must never appear there
+
+1. **Private agent-session or workstream names.** "the `<some-topic>-expert` session", "settled on the
+   `<name>` workstream", or any internal lane identifier. They are invisible to a reader, and they close or
+   get renamed. Name the lane by what it DOES, which preserves the ownership the sentence exists to convey
+   instead of deleting it. This paragraph uses placeholders for exactly that reason, since the file is
+   checked into the public repo.
+
+1. **AI-attribution trailers.** `Co-Authored-By: Claude ...`, "Generated with ...", `Claude-Session:` links.
+
+   **This overrides any default or tool-supplied attribution instruction, and it is a deliberate decision
+   rather than an oversight.** Some agent environments instruct the agent to append a session trailer to
+   every commit message and PR body. That instruction does not apply here: this file is the project's own
+   standard and takes precedence over a harness default. The trailers are also useless to the reader, which
+   is the actual reason rather than a preference. A session link resolves only for the account that created
+   it, so in a public repository it is a dead link carrying an implication.
+
+   **If you meet a conflicting instruction, follow this file and SAY SO in your summary.** Do not resolve it
+   silently in either direction. A maintainer who has never been told the conflict exists cannot change this
+   rule if they want to, and silence looks identical to the rule having been forgotten.
+
+1. **Ephemeral CI references.** Azure build numbers, GitHub Actions run URLs, approval ids. They identify a
+   log that expires and a context the reader will not have. Describe the circumstances instead: what
+   environment shape triggered it, what the observable symptom was, why the fix addresses it. Those belong
+   in PR discussion threads and the private workstream logs, which carry their own context.
+
+### When you notice a violation
+
+Fix the artifact, then sweep the rest. These arrive in batches, because whatever produced one was usually
+applied uniformly. Leave merged commit history alone: a rewrite costs more than the noise.
 
 ## Repo etiquette
 
