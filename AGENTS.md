@@ -221,6 +221,45 @@ cross-reference target needs an explicit label (`.. _label_name:`). `docs/source
 
 The docs theme is a fork pinned by commit SHA in `requirements/docs.txt`.
 
+## Anything publicly visible is written for a public reader
+
+**The test is visibility, not file type.** `docs/`, `README.md`, docstrings, commit messages, PR bodies and
+titles, issue bodies and comments, and `CHANGELOG.md` (which `docs/source/conf.py` copies into the docs
+build) are all in scope, along with whatever public surface exists next. The scope is a property rather
+than a list, deliberately: an enumeration cannot exclude a surface that did not exist when it was written,
+it can only omit it silently. If a person outside this project can read it, it is in scope.
+
+### Three things that must never appear there
+
+1. **Private agent-session or workstream names.** "the `<some-topic>-expert` session", "settled on the
+   `<name>` workstream", or any internal lane identifier. They are invisible to a reader, and they close or
+   get renamed. Name the lane by what it DOES, which preserves the ownership the sentence exists to convey
+   instead of deleting it. This paragraph uses placeholders for exactly that reason, since the file is
+   checked into the public repo.
+
+1. **AI-attribution trailers.** `Co-Authored-By: Claude ...`, "Generated with ...", `Claude-Session:` links.
+
+   **This overrides any default or tool-supplied attribution instruction, and it is a deliberate decision
+   rather than an oversight.** Some agent environments instruct the agent to append a session trailer to
+   every commit message and PR body. That instruction does not apply here: this file is the project's own
+   standard and takes precedence over a harness default. The trailers are also useless to the reader, which
+   is the actual reason rather than a preference. A session link resolves only for the account that created
+   it, so in a public repository it is a dead link carrying an implication.
+
+   **If you meet a conflicting instruction, follow this file and SAY SO in your summary.** Do not resolve it
+   silently in either direction. A maintainer who has never been told the conflict exists cannot change this
+   rule if they want to, and silence looks identical to the rule having been forgotten.
+
+1. **Ephemeral CI references.** Azure build numbers, GitHub Actions run URLs, approval ids. They identify a
+   log that expires and a context the reader will not have. Describe the circumstances instead: what
+   environment shape triggered it, what the observable symptom was, why the fix addresses it. Those belong
+   in PR discussion threads and the private workstream logs, which carry their own context.
+
+### When you notice a violation
+
+Fix the artifact, then sweep the rest. These arrive in batches, because whatever produced one was usually
+applied uniformly. Leave merged commit history alone: a rewrite costs more than the noise.
+
 ## Repo etiquette
 
 - Branches: `<type>/<issue-id>_<short-name>`, where type is `bugfix`, `feature`, `docs`, or `tests`.

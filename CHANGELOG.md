@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Added `docs-linkcheck.yml`, a weekly scheduled Sphinx `linkcheck`. No workflow ran `linkcheck` previously, which is how 18 broken links accumulated unnoticed. A docs *build* failure fails the job (matching Read the Docs' `fail_on_warning`), while broken external links instead open or update a single long-lived tracking issue and leave the job green, so third-party link rot cannot mask a genuine build regression.
 
-- Vendored the `cross-platform-latex` skill from [speediedan/skills](https://github.com/speediedan/skills) and added `scripts/check_vendored_skills.py`, a dependency-free pre-commit guard asserting the vendored copies still match `.claude/skills/.shared-skills.sha256`. A repo-level `exclude` stops the formatting hooks rewriting those files, since a rewrite would desync the very manifest that asserts they match the master. The guard sets `always_run: true` because that same `exclude` would otherwise hand it an empty file list and report `(no files to check) Skipped`, a green result indistinguishable from a real pass, in exactly the case it exists to catch: a commit touching only a vendored skill.
+- Vendored the `cross-platform-latex` skill from [speediedan/skills](https://github.com/speediedan/skills) and added `scripts/check_vendored_skills.py`, a dependency-free pre-commit guard asserting the vendored copies still match `.claude/skills/.shared-skills.sha256`. A repo-level `exclude` stops the formatting hooks rewriting those files, since a rewrite would desync the very manifest that asserts they match the master.
 
 ### Fixed
 
