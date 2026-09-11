@@ -148,6 +148,21 @@ ci_gpu_lease_acquire() {
     { echo "pid=$(cat "$pidfile")"; echo "started=$(date -Iseconds)"; echo "epoch=$(date +%s)"
       echo "project=${label}"; echo "host=$(hostname)"; echo "container=yes"
       echo "cmd=azure pipeline job"; } > "${dir}/gpu.holder" 2>/dev/null || true
+    # Make the holder repairable by whoever takes the lease next. This container owns the file it just
+    # created so the chmod succeeds HERE, whereas a local uid could never repair it later: chmod(2)
+    # requires ownership, and unlink in the sticky lease dir does too, and a local user owns neither the
+    # file (written as a rootless-docker subuid) nor the directory (the pipeline agent's own user).
+    #
+    # Scope, so this is not read as fixing a recurring failure: the normal path never needs it, because
+    # ci_gpu_lease_release below removes the holder outright and runs under `condition: always()`.
+    # Handoffs have been measured clean in both directions across several consecutive builds. It matters
+    # only when a termination bypasses that cleanup (container teardown mid-step, agent kill, host crash),
+    # which would otherwise leave a 0644 container-owned holder that the next LOCAL acquire cannot
+    # overwrite, so `--status` would misattribute a local hold to a finished build. That is the attribution
+    # the "never force-reset a CI-held lease" rule depends on. It self-heals at the next CI build, which
+    # shares the subuid, so the exposure is one abnormal termination wide. At ACQUIRE rather than at
+    # release precisely because a torn-down job never reaches its release step.
+    chmod 0666 "${dir}/gpu.holder" 2>/dev/null || true
     echo "ci_gpu_lease: acquired the GPU lease (holder $(cat "$pidfile"))." >&2
 }
 
