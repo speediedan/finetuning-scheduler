@@ -1,8 +1,0 @@
-{
-  "$schema": "https://opencode.ai/config.json",
-  "instructions": [
-    "/home/speediedan/.config/opencode/instructions/finetuning-scheduler-instructions.md",
-    "/home/speediedan/.config/opencode/instructions/shared-orchestration-instructions.md",
-    "AGENTS.md"
-  ]
-}
