@@ -178,3 +178,8 @@ tags
 # Claude Code personal (untracked) instructions
 CLAUDE.local.md
 .claude/settings.local.json
+
+# Codex personal (untracked) instructions; agent-neutral analog of CLAUDE.local.md.
+# Composed snapshot (AGENTS.md plus local files), not a reference: AGENTS.override.md
+# shadows AGENTS.md, so a bare path would hide the repo guidance from Codex.
+AGENTS.override.md

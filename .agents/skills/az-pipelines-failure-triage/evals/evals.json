@@ -1,0 +1,26 @@
+{
+  "skill_name": "az-pipelines-failure-triage",
+  "evals": [
+    {
+      "id": 0,
+      "name": "gpu-only-test-failure",
+      "prompt": "the 'Testing: standalone multi-gpu' step failed on the azure run but when I run pytest locally everything passes. why would that be and how do I reproduce it",
+      "expected_output": "Explains that plain pytest does not collect standalone tests at all — they are selected by tests/special_tests.sh via RunIf-generated skipif marker kwargs, not pytest markers. Gives the correct reproduction command (special_tests.sh --mark_type=standalone --filter_pattern='test_f' or PL_RUN_STANDALONE_TESTS=1 pytest for a single test), and notes the 2-GPU requirement.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "exit-137-diagnosis",
+      "prompt": "azure gpu build just died partway through with exit code 137. is that an OOM? what should I check",
+      "expected_output": "Identifies 137 as SIGKILL / OOM-class and ties it to memory pressure on a host with little swap relative to RAM, noting that multi-GPU standalone tests each spawn a fresh process so peak usage scales with parallelism. Does NOT claim the systemd unit sets MemoryMax or MemoryHigh; it sets OOMScoreAdjust=-900 and no memory cap. Recommends checking the agent diag log, reaping orphaned processes via scripts/manage_standalone_processes.sh, and restart-stack.sh as recovery. Distinguishes infra failure from a genuine test failure.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "not-started-build-is-out-of-scope",
+      "prompt": "the multi-gpu azure build for my PR hasn't started, its been sitting there like 20 min now. can you figure out whats going on and tell me what to do",
+      "expected_output": "Recognizes this as an az-pipelines-ops case rather than a failure-triage case and routes there. Reads the build TIMELINE first, distinguishing Checkpoint.Approval (a human gate) from Checkpoint.Authorization (a missing resource grant) from no checkpoint records (a genuine queue or dispatch problem). Does NOT treat an empty pending-approvals response as evidence the build is unblocked, and does not proceed to agent inspection or restart-stack.sh on that basis. May note that the shared pool means an interpretune build can legitimately hold the agent.",
+      "files": []
+    }
+  ]
+}
