@@ -42,8 +42,16 @@ $GPU_LEASE_CMD -- python -m pytest tests/... -v     # block until free, then run
 $GPU_LEASE_CMD --cpu-heavy -- <cmd>                 # also take the CPU lease (profiling/benchmarks)
 $GPU_LEASE_CMD --timeout 3600 -- <cmd>              # bound the wait; exit 75 (EX_TEMPFAIL) on expiry
 $GPU_LEASE_CMD --status                             # who holds each lease, since when, running what
+$GPU_LEASE_CMD --status --json                      # the same, machine-readable (see below)
 $GPU_LEASE_CMD --doctor                             # full diagnosis (see Recovery)
 ```
+
+`--status --json` is the contract for tools that serialize work through the lease rather than a human
+reading it, such as an agent orchestrator deciding whether a `lease:<key>` wait has cleared. It prints one
+object, `{"leases": [...], "queue": [...]}`. Each lease is `{"key", "held"}`, plus `holder`, `pid`,
+`since`, `cmd` and `container` when held. `queue` lists waiters where the implementation can see them,
+and is empty otherwise (a `flock` cannot enumerate its waiters). Any command that honors this shape can
+stand in for `gpu_lease.sh` on a host with a different scheduler.
 
 Use `--cpu-heavy` for profiling and benchmark legs: their numbers are only comparable on an otherwise-quiet
 machine, so they should exclude CPU-only work too, even when it would not affect correctness.
