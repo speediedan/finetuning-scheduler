@@ -279,7 +279,7 @@ Fixes land on `main` first and are cherry-picked forward chronologically (`--no-
 ## CI
 
 - `ci_test-full.yml` ("Test full") — CPU matrix: `{ubuntu-22.04, windows-2022, macOS-14}` x
-  `{3.10, 3.13}` x `{oldest, latest}`, excluding 3.13+oldest. Installs via the composite action
+  `{3.11, 3.13}` x `{oldest, latest}`, excluding 3.13+oldest. Installs via the composite action
   `.github/actions/install-ci-dependencies`. Sets `DISABLE_MPS=1` on macOS. The `oldest` leg resolves
   through `requirements/ci/requirements-oldest.txt`.
 - `code-checks.yml` ("Type Checks") — `pyright -p pyproject.toml`.

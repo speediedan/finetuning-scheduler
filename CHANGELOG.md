@@ -4,7 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [2.14.0] - 2026-XX-XX
+## [2.15.0] - 2026-XX-XX
+
+### Added
+
+### Fixed
+
+- Fixed the examples' environment logging (`collect_env_info`) failing under PyTorch `2.15`, which added a `rocm_compiled_version` field to `torch.utils.collect_env.SystemEnv`. The examples build that tuple themselves to avoid initializing CUDA; they now pass only the fields the installed PyTorch defines and mark any they do not inspect, so a future field no longer breaks every example.
+
+- Fixed `lock_ci_requirements.sh` ignoring the CUDA target configured in `requirements/ci/torch-pre.txt`. The generated `torch-override.txt` header and the printed installation commands hardcoded the `nightly/cu130` index, so a `test` channel or `cu132` configuration documented the wrong index.
+
+### Changed
+
+- Raised the minimum supported PyTorch version to `2.12.0`, maintaining the "latest 4 PyTorch minor releases" support window documented in `docs/source/versioning.rst`.
+
+- Raised the minimum supported Python version to `3.11`, in step with PyTorch `2.15`, which drops Python `3.10`. Deprecated in `2.14.1`. The CPU CI matrix now tests Python `3.11` and `3.13`.
+
+- The development branch now tracks the PyTorch `2.15` release candidates. The CI Docker images and the Azure multi-GPU pipeline use PyTorch `2.15`'s CUDA `13.0` build (toolkit `13.0.3`) rather than its default CUDA `13.2` build: the `nvidia/cuda` `13.2` images declare `NVIDIA_REQUIRE_CUDA=cuda>=13.2`, which the NVIDIA container runtime enforces at container start, and the CI host's driver supports CUDA `13.0`.
+
+- Raised dependency floors that predate Python `3.11` support, which the `oldest` CI leg exposed once Python `3.11` became the minimum. In the optional extras: `hydra-core` `>=1.3.0` and `omegaconf` `>=2.3.0` (earlier releases define dataclass defaults Python `3.11` rejects), `tensorboardX` `>=2.6.2` (earlier releases call `float()` on a one-element array, an error under NumPy `2.4`) and `psutil` `>=5.9.4` (earlier releases ship no Python `3.11` wheels). In the test dependencies: `mlflow` `>=3.9.0` (earlier releases import a pool class removed in SQLAlchemy `2.1`) and `coverage` `>=7.0.0` (earlier releases ship no Python `3.11` wheel for macOS arm64).
+
+- Raised the `jsonargparse` floor to `4.40.0` and added its `jsonnet` extra in the optional extras. Lightning `2.7` requires `jsonargparse[jsonnet,signatures]>=4.39` for `LightningCLI`, and `4.40.0` is the first release whose `jsonnet` extra uses `jsonnet` releases that ship wheels for every platform.
+
+### Deprecated
+
+## [2.14.1] - 2026-10-09
 
 ### Added
 
@@ -33,6 +57,13 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Removed the static `ScheduleImplMixin.gen_ft_schedule()` method, deprecated since `2.10.0`. Use the `StrategyAdapter.gen_ft_schedule()` instance method instead, which strategy adapters can override to customize schedule generation and which FTS itself has used since `2.10.0`.
 
 - Deprecated Python `3.10` support. FTS `2.15.0` will require Python `>=3.11`, in step with PyTorch `2.15`, which drops Python `3.10` (itself end-of-life in October 2026). FTS `2.14.x` continues to support Python `3.10`.
+
+## [2.14.0] - not released
+
+No FTS `2.14.0` release was published. FTS `2.14.1` is the first release of the `2.14` line, numbered to match
+PyTorch `2.14.1`, the latest PyTorch release it is validated against. It includes everything planned for `2.14.0`,
+including the removal of `ScheduleImplMixin.gen_ft_schedule()` (announced for `2.14.0`) and the minimum supported
+PyTorch of `2.11.0`.
 
 ## [2.13.0] - 2026-07-26
 

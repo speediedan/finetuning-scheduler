@@ -11,3 +11,9 @@
 # 2.11.0
 # cu130
 # test
+
+# Active: test (RC) channel, tracking the torch 2.15 release candidates ahead of GA (2026-10-28).
+# Return this file to stable (all commented) once 2.15.0 is published to PyPI.
+2.15.0
+cu130
+test

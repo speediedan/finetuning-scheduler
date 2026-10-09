@@ -44,7 +44,7 @@ cd finetuning-scheduler
 
 # Step 1: Install a PyTorch prerelease (adjust version and CUDA target as needed; see configuration in requirements/ci/torch-pre.txt)
 # Example (nightly):
-uv pip install --prerelease=allow torch==2.14.0.dev20260810 --index-url https://download.pytorch.org/whl/nightly/cu130
+uv pip install --prerelease=allow torch==2.15.0 --index-url https://download.pytorch.org/whl/test/cu130
 
 # Step 2: Install FTS with Lightning commit pin (torch already installed, will be skipped)
 export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
@@ -124,7 +124,7 @@ ${FTS_REPO_DIR}/scripts/manage_standalone_processes.sh --use-nohup \
   --no-rebuild-base \
   --run-all-and-examples
 
-# Generate coverage with oldest dependencies (Python 3.10, mirrors CI oldest matrix)
+# Generate coverage with oldest dependencies (Python 3.11, mirrors CI oldest matrix)
 ${FTS_REPO_DIR}/scripts/manage_standalone_processes.sh --use-nohup \
   ${FTS_REPO_DIR}/scripts/gen_fts_coverage.sh \
   --repo-home=${FTS_REPO_DIR} \
@@ -173,7 +173,7 @@ cd ${FTS_REPO_DIR}
 # For coverage collection use `gen_fts_coverage.sh` (handles building/rebuilding and running coverage):
 #   ./scripts/gen_fts_coverage.sh --repo-home=${PWD} --target-env-name=fts_latest
 
-# Oldest supported dependencies (Python 3.10, mirrors CI oldest matrix)
+# Oldest supported dependencies (Python 3.11, mirrors CI oldest matrix)
 ./scripts/build_fts_env.sh --repo-home=${PWD} --target-env-name=fts_oldest --oldest
 ```
 

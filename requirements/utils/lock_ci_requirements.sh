@@ -37,7 +37,7 @@ mkdir -p "${CI_DIR}"
 echo "Generating locked CI requirements from pyproject.toml..."
 
 # Check if torch prerelease is configured
-# Returns: "version:channel" if prerelease is enabled, empty string otherwise
+# Returns: "version:cuda:channel" if prerelease is enabled, empty string otherwise
 get_torch_pre_config() {
     if [[ -f "${TORCH_PRE_FILE}" ]]; then
         # Read 3-line config: version, CUDA target, channel type
@@ -46,7 +46,7 @@ get_torch_pre_config() {
         local cuda="${PRE_CONFIG[1]}"
         local channel="${PRE_CONFIG[2]}"
         if [[ -n "${version}" && -n "${channel}" ]]; then
-            echo "${version}:${channel}"
+            echo "${version}:${cuda:-cu130}:${channel}"
             return
         fi
     fi
@@ -63,7 +63,7 @@ get_torch_pre_config() {
 # included in universal lock files. It will be installed separately via UV_OVERRIDE.
 #
 # Note on Python version compatibility:
-# - Lock files are generated for Python 3.10+ (our minimum supported version)
+# - Lock files are generated for Python 3.11+ (our minimum supported version)
 #
 # All dependencies in pyproject.toml have explicit minimum versions (>=x.y.z),
 # which ensures uv can properly resolve oldest compatible versions with
@@ -72,10 +72,10 @@ get_torch_pre_config() {
 # Check if torch prerelease is configured
 TORCH_PRE_CONFIG=$(get_torch_pre_config)
 if [[ -n "${TORCH_PRE_CONFIG}" ]]; then
-    TORCH_PRE_VERSION="${TORCH_PRE_CONFIG%%:*}"  # Extract version before ':'
-    TORCH_PRE_CHANNEL="${TORCH_PRE_CONFIG##*:}"  # Extract channel after ':'
+    IFS=':' read -r TORCH_PRE_VERSION TORCH_PRE_CUDA TORCH_PRE_CHANNEL <<< "${TORCH_PRE_CONFIG}"
 else
     TORCH_PRE_VERSION=""
+    TORCH_PRE_CUDA=""
     TORCH_PRE_CHANNEL=""
 fi
 
@@ -99,14 +99,14 @@ generate_torch_override() {
 #
 # Manual installation with prerelease (two-step approach for security):
 #   Step 1: Install PyTorch prerelease (edit torch-pre.txt to configure channel)
-#   uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/nightly/cu130
+#   uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_PRE_CHANNEL}/${TORCH_PRE_CUDA}
 #
 #   Step 2: Install FTS with Lightning commit pin (torch already installed, will be skipped)
 #   export UV_OVERRIDE=\${PWD}/requirements/ci/overrides.txt
 #   uv pip install -e ".[all]"
 #
 # Or with locked requirements:
-#   uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/nightly/cu130
+#   uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_PRE_CHANNEL}/${TORCH_PRE_CUDA}
 #   UV_OVERRIDE=\${PWD}/requirements/ci/overrides.txt uv pip install -e . -r requirements/ci/requirements.txt
 
 torch==${TORCH_PRE_VERSION}
@@ -224,9 +224,9 @@ generate_lockfile() {
 }
 
 # Generate both lock files
-# - Latest: Python 3.10 (minimum supported) to ensure proper version markers for
+# - Latest: Python 3.11 (minimum supported) to ensure proper version markers for
 #   packages like contourpy that have Python version requirements
-# - Oldest: Python 3.10 (minimum supported), lowest resolution
+# - Oldest: Python 3.11 (minimum supported), lowest resolution
 #
 # When torch prerelease (nightly or test) is configured:
 # - requirements.txt excludes torch (installed separately with appropriate backend)
@@ -246,8 +246,8 @@ generate_torch_override
 echo "Syncing metadata from utils.py to pyproject.toml..."
 python "${SCRIPT_DIR}/sync_metadata.py"
 
-generate_lockfile "highest" "${CI_DIR}/requirements.txt" "3.10" "${USE_PRERELEASE}"
-generate_lockfile "lowest-direct" "${CI_DIR}/requirements-oldest.txt" "3.10" "false"
+generate_lockfile "highest" "${CI_DIR}/requirements.txt" "3.11" "${USE_PRERELEASE}"
+generate_lockfile "lowest-direct" "${CI_DIR}/requirements-oldest.txt" "3.11" "false"
 
 echo ""
 echo "Generated lock files:"
@@ -262,15 +262,15 @@ if [[ -n "${TORCH_PRE_VERSION}" ]]; then
     echo "  - ${CI_DIR}/torch-override.txt (for manual prerelease installation reference)"
     echo ""
     echo "Manual installation with prerelease (two-step approach):"
-    echo "  1. uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_PRE_CHANNEL}/cu130"
+    echo "  1. uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_PRE_CHANNEL}/${TORCH_PRE_CUDA}"
     echo "  2. UV_OVERRIDE=requirements/ci/overrides.txt uv pip install -e \".[all]\""
     echo ""
     echo "Or with locked requirements:"
-    echo "  1. uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_PRE_CHANNEL}/cu130"
+    echo "  1. uv pip install --prerelease=if-necessary-or-explicit torch==${TORCH_PRE_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_PRE_CHANNEL}/${TORCH_PRE_CUDA}"
     echo "  2. UV_OVERRIDE=requirements/ci/overrides.txt uv pip install -e . -r requirements/ci/requirements.txt"
     echo ""
     echo "Docker image installation (CUDA):"
-    echo "  Ensure Dockerfile installs: torch==${TORCH_PRE_VERSION} from ${TORCH_PRE_CHANNEL}/cu130 index"
+    echo "  Ensure Dockerfile installs: torch==${TORCH_PRE_VERSION} from ${TORCH_PRE_CHANNEL}/${TORCH_PRE_CUDA} index"
     echo ""
     echo "Azure Pipelines (Docker with pre-installed torch):"
     echo "  UV_OVERRIDE=requirements/ci/overrides.txt uv pip install -e . -r requirements/ci/requirements.txt"

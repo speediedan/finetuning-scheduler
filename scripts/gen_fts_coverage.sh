@@ -30,7 +30,7 @@ usage(){
 Usage: $0
    [ --repo-home input]
    [ --target-env-name input ]
-   [ --oldest ]                     # Use oldest CI requirements (Python 3.10, requirements-oldest.txt)
+   [ --oldest ]                     # Use oldest CI requirements (Python 3.11, requirements-oldest.txt)
    [ --torch-backend input ]  (cpu, auto, cu130, etc. default: auto)
    [ --no-rebuild-base ]
    [ --no-special ]                 # Skip special tests (standalone/experimental), run only main test suite

@@ -192,6 +192,10 @@ Update the following files with version changes:
      ```
      Prefer one a couple of days old so obvious upstream regressions have had time to surface. Expect to
      re-pin nearer feature freeze and then switch to the `test` (RC) channel once RC1 lands.
+   - **After the target's branch cut, "dev" means the `test` channel.** The nightly index moves to the *next* minor at
+     branch cut (on 2026-10-09 it already served `2.16.0.dev`), so the target's builds live only on
+     `whl/test/<cuda>/` as `X.Y.0` RCs. Use `X.Y.0` / `cu<NNN>` / `test`, and in `dockers/base-cuda/Dockerfile`
+     activate the test-channel line pinned to `${PYTORCH_VERSION}`.
 
    The **same nightly must also be set in `dockers/base-cuda/Dockerfile`**, where exactly one of the
    stable / nightly / test install lines may be uncommented. A stale hardcoded nightly there broke the
@@ -213,12 +217,72 @@ been observed to be incomplete (it omits CUDA 12.9 for 2.13 despite cu129 Linux 
    # torch 2.13.0 -> cuda-toolkit[...]==13.0.3  =>  ARG CUDA_VERSION=13.0.3
    ```
 1. **Mirror `TORCH_CUDA_ARCH_LIST`** from `TORCH_CUDA_ARCH_LIST_TABLE` in
-   `.ci/manywheel/build_env_setup.py` for that CUDA version, `x86_64`. CUDA 13.0/13.2 → `{75, 80, 86, 90, 100, 120}` → `"7.5;8.0;8.6;9.0;10.0;12.0+PTX"`. **Do not drop `7.5`** — the CI host has an
+   `.ci/wheel/linux/build_env_setup.py` (it lived in `.ci/manywheel/build_env_setup.py` before 2.15) for that CUDA
+   version, `x86_64`. Release and RC wheels omit `+PTX`; keep it in the Docker arch list for forward compatibility. CUDA 13.0/13.2 → `{75, 80, 86, 90, 100, 120}` → `"7.5;8.0;8.6;9.0;10.0;12.0+PTX"`. **Do not drop `7.5`** — the CI host has an
    RTX 2070 SUPER (sm_75).
 
 The per-release decision is announced in a dedicated RFC issue (2.11 → pytorch#172663,
-2.12 → pytorch#178665, 2.14 → pytorch#190355). Check the issue for the target release; if it is still
-open, surface that to the user rather than assuming.
+2.12 → pytorch#178665, 2.14 → pytorch#190355, closed with 13.0 kept as `CUDA_STABLE`). Check the issue for the
+target release; if it is still open, surface that to the user rather than assuming. For 2.15, `CUDA_STABLE` moved
+to `13.2` (arches 13.0/13.2/13.4, 12.6 dropped).
+
+**Confirm the Docker base image exists before committing to a toolkit patch.** `nvidia/cuda` can lag torch's pin
+(2.15's cu132 wheel pins `cuda-toolkit==13.2.2` while the newest published devel image was `13.2.1`). The wheel
+ships its own CUDA runtime, so the newest published patch of the same minor is the right base:
+
+```bash
+docker manifest inspect nvidia/cuda:13.2.2-devel-ubuntu22.04 >/dev/null 2>&1 && echo exists || echo missing
+```
+
+**The CI host's driver caps the image's CUDA minor, even though the wheel would run.** Check it first:
+
+```bash
+nvidia-smi | grep -o "CUDA Version: [0-9.]*"     # r580 reports 13.0
+```
+
+`nvidia/cuda` images declare `NVIDIA_REQUIRE_CUDA=cuda>=X.Y`, and the NVIDIA container runtime enforces it at
+`docker start --gpus`. In the 2.15 cycle a `13.2.1` image passed every local check and then failed in Azure with
+`nvidia-container-cli: requirement error: unsatisfied condition: cuda>=13.2, please update your driver`. Two
+checks had missed it: the cu132 *wheel* runs on an r580 driver under CUDA minor-version compatibility, and a
+`docker run` without `--gpus` never invokes the hook. If the host driver's CUDA version is below the target's
+`CUDA_STABLE`, either use the newest torch wheel variant the driver satisfies (2.15 shipped cu130 alongside
+cu132) on a matching base image, or upgrade the host driver first. Do not set `NVIDIA_DISABLE_REQUIRE` to force
+it. Always verify a new image the way the pipeline starts it:
+
+```bash
+docker run --rm --gpus all speediedan/finetuning-scheduler:<new azpl-init tag> nvidia-smi -L
+```
+
+When smoke-testing wheels on the host, run from a private directory, not `/tmp`: a stray `bisect.py` there once
+shadowed the standard library for every `python -c` started in it.
+
+#### When the newest PyTorch drops a Python version
+
+PyTorch 2.15 dropped Python 3.10 (its wheel metadata still said `>=3.10`, but no `cp310` wheels exist; `RELEASE.md`'s
+compatibility matrix is the operative statement). Raising the FTS floor touches:
+
+- `pyproject.toml`: `requires-python`, the `Programming Language :: Python :: X.Y` classifier, and
+  `[tool.fts.min-versions] python`
+- `requirements/utils/lock_ci_requirements.sh`: the `--python-version` passed to both `generate_lockfile` calls
+- `scripts/build_fts_env.sh`: the `--oldest` interpreter
+- `.github/workflows/ci_test-full.yml`: the matrix `python-version` minimum
+- `.pre-commit-config.yaml`: pyupgrade `--pyNNN-plus`
+- `.github/actions/regen-ci-reqs/action.yml` description, `tests/README.md`, `AGENTS.md` CI matrix line, README build
+  matrix, a `versioning.rst` note, and a CHANGELOG `Deprecated` notice in the *previous* release
+
+**Then audit the `oldest` lockfile against the new floor.** `--resolution lowest-direct` happily selects floors that
+predate the new minimum Python. Six did for 3.11: some fail as sdist builds (no wheel for the new ABI), others import
+fine and break at runtime (a NumPy upgrade the old Python had held back, or a transitive major the old Python could
+not resolve to). Check wheel coverage per CI OS first:
+
+```bash
+python .agents/skills/fts-development-branch-version-upgrade/scripts/check_wheel_coverage.py \
+  requirements/ci/requirements-oldest.txt --python 3.11
+```
+
+Pure-Python sdist-only packages (e.g. `antlr4-python3-runtime`) are harmless. Anything with a C extension needs its
+floor raised to the first release with a wheel for every CI OS (macOS legs are arm64). Then rebuild `fts_oldest`
+and run the CPU suite: runtime breaks only show up there.
 
 #### Docker Configuration Files
 
@@ -354,6 +418,10 @@ open, surface that to the user rather than assuming.
    - Retarget the Lightning git commit pin (`lightning @ git+https://github.com/Lightning-AI/lightning.git@<sha>`)
      if the upgrade tracks a new Lightning commit. This pin is applied via `UV_OVERRIDE` and is easy to miss
      because it lives outside `pyproject.toml`.
+   - Choose the commit by purpose. While preparing a **release** from `main`, pin the latest Lightning *release tag*
+     commit, so the release branch inherits a released Lightning with no release-only divergence. When **opening a
+     development cycle**, pin Lightning `master`, which is what the main-only pin exists for: early warning on the
+     next Lightning minor.
 
 1. **`requirements/ci/torch-override.txt`**:
 
@@ -763,6 +831,11 @@ After completing all phases, verify:
 ## Notes
 
 - Always run on a clean working tree (commit or stash first)
+- Do not edit a script while a background job is executing it: bash reads scripts incrementally, and an edit to
+  `build_fts_env.sh` mid-run produced `unexpected EOF while looking for matching '"'` from a script that `bash -n`
+  passes
+- Every `build_fts_env.sh` run re-points the shared `.git/hooks/pre-commit` at that env (worktrees share it). Re-run
+  `pre-commit install` from `fts_latest` after building `fts_oldest` or a scratch env
 - Use `--allow-failures` for initial coverage run to capture all issues
 - Monitor log files to catch issues early
 - Keep old environment as backup until new one validated
