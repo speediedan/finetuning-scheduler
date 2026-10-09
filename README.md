@@ -84,8 +84,8 @@ cd finetuning-scheduler
 ./scripts/build_fts_env.sh --repo-home=${PWD} --target-env-name=fts_latest --venv-dir=/path/to/.venvs
 
 # To configure PyTorch prerelease used by the build scripts, edit `requirements/ci/torch-pre.txt`:
-#   Line 1: torch version (e.g., 2.14.0 for test/RC or 2.14.0.dev20260810 for nightly)
-#   Line 2: CUDA target (e.g., cu130) — CI uses cpu
+#   Line 1: torch version (e.g., 2.15.0 for test/RC or 2.16.0.dev20261007 for nightly)
+#   Line 2: CUDA target (e.g., cu132) — CI uses cpu
 #   Line 3: channel type: "test" or "nightly"
 
 # Note: `manage_standalone_processes.sh` is an optional wrapper to run long-running coverage/build scripts with checks for other concurrent conflicting processes, and run options (--use-nohup etc) — you can also run `build_fts_env.sh` and `gen_fts_coverage.sh` directly.
@@ -116,8 +116,8 @@ git clone https://github.com/speediedan/finetuning-scheduler.git
 cd finetuning-scheduler
 
 # Step 1: Install a PyTorch prerelease (adjust version and CUDA target as needed; see configuration in requirements/ci/torch-pre.txt)
-# Example (nightly):
-uv pip install --prerelease=if-necessary-or-explicit torch==2.14.0.dev20260810 --index-url https://download.pytorch.org/whl/nightly/cu130
+# Example (test/RC channel):
+uv pip install --prerelease=if-necessary-or-explicit torch==2.15.0 --index-url https://download.pytorch.org/whl/test/cu132
 
 # Step 2: Install FTS with Lightning commit pin (torch already installed, will be skipped)
 export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
@@ -230,17 +230,17 @@ See the [versioning documentation](https://finetuning-scheduler.readthedocs.io/e
 <details>
   <summary>Current build statuses for Fine-Tuning Scheduler </summary>
 
-| System / (PyTorch/Python ver) |                                                                                                       2.11.0/3.10                                                                                                        |                                                                                                             2.14.1/3.10, 2.14.1/3.13                                                                                                             |
+| System / (PyTorch/Python ver) |                                                                                                       2.12.0/3.11                                                                                                        |                                                                                                             2.15.0/3.11, 2.15.0/3.13                                                                                                             |
 | :---------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
 |      Linux \[GPUs\*\*\]       |                                                                                                            -                                                                                                             | [![Build Status](https://dev.azure.com//speediedan/finetuning-scheduler/_apis/build/status/Multi-GPU%20&%20Example%20Tests?branchName=main)](https://dev.azure.com/speediedan/finetuning-scheduler/_build/latest?definitionId=1&branchName=main) |
 |     Linux (Ubuntu 22.04)      | [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml) |             [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml)             |
 |           OSX (14)            | [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml) |             [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml)             |
 |        Windows (2022)         | [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml) |             [![Test](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml/badge.svg?branch=main&event=push)](https://github.com/speediedan/finetuning-scheduler/actions/workflows/ci_test-full.yml)             |
 
-- The left column is the **oldest** supported PyTorch version, the right column the **latest** tested. PyTorch `2.11.0` is only exercised with Python `3.10`; the latest is exercised with both `3.10` and `3.13`.
-- The latest column is the newest stable PyTorch release. Between FTS releases the `main` branch may instead track a PyTorch prerelease (nightly or RC); released FTS versions always pin a stable PyTorch. See the [compatibility table](https://finetuning-scheduler.readthedocs.io/en/stable/versioning.html).
+- The left column is the **oldest** supported PyTorch version, the right column the **latest** tested. PyTorch `2.12.0` is only exercised with Python `3.11`; the latest is exercised with both `3.11` and `3.13`.
+- The `main` branch tracks the **PyTorch 2.15 release candidates** (the `test` channel), so the latest column is currently an RC rather than a published release. Released FTS versions always pin a stable PyTorch. See the [compatibility table](https://finetuning-scheduler.readthedocs.io/en/stable/versioning.html).
 - All GitHub Actions legs above are **CPU-only** (no CUDA).
-- \*\* Multi-GPU tests run on Azure Pipelines against **PyTorch `2.14.1` / CUDA `13.0` (toolkit `13.0.3`) / Python `3.13`**, on one RTX 4090 and one RTX 2070 SUPER.
+- \*\* Multi-GPU tests run on Azure Pipelines against **PyTorch `2.15.0` (RC) / CUDA `13.2` (toolkit `13.2.1`) / Python `3.13`**, on one RTX 4090 and one RTX 2070 SUPER.
 
 </details>
 

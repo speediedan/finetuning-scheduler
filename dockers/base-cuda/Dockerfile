@@ -11,13 +11,13 @@
 # limitations under the License.
 # initially based on https://bit.ly/3pdAf1G
 
-ARG CUDA_VERSION=13.0.3
+ARG CUDA_VERSION=13.2.1
 ARG OS_VER=ubuntu22.04
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-${OS_VER}
 
 ARG PYTHON_VERSION=3.13
-ARG PYTORCH_VERSION=2.14.1
+ARG PYTORCH_VERSION=2.15.0
 ARG CUST_BUILD=0
 ARG MKL_THREADING_LAYER=GNU
 
@@ -79,15 +79,16 @@ RUN \
         # NB: exactly ONE of the following must be uncommented. Prefer the stable line below unless
         # deliberately building against a prerelease; a hardcoded nightly goes stale quickly because
         # old nightlies are pruned from the index, and the build then fails to resolve.
-        # ... stable channel, pinned to the image's PYTORCH_VERSION (active)
-        CUDA_VERSION_MM=${CUDA_VERSION%.*}; \
-        uv pip install torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cu${CUDA_VERSION_MM//'.'/''}; \
+        # ... stable channel, pinned to the image's PYTORCH_VERSION
+        # CUDA_VERSION_MM=${CUDA_VERSION%.*}; \
+        # uv pip install torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cu${CUDA_VERSION_MM//'.'/''}; \
         # ... default channel
-        # uv pip install torch --torch-backend=cu130; \
+        # uv pip install torch --torch-backend=cu132; \
         # ... pytorch nightly dev version (keep in sync with requirements/ci/torch-pre.txt)
-        # uv pip install --prerelease=allow torch==2.14.0.dev20260724 --index-url https://download.pytorch.org/whl/nightly/cu130; \
-        # ... test channel (keep in sync with requirements/ci/torch-pre.txt)
-        # uv pip install --prerelease=allow torch==2.14.0 --index-url https://download.pytorch.org/whl/test/cu130; \
+        # uv pip install --prerelease=allow torch==2.16.0.dev20261007 --index-url https://download.pytorch.org/whl/nightly/cu132; \
+        # ... test channel, pinned to the image's PYTORCH_VERSION (keep in sync with requirements/ci/torch-pre.txt) (active)
+        CUDA_VERSION_MM=${CUDA_VERSION%.*}; \
+        uv pip install --prerelease=allow torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/test/cu${CUDA_VERSION_MM//'.'/''}; \
     fi && \
     # We avoid installing Lightning and other dependencies here as they are usually upgraded anyway later in
     # CI but we may re-enable in the future.

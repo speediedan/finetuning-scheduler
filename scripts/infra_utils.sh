@@ -292,7 +292,7 @@ read_torch_pre_config() {
 }
 
 # Get torch index URL based on channel and CUDA target
-# Args: $1 = channel ("test" or "nightly"), $2 = cuda_target (e.g., "cu130" or "cpu")
+# Args: $1 = channel ("test" or "nightly"), $2 = cuda_target (e.g., "cu132" or "cpu")
 # Returns: PyTorch wheel index URL
 get_torch_index_url() {
     local channel="$1"

@@ -12,7 +12,7 @@ dynamic = ["version", "description", "readme", "dependencies"]
 authors = [{name = "Daniel Dale", email = "danny.dale@gmail.com"}]
 license = "Apache-2.0"
 license-files = ["LICENSE*"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 # NOTE: Minimum versions for torch and Lightning are managed dynamically by setup.py
 # See src/finetuning_scheduler/dynamic_versioning/utils.py for version specifications:
@@ -39,7 +39,6 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -49,16 +48,16 @@ classifiers = [
 # CLI tools for LightningCLI integration
 cli = [
     "jsonargparse[signatures]>=4.27.7",
-    "omegaconf>=2.2.3",
-    "hydra-core>=1.2.0",
+    "omegaconf>=2.3.0",
+    "hydra-core>=1.3.0",
 ]
 # Extended functionality
 extra = [
     "rich>=12.3.0",
     # Include CLI deps
     "jsonargparse[signatures]>=4.27.7",
-    "omegaconf>=2.2.3",
-    "hydra-core>=1.2.0",
+    "omegaconf>=2.3.0",
+    "hydra-core>=1.3.0",
 ]
 # Example scripts dependencies
 examples = [
@@ -67,14 +66,14 @@ examples = [
     "transformers>=4.26.0",
     "scikit-learn>=1.2.0",
     "sentencepiece>=0.2.0",
-    "tensorboardX>=2.6.1",
+    "tensorboardX>=2.6.2",
     "tabulate>=0.8.9",
-    "psutil>=5.9.0",
+    "psutil>=5.9.4",
     "pip>=21.0.0",  # bc for torch collect_env until it supports uv
     # Include CLI deps
     "jsonargparse[signatures]>=4.27.7",
-    "omegaconf>=2.2.3",
-    "hydra-core>=1.2.0",
+    "omegaconf>=2.3.0",
+    "hydra-core>=1.3.0",
 ]
 # Jupyter notebook testing
 ipynb = [
@@ -98,17 +97,17 @@ all = [
     "rich>=12.3.0",
     # cli
     "jsonargparse[signatures]>=4.27.7",
-    "omegaconf>=2.2.3",
-    "hydra-core>=1.2.0",
+    "omegaconf>=2.3.0",
+    "hydra-core>=1.3.0",
     # examples
     "datasets>=4.0.0",
     "evaluate>=0.3.0",
     "transformers>=4.26.0",
     "scikit-learn>=1.2.0",
     "sentencepiece>=0.2.0",
-    "tensorboardX>=2.6.1",
+    "tensorboardX>=2.6.2",
     "tabulate>=0.8.9",
-    "psutil>=5.9.0",
+    "psutil>=5.9.4",
     "pip>=21.0.0",  # bc for torch collect_env until it supports uv
     # ipynb
     "ipython>=7.10.0",
@@ -132,9 +131,9 @@ all = [
 # Actual minimum versions are enforced in src/finetuning_scheduler/dynamic_versioning/utils.py
 # The build system (setup.py) reads from utils.py to populate the dynamic dependencies.
 [tool.fts.min-versions]
-torch = ">=2.11.0"
+torch = ">=2.12.0"
 lightning = ">=2.6.0,<2.7.0"
-python = "3.10"  # Defined in pyproject.toml requires-python
+python = "3.11"  # Defined in pyproject.toml requires-python
 
 [project.urls]
 "Homepage" = "https://github.com/speediedan/finetuning-scheduler"
@@ -261,23 +260,23 @@ notebook_metadata_filter = "-all"
 [dependency-groups]
 dev = [
     # Development dependencies include test group
-    "coverage>=6.4",
+    "coverage>=7.0.0",
     "pytest>=7.0.0",
     "pytest-rerunfailures>=11.0",  # 10.x imports pkg_resources, removed in setuptools 81+
     "twine>=3.2.0",
     "pyright>=1.1.390",
     "pre-commit>=2.0.0",
-    "mlflow>=3.0.0",
+    "mlflow>=3.9.0",
 ]
 test = [
-    "coverage>=6.4",
+    "coverage>=7.0.0",
     "pytest>=7.0.0",
     "pytest-rerunfailures>=11.0",  # 10.x imports pkg_resources, removed in setuptools 81+
     "twine>=3.2.0",
     "pyright>=1.1.390",
     "pre-commit>=2.0.0",
     # protobuf upper bound removed - handled by dependency resolution
-    "mlflow>=3.0.0",
+    "mlflow>=3.9.0",
 ]
 # git dependencies installed separately (git URLs cannot be in universal lock files)
 git-deps = [

@@ -10,4 +10,4 @@
 #   uv pip install -e ".[all]" --override requirements/ci/overrides.txt --torch-backend=auto
 
 # Lightning commit pin - update this when testing against new Lightning commits
-lightning @ git+https://github.com/Lightning-AI/lightning.git@771017e4f39b314b49abd4a1d65905c74268d248
+lightning @ git+https://github.com/Lightning-AI/lightning.git@84df182f50ab34301aabb3c0eb4031815bfb413d

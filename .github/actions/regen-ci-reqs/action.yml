@@ -4,7 +4,7 @@ description: >
   if the committed files differ. Assumes the caller has already run actions/checkout.
 inputs:
   python_version:
-    description: 'Python version used to run the lock script (uv resolves for --python-version 3.10 regardless)'
+    description: 'Python version used to run the lock script (uv resolves for --python-version 3.11 regardless)'
     required: false
     default: '3.13'
   compare_paths:

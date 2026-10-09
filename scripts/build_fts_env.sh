@@ -6,7 +6,7 @@
 #   ./build_fts_env.sh --repo-home=~/repos/finetuning-scheduler --target-env-name=fts_latest
 # build latest with explicit venv directory (recommended for hardlink performance):
 #   ./build_fts_env.sh --repo-home=${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --venv-dir=/mnt/cache/${USER}/.venvs
-# build oldest (CI oldest build simulation with Python 3.10 and oldest deps):
+# build oldest (CI oldest build simulation with Python 3.11 and oldest deps):
 #   ./build_fts_env.sh --repo-home=${HOME}/repos/finetuning-scheduler --target-env-name=fts_oldest --oldest
 # build release:
 #   ./build_fts_env.sh --repo-home=${HOME}/repos/fts-release --target-env-name=fts_release
@@ -34,11 +34,11 @@ usage(){
 Usage: $0
    [ --repo-home input]
    [ --target-env-name input ]
-   [ --oldest ]                # Use oldest CI requirements (Python 3.10, requirements-oldest.txt)
+   [ --oldest ]                # Use oldest CI requirements (Python 3.11, requirements-oldest.txt)
    [ --uv-install-flags "flags" ]
    [ --no-commit-pin ]
    [ --venv-dir input ]
-   [ --torch-backend input ]  (cpu, cu130, auto; default: cu130 for CUDA 12.8)
+   [ --torch-backend input ]  (cpu, cu130, cu132, auto; default: cu130)
    [ --from-source "package:path[:extras][:ENV_VAR=value]" ]
    [ --help ]
    Examples:
@@ -58,8 +58,8 @@ Usage: $0
     #   ./build_fts_env.sh --repo-home=\${HOME}/repos/finetuning-scheduler --target-env-name=fts_latest --from-source="lightning:\${HOME}/repos/lightning:pytorch"
 
     # To configure PyTorch version, edit requirements/ci/torch-pre.txt:
-    #   Line 1: torch version (e.g., 2.11.0 for test, 2.11.0.dev20260121 for nightly)
-    #   Line 2: CUDA target (e.g., cu130)
+    #   Line 1: torch version (e.g., 2.15.0 for test, 2.16.0.dev20261007 for nightly)
+    #   Line 2: CUDA target (e.g., cu132)
     #   Line 3: channel type (test or nightly)
 EOF
 exit 1
@@ -126,11 +126,11 @@ log_torch_version(){
 }
 
 base_env_build(){
-    # Use Python 3.10 for oldest builds, 3.13 for latest
+    # Use Python 3.11 for oldest builds, 3.13 for latest
     local python_version="python3.13"
     if [[ -n ${oldest} ]]; then
-        python_version="python3.10"
-        echo "Using Python 3.10 for oldest build"
+        python_version="python3.11"
+        echo "Using Python 3.11 for oldest build"
     fi
 
     clear_activate_env ${python_version}

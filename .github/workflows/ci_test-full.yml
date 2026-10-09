@@ -42,7 +42,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, windows-2022, macOS-14]
-        python-version: ["3.10", "3.13"]  # minimum, maximum
+        python-version: ["3.11", "3.13"]  # minimum, maximum
         # tests will include oldest and newest tested patch versions of pytorch
         requires: ["oldest", "latest"]
         release: ["latest"]

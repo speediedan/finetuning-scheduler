@@ -28,10 +28,17 @@ PyTorch Compatibility Policy
 
 Fine-Tuning Scheduler strives to officially support **at least the latest 4 PyTorch minor releases**. This provides a balance between API stability and the ability to leverage new PyTorch features while reducing maintenance overhead.
 
-For example, with PyTorch 2.14 released, FTS is guaranteed to support PyTorch >= 2.11 at a minimum. In practice, FTS may support additional earlier PyTorch versions (e.g. FTS 2.13 supports PyTorch 2.7), but support for the most recent 4 versions is the target commitment.
+For example, with PyTorch 2.15 released, FTS is guaranteed to support PyTorch >= 2.12 at a minimum. In practice, FTS may support additional earlier PyTorch versions (e.g. FTS 2.13 supports PyTorch 2.7), but support for the most recent 4 versions is the target commitment.
 
 .. note::
    This is a target policy rather than a strict requirement, providing the project latitude to support additional versions when feasible.
+
+Python Compatibility
+====================
+
+FTS raises its minimum supported Python version when the newest PyTorch minor release in its support window drops a
+Python version. Beginning with FTS 2.15, Python >= 3.11 is required, in step with PyTorch 2.15 (which drops Python
+3.10). FTS 2.14.x is the last release line supporting Python 3.10.
 
 Lightning Compatibility Policy
 ===============================
@@ -56,6 +63,10 @@ The following table shows the compatibility between Fine-Tuning Scheduler, PyTor
      - Min PyTorch
      - Max PyTorch (tested)
      - Compatible Lightning (min)
+   * - 2.15.x
+     - 2.12.0
+     - 2.15.0
+     - >= 2.6.0
    * - 2.14.x
      - 2.11.0
      - 2.14.0
