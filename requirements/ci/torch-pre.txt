@@ -11,9 +11,3 @@
 # 2.11.0
 # cu130
 # test
-
-# Active: nightly channel, tracking the torch 2.14 development cycle.
-# Re-pin nearer the 2.14.0 feature freeze (2026-08-07), then move to the `test` channel after RC1.
-2.14.0.dev20260724
-cu130
-nightly

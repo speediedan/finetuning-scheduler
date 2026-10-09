@@ -88,7 +88,7 @@ and :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks with
 The Default Fine-Tuning Schedule
 ********************************
 Schedule definition is facilitated via
-:meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.gen_ft_schedule` which dumps
+:meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.gen_ft_schedule` which dumps
 a default fine-tuning schedule (by default using a naive, 2-parameters per level heuristic) which can be adjusted as
 desired by the user and/or subsequently passed to the callback. Using the default/implicitly generated schedule will
 often be less computationally efficient than a user-defined fine-tuning schedule but can often serve as a

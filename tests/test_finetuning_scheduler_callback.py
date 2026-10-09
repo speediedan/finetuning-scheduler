@@ -1112,27 +1112,6 @@ def test_fts_gen_ft_schedule(tmpdir, model: "LightningModule", dist_mode: bool, 
         assert test_schedule[next(reversed(list(test_schedule.keys())))]["params"] == expected[2]
 
 
-def test_fts_gen_ft_schedule_deprecation_warning(tmpdir):
-    """Validate that direct calls to ScheduleImplMixin.gen_ft_schedule() issue a deprecation warning."""
-    from finetuning_scheduler.fts_supporters import ScheduleImplMixin
-
-    model = FinetuningSchedulerBoringModel()
-
-    # Test that the deprecation warning is issued
-    with pytest.warns(
-        UserWarning,
-        match=r"Direct calls to ScheduleImplMixin\.gen_ft_schedule\(\) are deprecated since v2\.10\.0",
-    ):
-        schedule_path = ScheduleImplMixin.gen_ft_schedule(model, tmpdir)
-
-    # Verify the schedule was still generated correctly
-    assert schedule_path is not None
-    assert os.path.isfile(schedule_path)
-    with open(schedule_path) as f:
-        test_schedule = yaml.safe_load(f.read())
-    assert isinstance(test_schedule, dict)
-    assert len(test_schedule) > 0
-
 @pytest.mark.skipif(not _MLFLOW_AVAILABLE, reason="test requires MLflow")
 @pytest.mark.parametrize("use_fts_log_dir", [True, False], ids=["fts_log_dir", "no_fts_log_dir"])
 def test_fts_log_dir(tmpdir, use_fts_log_dir):

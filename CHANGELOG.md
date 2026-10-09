@@ -12,9 +12,13 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Vendored the `cross-platform-latex` skill from [speediedan/skills](https://github.com/speediedan/skills) and added `scripts/check_vendored_skills.py`, a dependency-free pre-commit guard asserting the vendored copies still match `.claude/skills/.shared-skills.sha256`. A repo-level `exclude` stops the formatting hooks rewriting those files, since a rewrite would desync the very manifest that asserts they match the master.
 
+- Added an opt-in, `flock`-based GPU lease (`scripts/gpu_lease_wrap.sh`) that serializes GPU test suites on a shared multi-GPU host. `tests/special_tests.sh` and `scripts/gen_fts_coverage.sh` re-exec themselves under the lease, so one acquisition covers a whole suite. It is a complete no-op unless `GPU_LEASE_CMD` points at a lease implementation, so contributors and hosted CI are unaffected [#33](https://github.com/speediedan/finetuning-scheduler/pull/33).
+
 ### Fixed
 
-- Fixed `make linkcheck`, which reported 18 broken links. 17 were false positives: PyTorch's documentation site renders API anchors client-side, so `linkcheck` cannot resolve fragments like `#torch.nn.Module` even though the pages resolve. Added `linkcheck_anchors_ignore_for_url` for `pytorch.org` in `docs/source/conf.py`. The remaining failure was a genuine 404 — a historical changelog entry linked `jsonargparse` PR #205 as an issue, and that repository has issues disabled.
+- Fixed `make linkcheck`, which reported 18 broken links. 17 were false positives: PyTorch's documentation site renders API anchors client-side, so `linkcheck` cannot resolve fragments like `#torch.nn.Module` even though the pages resolve. Added `linkcheck_anchors_ignore_for_url` for `pytorch.org` in `docs/source/conf.py`. The remaining failure was a genuine 404: a historical changelog entry linked `jsonargparse` PR #205 as an issue, and that repository has issues disabled.
+
+- Fixed the scheduled `linkcheck` reporting 14 broken links. 13 were anchors on the Lightning documentation, which is now a client-rendered application that returns the same HTML shell for every path, so no fragment on it can be resolved; `lightning.ai/docs` joins `linkcheck_anchors_ignore_for_url`. The remaining one was Stack Overflow rejecting `linkcheck`'s requests with `403 Forbidden` while redirecting normally for a browser, so it is now listed in `linkcheck_ignore`. Resolves [#34](https://github.com/speediedan/finetuning-scheduler/issues/34).
 
 ### Changed
 
@@ -22,7 +26,11 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Raised the minimum supported PyTorch version to `2.11.0`, restoring the strict "latest 4 PyTorch minor releases" support window documented in `docs/source/versioning.rst`. This was announced as advance notice in `2.13.0`.
 
+- Validated support for PyTorch `2.14.1` (the latest tested version) and Lightning `2.6.6`. The CI Docker images and the Azure multi-GPU pipeline now use stable PyTorch `2.14.1` with CUDA `13.0` (toolkit `13.0.3`), and the pinned CI lockfiles were regenerated against stable PyTorch, so `requirements/ci/torch-override.txt` is removed until the next prerelease cycle.
+
 ### Deprecated
+
+- Removed the static `ScheduleImplMixin.gen_ft_schedule()` method, deprecated since `2.10.0`. Use the `StrategyAdapter.gen_ft_schedule()` instance method instead, which strategy adapters can override to customize schedule generation and which FTS itself has used since `2.10.0`.
 
 ## [2.13.0] - 2026-07-26
 

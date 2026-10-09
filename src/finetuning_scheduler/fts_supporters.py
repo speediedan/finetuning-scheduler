@@ -1498,37 +1498,11 @@ class ScheduleImplMixin(ABC):
         return ft_schedule_yaml
 
     @staticmethod
-    @rank_zero_only
-    def gen_ft_schedule(module: Module, dump_loc: str | os.PathLike) -> os.PathLike | None:
-        """Generate the default fine-tuning schedule using a naive, 2-parameters per-level heuristic.
-
-        .. deprecated:: 2.10.0
-            Direct calls to this static method are deprecated. Use the
-            :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.gen_ft_schedule` instance method
-            instead, which allows strategy adapters to customize schedule generation.
-
-        Args:
-            module (:class:`~torch.nn.Module`): The :class:`~torch.nn.Module` for which a fine-tuning schedule will be
-                generated
-            dump_loc: The directory to which the generated schedule (.yaml) should be written
-        Returns:
-            os.PathLike: The path to the generated schedule, by default ``Trainer.log_dir`` and named after the
-            :py:class:`~lightning.pytorch.core.module.LightningModule` subclass in use with the suffix
-            ``_ft_schedule.yaml``)
-        """
-        rank_zero_warn(
-            "Direct calls to ScheduleImplMixin.gen_ft_schedule() are deprecated since v2.10.0 and will be "
-            "removed in v2.14.0. Use strategy_adapter.gen_ft_schedule() instead to allow strategy-specific "
-            "customization."
-        )
-        return ScheduleImplMixin._gen_ft_schedule_impl(module, dump_loc)
-
-    @staticmethod
     def _gen_ft_schedule_impl(module: Module, dump_loc: str | os.PathLike) -> os.PathLike | None:
         """Internal implementation of default fine-tuning schedule generation.
 
-        This method contains the actual schedule generation logic shared between the deprecated static method
-        and the strategy adapter instance method.
+        Invoked by the :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.gen_ft_schedule` instance
+        method, which strategy adapters may override to customize schedule generation.
 
         Args:
             module (:class:`~torch.nn.Module`): The :class:`~torch.nn.Module` for which a fine-tuning schedule will be

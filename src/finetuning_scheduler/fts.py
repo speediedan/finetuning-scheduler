@@ -64,7 +64,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
     :ref:`Early Stopping<common/early_stopping:Early stopping>` for more details on that callback's configuration.
 
     Schedule definition is facilitated via
-    :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.gen_ft_schedule` which dumps
+    :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.gen_ft_schedule` which dumps
     a default fine-tuning schedule (by default using a naive, 2-parameters per level heuristic) which can be adjusted as
     desired by the user and subsuquently passed to the callback. Implicit fine-tuning mode generates the default
     schedule and proceeds to fine-tune according to the generated schedule. Implicit fine-tuning will often be less
