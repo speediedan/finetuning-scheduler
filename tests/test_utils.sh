@@ -177,6 +177,9 @@ show_test_results(){
   local tmp_raw_log="$2"
   if [ -f ${tmp_raw_log} ]; then
     raw_filename=$(basename "$tmp_raw_log")
+    # a fresh checkout has no ./lightning_logs, and a failed cp here aborts this EXIT trap under `set -e`
+    # before any results are reported
+    mkdir -p ./lightning_logs
     cp "$tmp_raw_log" "./lightning_logs/$raw_filename"
     echo -n "##vso[task.uploadfile]"
     echo "${PWD}/lightning_logs/$raw_filename"
