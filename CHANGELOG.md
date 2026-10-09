@@ -18,7 +18,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Raised the minimum supported Python version to `3.11`, in step with PyTorch `2.15`, which drops Python `3.10`. Deprecated in `2.14.0`. The CPU CI matrix now tests Python `3.11` and `3.13`.
 
-- The development branch now tracks the PyTorch `2.15` release candidates, with the CI Docker images and the Azure multi-GPU pipeline moving to CUDA `13.2`, matching PyTorch `2.15`'s default CUDA version.
+- The development branch now tracks the PyTorch `2.15` release candidates. The CI Docker images and the Azure multi-GPU pipeline use PyTorch `2.15`'s CUDA `13.0` build (toolkit `13.0.3`) rather than its default CUDA `13.2` build: the `nvidia/cuda` `13.2` images declare `NVIDIA_REQUIRE_CUDA=cuda>=13.2`, which the NVIDIA container runtime enforces at container start, and the CI host's driver supports CUDA `13.0`.
 
 - Raised dependency floors that predate Python `3.11` support, which the `oldest` CI leg exposed once Python `3.11` became the minimum. In the optional extras: `hydra-core` `>=1.3.0` and `omegaconf` `>=2.3.0` (earlier releases define dataclass defaults Python `3.11` rejects), `tensorboardX` `>=2.6.2` (earlier releases call `float()` on a one-element array, an error under NumPy `2.4`) and `psutil` `>=5.9.4` (earlier releases ship no Python `3.11` wheels). In the test dependencies: `mlflow` `>=3.9.0` (earlier releases import a pool class removed in SQLAlchemy `2.1`) and `coverage` `>=7.0.0` (earlier releases ship no Python `3.11` wheel for macOS arm64).
 

@@ -44,7 +44,7 @@ cd finetuning-scheduler
 
 # Step 1: Install a PyTorch prerelease (adjust version and CUDA target as needed; see configuration in requirements/ci/torch-pre.txt)
 # Example (nightly):
-uv pip install --prerelease=allow torch==2.15.0 --index-url https://download.pytorch.org/whl/test/cu132
+uv pip install --prerelease=allow torch==2.15.0 --index-url https://download.pytorch.org/whl/test/cu130
 
 # Step 2: Install FTS with Lightning commit pin (torch already installed, will be skipped)
 export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt

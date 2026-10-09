@@ -234,14 +234,27 @@ ships its own CUDA runtime, so the newest published patch of the same minor is t
 docker manifest inspect nvidia/cuda:13.2.2-devel-ubuntu22.04 >/dev/null 2>&1 && echo exists || echo missing
 ```
 
-**Smoke-test a CUDA minor newer than the host driver's.** CUDA 13.x minor-version compatibility lets a 13.2 wheel run
-on an r580 (CUDA 13.0) driver, but verify on every GPU, including a `torch.compile` call (Triton JIT), under a
-single-device lease. Run it from a private directory, not `/tmp`: a stray `bisect.py` there once shadowed the
-standard library for every `python -c` started in it.
+**The CI host's driver caps the image's CUDA minor, even though the wheel would run.** Check it first:
 
 ```bash
-$GPU_LEASE_CMD --gpus 1 --min-vram 16 --project fts-cuda-smoke -- python smoke.py   # repeat for the small GPU
+nvidia-smi | grep -o "CUDA Version: [0-9.]*"     # r580 reports 13.0
 ```
+
+`nvidia/cuda` images declare `NVIDIA_REQUIRE_CUDA=cuda>=X.Y`, and the NVIDIA container runtime enforces it at
+`docker start --gpus`. In the 2.15 cycle a `13.2.1` image passed every local check and then failed in Azure with
+`nvidia-container-cli: requirement error: unsatisfied condition: cuda>=13.2, please update your driver`. Two
+checks had missed it: the cu132 *wheel* runs on an r580 driver under CUDA minor-version compatibility, and a
+`docker run` without `--gpus` never invokes the hook. If the host driver's CUDA version is below the target's
+`CUDA_STABLE`, either use the newest torch wheel variant the driver satisfies (2.15 shipped cu130 alongside
+cu132) on a matching base image, or upgrade the host driver first. Do not set `NVIDIA_DISABLE_REQUIRE` to force
+it. Always verify a new image the way the pipeline starts it:
+
+```bash
+docker run --rm --gpus all speediedan/finetuning-scheduler:<new azpl-init tag> nvidia-smi -L
+```
+
+When smoke-testing wheels on the host, run from a private directory, not `/tmp`: a stray `bisect.py` there once
+shadowed the standard library for every `python -c` started in it.
 
 #### When the newest PyTorch drops a Python version
 
