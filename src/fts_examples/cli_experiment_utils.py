@@ -103,6 +103,7 @@ def get_env_info():
         not hasattr(torch.version, "hip") or torch.version.hip is None
     ):  # cuda version
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = "N/A"
+        rocm_compiled_version = "N/A"
     else:  # HIP version
 
         def get_version_or_na(cfg, prefix):
@@ -113,6 +114,8 @@ def get_env_info():
         hip_runtime_version = get_version_or_na(cfg, "HIP Runtime")
         miopen_runtime_version = get_version_or_na(cfg, "MIOpen")
         cuda_version_str = "N/A"
+        # older wheels have no `torch.version.rocm`
+        rocm_compiled_version = getattr(torch.version, "rocm", None) or "N/A"
         hip_compiled_version = torch.version.hip
 
     sys_version = sys.version.replace("\n", " ")
@@ -146,6 +149,12 @@ def get_env_info():
     }
     # get_cuda_module_loading_config() initializes CUDA which we want to avoid so we bypass this inspection
     systemenv_kwargs["cuda_module_loading"] = "not inspected"
+    # `SystemEnv` fields vary by torch version (e.g. `rocm_compiled_version` arrived in 2.15), so pass only the fields
+    # this torch defines and mark any we do not yet inspect rather than failing construction
+    systemenv_kwargs["rocm_compiled_version"] = rocm_compiled_version
+    fields = collect_env.SystemEnv._fields
+    systemenv_kwargs = {k: v for k, v in systemenv_kwargs.items() if k in fields}
+    systemenv_kwargs.update({f: "not inspected" for f in fields if f not in systemenv_kwargs})
     return collect_env.SystemEnv(**systemenv_kwargs)
 
 
