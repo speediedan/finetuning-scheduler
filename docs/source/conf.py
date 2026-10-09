@@ -293,6 +293,15 @@ intersphinx_mapping = {
 linkcheck_anchors_ignore_for_url = [
     r"https://pytorch\.org/docs/.*",
     r"https://docs\.pytorch\.org/docs/.*",
+    # The Lightning docs are now a client-rendered app: every path, including a nonexistent one, returns the same
+    # HTML shell, so no fragment on it can be resolved by ``linkcheck``.
+    r"https://lightning\.ai/docs/.*",
+]
+
+# Stack Overflow answers ``linkcheck``'s requests with ``403 Forbidden`` (bot filtering) while the same URL redirects
+# normally for a browser, so the result says nothing about whether the link is valid.
+linkcheck_ignore = [
+    r"https://stackoverflow\.com/.*",
 ]
 
 # -- Options for todo extension ----------------------------------------------

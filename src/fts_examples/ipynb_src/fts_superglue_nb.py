@@ -55,7 +55,7 @@
 # %% [markdown]
 # ## The Default Fine-Tuning Schedule
 #
-# Schedule definition is facilitated via the [gen_ft_schedule](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts_supporters.html#finetuning_scheduler.fts_supporters.ScheduleImplMixin.gen_ft_schedule) method which dumps a default fine-tuning schedule (by default using a naive, 2-parameters per level heuristic) which can be adjusted as
+# Schedule definition is facilitated via the [gen_ft_schedule](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.strategy_adapters.html#finetuning_scheduler.strategy_adapters.StrategyAdapter.gen_ft_schedule) method which dumps a default fine-tuning schedule (by default using a naive, 2-parameters per level heuristic) which can be adjusted as
 # desired by the user and/or subsequently passed to the callback. Using the default/implicitly generated schedule will likely be less computationally efficient than a user-defined fine-tuning schedule but is useful for exploring a model's fine-tuning behavior and can serve as a good baseline for subsequent explicit schedule refinement.
 # While the current version of [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) only supports single optimizer and (optional) lr_scheduler configurations, per-phase maximum learning rates can be set as demonstrated in the next section.
 
