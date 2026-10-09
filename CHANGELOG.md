@@ -32,6 +32,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Removed the static `ScheduleImplMixin.gen_ft_schedule()` method, deprecated since `2.10.0`. Use the `StrategyAdapter.gen_ft_schedule()` instance method instead, which strategy adapters can override to customize schedule generation and which FTS itself has used since `2.10.0`.
 
+- Deprecated Python `3.10` support. FTS `2.15.0` will require Python `>=3.11`, in step with PyTorch `2.15`, which drops Python `3.10` (itself end-of-life in October 2026). FTS `2.14.x` continues to support Python `3.10`.
+
 ## [2.13.0] - 2026-07-26
 
 ### Added
