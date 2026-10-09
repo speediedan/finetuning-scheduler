@@ -129,7 +129,7 @@ The prerelease version is configured via `requirements/ci/torch-pre.txt`. The `l
 #### Install a specific FTS version from source using the standalone `pytorch-lighting` package:
 
 ```bash
-export FTS_VERSION=2.14.0
+export FTS_VERSION=2.14.1
 export PACKAGE_NAME=pytorch
 git clone -b v${FTS_VERSION} https://github.com/speediedan/finetuning-scheduler
 cd finetuning-scheduler

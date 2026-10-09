@@ -58,7 +58,7 @@ The following table shows the compatibility between Fine-Tuning Scheduler, PyTor
      - Compatible Lightning (min)
    * - 2.14.x
      - 2.11.0
-     - 2.14.0
+     - 2.14.1
      - >= 2.6.0
    * - 2.13.x
      - 2.7.0
