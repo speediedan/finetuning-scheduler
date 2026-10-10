@@ -276,6 +276,10 @@ applied uniformly. Leave merged commit history alone: a rewrite costs more than 
 
 Fixes land on `main` first and are cherry-picked forward chronologically (`--no-merges`).
 
+**Releases:** use the `fts-release` skill (preparation, the maintainer authorization gate before tagging,
+publication checks, and the post-release Zenodo/`CITATION.cff` update). Opening a new development cycle on `main` is
+the `fts-development-branch-version-upgrade` skill.
+
 ## CI
 
 - `ci_test-full.yml` ("Test full") — CPU matrix: `{ubuntu-22.04, windows-2022, macOS-14}` x
