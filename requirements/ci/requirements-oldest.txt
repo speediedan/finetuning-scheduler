@@ -519,7 +519,7 @@ python-dateutil==2.9.0.post0
     #   jupyter-client
     #   matplotlib
     #   pandas
-python-discovery==1.6.1
+python-discovery==1.6.2
     # via virtualenv
 python-dotenv==1.2.4
     # via mlflow-skinny

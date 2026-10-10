@@ -85,7 +85,7 @@ cd finetuning-scheduler
 
 # To configure PyTorch prerelease used by the build scripts, edit `requirements/ci/torch-pre.txt`:
 #   Line 1: torch version (e.g., 2.15.0 for test/RC or 2.16.0.dev20261007 for nightly)
-#   Line 2: CUDA target (e.g., cu130) — CI uses cpu
+#   Line 2: CUDA target (e.g., cu132) — CI uses cpu
 #   Line 3: channel type: "test" or "nightly"
 
 # Note: `manage_standalone_processes.sh` is an optional wrapper to run long-running coverage/build scripts with checks for other concurrent conflicting processes, and run options (--use-nohup etc) — you can also run `build_fts_env.sh` and `gen_fts_coverage.sh` directly.
@@ -117,7 +117,7 @@ cd finetuning-scheduler
 
 # Step 1: Install a PyTorch prerelease (adjust version and CUDA target as needed; see configuration in requirements/ci/torch-pre.txt)
 # Example (test/RC channel):
-uv pip install --prerelease=if-necessary-or-explicit torch==2.15.0 --index-url https://download.pytorch.org/whl/test/cu130
+uv pip install --prerelease=if-necessary-or-explicit torch==2.15.0 --index-url https://download.pytorch.org/whl/test/cu132
 
 # Step 2: Install FTS with Lightning commit pin (torch already installed, will be skipped)
 export UV_OVERRIDE=${PWD}/requirements/ci/overrides.txt
@@ -240,7 +240,7 @@ See the [versioning documentation](https://finetuning-scheduler.readthedocs.io/e
 - The left column is the **oldest** supported PyTorch version, the right column the **latest** tested. PyTorch `2.12.0` is only exercised with Python `3.11`; the latest is exercised with both `3.11` and `3.13`.
 - The `main` branch tracks the **PyTorch 2.15 release candidates** (the `test` channel), so the latest column is currently an RC rather than a published release. Released FTS versions always pin a stable PyTorch. See the [compatibility table](https://finetuning-scheduler.readthedocs.io/en/stable/versioning.html).
 - All GitHub Actions legs above are **CPU-only** (no CUDA).
-- \*\* Multi-GPU tests run on Azure Pipelines against **PyTorch `2.15.0` (RC) / CUDA `13.0` (toolkit `13.0.3`) / Python `3.13`**, on one RTX 4090 and one RTX 2070 SUPER.
+- \*\* Multi-GPU tests run on Azure Pipelines against **PyTorch `2.15.0` (RC) / CUDA `13.2` (toolkit `13.2.1`) / Python `3.13`**, on one RTX 4090 and one RTX 2070 SUPER.
 
 </details>
 
