@@ -17,6 +17,7 @@ from copy import deepcopy, copy
 from logging import DEBUG
 from pathlib import Path
 from unittest import mock
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch, MagicMock
 
@@ -3009,3 +3010,27 @@ def test_fts_ckpt_load_state_dict_resets_wait_count_with_es(tmpdir):
 
     ckpt.load_state_dict({"current_ckpt_depth": 1, "best_ckpt_depth": 0, "best_model_path": ""})
     assert early_stopping.wait_count == 0
+
+
+def test_fts_import_reinit_class_requires_qualified_class_path():
+    """Validate a reinitialization ``class_path`` without a module path raises a ``MisconfigurationException``
+    rather than an uncaught ``ValueError`` (issue #61)."""
+    fts = FinetuningScheduler()
+    with pytest.raises(MisconfigurationException, match=r"\(SGD\).*fully qualified `class_path` is required"):
+        fts._import_reinit_class({"class_path": "SGD"}, "optimizer")
+
+
+def test_fts_sync_reads_but_never_writes_dotted_paths():
+    """Validate ``sync`` aggregates through dotted attribute paths without writing to them, so no attribute named
+    with the dotted path is created on the source object (issue #63)."""
+    loop = SimpleNamespace(epoch_progress=SimpleNamespace(current=SimpleNamespace(completed=4)))
+    state = SimpleNamespace(_ft_epoch=2)
+    sync_props = (("epoch_progress.current.completed", "_ft_epoch"),)
+    FinetuningScheduler.sync((loop, state), sync_props)
+    assert state._ft_epoch == 4
+    assert "epoch_progress.current.completed" not in vars(loop)
+    state._ft_epoch = 6
+    FinetuningScheduler.sync((loop, state), sync_props)
+    assert state._ft_epoch == 6
+    assert loop.epoch_progress.current.completed == 4
+    assert "epoch_progress.current.completed" not in vars(loop)

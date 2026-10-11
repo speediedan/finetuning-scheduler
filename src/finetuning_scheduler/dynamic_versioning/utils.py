@@ -54,6 +54,7 @@ LIGHTNING_PACKAGES = {
 # under [tool.fts.min-versions] (informational only).
 BASE_DEPENDENCIES = [
     "torch>=2.12.0",
+    "PyYAML>=6.0.2",
 ]
 
 # Files to exclude from modification to prevent self-modification

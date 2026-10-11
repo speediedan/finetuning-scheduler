@@ -12,6 +12,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Fixed the examples' environment logging (`collect_env_info`) failing under PyTorch `2.15`, which added a `rocm_compiled_version` field to `torch.utils.collect_env.SystemEnv`. The examples build that tuple themselves to avoid initializing CUDA; they now pass only the fields the installed PyTorch defines and mark any they do not inspect, so a future field no longer breaks every example.
 
+- Fixed a reinitialization `class_path` without a module path (for example `class_path: SGD`) raising an uncaught `ValueError` from tuple unpacking. It now raises a `MisconfigurationException` that names the `class_path` and asks for a fully qualified path [#61](https://github.com/speediedan/finetuning-scheduler/issues/61).
+
+- Fixed custom strategy adapter resolution accepting targets that are not `StrategyAdapter` subclasses: the result of its `issubclass` check was discarded, so a wrong target failed later and far from its configuration. Targets resolved by entry-point name or by fully qualified name are now refused at resolution [#62](https://github.com/speediedan/finetuning-scheduler/issues/62).
+
+- Fixed `ScheduleImplMixin.sync` creating attributes named with a dotted path (for example `epoch_progress.current.completed`) on the Lightning fit loop. Dotted paths are now read-only views. The old write never reached the nested counter, so scheduling behavior is unchanged [#63](https://github.com/speediedan/finetuning-scheduler/issues/63).
+
 - Fixed `lock_ci_requirements.sh` ignoring the CUDA target configured in `requirements/ci/torch-pre.txt`. The generated `torch-override.txt` header and the printed installation commands hardcoded the `nightly/cu130` index, so a `test` channel or `cu132` configuration documented the wrong index.
 
 ### Changed
@@ -25,6 +31,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Raised dependency floors that predate Python `3.11` support, which the `oldest` CI leg exposed once Python `3.11` became the minimum. In the optional extras: `hydra-core` `>=1.3.0` and `omegaconf` `>=2.3.0` (earlier releases define dataclass defaults Python `3.11` rejects), `tensorboardX` `>=2.6.2` (earlier releases call `float()` on a one-element array, an error under NumPy `2.4`) and `psutil` `>=5.9.4` (earlier releases ship no Python `3.11` wheels). In the test dependencies: `mlflow` `>=3.9.0` (earlier releases import a pool class removed in SQLAlchemy `2.1`) and `coverage` `>=7.0.0` (earlier releases ship no Python `3.11` wheel for macOS arm64).
 
 - Raised the `jsonargparse` floor to `4.40.0` and added its `jsonnet` extra in the optional extras. Lightning `2.7` requires `jsonargparse[jsonnet,signatures]>=4.39` for `LightningCLI`, and `4.40.0` is the first release whose `jsonnet` extra uses `jsonnet` releases that ship wheels for every platform.
+
+- Capped `jsonargparse` below `5.0` in the `cli`, `extra`, `examples` and `all` extras. jsonargparse `5.0` removes `ArgumentParser.add_instantiator`, which `LightningCLI` still calls, and Lightning's own `<5.0` cap applies only to Lightning's extras, which FTS does not install. The examples now call `add_class_arguments` in place of `add_dataclass_arguments`, which `5.0` also removes [#60](https://github.com/speediedan/finetuning-scheduler/issues/60).
+
+- Declared `PyYAML>=6.0.2` as a base dependency. FTS imports `yaml` directly but previously received it only through Lightning. The floor is the first release with wheels for every supported Python version [#64](https://github.com/speediedan/finetuning-scheduler/issues/64).
 
 ### Deprecated
 
