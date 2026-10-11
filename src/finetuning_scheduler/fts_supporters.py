@@ -51,6 +51,7 @@ from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 from lightning.pytorch.utilities.types import LRSchedulerConfig
 
+import finetuning_scheduler.lightning  # noqa: F401  (registers the Lightning backends with the core)
 from finetuning_scheduler.setup_tools import disable_always_warnings
 from finetuning_scheduler.strategy_adapters import StrategyAdapter, FSDPStrategyAdapter, ModelParallelStrategyAdapter
 from finetuning_scheduler.types import (FTSLRSchedulerType, FTSLRSchedulerTypeTuple, ParamGroupAddable,

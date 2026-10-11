@@ -32,6 +32,7 @@ from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 from lightning.pytorch.trainer.connectors.logger_connector.result import _ResultMetric
 
+import finetuning_scheduler.lightning  # noqa: F401  (registers the Lightning backends with the core)
 from finetuning_scheduler.fts_supporters import (
     CallbackDepMixin,
     FTSEarlyStopping,
