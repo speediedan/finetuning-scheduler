@@ -149,8 +149,9 @@ frozenlist==1.8.0
     # via
     #   aiohttp
     #   aiosignal
-fsspec[http]==2025.3.0
+fsspec[http]==2023.5.0
     # via
+    #   finetuning-scheduler (pyproject.toml)
     #   datasets
     #   evaluate
     #   huggingface-hub
@@ -563,6 +564,7 @@ requests==2.34.2
     #   datasets
     #   docker
     #   evaluate
+    #   fsspec
     #   huggingface-hub
     #   mlflow-skinny
     #   requests-toolbelt
