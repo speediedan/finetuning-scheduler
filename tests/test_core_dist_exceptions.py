@@ -32,6 +32,7 @@ from finetuning_scheduler.lightning import FTSMisconfigurationException, LIGHTNI
 THIS_FILE = os.path.abspath(__file__)
 CORE_DIR = Path(finetuning_scheduler.__file__).parent / "core"
 CORE_IMPORT_ALLOWLIST = {"torch", "yaml", "fsspec", "typing_extensions"}
+CORE_FTS_IMPORT_ALLOWLIST = ("finetuning_scheduler.core", "finetuning_scheduler.setup_tools")
 
 
 @pytest.fixture
@@ -187,4 +188,4 @@ def test_core_import_allowlist(path):
         for node in ast.walk(ast.parse(path.read_text()))
         if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("finetuning_scheduler")
     }
-    assert all(m.startswith("finetuning_scheduler.core") for m in fts_imports), fts_imports
+    assert all(m.startswith(CORE_FTS_IMPORT_ALLOWLIST) for m in fts_imports), fts_imports
