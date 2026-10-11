@@ -1212,12 +1212,16 @@ class ScheduleParsingMixin(ABC):
         """
         # TODO: refactor this function to enable type narrowing while continuing to share relevant code paths
         try:
+            if "." not in reinit_cfg["class_path"]:
+                raise ValueError(
+                    "a fully qualified `class_path` is required (e.g. `torch.optim.SGD` rather than `SGD`)"
+                )
             class_module, class_name = reinit_cfg["class_path"].rsplit(".", 1)
             module = __import__(class_module, fromlist=[class_name])
             reinit_class = getattr(module, class_name)
             if reinit_target == "lr_scheduler":
                 self._is_supported_lr(reinit_class)
-        except (ImportError, AttributeError) as err:
+        except (ImportError, AttributeError, ValueError) as err:
             error_msg = (
                 "Could not import specified reinitialization configuration class using class_path "
                 f"({reinit_cfg['class_path']}). Received the following error while importing: {err}. Please validate "
@@ -1237,6 +1241,7 @@ class ScheduleParsingMixin(ABC):
         Raises:
             MisconfigurationException: If the specified custom strategy adapter cannot be imported successfully.
             MisconfigurationException: If the specified `strategy_key` does not match the current strategy.
+            MisconfigurationException: If the resolved target is not a :class:`StrategyAdapter` subclass.
 
         Returns:
             StrategyAdapter: The custom strategy adapter class to be instantiated.
@@ -1250,29 +1255,38 @@ class ScheduleParsingMixin(ABC):
                 )
             # If a short entry point name was provided, check the discovered STRATEGY_ADAPTERS mapping
             if qualname in STRATEGY_ADAPTERS:
-                return STRATEGY_ADAPTERS[qualname]
-
-            # Accept either 'module.Class' or 'module:Class' form to support both direct import paths and
-            # entry-point-like strings.
-            if ":" in qualname:
-                class_module, class_name = qualname.split(":", 1)
+                custom_strategy_adapter_cls = STRATEGY_ADAPTERS[qualname]
             else:
-                # Require at least one '.' for module.Class format
-                if "." not in qualname:
-                    raise ValueError(
-                        f"Invalid adapter name '{qualname}'. Must be either a registered plugin name "
-                        f"(found in STRATEGY_ADAPTERS: {list(STRATEGY_ADAPTERS.keys())}) or a fully qualified "
-                        f"class name in 'module.Class' or 'module:Class' format."
-                    )
-                class_module, class_name = qualname.rsplit(".", 1)
-            module = __import__(class_module, fromlist=[class_name])
-            custom_strategy_adapter_cls = getattr(module, class_name)
-            issubclass(custom_strategy_adapter_cls, StrategyAdapter)
+                # Accept either 'module.Class' or 'module:Class' form to support both direct import paths and
+                # entry-point-like strings.
+                if ":" in qualname:
+                    class_module, class_name = qualname.split(":", 1)
+                else:
+                    # Require at least one '.' for module.Class format
+                    if "." not in qualname:
+                        raise ValueError(
+                            f"Invalid adapter name '{qualname}'. Must be either a registered plugin name "
+                            f"(found in STRATEGY_ADAPTERS: {list(STRATEGY_ADAPTERS.keys())}) or a fully qualified "
+                            f"class name in 'module.Class' or 'module:Class' format."
+                        )
+                    class_module, class_name = qualname.rsplit(".", 1)
+                module = __import__(class_module, fromlist=[class_name])
+                custom_strategy_adapter_cls = getattr(module, class_name)
         except (ImportError, AttributeError, ValueError) as err:
             error_msg = (
                 "Could not import the specified custom strategy adapter class using the provided fully qualified class"
                 f" name ({qualname}). Received the following error while importing: {err}. Please validate specified"
                 " path."
+            )
+            rank_zero_warn(error_msg)
+            raise MisconfigurationException(error_msg)
+        is_adapter = isinstance(custom_strategy_adapter_cls, type) and issubclass(
+            custom_strategy_adapter_cls, StrategyAdapter
+        )
+        if not is_adapter:
+            error_msg = (
+                f"The specified custom strategy adapter ({qualname}) resolved to {custom_strategy_adapter_cls!r}, which"
+                " is not a subclass of `StrategyAdapter`."
             )
             rank_zero_warn(error_msg)
             raise MisconfigurationException(error_msg)
@@ -1752,6 +1766,10 @@ class ScheduleImplMixin(ABC):
     def sync(objs: tuple, asets: tuple, agg_func: Callable = max) -> None:
         """Synchronize sets of object attributes using a given aggregation function.
 
+        Dotted attribute paths (e.g. ``epoch_progress.current.completed``) are read through the nested objects they
+        name but are never written: they are treated as read-only views of state owned by another component (here,
+        the Lightning fit loop). Only plain (non-dotted) attributes receive the aggregated value.
+
         Args:
             objs: The target objects to synchronize
             asets: The attribute sets to synchronize
@@ -1760,7 +1778,8 @@ class ScheduleImplMixin(ABC):
         for attrs in asets:
             agg = reduce(agg_func, [reduce(getattr, a.split(sep="."), o) for o, a in zip(objs, attrs)])
             for o, a in zip(objs, attrs):
-                setattr(o, a, agg)
+                if "." not in a:
+                    setattr(o, a, agg)
 
     def _inspect_fts_opt_state(self) -> tuple:
         """Distills relevant initialized optimizer state for validation prior to fit start.

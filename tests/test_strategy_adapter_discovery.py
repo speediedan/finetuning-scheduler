@@ -163,3 +163,18 @@ def test_resolve_strategy_adapter_missing_strategy_key():
         match=r"Current strategy name \(single_device\) does not map to a custom strategy adapter",
     ):
         fts._resolve_strategy_adapter("single_device", adapter_map)
+
+
+@pytest.mark.parametrize(
+    "qualname",
+    ["torch.nn:Linear", "os.path:sep"],
+    ids=["non_adapter_class", "non_class"],
+)
+def test_resolve_strategy_adapter_not_an_adapter(qualname):
+    """Validate a target that is not a ``StrategyAdapter`` subclass is refused at resolution rather than failing
+    later (issue #62)."""
+    adapter_map = {"single_device": qualname}
+    fts = FinetuningScheduler()
+
+    with pytest.raises(MisconfigurationException, match=r"is not a subclass of `StrategyAdapter`"):
+        fts._resolve_strategy_adapter("single_device", adapter_map)

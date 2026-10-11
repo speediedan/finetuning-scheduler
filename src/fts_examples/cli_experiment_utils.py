@@ -291,7 +291,7 @@ class FTSExperimentCLI(LightningCLI):
 
     def add_exp_harness_args_to_parser(self, parser, nested_key, datacls):
         kwargs: dict[str, Any] = {"instantiate": False, "fail_untyped": False, 'required': False}
-        parser.add_dataclass_arguments(datacls, nested_key, **kwargs)
+        parser.add_class_arguments(datacls, nested_key, **kwargs)
         parser.link_arguments(nested_key, f"model.init_args.{nested_key}")
 
     def _add_configure_optimizers_method_to_model(self, subcommand: str | None) -> None:

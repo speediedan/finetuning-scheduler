@@ -2,7 +2,7 @@
 #    uv pip compile pyproject.toml --extra all --group dev --group test --output-file requirements/ci/requirements-oldest.txt --no-strip-extras --resolution lowest-direct --universal --python-version 3.11
 aiohappyeyeballs==2.7.1
     # via aiohttp
-aiohttp==3.14.4
+aiohttp==3.14.5
     # via fsspec
 aiosignal==1.4.0
     # via aiohttp
@@ -94,7 +94,7 @@ cryptography==46.0.7
     #   secretstorage
 cycler==0.12.1
     # via matplotlib
-databricks-sdk==0.150.0
+databricks-sdk==0.151.0
     # via
     #   mlflow-skinny
     #   mlflow-tracing
@@ -129,7 +129,7 @@ evaluate==0.3.0
     # via finetuning-scheduler (pyproject.toml)
 fastapi==0.143.0
     # via mlflow-skinny
-filelock==4.1.0
+filelock==4.1.1
     # via
     #   datasets
     #   huggingface-hub
@@ -310,7 +310,7 @@ more-itertools==11.1.0
     # via
     #   jaraco-classes
     #   jaraco-functools
-multidict==6.9.1
+multidict==7.1.0
     # via
     #   aiohttp
     #   yarl
@@ -365,7 +365,7 @@ numpy==2.4.6 ; python_full_version < '3.12'
     #   tensorboardx
     #   torchmetrics
     #   transformers
-numpy==2.5.3 ; python_full_version >= '3.12'
+numpy==2.5.4 ; python_full_version >= '3.12'
     # via
     #   contourpy
     #   datasets
@@ -439,7 +439,7 @@ pip==21.0
     # via finetuning-scheduler (pyproject.toml)
 pkginfo==1.13
     # via twine
-platformdirs==4.12.4
+platformdirs==4.13.0
     # via virtualenv
 pluggy==1.6.0
     # via pytest
@@ -482,12 +482,12 @@ pyasn1-modules==0.4.2
     # via google-auth
 pycparser==3.11 ; implementation_name != 'PyPy'
     # via cffi
-pydantic==2.14.0
+pydantic==2.14.1
     # via
     #   fastapi
     #   mlflow-skinny
     #   mlflow-tracing
-pydantic-core==2.50.0
+pydantic-core==2.50.1
     # via pydantic
 pygments==2.21.0
     # via
@@ -535,8 +535,9 @@ pywin32-ctypes==0.2.3 ; sys_platform == 'win32'
     # via keyring
 pywinpty==3.0.5 ; os_name == 'nt'
     # via terminado
-pyyaml==6.0.3
+pyyaml==6.0.2
     # via
+    #   finetuning-scheduler (pyproject.toml)
     #   aspy-yaml
     #   datasets
     #   huggingface-hub
