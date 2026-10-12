@@ -211,14 +211,14 @@ collect_env_coverage(){
         log_msg ""
         log_msg "=== DRY-RUN MODE: Collecting tests without execution ==="
         log_msg "Tests that would be collected:"
-        python -m pytest src/finetuning_scheduler tests --collect-only -q 2>&1 >> $coverage_session_log
+        python -m pytest src/finetuning_scheduler tests --collect-only -q >> $coverage_session_log 2>&1
         log_msg ""
         log_msg "Standalone tests that would run (pattern: test_f):"
-        PL_RUN_STANDALONE_TESTS=1 python -m pytest tests -m standalone --collect-only -q -k 'test_f' 2>&1 >> $coverage_session_log || true
+        PL_RUN_STANDALONE_TESTS=1 python -m pytest tests --collect-only -q -k 'test_f' >> $coverage_session_log 2>&1 || true
         if [[ $include_experimental -eq 1 ]]; then
             log_msg ""
             log_msg "Experimental patch tests that would run:"
-            PL_RUN_EXP_PATCH_TESTS=1 python -m pytest tests -m exp_patch --collect-only -q -k 'test_f' 2>&1 >> $coverage_session_log || true
+            FTS_EXPERIMENTAL_PATCH_TESTS=1 python -m pytest tests --collect-only -q -k 'test_f' >> $coverage_session_log 2>&1 || true
         fi
         log_msg "=== DRY-RUN COMPLETE ==="
         return 0
@@ -229,7 +229,7 @@ collect_env_coverage(){
             log_msg "Erasing previous coverage data"
 			python -m coverage erase
             log_msg "Running main test suite with coverage"
-			python -m coverage run --append --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v 2>&1 >> $coverage_session_log
+			python -m coverage run --append --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v >> $coverage_session_log 2>&1
             # Skip special tests if --no-special flag is set
             if [[ $no_special -eq 1 ]]; then
                 log_msg "Skipping special tests (--no-special flag set)"
@@ -241,19 +241,19 @@ collect_env_coverage(){
                 fi
 
                 log_msg "Running standalone tests (pattern: test_f)"
-                (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f' --log_file=${coverage_session_log} ${failures_flag} 2>&1 >> ${temp_special_log}) > /dev/null
+                (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f' --log_file=${coverage_session_log} ${failures_flag} >> ${temp_special_log} 2>&1) > /dev/null
 
                 if [[ $run_all_and_examples -eq 1 ]]; then
                     log_msg "Running all FTS example tests (non-standalone)"
-                    python -m coverage run --append --source src/finetuning_scheduler -m pytest src/fts_examples/test_examples.py -v 2>&1 >> $coverage_session_log
+                    python -m coverage run --append --source src/finetuning_scheduler -m pytest src/fts_examples/test_examples.py -v >> $coverage_session_log 2>&1
 
                     log_msg "Running all FTS example tests (standalone)"
-                    (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_examples' --collect_dir=src/fts_examples --log_file=${coverage_session_log} ${failures_flag} 2>&1 >> ${temp_special_log}) > /dev/null
+                    (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_examples' --collect_dir=src/fts_examples --log_file=${coverage_session_log} ${failures_flag} >> ${temp_special_log} 2>&1) > /dev/null
                 fi
 
                 if [[ $include_experimental -eq 1 ]]; then
                     log_msg "Running tests that require experimental patches using $1"
-                    (./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --log_file=${coverage_session_log} --experiment_patch_mask="1 0 0 1" ${failures_flag} 2>&1 >> ${temp_special_log}) > /dev/null
+                    (./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --log_file=${coverage_session_log} --experiment_patch_mask="1 0 0 1" ${failures_flag} >> ${temp_special_log} 2>&1) > /dev/null
                 else
                     log_msg "Skipping tests that require experimental patches."
                 fi
