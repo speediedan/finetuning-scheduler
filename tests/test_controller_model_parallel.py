@@ -81,6 +81,51 @@ def test_fsdp_restores_the_best_and_resumes(gloo_pool, tmp_path):
 
 
 @GLOO
+@pytest.mark.parametrize("where", ["gate", "end", "start"])
+def test_forward_in_a_gate_or_phase_hook_before_the_thaw(gloo_pool, where):
+    """A gate or a phase hook may evaluate the model between the controller's restore and its thaw; the thaw must
+    still reach the parameters FSDP2 trains (#90)."""
+    results = gloo_pool.run(mp.fsdp, callback_eval=where)
+    agreed = _agreed(results)
+    assert _states(agreed["path"]) == _expected(path_fsdp_autocm) and agreed["unmoved"] == []
+    assert _close(results[0]["params"], mp.reference()["params"])
+
+
+@GLOO
+def test_load_after_a_forward_resumes_exactly(gloo_pool, tmp_path):
+    """A phase-0 start hook evaluates the fresh model before ``load()`` replays the thaw up to the saved depth
+    (where the root's parameters are thawed); the resumed run still matches an uninterrupted one (#90)."""
+    val = [1.0, 0.8, 0.9, 0.7]
+    resumed = gloo_pool.run(mp.fsdp_resume, ckpt_dir=str(tmp_path / "resume"), epochs=4, split=3, val=val,
+                            hook_eval=True)
+    straight = gloo_pool.run(mp.fsdp, epochs=4, ckpt_dir=str(tmp_path / "straight"), val=val)
+    assert straight[0]["unmoved"] == []
+    assert _phases(resumed[0]["path"]) == _phases(straight[0]["path"])
+    assert _close(resumed[0]["params"], straight[0]["params"], tol=1e-6)
+
+
+@GLOO
+def test_root_only_plan_saves_sharded_after_a_forward(gloo_pool, tmp_path):
+    """With FSDP2 on the root alone, an evaluation forward leaves every parameter unsharded; best checkpoints are
+    still written and restored through DCP, and the run matches a single-process one."""
+    results = gloo_pool.run(mp.fsdp, root_only=True, evaluate=True, ckpt_dir=str(tmp_path / "root"), val=VAL)
+    agreed = _agreed(results)
+    assert agreed["layout"]["fsdp_modules"] == [""] and agreed["sharded_best"] and agreed["unmoved"] == []
+    ref = mp.reference(ckpt_dir=str(tmp_path / "ref"), val=VAL)
+    assert agreed["restored"] == ref["restored"] == 2
+    assert _close(results[0]["params"], ref["params"])
+
+
+@GLOO
+def test_warning_covers_tensor_parallel_params_outside_fsdp(gloo_pool):
+    """On a (data-parallel, tensor-parallel) mesh, a tensor-parallel DTensor no FSDP module manages is not averaged
+    across data-parallel ranks, so it is warned about like a plain tensor."""
+    results = gloo_pool.run(mp.warn_2d)
+    assert results[0]["tok_embeddings_is_dtensor"]
+    assert len(results[0]["warned"]) == 1 and "tok_embeddings.weight" in results[0]["warned"][0]
+
+
+@GLOO
 @pytest.mark.parametrize("tp_loss_parallel", [True, False], ids=["loss_parallel", "replicated_loss"])
 def test_tp_follows_the_lightning_path(gloo_pool, tmp_path, tp_loss_parallel):
     """Tensor parallelism over both ranks follows the Lightning test's TP path, restores the best through DCP, and

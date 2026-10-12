@@ -76,10 +76,17 @@ def _loss(model: nn.Module, tokens: torch.Tensor, tp_loss_parallel: bool = False
     return loss.detach()
 
 
-def _controller(model, ckpt_dir=None, restore_best=False):
+def _controller(model, ckpt_dir=None, restore_best=False, callback=None):
+    """``callback`` is ``(where, fn)``: a gate (``"gate"``) or a phase hook (``"start"`` or ``"end"``)."""
     checkpoint = BestCheckpoint(ckpt_dir, "val_loss") if ckpt_dir else None
     fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), transition=None,
                         host=TorchHost(model), checkpoint=checkpoint, restore_best=restore_best and bool(ckpt_dir))
+    if callback is not None:
+        where, fn = callback
+        if where == "gate":
+            fts.add_gate(fn)
+        else:
+            fts.add_phase_hook(fn, when=where)
     fts.setup()
     return fts
 
@@ -127,10 +134,11 @@ def _train(fts, model, data, shard, device, epochs, val=None, tp_loss_parallel=F
     return path
 
 
-def _fsdp_plan(model: nn.Module, mesh, shard_root: bool = True, mp_policy=None) -> list[str]:
-    """``fsdp_cm_only``'s plan (``output``, ``layers.1``, ``norm``) plus ``layers.0``, then the root."""
+def _fsdp_plan(model: nn.Module, mesh, shard_root: bool = True, mp_policy=None, root_only: bool = False) -> list[str]:
+    """``fsdp_cm_only``'s plan (``output``, ``layers.1``, ``norm``) plus ``layers.0``, then the root (or the root
+    alone)."""
     kwargs = {"mesh": mesh} | ({"mp_policy": mp_policy} if mp_policy is not None else {})
-    planned = ["layers.0", "layers.1", "norm", "output"]
+    planned = [] if root_only else ["layers.0", "layers.1", "norm", "output"]
     for name in planned:
         fully_shard(model.get_submodule(name), **kwargs)
     if shard_root:
@@ -139,25 +147,36 @@ def _fsdp_plan(model: nn.Module, mesh, shard_root: bool = True, mp_policy=None) 
     return planned
 
 
+def _evaluate(model: nn.Module, tokens: torch.Tensor, device: torch.device) -> None:
+    """A forward-only pass, as a validation metric, a gate's probe or a phase hook's baseline runs."""
+    with torch.no_grad():
+        model(tokens[:, :-1].to(device))
+
+
 def _shard(ctx, batch):
     return slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
 
 
 def fsdp(ctx, epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, checkpoint_activations: bool = False,
-         ckpt_dir: str | None = None, val: list | None = None, fp16: bool = False, evaluate: bool = False) -> dict:
+         ckpt_dir: str | None = None, val: list | None = None, fp16: bool = False, evaluate: bool = False,
+         callback_eval: str | None = None, root_only: bool = False) -> dict:
     """FSDP2 with a manual plan sharding the root last (T1), optionally with activation checkpointing (T2), a best-
-    checkpoint policy restoring at boundaries (T3) or fp16 mixed precision (T4)."""
+    checkpoint policy restoring at boundaries (T3) or fp16 mixed precision (T4); with a forward-only pass before
+    each ``epoch_end`` (``evaluate``) or inside a gate or a phase's ``start`` or ``end`` hook
+    (``callback_eval``)."""
     model = _model(seed, ctx.device, checkpoint_activations)
     mp_policy = MixedPrecisionPolicy(param_dtype=torch.float16, reduce_dtype=torch.float32) if fp16 else None
-    planned = _fsdp_plan(model, ctx.mesh(), mp_policy=mp_policy)
+    planned = _fsdp_plan(model, ctx.mesh(), mp_policy=mp_policy, root_only=root_only)
     initial = _params(model)
     unsharded_dtypes = set()
     if fp16:  # record the dtype each FSDP module computes in, after FSDP2's all-gather
         model.layers[0].register_forward_pre_hook(
             lambda mod, args: unsharded_dtypes.add(str(mod.attention.wq.weight.dtype)))
-    fts = _controller(model, ckpt_dir, restore_best=ckpt_dir is not None)
-    path = _train(fts, model, _data(epochs, steps, batch, seed), _shard(ctx, batch), ctx.device, epochs, val=val,
-                  evaluate=evaluate)
+    data, shard = _data(epochs, steps, batch, seed), _shard(ctx, batch)
+    callback = None if callback_eval is None else (
+        callback_eval, lambda event: _evaluate(model, data[0, 0, shard], ctx.device) or True)
+    fts = _controller(model, ckpt_dir, restore_best=ckpt_dir is not None, callback=callback)
+    path = _train(fts, model, data, shard, ctx.device, epochs, val=val, evaluate=evaluate)
     return {"path": path, "layout": _fsdp_layout(model, planned, ctx.world_size), "params": _params(model),
             "unmoved": _unmoved(model, initial),
             "restored": fts.restored_count, "unsharded_dtypes": sorted(unsharded_dtypes),
@@ -175,8 +194,12 @@ def reference(epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, ck
 
 
 def fsdp_resume(ctx, ckpt_dir: str, epochs: int = 3, split: int = 2, steps: int = 2, batch: int = 4, seed: int = 7,
-                val: list | None = None) -> dict:
-    """Train ``split`` epochs, save (a DCP directory), load into a fresh sharded model and controller, finish."""
+                val: list | None = None, hook_eval: bool = False) -> dict:
+    """Train ``split`` epochs, save (a DCP directory), load into a fresh sharded model and controller, finish.
+
+    With
+    ``hook_eval``, the fresh controller's phase-0 start hook runs a forward-only pass before the load.
+    """
     data, shard = _data(epochs, steps, batch, seed), _shard(ctx, batch)
     first_model = _model(seed, ctx.device)
     _fsdp_plan(first_model, ctx.mesh())
@@ -185,7 +208,8 @@ def fsdp_resume(ctx, ckpt_dir: str, epochs: int = 3, split: int = 2, steps: int 
     saved = first.save(os.path.join(ckpt_dir, "resume"))
     model = _model(seed + 100, ctx.device)  # different initial weights: the load must overwrite them
     _fsdp_plan(model, ctx.mesh())
-    fts = _controller(model, os.path.join(ckpt_dir, "best"), restore_best=True)
+    hook = ("start", lambda event: _evaluate(model, data[0, 0, shard], ctx.device)) if hook_eval else None
+    fts = _controller(model, os.path.join(ckpt_dir, "best"), restore_best=True, callback=hook)
     fts.load(saved)
     path = _train(fts, model, data, shard, ctx.device, epochs, val=val, start_path=path)
     return {"path": path, "params": _params(model), "saved_is_dir": os.path.isdir(saved)}
@@ -243,3 +267,21 @@ def refused_wrappers(ctx) -> dict:
     inner.layers[1] = nn.parallel.DistributedDataParallel(inner.layers[1])
     return {"ddp_root": attempt(ddp_root), "ddp_submodule": attempt(inner),
             "replicate": attempt(replicate(_model(1, ctx.device)))}
+
+
+def warn_2d(ctx, seed: int = 7) -> dict:
+    """A (data-parallel, tensor-parallel) mesh with the TP plan over the whole model and FSDP2 on the blocks only:
+
+    the root's parameters are tensor-parallel DTensors that nothing averages across data-parallel ranks.
+    """
+    import warnings
+
+    mesh = ctx.mesh((ctx.world_size, 1), ("data_parallel", "tensor_parallel"))
+    model = gen_apply_transformer_tp_plan(_model(seed, ctx.device, math_sdpa=True), mesh, False)
+    for name in ("layers.0", "layers.1", "norm", "output"):
+        fully_shard(model.get_submodule(name), mesh=mesh["data_parallel"])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _controller(model)
+    return {"warned": [str(w.message) for w in caught if "not synchronized" in str(w.message)],
+            "tok_embeddings_is_dtensor": isinstance(model.tok_embeddings.weight, DTensor)}

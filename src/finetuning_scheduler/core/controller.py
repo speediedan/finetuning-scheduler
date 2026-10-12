@@ -405,16 +405,23 @@ class FTSController:
         core_optim.check_lr_scheduler_init(lrs_class, lr_scheduler_init, implicit)
 
     def _warn_unsynchronized_params(self) -> None:
-        """Warn about scheduled parameters that FSDP2 leaves unsharded in a data-parallel run (a plan that does not
+        """Warn about scheduled parameters no FSDP2 module manages in a data-parallel run (a plan that does not
         shard the root module): nothing synchronizes their gradients, so each rank would train its own copy."""
         if self._host.world_size < 2 or not torch.distributed.is_available():
             return
         from torch.distributed.fsdp import FSDPModule
 
-        if not any(isinstance(m, FSDPModule) for m in self.model.modules()):
+        fsdp_modules = {name for name, m in self.model.named_modules() if isinstance(m, FSDPModule)}
+        if not fsdp_modules:
             return
+
+        def managed(param_name: str) -> bool:  # FSDP2 manages a parameter of the module it shards or any descendant
+            parts = param_name.split(".")[:-1]
+            return any(".".join(parts[:i]) in fsdp_modules for i in range(len(parts) + 1))
+
         scheduled = {n for d, phase in self._schedule.items() if d <= self._max_depth for n in phase["params"]}
-        plain = [n for n, p in self.model.named_parameters() if n in scheduled and type(p).__name__ != "DTensor"]
+        # a tensor-parallel DTensor outside every FSDP module is not averaged across data-parallel ranks either
+        plain = [n for n, _ in self.model.named_parameters() if n in scheduled and not managed(n)]
         if plain:
             shown = ", ".join(plain[:5]) + (f" and {len(plain) - 5} more" if len(plain) > 5 else "")
             rank_zero_warn(
@@ -716,6 +723,8 @@ class FTSController:
         """Thaw ``depth``'s parameters (and, after a restore or an optimizer reinitialization, every phase the
         optimizer lacks) and configure the optimizer and lr schedulers for them, as the callback's ``step_pg``
         does."""
+        # after any phase hooks and gates, which may have run a forward-only pass, and on `load_state_dict`'s replay
+        _reshard_fsdp_modules(self.model)
         optimizer = self.optimizer
         schedulers = [s for s, _ in self._host.get_lr_schedulers()]
         new_optimizer_cfg, phases = core_phase.thaw_plan(self._schedule, depth, restored_depth, depth_sync=depth_sync,
