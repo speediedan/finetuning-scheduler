@@ -1384,32 +1384,9 @@ class ScheduleImplMixin(ABC):
                 # implemented in `StrategyAdapter` since override behavior may be strategy-dependent in the future
                 self.strategy_adapter.phase0_optimizer_override()
             else:
-                w_msg = ScheduleImplMixin.PHASE_0_DIVERGENCE_MSG + (
-                    " Since `enforce_phase0_params` is currently set to `False`, FinetuningScheduler will not override"
-                    " the user-configured optimizer configuration to enforce the expected phase 0 configuration of"
-                    " thawed parameters."
-                    "\n\n"
-                    "HINT: Leaving `enforce_phase0_params` to its default (`True`) will avoid discrepancies like this"
-                    " in the majority of use cases. If that solution is not desired or sufficient, please find more"
-                    " detailed information about the configuration divergence below. \n\n"
-                    f"In this case, FinetuningScheduler configured the provided model to have {init_ft_cnt} trainable"
-                    " parameters in phase 0 (the initial training phase) but the optimizer has subsequently been"
-                    " initialized with"
+                rank_zero_warn(
+                    core_optim.phase0_divergence_warning(init_ft_cnt, no_grad_cnt, total_ft_cnt, param_diff_summary)
                 )
-                if param_diff_summary:
-                    w_msg = ScheduleImplMixin._grad_mismatch_feedback(w_msg, param_diff_summary)
-                if no_grad_cnt > 0:
-                    w_msg += (
-                        f"Also note that there are {no_grad_cnt} parameters in the optimizer that do not require a"
-                        " gradient. If non-intentional, this state is commonly caused by failing to filter out"
-                        " parameters that do not require a gradient when initializing the optimizer (e.g.,"
-                        " `parameters = list(filter(lambda x: x.requires_grad, self.parameters()))`. If you intended to"
-                        " initialize the optimizer with parameters that do not require a gradient you may want to"
-                        f" ensure they are not included in the {total_ft_cnt} parameters that the FinetuningScheduler"
-                        " is currently configured to thaw (sum of all phases) to avoid triggering a parameter collision"
-                        " and training failure in pytorch during a future fine-tuning phase."
-                    )
-                rank_zero_warn(w_msg)
 
 
 class CallbackDepMixin(ABC):

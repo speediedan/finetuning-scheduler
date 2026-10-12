@@ -545,3 +545,41 @@ def warn_unapplied_lr_lambdas(schedulers: Sequence[Any], apply_lambdas_new_pgs: 
                 "set to the default of `False`. If you would like new groups to have lr "
                 "lambdas applied, set `apply_lambdas_new_pgs` to `True`."
             )
+
+
+def phase0_divergence_warning(init_ft_cnt: int, no_grad_cnt: int, total_ft_cnt: int, param_diff_summary: dict) -> str:
+    """The warning issued when the optimizer's parameters diverge from phase 0's and ``enforce_phase0_params`` is
+    ``False``.
+
+    Args:
+        init_ft_cnt: The number of parameters scheduled in phase 0.
+        no_grad_cnt: The number of optimizer parameters that do not require grad.
+        total_ft_cnt: The number of parameters scheduled in all phases.
+        param_diff_summary: The ``optim_params`` and ``phase_0_params`` name lists that differ (empty if they agree).
+    """
+    w_msg = PHASE_0_DIVERGENCE_MSG + (
+        " Since `enforce_phase0_params` is currently set to `False`, FinetuningScheduler will not override"
+        " the user-configured optimizer configuration to enforce the expected phase 0 configuration of"
+        " thawed parameters."
+        "\n\n"
+        "HINT: Leaving `enforce_phase0_params` to its default (`True`) will avoid discrepancies like this"
+        " in the majority of use cases. If that solution is not desired or sufficient, please find more"
+        " detailed information about the configuration divergence below. \n\n"
+        f"In this case, FinetuningScheduler configured the provided model to have {init_ft_cnt} trainable"
+        " parameters in phase 0 (the initial training phase) but the optimizer has subsequently been"
+        " initialized with"
+    )
+    if param_diff_summary:
+        w_msg = grad_mismatch_feedback(w_msg, param_diff_summary)
+    if no_grad_cnt > 0:
+        w_msg += (
+            f"Also note that there are {no_grad_cnt} parameters in the optimizer that do not require a"
+            " gradient. If non-intentional, this state is commonly caused by failing to filter out"
+            " parameters that do not require a gradient when initializing the optimizer (e.g.,"
+            " `parameters = list(filter(lambda x: x.requires_grad, self.parameters()))`. If you intended to"
+            " initialize the optimizer with parameters that do not require a gradient you may want to"
+            f" ensure they are not included in the {total_ft_cnt} parameters that the FinetuningScheduler"
+            " is currently configured to thaw (sum of all phases) to avoid triggering a parameter collision"
+            " and training failure in pytorch during a future fine-tuning phase."
+        )
+    return w_msg
