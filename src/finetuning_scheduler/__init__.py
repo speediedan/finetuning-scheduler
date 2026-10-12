@@ -14,7 +14,7 @@ from finetuning_scheduler.__about__ import *  # noqa: F401, F403
 from finetuning_scheduler.core import optim as _core_optim  # noqa: F401
 from finetuning_scheduler.core.state import FTSState
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from finetuning_scheduler.lightning.fts import FinetuningScheduler
     from finetuning_scheduler.lightning.fts_supporters import (CallbackDepMixin, CallbackResolverMixin, FTSCheckpoint,
                                                      FTSEarlyStopping, ScheduleImplMixin, ScheduleParsingMixin)

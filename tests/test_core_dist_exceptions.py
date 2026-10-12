@@ -161,6 +161,27 @@ def test_default_backend_logging(default_backend, monkeypatch, caplog):
     ]
 
 
+def test_default_backend_rank_from_process_group(default_backend, tmp_path):
+    """With an initialized process group, the default backend takes the rank from ``torch.distributed``."""
+    torch_dist = pytest.importorskip("torch.distributed")
+    if not torch_dist.is_available() or torch_dist.is_initialized():
+        pytest.skip("needs torch.distributed with no process group already initialized")
+    torch_dist.init_process_group("gloo", init_method=f"file://{tmp_path / 'pg'}", rank=0, world_size=1)
+    try:
+        assert core_dist.global_rank() == 0
+    finally:
+        torch_dist.destroy_process_group()
+
+
+def test_lightning_backend_requires_rank(monkeypatch):
+    """Lightning's backend refuses to report a rank before Lightning has set one."""
+    from finetuning_scheduler.lightning import _lightning_global_rank
+
+    monkeypatch.delattr(rank_zero_only, "rank", raising=False)
+    with pytest.raises(RuntimeError, match="needs to be set before use"):
+        _lightning_global_rank()
+
+
 def _imported_top_level_modules(path: Path) -> set[str]:
     modules = set()
     for node in ast.walk(ast.parse(path.read_text())):

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from finetuning_scheduler.core.types import (AutoStrEnum, FTSLRSchedulerType, FTSLRSchedulerTypeTuple,
                                              ParamGroupAddable, supported_lrs)
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from finetuning_scheduler.lightning.types import BaseCallbackDepType
 
 
