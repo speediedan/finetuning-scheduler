@@ -45,6 +45,11 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+# The extras the Lightning integration will need once Lightning becomes optional (no earlier than 2.17). Lightning is
+# still a base dependency, so in this release both are accepted and install nothing more: adopting them now makes the
+# move a no-op for you. `pytorch-lightning` is for the standalone `pytorch_lightning` package build.
+lightning = []
+pytorch-lightning = []
 # CLI tools for LightningCLI integration
 cli = [
     "jsonargparse[signatures,jsonnet]>=4.40.0,<5.0",

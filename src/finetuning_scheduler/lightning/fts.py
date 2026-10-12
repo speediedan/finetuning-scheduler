@@ -50,6 +50,21 @@ from finetuning_scheduler.types import ParamGroupAddable
 # the logger keeps its established name, so existing logging configuration still applies
 log = logging.getLogger("finetuning_scheduler.fts")
 
+LIGHTNING_EXTRA_NOTICE = (
+    "Lightning will become an optional dependency of finetuning-scheduler, no earlier than 2.17. To keep the Lightning"
+    " integration unchanged, install `finetuning-scheduler[lightning]` (or `[pytorch-lightning]` for the standalone"
+    " package); the extra is already accepted."
+)
+_lightning_extra_notice_issued = False
+
+
+def _notify_lightning_extra() -> None:
+    """Issue the Lightning-extra notice once per process."""
+    global _lightning_extra_notice_issued
+    if not _lightning_extra_notice_issued:
+        _lightning_extra_notice_issued = True
+        rank_zero_warn(LIGHTNING_EXTRA_NOTICE, category=FutureWarning)
+
 
 class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMixin, BaseFinetuning):
     r"""This callback enables flexible, multi-phase, scheduled fine-tuning of foundation models. Gradual
@@ -267,6 +282,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 ``None``, will be set to the ``lr`` of the first scheduled fine-tuning depth. Defaults to 1e-5.
         """
         super().__init__()
+        _notify_lightning_extra()
         self._fts_state = FTSState()
         self.max_depth = max_depth
         self.restore_best = restore_best

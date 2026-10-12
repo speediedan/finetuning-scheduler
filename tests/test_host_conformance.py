@@ -102,3 +102,18 @@ def test_lightning_host_conformance(tmpdir):
     assert obs["dist"] == (True, 1, 3, True, "x", [1])
     assert obs["rng_devices"] == []
     assert trainer.fit_loop.max_epochs == 1
+
+
+def test_lightning_extra_notice_once(monkeypatch):
+    """The first ``FinetuningScheduler`` in a process announces the move of Lightning behind an extra, once."""
+    import warnings
+
+    from finetuning_scheduler.lightning import fts as lightning_fts
+
+    monkeypatch.setattr(lightning_fts, "_lightning_extra_notice_issued", False)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        FinetuningScheduler()
+        FinetuningScheduler()
+    notices = [w for w in record if issubclass(w.category, FutureWarning) and "optional dependency" in str(w.message)]
+    assert len(notices) == 1 and "finetuning-scheduler[lightning]" in str(notices[0].message)
