@@ -96,6 +96,18 @@ class TrainingHost(Protocol):
 
     def rng_devices(self) -> list[torch.device]: ...
 
+    def advance_epoch(self) -> None:
+        """Count a completed epoch (a no-op for a host whose framework counts epochs itself)."""
+        ...
+
+    def advance_step(self, steps: int = 1) -> None:
+        """Count completed optimizer steps (a no-op for a host whose framework counts them itself)."""
+        ...
+
+    def load_counters(self, current_epoch: int, global_step: int) -> None:
+        """Restore the epoch and step counters on resume."""
+        ...
+
 
 class TorchHost:
     """The :class:`TrainingHost` for a plain PyTorch training loop.

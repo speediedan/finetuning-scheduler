@@ -75,7 +75,10 @@ class PhaseEvent:
 
 
 def _is_compiled(module: nn.Module) -> bool:
-    return hasattr(module, "_orig_mod") or any(hasattr(m, "_orig_mod") for m in module.modules())
+    """Whether ``module`` or a submodule is compiled, by ``torch.compile(module)`` or in place by
+    ``module.compile()``."""
+    return any(hasattr(m, "_orig_mod") or getattr(m, "_compiled_call_impl", None) is not None
+               for m in module.modules())
 
 
 class FTSController:
@@ -318,7 +321,7 @@ class FTSController:
         core_schedule.validate_phases_disjoint(schedule)
         self._epoch_watermark = max_epoch_wm
         if not self._user_policies:
-            final = len(schedule) - 1
+            final = core_schedule.resolve_max_depth(self._max_depth_arg, len(schedule))
             unset = [d for d in schedule if d < final and schedule[d]["max_transition_epoch"] < 0
                      and schedule[d]["max_transition_step"] < 0]
             if unset:
@@ -464,6 +467,9 @@ class FTSController:
         (with no metrics) unless the loop called it; stops early once :attr:`should_stop`, then calls
         :meth:`train_end`.
 
+        Leaving the loop early (``break``, or an exception in its body) does not end training: no final restore,
+        end hooks or gates run. Call :meth:`train_end` yourself if a deliberate early exit should end the run.
+
         As with the Lightning callback, when the final phase sets ``max_transition_epoch`` the run lasts the greater of
         ``max_epochs`` and the schedule's highest ``max_transition_epoch`` (with a warning).
         """
@@ -472,16 +478,15 @@ class FTSController:
                                                         max_epochs)
         max_epochs = extended if extended is not None else max_epochs
         self._host.set_max_epochs(max_epochs)
-        try:
-            while self._host.current_epoch < max_epochs and not self._should_stop:
-                self.epoch_start()
-                if self._should_stop:  # a gate vetoed the phase at this boundary
-                    break
-                yield self._host.current_epoch
-                if not self._epoch_end_called:
-                    self.epoch_end()
-        finally:
-            self.train_end()
+        while self._host.current_epoch < max_epochs and not self._should_stop:
+            self.epoch_start()
+            if self._should_stop:  # a gate vetoed the phase at this boundary
+                break
+            # an abandoned or failed loop raises GeneratorExit here, which skips `train_end` below
+            yield self._host.current_epoch
+            if not self._epoch_end_called:
+                self.epoch_end()
+        self.train_end()
 
     def epoch_start(self) -> None:
         """Begin an epoch: advance to the next phase when a transition is pending or the schedule's
@@ -561,9 +566,19 @@ class FTSController:
 
     def step_lr_schedulers(self, interval: Literal["step", "epoch"], metrics: Mapping[str, Any] | None = None) -> None:
         """Step every lr scheduler configured for ``interval`` (honoring its ``frequency``, and passing its
-        ``monitor`` metric to schedulers such as ``ReduceLROnPlateau``)."""
+        ``monitor`` metric to schedulers such as ``ReduceLROnPlateau``).
+
+        For ``"epoch"``, call it once per epoch, before or after :meth:`epoch_end`: the epoch being run counts as
+        completed either way, so a ``frequency`` of ``n`` steps after every ``n``-th epoch, as under Lightning. For
+        ``"step"``, call it after each optimizer step; ``frequency`` counts optimizer steps since the run began
+        (Lightning counts batches within the epoch, which differs only when an epoch's step count is not a
+        multiple of the frequency).
+        """
         self._require_setup()
-        count = self._host.global_step if interval == "step" else self._host.current_epoch
+        if interval == "step":
+            count = self._host.global_step
+        else:
+            count = self._host.current_epoch if self._epoch_end_called else self._host.current_epoch + 1
         for sched, cfg in self._host.get_lr_schedulers():
             if cfg.interval != interval or count % cfg.frequency != 0:
                 continue
@@ -580,7 +595,8 @@ class FTSController:
     def _evaluate(self, unit: Literal["epoch", "step"], metrics: Mapping[str, Any] | None,
                   completed_epochs: int) -> tuple[Decision, str | None]:
         if unit not in self._policy.granularity:
-            local, reason = Decision.CONTINUE, None
+            # no policy evaluates this unit (the same configuration on every rank), so there is nothing to agree on
+            return Decision.CONTINUE, None
         else:
             phase = self._schedule[self._depth]
             ctx = TransitionContext(
@@ -980,6 +996,11 @@ class FTSController:
         :meth:`train_end`). Hooks run in registration order, with the training random streams isolated unless
         ``isolate_rng`` (or the controller's default) is ``False``.
 
+        Start hooks for phase 0 run at the end of :meth:`setup`, after phase 0 is thawed and the optimizer built. Start
+        hooks for a later phase run at its boundary before its parameters are thawed and its parameter groups added
+        (after any best-checkpoint restore, the previous phase's end hooks and the gates), so they can prepare the
+        model for the thaw; the new phase's parameters are listed in ``event.controller.schedule[event.depth]``.
+
         Returns:
             A handle whose ``remove()`` unregisters the hook.
         """
@@ -1010,12 +1031,20 @@ class FTSController:
             yield batch
 
     @contextmanager
-    def _suspend_step_counting(self) -> Iterator[None]:
+    def suspend_step_counting(self) -> Iterator[None]:
+        """Do not count optimizer steps taken inside this context.
+
+        Some state-dict utilities step the optimizer to initialize its state (for example
+        ``torch.distributed.checkpoint.state_dict.get_state_dict`` on an optimizer with no state yet). Wrap your own
+        calls to them in this context; the controller's own checkpointing already does.
+        """
         prev, self._counting_suspended = self._counting_suspended, True
         try:
             yield
         finally:
             self._counting_suspended = prev
+
+    _suspend_step_counting = suspend_step_counting
 
     def _on_optimizer_step(self, optimizer: Optimizer, args: Any, kwargs: Any) -> None:
         if self._counting_suspended:

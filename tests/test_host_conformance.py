@@ -117,3 +117,12 @@ def test_lightning_extra_notice_once(monkeypatch):
         FinetuningScheduler()
     notices = [w for w in record if issubclass(w.category, FutureWarning) and "optional dependency" in str(w.message)]
     assert len(notices) == 1 and "finetuning-scheduler[lightning]" in str(notices[0].message)
+
+
+def test_hosts_implement_the_counter_members():
+    from finetuning_scheduler.core.host import TorchHost, TrainingHost
+    from finetuning_scheduler.lightning.host import LightningHost
+
+    for member in ("advance_epoch", "advance_step", "load_counters"):
+        assert hasattr(TrainingHost, member)
+        assert callable(getattr(TorchHost, member)) and callable(getattr(LightningHost, member))

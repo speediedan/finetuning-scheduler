@@ -461,3 +461,77 @@ def test_reinitialization_refusals(phase1, kwargs, match):
     with pytest.raises(FTSConfigurationError, match=match):
         FTSController(Net(), schedule, optimizer=partial(torch.optim.SGD, lr=0.1), transition=transition,
                       **kwargs).setup()
+
+
+@pytest.mark.parametrize("when", ["before_epoch_end", "after_epoch_end"])
+def test_epoch_lr_stepping_does_not_depend_on_placement(when):
+    """With ``frequency=2``, the scheduler steps after epochs 2 and 4 (as under Lightning), whether the loop calls
+    ``step_lr_schedulers`` before or after ``epoch_end``."""
+    model = Net()
+    fts = FTSController(model, {0: {"params": ["l2.weight", "l2.bias"]}}, optimizer=partial(torch.optim.SGD, lr=1.0),
+                        lr_scheduler=partial(torch.optim.lr_scheduler.StepLR, step_size=1, gamma=0.5),
+                        lr_scheduler_cfg={"interval": "epoch", "frequency": 2})
+    fts.setup()
+    lrs = []
+    for epoch in fts.epochs(4):
+        lrs.append(fts.optimizer.param_groups[0]["lr"])
+        _train_epoch(fts, model, steps=1, seed=epoch)
+        if when == "before_epoch_end":
+            fts.step_lr_schedulers("epoch")
+            fts.epoch_end()
+        else:
+            fts.epoch_end()
+            fts.step_lr_schedulers("epoch")
+    assert lrs == [1.0, 1.0, 0.5, 0.5]
+
+
+def test_transition_check_honors_max_depth():
+    """Phase 1 is the final phase when ``max_depth=1``, so it need not set a transition."""
+    schedule = {0: {"params": ["l2.weight", "l2.bias"], "max_transition_epoch": 1}, 1: {"params": ["l1.weight"]},
+                2: {"params": ["l0.weight"]}}
+    FTSController(Net(), schedule, optimizer=partial(torch.optim.SGD, lr=0.1), max_depth=1).setup()
+    with pytest.raises(FTSConfigurationError, match=r"Phases \[1\] set neither"):
+        FTSController(Net(), schedule, optimizer=partial(torch.optim.SGD, lr=0.1)).setup()
+
+
+def test_leaving_the_loop_early_does_not_end_training():
+    ended = []
+    for exit_by in ("break", "error", "completion"):
+        model = Net()
+        fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1))
+        fts.add_phase_hook(lambda e: ended.append((exit_by, e.depth)), when="end")
+        fts.setup()
+        try:
+            for epoch in fts.epochs(4):
+                _train_epoch(fts, model, steps=1, seed=epoch)
+                if exit_by == "break":
+                    break
+                if exit_by == "error":
+                    raise RuntimeError("the loop failed")
+        except RuntimeError:
+            pass
+    assert [e for e in ended if e[0] != "completion"] == []
+    assert ("completion", 2) in ended
+
+
+def test_suspend_step_counting_for_user_state_dict_calls():
+    from torch.distributed.checkpoint.state_dict import get_state_dict
+
+    model = Net()
+    fts = FTSController(model, {0: {"params": ["l2.weight", "l2.bias"], "max_transition_step": 4},
+                                1: {"params": ["l1.weight", "l1.bias"]}}, optimizer=partial(torch.optim.SGD, lr=0.1))
+    fts.setup()
+    _train_epoch(fts, model, steps=1)
+    fts.step_end()
+    with fts.suspend_step_counting():
+        get_state_dict(model, fts.optimizer)  # steps a stateless optimizer to initialize its state
+    assert fts.global_step == 1
+
+
+def test_in_place_compile_is_detected():
+    from finetuning_scheduler.core.controller import _is_compiled
+
+    model = Net()
+    assert not _is_compiled(model)
+    model.compile()
+    assert _is_compiled(model)
