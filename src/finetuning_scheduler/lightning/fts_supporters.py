@@ -538,16 +538,9 @@ class ScheduleParsingMixin(ABC):
             self._parse_phase(depth, named_params, msp_ref)
             if depth > 0:
                 assert isinstance(self.ft_schedule, dict)
-                curr_max_epoch = self.ft_schedule[depth]["max_transition_epoch"]
-                if 0 <= curr_max_epoch <= max_epoch_wm:
-                    es_addendum = " depending upon EarlyStopping criteria."
-                    rank_zero_info(
-                        f"Specified max_transition_epoch of depth {depth}"
-                        f"({self.ft_schedule[depth]['max_transition_epoch']}) is less than or equal to a "
-                        f"previous max_transition_epoch ({max_epoch_wm}), depth may execute only a single "
-                        f"epoch{'.' if self.epoch_transitions_only else es_addendum}"  # type: ignore[attr-defined]
-                    )
-                max_epoch_wm = max(max_epoch_wm, curr_max_epoch)
+                max_epoch_wm = core_schedule.update_epoch_watermark(
+                    self.ft_schedule, depth, max_epoch_wm, self.epoch_transitions_only  # type: ignore[attr-defined]
+                )
         self._validate_phases_disjoint()
         if self.epoch_transitions_only:  # type: ignore[attr-defined]
             self._validate_epoch_transitions()
@@ -706,24 +699,17 @@ class ScheduleParsingMixin(ABC):
                 training phase.
         """
         assert isinstance(self.ft_schedule, dict)
-        reinit_cfg = {}
-        for reinit_k, attr in zip(ScheduleParsingMixin.VALID_REINIT_KEYS, ScheduleParsingMixin.VALID_REINIT_ATTR):
-            reinit_cfg[reinit_k] = getattr(self, attr) or {
-                k: self.ft_schedule[k].get(reinit_k)
-                for k in self.ft_schedule.keys()
-                if self.ft_schedule[k].get(reinit_k)
-            }
+        reinit_cfg = core_schedule.collect_reinit_cfgs(
+            self.ft_schedule,
+            {k: getattr(self, attr) for k, attr in zip(ScheduleParsingMixin.VALID_REINIT_KEYS,
+                                                       ScheduleParsingMixin.VALID_REINIT_ATTR)},
+        )
         if not any(reinit_cfg.values()):
             return  # no further validation needed since there is no reinitialization configuration
         self._has_reinit_schedule = True  # schedules that reinitialize require special handling in some contexts
         assert self.trainer is not None
         assert self.log_dir is not None
-        for rk, rp in reinit_cfg.items():
-            if isinstance(rp, dict) and 0 in rp.keys():
-                raise MisconfigurationException(
-                    f"You have specified a `{rk}` reinitialization directive for the initial training phase which is an"
-                    "invalid configuration. The initial configuration should be passed to your LightningModule."
-                )
+        core_schedule.refuse_phase0_reinit(reinit_cfg)
         self._reinit_validation(reinit_cfg)
 
     def _convert_phase_keys(self) -> None:
@@ -1142,17 +1128,7 @@ class ScheduleImplMixin(ABC):
         if not self.ft_schedule and self.max_depth == -1:
             rank_zero_info("No fine-tuning schedule provided, max_depth set to -1 so iteratively thawing entire model")
         assert self.log_dir is not None
-        if self.ft_schedule and self.reinit_lr_cfg:
-            error_msg = (
-                "Specifying both `ft_schedule` and `reinit_lr_cfg` is an invalid configuration. `reinit_lr_cfg` "
-                "specifies an lr scheduler configuration to reinitialize with at every new phase of an implicitly "
-                "defined fine-tuning shedule whereas `ft_schedule` is an explicity defined schedule. To reinitialize "
-                "a given lr scheduler configuration with an explicit fine-tuning schedule, please add the desired "
-                "lr scheduler configurations to your explicit schedule using the `new_lr_scheduler` key of the "
-                "relevant phases."
-            )
-            rank_zero_warn(error_msg)
-            raise MisconfigurationException(error_msg)
+        core_schedule.check_schedule_vs_reinit_lr(bool(self.ft_schedule), self.reinit_lr_cfg)
         if self.ft_schedule:  # thaw according to an explicit schedule
             self.ft_schedule = (
                 self.load_yaml_schedule(pathlib.Path(self.ft_schedule))
@@ -1177,22 +1153,16 @@ class ScheduleImplMixin(ABC):
         """
         self.gen_or_load_sched()
         assert isinstance(self.ft_schedule, dict)
-        if self.max_depth == -1:
-            self.max_depth = len(self.ft_schedule) - 1
-        else:
-            self.max_depth = min(self.max_depth, len(self.ft_schedule) - 1)
+        self.max_depth = core_schedule.resolve_max_depth(self.max_depth, len(self.ft_schedule))
         # Delegate schedule validation to strategy adapter (allows custom validation logic)
         max_phase, max_epoch_wm = self.strategy_adapter.validate_ft_sched()
         # if the final phase is not using EarlyStopping, apply the maximum phase-specified epoch to global max_epochs
-        if self.ft_schedule[max_phase]["max_transition_epoch"] >= 0:
-            assert self.trainer is not None
-            rank_zero_warn(
-                "Final phase max_transition_epoch"
-                f" ({self.ft_schedule[max_phase]['max_transition_epoch']})"
-                f" will be overidden by the greater of max_epochs ({self.trainer.max_epochs}) and"
-                f" the maximum phase-specified epoch ({max_epoch_wm})."
-            )
-            self.trainer.fit_loop.max_epochs = max(max_epoch_wm, self.trainer.max_epochs)
+        assert self.trainer is not None
+        max_epochs = core_schedule.final_phase_max_epochs(
+            self.ft_schedule, max_phase, max_epoch_wm, self.trainer.max_epochs  # type: ignore[arg-type]
+        )
+        if max_epochs is not None:
+            self.trainer.fit_loop.max_epochs = max_epochs
 
     @rank_zero_only
     def gen_implicit_schedule(self, sched_dir: str | os.PathLike) -> None:
