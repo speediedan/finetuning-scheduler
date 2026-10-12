@@ -32,6 +32,7 @@ from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 from lightning.pytorch.trainer.connectors.logger_connector.result import _ResultMetric
 
+from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import phase as core_phase
 from finetuning_scheduler.lightning.fts_supporters import (
     CallbackDepMixin,
@@ -491,20 +492,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
 
     def _maybe_warn_lr_lambdas(self) -> None:
         """If appropriate, warn the user that `lr_lambdas` will not be applied given the current configuration."""
-        if self.trainer.lr_scheduler_configs:
-            for config in self.trainer.lr_scheduler_configs:
-                show_warn_lambdas = (
-                    hasattr(config.scheduler, "lr_lambdas")
-                    and config.scheduler.lr_lambdas[-1] is not None  # type: ignore[union-attr]
-                    and not self.apply_lambdas_new_pgs
-                )
-                if show_warn_lambdas:
-                    rank_zero_warn(
-                        "The lr scheduler used in this phase has lr_lambdas but will use a "
-                        "configured lr for new parameter groups because `apply_lambdas_new_pgs` is "
-                        "set to the default of `False`. If you would like new groups to have lr "
-                        "lambdas applied, set `apply_lambdas_new_pgs` to `True`."
-                    )
+        core_optim.warn_unapplied_lr_lambdas(
+            [config.scheduler for config in self.trainer.lr_scheduler_configs], self.apply_lambdas_new_pgs
+        )
 
     def restore_best_ckpt(self) -> None:
         """Restore the current best model checkpoint, according to

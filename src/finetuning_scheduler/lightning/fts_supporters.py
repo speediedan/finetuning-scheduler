@@ -23,9 +23,7 @@ import inspect
 import warnings
 from contextlib import contextmanager
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from collections.abc import KeysView
-from copy import copy, deepcopy
 from dataclasses import fields
 from typing import Any
 from collections.abc import Callable, Iterator
@@ -837,11 +835,8 @@ class ScheduleParsingMixin(ABC):
             tuple[Dict, List]: The lr state to restore from the current lr scheduler and the most recent `lr`s for
                 parameter groups associated with the current phases's optimizer.
         """
-        curr_lr_state: dict = {}
-        if trainer.lr_scheduler_configs:
-            curr_lr_state = deepcopy(trainer.lr_scheduler_configs[0].scheduler.state_dict())
-        prev_optimizer_lrs = copy([group["lr"] for group in trainer.strategy.optimizers[0].param_groups])
-        return curr_lr_state, prev_optimizer_lrs
+        scheduler = trainer.lr_scheduler_configs[0].scheduler if trainer.lr_scheduler_configs else None
+        return core_optim.capture_lr_state(scheduler, trainer.strategy.optimizers[0])  # type: ignore[arg-type]
 
     def reinit_optimizer(self, new_optimizer: dict, trainer: pl.Trainer, init_params: list) -> ParamGroupAddable:
         """Reinitialize the optimizer, using a validated optimizer reinitialization configuration.
@@ -858,15 +853,9 @@ class ScheduleParsingMixin(ABC):
         prev_optim_repr = repr(trainer.strategy.optimizers[0])
         optimizer_class = self._import_reinit_class(optimizer_init, reinit_target="optimizer")
         reinit_pgs = self._reinit_phase0_pgs(thawed_pl=init_params)
-        new_optimizer_handle = optimizer_class(
-            reinit_pgs, **optimizer_init.get("init_args", {})  # type: ignore[operator, arg-type]
+        new_optimizer_handle = core_optim.build_phase0_optimizer(
+            optimizer_class, optimizer_init.get("init_args", {}), reinit_pgs  # type: ignore[arg-type]
         )
-        # If the user or optimizer doesn't set `initial_lr` keys, add them based on the initial lr values.
-        # The latest LR state will still be set in subsequent phases, but this allows subsequent lr scheduler
-        # reinitializations to access an `initial_lr` for the existing optimizer if desired (important for consistency
-        # with lr scheduler-only reinitializations).
-        for group in new_optimizer_handle.param_groups:  # type: ignore[union-attr]
-            group["initial_lr"] = group.get("initial_lr", group["lr"])
         trainer.strategy.optimizers = [new_optimizer_handle]  # type: ignore[list-item]
         if trainer.lr_scheduler_configs:
             trainer.lr_scheduler_configs[0].scheduler.optimizer = new_optimizer_handle  # type: ignore[assignment]
@@ -895,15 +884,7 @@ class ScheduleParsingMixin(ABC):
         lr_scheduler_init = new_lr_scheduler["lr_scheduler_init"]
         prev_lrs_repr = repr(trainer.lr_scheduler_configs[0])
         lrs_class = self._import_reinit_class(lr_scheduler_init, reinit_target="lr_scheduler")
-        existing_lr_key = "initial_lr" if not new_lr_scheduler.get("use_current_optimizer_pg_lrs", None) else "lr"
-        curr_optimizer_lrs = [group.get(existing_lr_key, group["lr"]) for group in optimizer.param_groups]
-        reset_init_pg_lrs = True if new_lr_scheduler.get("init_pg_lrs", None) else False
-        initial_optimizer_lrs = new_lr_scheduler.get("init_pg_lrs", curr_optimizer_lrs)
-        for _, data in enumerate(zip(optimizer.param_groups, initial_optimizer_lrs)):
-            param_group, lr = data
-            param_group["lr"] = lr
-            if reset_init_pg_lrs:
-                param_group["initial_lr"] = lr
+        core_optim.apply_reinit_pg_lrs(optimizer, new_lr_scheduler)
         if "pl_lrs_cfg" in new_lr_scheduler.keys():
             new_lr_scheduler["pl_lrs_cfg"] = self._update_pl_lrs(
                 new_lr_scheduler["pl_lrs_cfg"], lrs_class=lrs_class  # type:ignore[arg-type]
@@ -1365,29 +1346,13 @@ class ScheduleImplMixin(ABC):
             Tuple: Distilled optimizer state to be validated.
         """
         assert isinstance(self.ft_schedule, dict)
-        opt = self.trainer.optimizers[0]
-        sched = self.ft_schedule
-        no_grad_cnt = len([p for pg in opt.param_groups for p in pg["params"] if not p.requires_grad])
-        init_ft_cnt = len(self.strategy_adapter.fts_optim_inspect(sched[0]["params"]))
-        total_ft_cnt = len(
-            [p for phase in sched for p in self.strategy_adapter.fts_optim_inspect(sched[phase]["params"])]
+        return core_optim.inspect_phase0_opt_state(
+            self.trainer.optimizers[0],
+            self.pl_module,
+            self.ft_schedule,
+            self.strategy_adapter.fts_optim_inspect,
+            self.strategy_adapter.logical_param_translation,
         )
-        optim_grad_param_set = {p for pg in opt.param_groups for p in pg["params"] if p.requires_grad}
-        sched_grad_param_set = {
-            p
-            for n, p in self.pl_module.named_parameters()
-            if n in self.strategy_adapter.fts_optim_inspect(sched[0]["params"])
-        }
-        expected_params_sym_diff = optim_grad_param_set ^ sched_grad_param_set
-        p_diff_summary = defaultdict(list)
-        if expected_params_sym_diff:
-            for n, p in self.pl_module.named_parameters():
-                if p in optim_grad_param_set:
-                    p_diff_summary["optim_params"].append(n)
-                if p in sched_grad_param_set:
-                    p_diff_summary["phase_0_params"].append(n)
-        p_diff_summary = {k: self.strategy_adapter.logical_param_translation(v) for k, v in p_diff_summary.items()}
-        return no_grad_cnt, init_ft_cnt, total_ft_cnt, p_diff_summary
 
     @staticmethod
     def _grad_mismatch_feedback(w_msg: str, param_diff_summary: dict) -> str:

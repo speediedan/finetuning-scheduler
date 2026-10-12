@@ -20,7 +20,8 @@ group construction and growth, scheduler extension and lr state restoration.
 import os
 import warnings
 from collections.abc import Callable, Iterable, Sequence
-from copy import copy
+from collections import defaultdict
+from copy import copy, deepcopy
 from functools import reduce
 from pprint import pformat
 from typing import Any, overload
@@ -428,3 +429,119 @@ def grad_mismatch_feedback(w_msg: str, param_diff_summary: dict) -> str:
         f"{pformat(param_diff_summary['phase_0_params'])}{os.linesep}"
     )
     return w_msg
+
+
+def inspect_phase0_opt_state(optimizer: ParamGroupAddable, module: Module, schedule: dict,
+                             optim_inspect: Callable[[list], list], translate: Callable[[list], Any]) -> tuple:
+    """Distill the optimizer state needed to check that the optimizer matches the schedule's phase 0.
+
+    Args:
+        optimizer: The configured optimizer.
+        module: The scheduled module.
+        schedule: The fine-tuning schedule.
+        optim_inspect: Maps a phase's parameter names to the names the optimizer holds (a strategy adapter's
+            ``fts_optim_inspect``).
+        translate: Maps parameter names to the names reported to the user (a strategy adapter's
+            ``logical_param_translation``).
+
+    Returns:
+        The count of optimizer parameters that do not require grad; the counts of scheduled parameters in phase 0 and
+        in all phases; and, when the optimizer's trainable parameters differ from phase 0's, a summary of both name
+        sets (otherwise empty).
+    """
+    no_grad_cnt = len([p for pg in optimizer.param_groups for p in pg["params"] if not p.requires_grad])
+    init_ft_cnt = len(optim_inspect(schedule[0]["params"]))
+    total_ft_cnt = len([p for phase in schedule for p in optim_inspect(schedule[phase]["params"])])
+    optim_grad_param_set = {p for pg in optimizer.param_groups for p in pg["params"] if p.requires_grad}
+    sched_grad_param_set = {p for n, p in module.named_parameters() if n in optim_inspect(schedule[0]["params"])}
+    expected_params_sym_diff = optim_grad_param_set ^ sched_grad_param_set
+    p_diff_summary: dict = defaultdict(list)
+    if expected_params_sym_diff:
+        for n, p in module.named_parameters():
+            if p in optim_grad_param_set:
+                p_diff_summary["optim_params"].append(n)
+            if p in sched_grad_param_set:
+                p_diff_summary["phase_0_params"].append(n)
+    p_diff_summary = {k: translate(v) for k, v in p_diff_summary.items()}
+    return no_grad_cnt, init_ft_cnt, total_ft_cnt, p_diff_summary
+
+
+def clean_optim_lr_pgs(optimizers: Sequence[ParamGroupAddable], schedulers: Sequence[Any]) -> list[int]:
+    """Remove every parameter group from ``optimizers`` and reset ``schedulers`` so phase 0 can be configured
+    afresh.
+
+    Returns:
+        The number of groups removed from each optimizer.
+    """
+    orig_num_pgs = []
+    for optimizer in optimizers:
+        orig_num_pgs.append(len(optimizer.param_groups))
+        optimizer.param_groups = []
+    for scheduler in schedulers:
+        scheduler.last_epoch = -1
+        if not isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.base_lrs = []
+    return orig_num_pgs
+
+
+def reconfigure_lrs_for_phase0(schedulers: Sequence[Any], orig_num_pgs: list[int]) -> None:
+    """Re-derive scheduler state for the reconfigured phase-0 parameter groups.
+
+    Groups may have been added (for example to apply ``no_decay``), so the type-dependent state (``min_lrs``,
+    ``lr_lambdas`` and the initial step) is recomputed.
+    """
+    for scheduler in schedulers:
+        if not isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler._initial_step()
+        scheduler._last_lr = [group["lr"] for group in scheduler.optimizer.param_groups]
+        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.min_lrs = scheduler.min_lrs[orig_num_pgs[0]:]
+
+
+def capture_lr_state(scheduler: Any | None, optimizer: ParamGroupAddable) -> tuple[dict, list]:
+    """Capture the scheduler state and the optimizer's current group ``lr`` s, to restore after a
+    reinitialization."""
+    curr_lr_state: dict = deepcopy(scheduler.state_dict()) if scheduler is not None else {}
+    prev_optimizer_lrs = copy([group["lr"] for group in optimizer.param_groups])
+    return curr_lr_state, prev_optimizer_lrs
+
+
+def build_phase0_optimizer(optimizer_class: Callable, init_args: dict, param_groups: list) -> ParamGroupAddable:
+    """Construct a reinitialized optimizer over ``param_groups``.
+
+    Every group gets an ``initial_lr`` (its ``lr`` unless already set), so a later lr scheduler reinitialization can
+    start from it, as it would after an lr-scheduler-only reinitialization.
+    """
+    optimizer = optimizer_class(param_groups, **init_args)
+    for group in optimizer.param_groups:
+        group["initial_lr"] = group.get("initial_lr", group["lr"])
+    return optimizer
+
+
+def apply_reinit_pg_lrs(optimizer: ParamGroupAddable, new_lr_scheduler: dict) -> None:
+    """Set the existing groups' ``lr`` before an lr scheduler is reinitialized around ``optimizer``.
+
+    Precedence: the directive's ``init_pg_lrs`` (which also become the groups' ``initial_lr``); then, with
+    ``use_current_optimizer_pg_lrs``, the current ``lr`` s; otherwise each group's ``initial_lr``, falling back to its
+    current ``lr``.
+    """
+    existing_lr_key = "initial_lr" if not new_lr_scheduler.get("use_current_optimizer_pg_lrs", None) else "lr"
+    curr_optimizer_lrs = [group.get(existing_lr_key, group["lr"]) for group in optimizer.param_groups]
+    reset_init_pg_lrs = True if new_lr_scheduler.get("init_pg_lrs", None) else False
+    initial_optimizer_lrs = new_lr_scheduler.get("init_pg_lrs", curr_optimizer_lrs)
+    for param_group, lr in zip(optimizer.param_groups, initial_optimizer_lrs):
+        param_group["lr"] = lr
+        if reset_init_pg_lrs:
+            param_group["initial_lr"] = lr
+
+
+def warn_unapplied_lr_lambdas(schedulers: Sequence[Any], apply_lambdas_new_pgs: bool) -> None:
+    """Warn, once per scheduler with ``lr_lambdas``, that new groups will use their configured ``lr`` instead."""
+    for scheduler in schedulers:
+        if hasattr(scheduler, "lr_lambdas") and scheduler.lr_lambdas[-1] is not None and not apply_lambdas_new_pgs:
+            rank_zero_warn(
+                "The lr scheduler used in this phase has lr_lambdas but will use a "
+                "configured lr for new parameter groups because `apply_lambdas_new_pgs` is "
+                "set to the default of `False`. If you would like new groups to have lr "
+                "lambdas applied, set `apply_lambdas_new_pgs` to `True`."
+            )

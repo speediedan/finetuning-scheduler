@@ -23,7 +23,6 @@ import logging
 import os
 
 import torch
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn.parallel import DistributedDataParallel
 from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
 from lightning.pytorch import LightningModule, Trainer
@@ -33,6 +32,7 @@ from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 
 import finetuning_scheduler.lightning  # noqa: F401  (registers the Lightning backends the core logs through)
+from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import phase as core_phase
 
 log = logging.getLogger(__name__)
@@ -271,15 +271,9 @@ class StrategyAdapter:
             List: A list of the number of parameter groups pruned for each optimizer (since only a single optimizer is
                 currently supported by FTS, this list will have only a single element in this verison.)
         """
-        orig_num_pgs = []
-        for optimizer in trainer.optimizers:
-            orig_num_pgs.append(len(optimizer.param_groups))
-            optimizer.param_groups = []
-        for lrs_cfg in trainer.lr_scheduler_configs:
-            lrs_cfg.scheduler.last_epoch = -1  # type: ignore[union-attr]
-            if not isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
-                lrs_cfg.scheduler.base_lrs = []
-        return orig_num_pgs
+        return core_optim.clean_optim_lr_pgs(
+            trainer.optimizers, [cfg.scheduler for cfg in trainer.lr_scheduler_configs]  # type: ignore[arg-type]
+        )
 
     def _reconfigure_optimizer_for_phase0(self, trainer: Trainer) -> None:
         """Reconfigure optimizer state to comport with the scheduled phase 0.
@@ -309,15 +303,7 @@ class StrategyAdapter:
         """
         # since we may have added parameter groups (e.g. implementing ``no_decay`` for user), we need to reinitialize
         # certain lr_scheduler variables (including type-dependent ones like ``min_lrs`` and ``lr_lambdas``)
-        if trainer.lr_scheduler_configs:
-            for lrs_cfg in trainer.lr_scheduler_configs:
-                if not isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
-                    lrs_cfg.scheduler._initial_step()
-                lrs_cfg.scheduler._last_lr = [  # type: ignore[union-attr]
-                    group["lr"] for group in lrs_cfg.scheduler.optimizer.param_groups
-                ]
-                if isinstance(lrs_cfg.scheduler, ReduceLROnPlateau):
-                    lrs_cfg.scheduler.min_lrs = lrs_cfg.scheduler.min_lrs[orig_num_pgs[0] :]
+        core_optim.reconfigure_lrs_for_phase0([cfg.scheduler for cfg in trainer.lr_scheduler_configs], orig_num_pgs)
 
     def phase0_optimizer_override(self) -> None:
         """Reconfigure the user-configured optimizer (configured via `configure_optimizers`) to optimize the
