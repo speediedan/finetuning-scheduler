@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Characterization of the phase-transition behavior the direct-PyTorch controller extracts into the core (#51).
+"""Characterization of the phase-transition behavior ``FTSController`` extracts into the core (#51).
 
 These pin today's Lightning-layer behavior, quirks included, before any of it moves: the plateau decisions of
 ``FTSEarlyStopping`` (which become ``PlateauTransition``) and the thaw bookkeeping of ``StrategyAdapter.base_ft_phase``

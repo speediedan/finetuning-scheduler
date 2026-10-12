@@ -12,7 +12,7 @@
 """A self-contained distributed smoke check for vetting a multi-GPU host, ROCm in particular, before relying on it.
 
 It needs only PyTorch: no Lightning, no finetuning-scheduler install and no test suite, so it can run on a rented
-instance. It exercises what the direct-PyTorch distributed path depends on:
+instance. It exercises what the PyTorch API's distributed path depends on:
 
 - ``collectives``: all-reduce, all-gather, reduce-scatter and broadcast at 1 KB to 64 MB, checked exactly, plus the
   all-reduce bus bandwidth;

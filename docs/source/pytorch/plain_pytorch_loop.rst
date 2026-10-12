@@ -28,7 +28,7 @@ groups, and when the next phase starts. You call it at a few well-defined points
 - :meth:`~finetuning_scheduler.core.controller.FTSController.step_end` after each optimizer step, only when a phase
   should end at a step count rather than at an epoch boundary.
 
-The direct API does not import Lightning or jsonargparse.
+The PyTorch API does not import Lightning or jsonargparse.
 
 A Minimal Loop
 **************
@@ -72,9 +72,11 @@ The schedule below thaws the classifier head first, then the layers beneath it. 
 
 A few things to note:
 
-- **Pass an optimizer factory** (here ``partial(torch.optim.AdamW, lr=1e-2)``). The controller calls it with phase 0's
-  parameter groups and adds groups as later phases thaw parameters. An optimizer instance also works: unless
-  ``enforce_phase0_params=False``, it is reconfigured to optimize exactly phase 0's parameters.
+- **Pass an optimizer instance or factory.** This example passes a factory
+  (``partial(torch.optim.AdamW, lr=1e-2)``), which the controller calls with phase 0's parameter groups; it then adds
+  groups as later phases thaw parameters. A factory is preferred, and phase 0's ``pg_overrides`` requires one. An
+  optimizer instance also works: unless ``enforce_phase0_params=False``, it is reconfigured to optimize exactly phase
+  0's parameters.
 - **Use** ``fts.optimizer`` **in the loop**, not a reference taken before ``setup()``: a schedule can replace the
   optimizer at a phase transition (see :ref:`optimizer reinitialization<optim-reinit-overview>`), and the retired one
   refuses to step.
@@ -106,9 +108,9 @@ distributed run, the decisions are agreed across ranks, and the greatest wins, s
 
 Without any policy, every phase but the final one must set ``max_transition_epoch`` or ``max_transition_step``.
 
-Schedule Keys for the Direct API
-********************************
-Three per-phase keys are interpreted only by the direct API. The Lightning callback refuses them rather than ignoring
+Schedule Keys for the PyTorch API
+*********************************
+Three per-phase keys are interpreted only by the PyTorch API. The Lightning callback refuses them rather than ignoring
 them:
 
 - ``max_transition_step``: end the phase at a global optimizer-step count (call ``step_end()`` after each step);
@@ -169,7 +171,7 @@ Shard the model yourself with FSDP2 (``torch.distributed.fsdp.fully_shard``) bef
 call the controller on every rank. Transition decisions and gate results are agreed across ranks. For sharded models,
 checkpoints are written with ``torch.distributed.checkpoint``.
 
-Two configurations are refused:
+Two configurations are currently refused:
 
 - a ``DistributedDataParallel``-wrapped module, because DDP registers only the parameters that require grad when it
   wraps the module, so parameters thawed in later phases would never be gradient-synchronized (the Lightning
@@ -189,7 +191,7 @@ and the parity tests keep their behavior aligned. The differences are in what ea
 :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping`; in a plain loop, you run the loop and the controller
 provides the equivalents.
 
-Lightning remains a base dependency of Fine-Tuning Scheduler in 2.15. It is planned to become an optional dependency no
-earlier than 2.17 (see :ref:`versioning`); installing ``finetuning-scheduler[lightning]`` (or
-``finetuning-scheduler[pytorch-lightning]`` for the standalone package) now keeps a Lightning-based project working
-through that change.
+Lightning remains a base dependency of Fine-Tuning Scheduler until it becomes an optional dependency, no earlier than
+2.17 (see :ref:`versioning`). Until then, a plain install keeps the Lightning integration working as before. Naming
+``finetuning-scheduler[lightning]`` (or ``finetuning-scheduler[pytorch-lightning]`` for the standalone package) in a
+Lightning-based project's requirements now means that change needs no further edit.

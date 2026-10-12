@@ -392,7 +392,7 @@ should install them using the ``[examples]`` extra:
 .. note::
    The extras that install jsonargparse (``cli``, ``examples``, ``extra`` and ``all``) cap it below 5.0, because
    :py:class:`~lightning.pytorch.cli.LightningCLI` does not yet support jsonargparse 5. The cap will be lifted once a
-   Lightning release does. Fine-Tuning Scheduler's core and its direct PyTorch API do not use jsonargparse.
+   Lightning release does. Fine-Tuning Scheduler's core and its PyTorch API do not use jsonargparse.
 
 There are three different demo schedule configurations composed with shared defaults (./config/fts_defaults.yaml)
 provided for the default 'rte' task. Note DDP (with auto-selected GPUs) is the default configuration so ensure you
@@ -512,10 +512,10 @@ Footnotes
 
 .. toctree::
    :maxdepth: 1
-   :name: Direct PyTorch API
-   :caption: Direct PyTorch API (experimental)
+   :name: PyTorch API
+   :caption: PyTorch API (experimental)
 
-   direct_pytorch/plain_pytorch_loop
+   pytorch/plain_pytorch_loop
 
 .. toctree::
    :maxdepth: 1

@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""The direct PyTorch controller on FSDP2 across two processes (gloo on CPU; NCCL on two GPUs) (#51)."""
+"""``FTSController`` on FSDP2 across two processes (gloo on CPU; NCCL on two GPUs) (#51)."""
 import pytest
 
 from tests.dist_cases import fts_controller

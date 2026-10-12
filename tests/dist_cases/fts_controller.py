@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""The direct PyTorch controller on FSDP2 (pool cases, gloo or NCCL).
+"""``FTSController`` on FSDP2 (pool cases, gloo or NCCL).
 
 With equal per-rank shards of each batch, FSDP2's gradient averaging makes a sharded run mathematically identical to a
 single-process run on the full batch, so the phase path must match exactly and the parameters to float tolerance.

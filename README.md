@@ -33,7 +33,7 @@ ______________________________________________________________________
   - explicit schedules for performance tuning, fine-grained behavioral experimentation and computational efficiency
 - automatic restoration of best per-phase checkpoints driven by iterative application of early-stopping criteria to each fine-tuning phase
 - composition of early-stopping and manually-set epoch-driven fine-tuning phase transitions
-- an experimental direct PyTorch API ([FTSController](https://finetuning-scheduler.readthedocs.io/en/latest/direct_pytorch/plain_pytorch_loop.html)) that brings the same schedules to a plain PyTorch training loop, without Lightning
+- an experimental PyTorch API ([FTSController](https://finetuning-scheduler.readthedocs.io/en/latest/pytorch/plain_pytorch_loop.html)) that brings the same schedules to a plain PyTorch training loop, without Lightning
 
 ______________________________________________________________________
 

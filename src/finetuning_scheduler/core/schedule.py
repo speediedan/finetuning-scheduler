@@ -474,12 +474,12 @@ def final_phase_max_epochs(schedule: dict, max_phase: int, max_epoch_wm: int, ma
     return max(max_epoch_wm, max_epochs)
 
 
-# phase keys only the direct PyTorch API interprets in this release
+# phase keys only the PyTorch API interprets in this release
 DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides")
 
 
 def parse_phase_extensions(schedule: dict) -> None:
-    """Validate and normalize, in place, the phase keys the direct PyTorch API adds.
+    """Validate and normalize, in place, the phase keys the PyTorch API adds.
 
     - ``max_transition_step``: a global optimizer step count at which the phase ends (default ``-1``, unset).
     - ``phase_config``: an opaque mapping handed to phase hooks and gates.
@@ -515,7 +515,7 @@ def parse_phase_extensions(schedule: dict) -> None:
 
 
 def refuse_direct_api_keys(schedule: dict) -> None:
-    """Refuse the phase keys only the direct PyTorch API interprets, naming each phase that uses one.
+    """Refuse the phase keys only the PyTorch API interprets, naming each phase that uses one.
 
     Raises:
         FTSConfigurationError: If any phase uses one.
@@ -525,6 +525,6 @@ def refuse_direct_api_keys(schedule: dict) -> None:
     if used:
         detail = "; ".join(f"phase {depth}: {', '.join(keys)}" for depth, keys in used.items())
         raise FTSConfigurationError(
-            f"The schedule uses keys only the direct PyTorch API (`FTSController`) supports in this release ({detail})."
+            f"The schedule uses keys only the PyTorch API (`FTSController`) supports in this release ({detail})."
             " Remove them to use the schedule with the Lightning callback."
         )
