@@ -72,9 +72,10 @@ public API. Run `python -c` checks from a private directory, not `/tmp`, where a
 standard library.
 
 **CI on the release branch head:** GitHub `Test full` green on every leg, and the Azure GPU pipeline green on every
-task (`Testing: standard`, `standalone multi-gpu`, `Examples`, `Multi-GPU Examples`). A push to `release/*` does
-auto-trigger Azure; find its build by id or `statusFilter=notStarted` before queueing a manual run, or you create a
-duplicate. Release the gate per the `az-pipelines-ops` skill.
+task (`Testing: CUDA`, named `Testing: standard` on older branches, then `standalone multi-gpu`, `Examples` and
+`Multi-GPU Examples`). A push to `release/*` does auto-trigger Azure; find its build by id or
+`statusFilter=notStarted` before queueing a manual run, or you create a duplicate. Release the gate per the
+`az-pipelines-ops` skill.
 
 **Coverage badges** for the branch must render percentages (URL-encode the slash):
 

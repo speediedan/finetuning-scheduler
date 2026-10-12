@@ -21,6 +21,7 @@ unset experiments_list
 unset experiment_patch_mask
 unset collect_dir
 unset allow_failures
+unset select_file
 unset PL_RUN_STANDALONE_TESTS
 unset FTS_RUN_STANDALONE_TESTS
 unset FTS_EXPERIMENTAL_PATCH_TESTS
@@ -40,6 +41,7 @@ Usage: $0
    [ --experiment_patch_mask input]
    [ --collect_dir input]
    [ --allow-failures ]          # Continue running tests after failures
+   [ --select_file input]        # Run only the collected tests listed in this file (one node id per line)
    [ --help ]
    Examples:
 	# run all standalone tests (but not experimental ones, note --mark_type defaults to 'standalone' ):
@@ -55,11 +57,13 @@ Usage: $0
 	#   ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0 1"
   # same as above, but use a custom experiments definition location:
   #   ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='model_parallel' --experiments_list=tests/.my_experiments --experiment_patch_mask="1 0 0 1"
+  # run only the standalone smoke set (the pull request gate's default):
+  #   ./tests/special_tests.sh --mark_type=standalone --select_file=tests/.standalone_smoke
 EOF
 exit 1
 }
 
-args=$(getopt -o '' --long mark_type:,log_file:,log-dir:,filter_pattern:,experiments_list:,experiment_patch_mask:,collect_dir:,allow-failures,help -- "$@")
+args=$(getopt -o '' --long mark_type:,log_file:,log-dir:,filter_pattern:,experiments_list:,experiment_patch_mask:,collect_dir:,allow-failures,select_file:,help -- "$@")
 if [[ $? -gt 0 ]]; then
   usage
 fi
@@ -77,6 +81,7 @@ do
     --experiment_patch_mask) experiment_patch_mask+=($2) ; shift 2  ;;
     --collect_dir)  collect_dir=$2    ; shift 2  ;;
     --allow-failures)  allow_failures=1    ; shift  ;;
+    --select_file)  select_file=$2    ; shift 2  ;;
     --help)    usage      ; shift   ;;
     --) shift; break ;;
     *) >&2 echo Unsupported option: $1
@@ -155,4 +160,7 @@ trap 'show_test_results "$special_test_session_log" "$test_session_tmp_log"' EXI
 ## Special coverage collection flow
 define_configuration
 collect_tests "$collect_defaults" "$special_test_session_log"
+if [[ -n "${select_file:-}" ]]; then
+  select_tests "$select_file" "$special_test_session_log"
+fi
 execute_tests "$exec_defaults" "$special_test_session_log" "$test_session_tmp_log" "${allow_failures:-0}"

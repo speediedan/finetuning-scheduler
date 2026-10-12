@@ -100,7 +100,7 @@ export GPU_LEASE_CMD=/path/to/gpu_lease.sh        # opt in for this shell
 whole suite. The Azure GPU pipeline participates too, by bind-mounting the lease directory into the job
 container (`flock` works on the inode, so container and host processes interlock). It tags its lease
 `project=azure-<buildId>` with **no project infix** (`.azure-pipelines/gpu-tests.yml`, the "Acquire host GPU
-lease" step), so that is the shape to recognize in `--status` output. `interpretune` builds share this
+leases" step), so that is the shape to recognize in `--status` output. `interpretune` builds share this
 agent and tag `azure-it-<buildId>`, so the infix is how you tell whose build holds the lease.
 
 Two things worth knowing up front:
@@ -121,7 +121,10 @@ instead.
 1. `pre-commit run --all-files`
 1. `pyright -p pyproject.toml` — the type checker (mypy was removed). Covers `src/finetuning_scheduler` only.
 1. A `CHANGELOG.md` entry under the unreleased section for anything non-trivial.
-1. `./tests/special_tests.sh` for changes touching FSDP, model-parallel, or strategy adapters.
+1. `./tests/special_tests.sh` for changes touching FSDP, model-parallel, or strategy adapters. A pull request that
+   changes how a strategy is driven (how an adapter wraps, shards, checkpoints or reconfigures the module, or how the
+   callback drives a distributed strategy) also gets the `full-gpu-suite` label before its GPU gate is approved, so the
+   gate runs every standalone test rather than the smoke set (see CI below).
 1. `python scripts/verify_version_consistency.py` for any change touching a torch/CUDA/Lightning/Python
    version declaration — those live in six or seven files that must agree (Dockerfiles, both
    `dockers/docker_images_*.sh`, the Azure image tag, the `release-docker.yml` matrix). It exits
@@ -295,8 +298,18 @@ the `fts-development-branch-version-upgrade` skill.
   `.github/actions/install-ci-dependencies`. Sets `DISABLE_MPS=1` on macOS. The `oldest` leg resolves
   through `requirements/ci/requirements-oldest.txt`.
 - `code-checks.yml` ("Type Checks") — `pyright -p pyproject.toml`.
-- `.azure-pipelines/gpu-tests.yml` — self-hosted, asserts `>= 2` CUDA GPUs. Runs the standard suite,
-  standalone multi-GPU, examples, and multi-GPU examples as separate steps.
+- `.azure-pipelines/gpu-tests.yml`: self-hosted, asserts `>= 2` CUDA GPUs. Runs the non-standalone CUDA tests
+  only (`FTS_CUDA_TESTS_ONLY=1`; the hosted matrix runs every other test in that collection, on CPU), then the
+  standalone tests under `tests/`, examples, and multi-GPU examples as separate steps. It takes the host's `gpu` and
+  `cpu-heavy` leases after installing.
+  - **Standalone scope** (`.azure-pipelines/scripts/standalone_scope.sh`): a pull request into `main` runs the smoke
+    set in `tests/.standalone_smoke`, one test per strategy family. Every other build runs every standalone test:
+    release branches and tags, builds of `main`, manual runs (one queued on a pull request's merge ref included), and a
+    pull request labeled `full-gpu-suite` (read when the build runs, so a label added before the gate is approved
+    counts).
+  - **The trade:** a regression in one FSDP or model-parallel case that the smoke set does not cover surfaces at the
+    next full run rather than on the pull request that caused it, which is why strategy-driving changes take the
+    label (see "Checks required before a change is done").
 
 ## Known stale references
 

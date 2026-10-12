@@ -218,8 +218,8 @@ collect_env_coverage(){
         log_msg "Tests that would be collected:"
         python -m pytest src/finetuning_scheduler tests --collect-only -q >> $coverage_session_log 2>&1
         log_msg ""
-        log_msg "Standalone tests that would run (pattern: test_f):"
-        PL_RUN_STANDALONE_TESTS=1 python -m pytest tests --collect-only -q -k 'test_f' >> $coverage_session_log 2>&1 || true
+        log_msg "Standalone tests that would run:"
+        PL_RUN_STANDALONE_TESTS=1 python -m pytest tests --collect-only -q >> $coverage_session_log 2>&1 || true
         if [[ $include_experimental -eq 1 ]]; then
             log_msg ""
             log_msg "Experimental patch tests that would run:"
@@ -245,8 +245,8 @@ collect_env_coverage(){
                     failures_flag="--allow-failures"
                 fi
 
-                log_msg "Running standalone tests (pattern: test_f)"
-                (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f' --log_file=${coverage_session_log} ${failures_flag} >> ${temp_special_log} 2>&1) > /dev/null
+                log_msg "Running standalone tests"
+                (./tests/special_tests.sh --mark_type=standalone --log_file=${coverage_session_log} ${failures_flag} >> ${temp_special_log} 2>&1) > /dev/null
 
                 if [[ $run_all_and_examples -eq 1 ]]; then
                     log_msg "Running all FTS example tests (non-standalone)"

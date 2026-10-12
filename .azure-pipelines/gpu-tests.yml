@@ -45,8 +45,9 @@ jobs:
         'PyTorch | latest':
           image: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-azpl-init"
           scope: ""
-    # how long to run the job before automatically cancelling
-    timeoutInMinutes: "100"
+    # how long to run the job before automatically cancelling: up to 40 minutes waiting for the host leases, then about
+    # 35 minutes of install and tests with the full standalone suite
+    timeoutInMinutes: "120"
     # how much time to give 'run always even if cancelled tasks' before stopping them
     cancelTimeoutInMinutes: "2"
 
@@ -74,15 +75,6 @@ jobs:
       clean: outputs
 
     steps:
-
-    # Serialize this job against any local multi-GPU run on the self-hosted host. The agent already
-    # guarantees one Azure job at a time, so this exists purely to avoid colliding with interactive/agent
-    # sessions -- a collision that previously surfaced as OOM or flaky timing rather than a clear error.
-    # Fails open if the lease directory is not mounted, so it can never break a host that lacks it.
-    - bash: |
-        source scripts/gpu_lease_wrap.sh
-        ci_gpu_lease_acquire /gpu_leases /tmp/azp_gpu_lease.pid 2400 "azure-$(Build.BuildId)"
-      displayName: 'Acquire host GPU lease'
 
     - bash: |
         set -e  # Exit on any error
@@ -117,14 +109,51 @@ jobs:
         python -c "import os ; assert os.environ.get('PL_RUN_CUDA_TESTS') == '1', 'PL_RUN_CUDA_TESTS is not set'"
       displayName: 'Env details'
 
+    # Serialize the GPU phases against local GPU work on the self-hosted host: the GPUs, then host memory (`cpu-heavy`),
+    # in the host lease tool's order. The agent already runs one Azure job at a time, so this exists to avoid colliding
+    # with interactive or agent sessions, a collision that surfaces as OOM or flaky timing rather than a clear error.
+    # Taken after the install, which needs neither. It first waits, without holding it, for `cpu-heavy` to be free, so
+    # a local CPU-only job holding it does not leave this job holding GPUs it cannot use (racy, which only costs that
+    # wait again). The three waits share one 40-minute budget. Fails open only when the lease directory is not
+    # mounted; `set -e` fails the step on any other acquire failure, and the cleanup step releases whatever is held.
+    - bash: |
+        set -e
+        source scripts/gpu_lease_wrap.sh
+        deadline=$(( SECONDS + 2400 ))
+        if [[ -e /gpu_leases/cpu-heavy.lock ]]; then
+          exec {fd}</gpu_leases/cpu-heavy.lock
+          wait_s=$(( deadline - SECONDS ))
+          flock -x -w "$wait_s" "$fd" || { echo "##vso[task.logissue type=error]Timed out waiting for the host's cpu-heavy lease."; exit 75; }
+          exec {fd}<&-
+        fi
+        wait_s=$(( deadline - SECONDS > 60 ? deadline - SECONDS : 60 ))
+        ci_gpu_lease_acquire /gpu_leases /tmp/azp_gpu_lease.pid "$wait_s" "azure-$(Build.BuildId)" gpu
+        wait_s=$(( deadline - SECONDS > 60 ? deadline - SECONDS : 60 ))
+        ci_gpu_lease_acquire /gpu_leases /tmp/azp_cpu_heavy_lease.pid "$wait_s" "azure-$(Build.BuildId)" cpu-heavy
+      displayName: 'Acquire host GPU leases'
+
+    # Only the CUDA tests that are not standalone: the hosted CPU matrix runs every other test in this collection, and
+    # the standalone step below runs the standalone ones (tests/conftest.py, FTS_CUDA_TESTS_ONLY).
     - bash: |
         source /tmp/venvs/fts_dev/bin/activate
         python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
-      displayName: 'Testing: standard'
+      env:
+        FTS_CUDA_TESTS_ONLY: "1"
+      displayName: 'Testing: CUDA'
 
+    # The standalone tests under tests/: on a pull request into main, the smoke set unless the pull request carries the
+    # `full-gpu-suite` label, and otherwise all of them (.azure-pipelines/scripts/standalone_scope.sh). The marker alone
+    # defines the partition, so a standalone test in a module whose name does not start with `test_f` is not silently
+    # left out of the full suite.
     - bash: |
+        set -e
         source /tmp/venvs/fts_dev/bin/activate
-        bash ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
+        scope=$(bash .azure-pipelines/scripts/standalone_scope.sh)
+        if [[ "$scope" == smoke ]]; then
+          bash ./tests/special_tests.sh --mark_type=standalone --select_file=tests/.standalone_smoke
+        else
+          bash ./tests/special_tests.sh --mark_type=standalone
+        fi
       displayName: 'Testing: standalone multi-gpu'
 
     # - bash: |
@@ -176,10 +205,12 @@ jobs:
         sudo chmod -R 775 /__w/1/s || true
         echo "Cleaning up ephemeral directories..."
         sudo rm -rf /__w/1/s/.pytest_cache || true
-        # Release the host GPU lease. Belt-and-braces only: if this job dies or its container is torn
-        # down, every process inside it dies too and the kernel frees the lease automatically.
-        source scripts/gpu_lease_wrap.sh 2>/dev/null && \
-          ci_gpu_lease_release /gpu_leases /tmp/azp_gpu_lease.pid || true
+        # Release the host leases, cpu-heavy first. Belt-and-braces only: if this job dies or its container is torn
+        # down, every process inside it dies too and the kernel frees the leases automatically.
+        source scripts/gpu_lease_wrap.sh 2>/dev/null && {
+          ci_gpu_lease_release /gpu_leases /tmp/azp_cpu_heavy_lease.pid cpu-heavy
+          ci_gpu_lease_release /gpu_leases /tmp/azp_gpu_lease.pid gpu
+        } || true
         echo 'Agent workspace cleanup completed'
       condition: always()
       displayName: 'Cleaning up agent workspace'

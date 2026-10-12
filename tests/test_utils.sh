@@ -66,6 +66,39 @@ collect_tests(){
   fi
 }
 
+select_tests(){
+  # Keep only the collected tests listed in "$1", one node id per line (blank lines and `#` comments are ignored), in
+  # the file's order. A listed test that was not collected fails the run, so the list cannot fall out of date silently.
+  local select_file="$1"
+  local select_log="$2"
+  if [[ ! -r "$select_file" ]]; then
+    printf "Cannot read the test list ${select_file}. \n" | tee -a $select_log
+    export collection_failed=1
+    exit 1
+  fi
+  local -a wanted=($(grep -vE '^[[:space:]]*(#|$)' "$select_file" || true))
+  if [[ ${#wanted[@]} -eq 0 ]]; then
+    printf "The test list ${select_file} names no tests. \n" | tee -a $select_log
+    export collection_failed=1
+    exit 1
+  fi
+  local -a kept=() missing=()
+  for w in "${wanted[@]}"; do
+    if printf '%s\n' "${parameterizations[@]}" | grep -qxF -- "$w"; then kept+=("$w"); else missing+=("$w"); fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    printf "These tests listed in ${select_file} were not collected: \n" | tee -a $select_log
+    printf '%s\n' "${missing[@]}" | tee -a $select_log
+    export collection_failed=1
+    exit 1
+  fi
+  parameterizations=("${kept[@]}")
+  num_collected_tests="${#parameterizations[@]}"
+  printf "Selected the ${num_collected_tests} tests listed in ${select_file}: \n" | tee -a $select_log
+  printf '%s\n' "${parameterizations[@]}" | tee -a $select_log
+  printf '\n' | tee -a $select_log
+}
+
 execute_tests(){
   ensure_tests
   local execute_def="$1"
@@ -93,30 +126,44 @@ execute_tests(){
     # capture the exit code rather than letting the outer `set -eo pipefail` abort here, otherwise the
     # result parsing below (and --allow-failures) is unreachable for any failing parameterization
     test_rc=0
-    (set -o pipefail; python ${execute_def} ${parameterization} 2>&1 | sed "s,\x1b\[[0-9;]*[a-zA-Z],,g" >> $tmp_raw_log) > /dev/null || test_rc=$?
+    # each test's output is parsed on its own, then appended to the session's raw log
+    test_raw_log=$(mktemp)
+    (set -o pipefail; python ${execute_def} ${parameterization} 2>&1 | sed "s,\x1b\[[0-9;]*[a-zA-Z],,g" > "$test_raw_log") > /dev/null || test_rc=$?
+    cat "$test_raw_log" >> $tmp_raw_log
     test_to_find=`echo ${parameterization} | sed 's/\[/\\\[/g; s/\]/\\\]/g'`
-    if pass_or_fail=$(grep -E "(PASSED|FAILED|XPASS|XFAIL) .*${test_to_find}" $tmp_raw_log); then
+    # Under Lightning's `ddp` launcher every other rank re-runs this test in its own pytest session, writing to the same
+    # output, and only rank zero's exit code reaches this shell. So a FAILED or ERROR line from any rank fails the test,
+    # as does a non-zero exit, whichever rank's verdict is printed first, and so does a session that never finished (a
+    # rank that died, or was aborted in a collective, prints no verdict at all).
+    sessions=$(grep -c "test session starts" "$test_raw_log" || true)
+    finished=$(grep -cE "^=+ .+ in [0-9.]+s.* =+$" "$test_raw_log" || true)
+    if grep -qE "(FAILED|ERROR) .*${test_to_find}" "$test_raw_log"; then
+      parameterization_result="${parameterization}: FAILED"
+    elif [[ $test_rc -ne 0 ]]; then
+      parameterization_result="${parameterization}: FAILED (exit code ${test_rc})"
+    elif [[ $finished -lt $sessions ]]; then
+      parameterization_result="${parameterization}: FAILED (${sessions} pytest sessions started, ${finished} finished)"
+    elif pass_or_fail=$(grep -E "(PASSED|XPASS|XFAIL) .*${test_to_find}" "$test_raw_log"); then
       parameterization_result=`echo $pass_or_fail | awk 'NR==1 {print $2 ": "  $1}'`;
-      # Check if test failed and allow_failures is not set
-      if echo "$parameterization_result" | grep -q "FAILED" && [[ $allow_failures -eq 0 ]]; then
-        echo "Test failed: ${parameterization_result}" | tee -a $execute_log
-        echo "Stopping execution (use --allow-failures to continue after failures)" | tee -a $execute_log
-        report+="Ran\t${parameterization_result}\n"
-        break
-      fi
-    elif skipped=$(grep -E "${test_to_find}.*SKIPPED" $tmp_raw_log); then
+    elif skipped=$(grep -E "${test_to_find}.*SKIPPED" "$test_raw_log"); then
       parameterization_result=`echo $skipped | awk 'NR==1 {print $1 ": "  $2}'`;
-    elif [[ $test_rc -eq 0 ]] && grep -qE "SKIPPED \[[0-9]+\] $(echo "${parameterization%%::*}" | sed 's/[][]/\\&/g'):" $tmp_raw_log; then
+    elif grep -qE "SKIPPED \[[0-9]+\] $(echo "${parameterization%%::*}" | sed 's/[][]/\\&/g'):" "$test_raw_log"; then
       # pytest's short-summary SKIPPED lines cite file:LINE (not ::testname), and the progress
       # line's SKIPPED tag can be separated from the test id by interleaved live-log output
-      # (e.g. a skip raised mid-test after log capture) — fall back to the file-scoped summary,
-      # gated on pytest exit 0 so a crashed test can never be misclassified as a skip
+      # (e.g. a skip raised mid-test after log capture), so fall back to the file-scoped summary.
+      # Only reached on exit 0, so a crashed test can never be misclassified as a skip.
       parameterization_result="${parameterization}: SKIPPED"
     else
       echo "Could not parse result!" | tee -a $execute_log
       parameterization_result="UNKNOWN: see $tmp_raw_log"
     fi
+    rm -f "$test_raw_log"
     report+="Ran\t${parameterization_result}\n"
+    if [[ "$parameterization_result" == *FAILED* && $allow_failures -eq 0 ]]; then
+      echo "Test failed: ${parameterization_result}" | tee -a $execute_log
+      echo "Stopping execution (use --allow-failures to continue after failures)" | tee -a $execute_log
+      break
+    fi
   done
 }
 

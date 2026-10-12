@@ -42,6 +42,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Fixed `ci_gpu_lease_release` freeing the GPU lease before removing its holder record, so a local job that acquired the lease at that moment could not replace the record and ran unattributed. The record is now removed first, and an existing record is overwritten without a creating open, which `fs.protected_regular` forbids for another user's file [#73](https://github.com/speediedan/finetuning-scheduler/issues/73).
 
+- Fixed `tests/special_tests.sh` scoring a test by the first verdict printed in its shared log and ignoring the exit code. Under Lightning's `ddp` launcher every rank prints a verdict, so a passing rank could hide a failing one. A test now fails when any rank reports it failed or the run exits non-zero, and each test's output is parsed on its own [#57](https://github.com/speediedan/finetuning-scheduler/issues/57).
+
 - Fixed `tests/special_tests.sh` reporting success when test collection failed, building its default experiment mask from `tests/.experiments` whatever `--experiments_list` named, and failing when `--log-dir` did not exist. It and `scripts/gen_fts_coverage.sh` now reject a bad flag before waiting for the GPU lease [#68](https://github.com/speediedan/finetuning-scheduler/issues/68).
 
 ### Changed
@@ -73,6 +75,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Moved the Lightning integration modules to `finetuning_scheduler.lightning.fts` and `finetuning_scheduler.lightning.fts_supporters`. `finetuning_scheduler.fts` and `finetuning_scheduler.fts_supporters` remain importable and keep their API documentation pages and anchors. The classes' `__module__` (and so their `repr`) now names the new modules; logger names are unchanged [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
 
 - CUDA tests (`RunIf(min_cuda_gpus=...)` and `RunIf(bf16_cuda=True)`) now run only with `PL_RUN_CUDA_TESTS=1`, as the `min_cuda_gpus` documentation already stated, so a plain `pytest` run never uses a host's GPUs. `tests/special_tests.sh`, `scripts/gen_fts_coverage.sh` and the GPU pipeline set it [#68](https://github.com/speediedan/finetuning-scheduler/issues/68).
+
+- The GPU pipeline now runs only the CUDA tests that are not standalone, in place of the whole suite, which the hosted CPU matrix already runs on CPU. Single-GPU cases of the phase-transition, optimizer reinitialization and resumption tests join that phase, so those paths still run on a GPU. A pull request into `main` runs a smoke set of six standalone tests (`tests/.standalone_smoke`), one per strategy family. Release branches and tags, builds of `main`, manual runs, and a pull request labeled `full-gpu-suite` run every standalone test, now including those in modules not matching `test_f`, which had left out a two-GPU DDP test. The pipeline also takes the host's `gpu` and `cpu-heavy` (host memory) leases after installing rather than before [#57](https://github.com/speediedan/finetuning-scheduler/issues/57).
 
 ### Deprecated
 

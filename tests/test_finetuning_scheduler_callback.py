@@ -1378,7 +1378,7 @@ EXPECTED_RESUME_RESULTS = {
 
 
 def ckpt_resume_launch(ckpt_set_fixture: object, diff_dirpath: bool, ckpt: str, max_depth: int, tmpdir: Path,
-                       save_on_train_epoch_end: bool | None = None) -> None:
+                       save_on_train_epoch_end: bool | None = None, accelerator: str = "auto") -> None:
     dirpath = None if diff_dirpath else Path(ckpt_set_fixture["best"]).parent
     resume_callbacks = [
         FTSEarlyStopping(monitor="val_loss", patience=1, min_delta=0.001),
@@ -1391,7 +1391,7 @@ def ckpt_resume_launch(ckpt_set_fixture: object, diff_dirpath: bool, ckpt: str, 
 
     seed_everything(42)
     model = FinetuningSchedulerBoringModel()
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=resume_callbacks, devices=1)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=resume_callbacks, accelerator=accelerator, devices=1)
     finetuningscheduler_callback = get_fts(trainer)
     trainer.ckpt_path = ckpt_set_fixture[ckpt]
     trainer.fit(model)
@@ -1444,6 +1444,21 @@ def test_fts_callback_resume(tmpdir, ckpt_set, recwarn, diff_dirpath: bool, trai
         resume_warns.append(EXPECTED_TRAINCHK_WARN)
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=resume_warns)
+    assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
+
+
+@RunIf(min_cuda_gpus=1)
+def test_fts_callback_resume_gpu(tmpdir, ckpt_set, recwarn):
+    """Resume scheduled fine-tuning from a checkpoint on one GPU, through the phase transitions that remain."""
+    fts_callback, _, trainer = ckpt_resume_launch(
+        ckpt_set_fixture=ckpt_set, diff_dirpath=True, ckpt="best", max_depth=-1, tmpdir=tmpdir, accelerator="gpu"
+    )
+    assert trainer.strategy.root_device.type == "cuda"
+    expected_state = EXPECTED_RESUME_RESULTS[(True, False, "best", -1)]
+    assert trainer.checkpoint_callback.best_ckpt_depth == expected_state[0]
+    assert fts_callback.depth_remaining == expected_state[1]
+    assert fts_callback.curr_depth == expected_state[2]
+    unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=BASE_EXPECTED_WARNS)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
@@ -1528,10 +1543,17 @@ EXPECTED_INTRAFIT_STATE = {
 }
 
 
-@pytest.mark.parametrize("restore_best", [True, False], ids=["default", "norestorebest"])
-def test_fts_intrafit(tmpdir, restore_best: bool):
+@pytest.mark.parametrize(
+    "restore_best, accelerator",
+    [
+        pytest.param(True, "auto", id="default"),
+        pytest.param(False, "auto", id="norestorebest"),
+        pytest.param(True, "gpu", id="default_gpu", marks=RunIf(min_cuda_gpus=1)),
+    ],
+)
+def test_fts_intrafit(tmpdir, restore_best: bool, accelerator: str):
     """Inspect scheduled fine-tuning state within the training process to ensure it is taking the expected path in
-    both restore_best modes."""
+    both restore_best modes, and on one GPU."""
     seed_everything(42)
     model = FinetuningSchedulerBoringModel()
     callbacks = [
@@ -1539,7 +1561,7 @@ def test_fts_intrafit(tmpdir, restore_best: bool):
         FTSEarlyStopping(monitor="val_loss", patience=1),
         LearningRateMonitor(),
     ]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, accelerator=accelerator, devices=1)
     trainer.fit(model)
     finetuningscheduler_callback = get_fts(trainer)
     callbacks_dict = {type(c): i for i, c in enumerate(finetuningscheduler_callback.pl_module.trainer.callbacks)}
@@ -1738,18 +1760,19 @@ EXPECTED_REINIT_OPTIM_STATE = {
 
 
 @pytest.mark.parametrize(
-    "explicit_mode, reinit_optim_only, use_curr_optim_pg",
+    "explicit_mode, reinit_optim_only, use_curr_optim_pg, accelerator",
     [
-        pytest.param(True, True, False, id="explicit_optim"),
-        pytest.param(True, False, False, id="explicit_optimlr"),
-        pytest.param(False, True, False, id="implicit_optim"),
-        pytest.param(False, False, False, id="implicit_optimlr"),
-        pytest.param(True, False, True, id="explicit_optimlr_use_curr"),
-        pytest.param(False, False, True, id="implicit_optimlr_use_curr"),
+        pytest.param(True, True, False, "auto", id="explicit_optim"),
+        pytest.param(True, False, False, "auto", id="explicit_optimlr"),
+        pytest.param(False, True, False, "auto", id="implicit_optim"),
+        pytest.param(False, False, False, "auto", id="implicit_optimlr"),
+        pytest.param(True, False, True, "auto", id="explicit_optimlr_use_curr"),
+        pytest.param(False, False, True, "auto", id="implicit_optimlr_use_curr"),
+        pytest.param(True, False, False, "gpu", id="explicit_optimlr_gpu", marks=RunIf(min_cuda_gpus=1)),
     ],
 )
 def test_fts_reinit_optim(
-    tmpdir, boring_ft_schedule, explicit_mode: bool, reinit_optim_only: bool, use_curr_optim_pg: bool
+    tmpdir, boring_ft_schedule, explicit_mode: bool, reinit_optim_only: bool, use_curr_optim_pg: bool, accelerator: str
 ):
     """Inspect optimizer state within the training process to ensure it is taking the expected path in both
     explicit and implict fine-tuning modes."""
@@ -1779,7 +1802,7 @@ def test_fts_reinit_optim(
         ),
         FTSEarlyStopping(monitor="val_loss", patience=2),
     ]
-    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, devices=1)
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=callbacks, accelerator=accelerator, devices=1)
     trainer.fit(model)
     finetuningscheduler_callback = get_fts(trainer)
     assert finetuningscheduler_callback.depth_remaining == 0

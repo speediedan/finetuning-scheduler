@@ -24,6 +24,7 @@ Fixes #\<issue_number>
 - [ ] Did you make sure to **update the documentation** with your changes? (if necessary)
 - [ ] Did you write any **new necessary tests**? (not for typos and docs)
 - [ ] Did you verify new and **existing tests pass** locally with your changes?
+- [ ] Does this PR change **how a strategy is driven** (a strategy adapter, or the callback's distributed paths)? If so, ask for the `full-gpu-suite` label, so the GPU gate runs every standalone test rather than the smoke set.
 - [ ] Did you list all the **breaking changes** introduced by this pull request?
 - [ ] Did you **update the [CHANGELOG](https://github.com/speediedan/finetuning-scheduler/blob/main/CHANGELOG.md)**? (not for typos, docs, test updates, or internal minor changes/refactorings)
 
