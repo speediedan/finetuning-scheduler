@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Added `finetuning_scheduler.core`, a scheduling core that does not depend on Lightning. It holds schedule generation, loading, saving and validation; optimizer and lr scheduler reinitialization checks; parameter group growth; lr state restoration; and the scheduler state. It imports only PyTorch, PyYAML, fsspec and the standard library, and the Lightning integration delegates to it. The core raises configuration errors as `FTSConfigurationError`, a `ValueError`. Under Lightning they are raised as `FTSMisconfigurationException`, which is both an `FTSConfigurationError` and a Lightning `MisconfigurationException`, so existing `except MisconfigurationException` handlers keep catching them, and `except ValueError` now catches them too [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
 
+- Added `scripts/rocm_smoke.py`, a self-contained distributed smoke check (PyTorch only) for vetting a multi-GPU host, ROCm in particular, before relying on it: checked collectives and bandwidth, a collective soak, a two-phase FSDP2 schedule against a single-process run, bf16 mixed precision, a distributed-checkpoint restore and compilation at a phase transition, each run as configured and with `NCCL_PROTO=Simple` [#74](https://github.com/speediedan/finetuning-scheduler/issues/74).
+
 ### Fixed
 
 - Fixed the examples' environment logging (`collect_env_info`) failing under PyTorch `2.15`, which added a `rocm_compiled_version` field to `torch.utils.collect_env.SystemEnv`. The examples build that tuple themselves to avoid initializing CUDA; they now pass only the fields the installed PyTorch defines and mark any they do not inspect, so a future field no longer breaks every example.
@@ -25,6 +27,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Fixed `scripts/gpu_lease_wrap.sh` having drifted from the copy it shares with interpretune. `ci_gpu_lease_acquire` and `ci_gpu_lease_release` now take an optional lease name (default `gpu`), so a CI job can also take the host's `cpu-heavy` lease. Existing callers are unchanged [#66](https://github.com/speediedan/finetuning-scheduler/issues/66).
 
 - Fixed `scripts/gen_fts_coverage.sh` sending its commands' stderr to the terminal instead of the coverage session log, and its `--dry-run` listing no standalone tests: it selected with pytest markers this repository does not define, and set an environment variable nothing reads [#67](https://github.com/speediedan/finetuning-scheduler/issues/67).
+
+- Fixed `ci_gpu_lease_release` freeing the GPU lease before removing its holder record, so a local job that acquired the lease at that moment could not replace the record and ran unattributed. The record is now removed first, and an existing record is overwritten without a creating open, which `fs.protected_regular` forbids for another user's file [#73](https://github.com/speediedan/finetuning-scheduler/issues/73).
 
 ### Changed
 

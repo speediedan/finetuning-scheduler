@@ -151,7 +151,7 @@ ci_gpu_lease_acquire() {
     rm -f "$ready"
     { echo "pid=$(cat "$pidfile")"; echo "started=$(date -Iseconds)"; echo "epoch=$(date +%s)"
       echo "project=${label}"; echo "host=$(hostname)"; echo "container=yes"
-      echo "cmd=azure pipeline job"; } > "${dir}/${lease}.holder" 2>/dev/null || true
+      echo "cmd=azure pipeline job"; } | _ci_write_holder "${dir}/${lease}.holder"
     # Make the holder repairable by whoever takes the lease next. This container owns the file it just
     # created so the chmod succeeds HERE, whereas a local uid could never repair it later: chmod(2)
     # requires ownership, and unlink in the sticky lease dir does too, and a local user owns neither the
@@ -174,10 +174,28 @@ ci_gpu_lease_release() {
     local dir="${1:?lease dir}" pidfile="${2:?pidfile}" lease="${3:-gpu}"
     [[ -f "$pidfile" ]] || { echo "ci_gpu_lease: nothing to release for ${lease}." >&2; return 0; }
     local hpid; hpid=$(cat "$pidfile" 2>/dev/null); rm -f "$pidfile"
+    # Remove the holder record BEFORE freeing the lock. In the other order the lock is free while this job's
+    # record remains, and a waiter that acquires in that window cannot replace a record another uid owns (see
+    # _ci_write_holder), so its whole hold shows as unattributed. A record missing while the lock is still held
+    # reads as "held, unattributed", which is already to be treated as CI-held.
+    rm -f "${dir}/${lease}.holder" 2>/dev/null || true
     # Kill the process GROUP: the holder's `sleep` child inherits the flock'd fd, so killing only the
     # holder shell would leave the lock held by an orphan.
     [[ -n "$hpid" ]] && { kill -TERM -- "-${hpid}" 2>/dev/null || kill -TERM "$hpid" 2>/dev/null; sleep 1
                           kill -KILL -- "-${hpid}" 2>/dev/null || kill -KILL "$hpid" 2>/dev/null; }
-    rm -f "${dir}/${lease}.holder" 2>/dev/null || true
     echo "ci_gpu_lease: released the ${lease} lease." >&2
+}
+
+# Write stdin to the holder record at "$1". Where a record already exists, open it without O_CREAT: under
+# `fs.protected_regular` (the default on current Ubuntu and systemd-based distributions) the kernel refuses a
+# creating open of another uid's file in a sticky, world-writable directory whatever its mode, unless the
+# directory's owner owns the file, so a stale record left by a local process could not otherwise be replaced.
+# A plain open with O_TRUNC is governed by the file's mode alone, which the lease tools keep at 0666.
+_ci_write_holder() {
+    local path="$1"
+    if [[ -e "$path" ]]; then
+        dd of="$path" conv=nocreat status=none 2>/dev/null || true
+    else
+        cat > "$path" 2>/dev/null || true
+    fi
 }
