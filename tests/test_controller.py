@@ -546,3 +546,19 @@ def test_max_epochs_extension_follows_the_schedules_last_phase():
     fts = FTSController(model, schedule, optimizer=partial(torch.optim.SGD, lr=0.1), max_depth=1)
     fts.setup()
     assert len(_run(fts, model, 2)) == 2
+
+
+def test_breaking_after_should_stop_ends_training():
+    """``if fts.should_stop: break`` still ends training: the final end hooks run."""
+    ended = []
+    model = Net()
+    fts = FTSController(model, {0: {"params": ["l2.weight", "l2.bias"]}}, optimizer=partial(torch.optim.SGD, lr=0.1),
+                        transition=PlateauTransition("loss", patience=1))
+    fts.add_phase_hook(lambda e: ended.append(e.depth), when="end")
+    fts.setup()
+    for epoch in fts.epochs(10):
+        _train_epoch(fts, model, steps=1, seed=epoch)
+        fts.epoch_end({"loss": 1.0})
+        if fts.should_stop:
+            break
+    assert ended == [0]

@@ -41,9 +41,9 @@ def save_payload(payload: Mapping[str, Any], path: str | os.PathLike) -> str:
     The payload is written
     beside ``path`` and then moved over it, so an interrupted write never destroys an existing checkpoint.
     """
-    path = os.fspath(path)
+    path = os.path.normpath(os.fspath(path))
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = f"{path}.tmp-{os.getpid()}"
+    tmp = f"{path}.tmp"
     torch.save(dict(payload), tmp)
     os.replace(tmp, path)
     return path
@@ -63,10 +63,21 @@ def remove_checkpoint(path: str) -> None:
 
 
 def replace_checkpoint(source: str, target: str) -> None:
-    """Move a freshly written checkpoint file or directory over ``target`` (whatever ``target`` holds)."""
-    if os.path.isdir(source) or os.path.isdir(target):
-        remove_checkpoint(target)
+    """Move a freshly written checkpoint file or directory over ``target`` (whatever ``target`` holds).
+
+    An existing
+    ``target`` is first moved aside and removed only once ``source`` is in place, so an interruption leaves either the
+    old checkpoint or the new one at ``target`` (or, at worst, the old one at ``<target>.old``).
+    """
+    source, target = os.path.normpath(source), os.path.normpath(target)
+    if not os.path.lexists(target):
+        os.replace(source, target)
+        return
+    old = f"{target}.old"
+    remove_checkpoint(old)
+    os.replace(target, old)
     os.replace(source, target)
+    remove_checkpoint(old)
 
 
 def copy_checkpoint(source: str, target: str) -> None:
@@ -76,8 +87,9 @@ def copy_checkpoint(source: str, target: str) -> None:
     The copy is made beside ``target`` first, so ``target`` is replaced only by a complete
     copy.
     """
-    tmp = f"{target}.tmp-{os.getpid()}"
-    remove_checkpoint(tmp)
+    source, target = os.path.normpath(source), os.path.normpath(target)
+    tmp = f"{target}.tmp"
+    remove_checkpoint(tmp)  # also clears a copy an interrupted earlier run left behind
     if os.path.isdir(source):
         shutil.copytree(source, tmp)
     else:

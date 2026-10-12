@@ -254,3 +254,23 @@ def test_resuming_a_finished_run_reopens_its_phase(tmp_path):
     fts.load(tmp_path / "ended.pt")
     _run(fts, model2, 5)
     assert ends == [1, 2]  # phase 1 (current when saved) ends at its real boundary, then the final phase
+
+
+def test_interrupted_writes_leave_a_usable_checkpoint(tmp_path):
+    """A temporary file or directory left by an interrupted write is cleared by the next write, and replacing a
+    checkpoint moves the old one aside until the new one is in place."""
+    from finetuning_scheduler.core.checkpoint import copy_checkpoint, replace_checkpoint, save_payload
+
+    target = tmp_path / "ckpt.pt"
+    (tmp_path / "ckpt.pt.tmp").write_text("left by a crashed write")
+    save_payload({"v": 1}, target)
+    assert load_payload(target) == {"v": 1} and not (tmp_path / "ckpt.pt.tmp").exists()
+    new = tmp_path / "new"
+    new.mkdir()
+    (new / "part").write_text("new")
+    (tmp_path / "ckpt.pt.old").write_text("left by a crashed replace")
+    replace_checkpoint(str(new), str(target))
+    assert (target / "part").read_text() == "new"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["ckpt.pt"]
+    copy_checkpoint(str(target), str(tmp_path / "copy") + "/")  # a trailing separator names the same target
+    assert (tmp_path / "copy" / "part").read_text() == "new"

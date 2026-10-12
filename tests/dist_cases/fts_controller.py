@@ -225,3 +225,29 @@ def per_rank_state(ctx, ckpt_dir: str, sharded: bool, seed: int = 7) -> dict:
     fts2.register_stateful("loader", position2)
     fts2.load(saved)
     return {"rank": ctx.rank, "position": position2.n, "rng_matches": torch.rand(3).tolist() == expected}
+
+
+def resave_and_partial_metrics(ctx, ckpt_dir: str, epochs: int = 4, steps: int = 2, batch: int = 8,
+                               seed: int = 7) -> dict:
+    """Saving a sharded checkpoint again under the same directory spelled with a trailing slash replaces it; and a
+    rank that reports no metrics for an epoch still joins the best-checkpoint agreement."""
+    model = _sharded_model(ctx, seed)
+    # a lenient plateau policy, so the rank without metrics reaches the checkpoint agreement this case is about
+    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1, momentum=0.9),
+                        transition=PlateauTransition("val_loss", patience=1, strict=False), host=TorchHost(model),
+                        checkpoint=BestCheckpoint(os.path.join(ckpt_dir, "best"), "val_loss"))
+    fts.setup()
+    x, y = _data(epochs, steps, batch, seed)
+    shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
+    for epoch in fts.epochs(epochs):
+        for step in range(steps):
+            F.mse_loss(model(x[epoch, step, shard].to(ctx.device)), y[epoch, step, shard].to(ctx.device)).backward()
+            fts.optimizer.step()
+            fts.optimizer.zero_grad()
+        fts.epoch_end({"val_loss": VAL[epoch]} if ctx.rank == 0 else None)
+    target = os.path.join(ckpt_dir, "resave")
+    fts.save(target)
+    fts.save(target + os.sep)
+    leftovers = sorted(n for n in os.listdir(ckpt_dir) if n.startswith("resave."))
+    return {"best_depth": fts._checkpoint.best_depth, "resaved": os.path.isfile(os.path.join(target, "fts_meta.pt")),
+            "leftovers": leftovers}

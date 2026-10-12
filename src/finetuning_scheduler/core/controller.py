@@ -468,8 +468,10 @@ class FTSController:
         (with no metrics) unless the loop called it; stops early once :attr:`should_stop`, then calls
         :meth:`train_end`.
 
-        Leaving the loop early (``break``, or an exception in its body) does not end training: no final restore,
-        end hooks or gates run. Call :meth:`train_end` yourself if a deliberate early exit should end the run.
+        Leaving the loop early (``break``, or an exception in its body) does not end training, so no final restore, end
+        hooks or gates run, unless :attr:`should_stop` was already set (``if fts.should_stop: break`` ends training
+        as usual). Call :meth:`train_end` yourself if another deliberate early exit should end the run. An epoch is
+        delimited by :meth:`epoch_start`, which :meth:`epochs` calls; a loop of its own must call it too.
 
         As with the Lightning callback, when the final phase sets ``max_transition_epoch`` the run lasts the greater of
         ``max_epochs`` and the schedule's highest ``max_transition_epoch`` (with a warning).
@@ -484,8 +486,14 @@ class FTSController:
             self.epoch_start()
             if self._should_stop:  # a gate vetoed the phase at this boundary
                 break
-            # an abandoned or failed loop raises GeneratorExit here, which skips `train_end` below
-            yield self._host.current_epoch
+            try:
+                yield self._host.current_epoch
+            except GeneratorExit:
+                # the loop was left early: end training only if it had already decided to stop (the common
+                # `if fts.should_stop: break`); a failure or an arbitrary early exit does not end it
+                if self._should_stop:
+                    self.train_end()
+                raise
             if not self._epoch_end_called:
                 self.epoch_end()
         self.train_end()
@@ -517,7 +525,9 @@ class FTSController:
         self._epoch_end_called = True
         self._last_metrics = dict(metrics or {})
         decision, reason = self._evaluate("epoch", metrics, completed_epochs=self._host.current_epoch + 1)
-        if self._checkpoint is not None and metrics is not None and self._observe_best(metrics):
+        # with several ranks, every rank joins the agreement, even one that reported no metrics this epoch
+        if self._checkpoint is not None and (metrics is not None or self._host.world_size > 1) and \
+                self._observe_best(metrics):
             self._write_checkpoint(self._checkpoint.path_for("best"))
         self._host.advance_epoch()
         if decision >= Decision.STOP:
@@ -862,7 +872,7 @@ class FTSController:
         """Write the training state to ``path``: one file (rank zero) for an unsharded model; for a sharded model,
         a directory written by every rank through DCP, with the non-tensor state in ``fts_meta.pt`` and each rank's
         random generator state (if given) beside it."""
-        path = os.fspath(path)
+        path = os.path.normpath(os.fspath(path))  # `ckpt/` and `ckpt` are one checkpoint
         # registered state (a data-loader position, for example) and random streams are per rank
         statefuls = {name: obj.state_dict() for name, (obj, _) in self._statefuls.items()}
         per_rank = (self._host.all_gather_object({"statefuls": statefuls, "rng": rng_state})
@@ -872,7 +882,8 @@ class FTSController:
             from torch.distributed.checkpoint.state_dict import get_model_state_dict, get_state_dict
 
             # written beside `path` and moved over it once complete, so an interrupted save keeps the old one
-            tmp = self._host.broadcast_object(f"{path}.tmp-{os.getpid()}")
+            # (a fixed name, so a later save clears what an interrupted one left behind)
+            tmp = self._host.broadcast_object(f"{path}.tmp")
             if self._host.is_global_zero:
                 remove_checkpoint(tmp)
             self._host.barrier("fts_checkpoint_tmp")
@@ -980,14 +991,14 @@ class FTSController:
         rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
         return per_rank[rank][key] if rank < len(per_rank) else None
 
-    def _observe_best(self, metrics: Mapping[str, Any]) -> bool:
-        """Offer ``metrics`` to the checkpoint policy.
+    def _observe_best(self, metrics: Mapping[str, Any] | None) -> bool:
+        """Offer ``metrics`` to the checkpoint policy (``None`` counts as no improvement here).
 
         Saving is collective, so every rank must agree: rank zero's decision is used, and its policy state is shared, so
         the ranks keep one record of the best.
         """
         assert self._checkpoint is not None
-        improved = self._checkpoint.observe(metrics, self._depth)
+        improved = self._checkpoint.observe(metrics, self._depth) if metrics is not None else False
         if self._host.world_size > 1:
             improved, state = self._host.broadcast_object((improved, self._checkpoint.state_dict()))
             self._checkpoint.load_state_dict(state)

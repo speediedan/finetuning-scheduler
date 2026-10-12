@@ -95,3 +95,10 @@ def test_per_rank_state_is_restored_per_rank(gloo_pool, tmp_path, sharded):
     results = gloo_pool.run(fts_controller.per_rank_state, ckpt_dir=str(tmp_path / "per_rank"), sharded=sharded)
     assert sorted((r["rank"], r["position"]) for r in results) == [(0, 100), (1, 101)]
     assert all(r["rng_matches"] for r in results)
+
+
+@GLOO
+def test_resave_with_trailing_separator_and_partial_metrics(gloo_pool, tmp_path):
+    results = gloo_pool.run(fts_controller.resave_and_partial_metrics, ckpt_dir=str(tmp_path / "resave"))
+    agreed = assert_ranks_agree(results)
+    assert agreed["resaved"] and agreed["leftovers"] == [] and agreed["best_depth"] is not None
