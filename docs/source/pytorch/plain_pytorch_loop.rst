@@ -167,18 +167,25 @@ example):
 
 Distributed Training
 ********************
-Shard the model yourself with FSDP2 (``torch.distributed.fsdp.fully_shard``) before handing it to the controller, and
-call the controller on every rank. Transition decisions and gate results are agreed across ranks. For sharded models,
-checkpoints are written with ``torch.distributed.checkpoint``. The
+Shard the model yourself with FSDP2 (``torch.distributed.fsdp.fully_shard``), tensor parallelism
+(``torch.distributed.tensor.parallel.parallelize_module``) or both, before handing it to the controller, and call the
+controller on every rank. Transition decisions and gate results are agreed across ranks. For sharded models,
+checkpoints are written with ``torch.distributed.checkpoint``.
+
+Apply ``fully_shard`` to the root module too, last, so FSDP2 manages every parameter: a parameter no FSDP module
+manages has its gradients synchronized by nothing, so each data-parallel rank would train its own copy. The controller
+warns about scheduled parameters left that way. The
 :ref:`model-parallel example for the PyTorch API<model-parallel-plain-loop>` shards a Llama model this way, and also
 runs it with tensor parallelism, mapping each part of the Lightning model-parallel example's configuration to its
 plain-loop equivalent.
 
 Two configurations are currently refused:
 
-- a ``DistributedDataParallel``-wrapped module, because DDP registers only the parameters that require grad when it
-  wraps the module, so parameters thawed in later phases would never be gradient-synchronized (the Lightning
-  callback rebuilds its DDP wrapper at each transition instead);
+- ``DistributedDataParallel``, on the model or any submodule, and torch's composable ``replicate()``. DDP registers
+  only the parameters that require grad when it is built (``replicate()`` builds it at the first forward, after the
+  controller has frozen the model), so parameters thawed in later phases would never be gradient-synchronized. The
+  Lightning callback, which owns its DDP wrapper, rebuilds it at each transition instead. With FSDP2, parameters
+  thawed in later phases stay synchronized;
 - ``ZeroRedundancyOptimizer``.
 
 The Lightning callback's distributed support is unchanged; see
