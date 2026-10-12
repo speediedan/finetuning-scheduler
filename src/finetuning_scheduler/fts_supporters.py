@@ -49,8 +49,8 @@ from finetuning_scheduler.core import schedule as core_schedule
 from finetuning_scheduler.core.schedule import UniqueKeyLoader  # noqa: F401  (legacy import path)
 from finetuning_scheduler.core.state import FTSState
 from finetuning_scheduler.strategy_adapters import StrategyAdapter, FSDPStrategyAdapter, ModelParallelStrategyAdapter
-from finetuning_scheduler.types import (FTSLRSchedulerType, ParamGroupAddable,
-                                        BaseCallbackDepType)
+from finetuning_scheduler.lightning.types import BaseCallbackDepType
+from finetuning_scheduler.types import FTSLRSchedulerType, ParamGroupAddable
 
 
 from finetuning_scheduler.core.optim import ZeroRedundancyOptimizer  # noqa: F401  (legacy import path)

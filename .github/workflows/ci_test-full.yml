@@ -111,3 +111,37 @@ jobs:
 
     # Note: UV cache pruning is handled automatically by setup-uv action
     # with prune-cache: true (set in install-ci-dependencies action)
+
+  core-no-lightning:
+    # The scheduling core with only the declared base dependencies installed (no Lightning, no jsonargparse), which
+    # proves those dependencies suffice for it. Stable CPU torch: the cpu matrix above covers torch versions.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv and set Python version
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: "3.13"
+        activate-environment: true
+
+    - name: Install the base dependencies only
+      run: |
+        python -c "import runpy; print('\n'.join(runpy.run_path('src/finetuning_scheduler/dynamic_versioning/utils.py')['BASE_DEPENDENCIES']))" > base-requirements.txt
+        cat base-requirements.txt
+        uv pip install -r base-requirements.txt pytest --torch-backend=cpu
+        uv pip install --no-deps -e .
+        uv pip list
+
+    - name: Confirm Lightning and jsonargparse are absent
+      run: |
+        python - <<'PY'
+        import importlib.util
+        present = [m for m in ("lightning", "pytorch_lightning", "lightning_fabric", "lightning_utilities",
+                               "torchmetrics", "jsonargparse") if importlib.util.find_spec(m) is not None]
+        assert not present, f"expected absent: {present}"
+        PY
+
+    - name: Tests
+      run: python -m pytest --noconftest tests/test_core_import_isolation.py -v

@@ -16,14 +16,24 @@ Fine-Tuning Scheduler Types
 Type definitions required for Fine-Tuning Scheduler.
 
 """
-from typing import TypeAlias
-
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from typing import TYPE_CHECKING, Any
 
 from finetuning_scheduler.core.types import (AutoStrEnum, FTSLRSchedulerType, FTSLRSchedulerTypeTuple,
                                              ParamGroupAddable, supported_lrs)
 
-BaseCallbackDepType: TypeAlias = type[EarlyStopping] | type[ModelCheckpoint]
+if TYPE_CHECKING:
+    from finetuning_scheduler.lightning.types import BaseCallbackDepType
+
+
+def __getattr__(name: str) -> Any:
+    # the Lightning-bound type loads on first access, so importing this module does not import Lightning
+    if name == "BaseCallbackDepType":
+        from finetuning_scheduler.lightning.types import BaseCallbackDepType
+
+        globals()[name] = BaseCallbackDepType
+        return BaseCallbackDepType
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "AutoStrEnum",
