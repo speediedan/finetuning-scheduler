@@ -32,6 +32,9 @@ from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 from lightning.pytorch.trainer.connectors.logger_connector.result import _ResultMetric
 
+from finetuning_scheduler.core import optim as core_optim
+from finetuning_scheduler.core import phase as core_phase
+from finetuning_scheduler.core import transitions as core_transitions
 from finetuning_scheduler.lightning.fts_supporters import (
     CallbackDepMixin,
     FTSEarlyStopping,
@@ -319,7 +322,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         Returns:
             int: The number of remaining fine-tuning training levels
         """
-        return max(self.max_depth - self._fts_state._curr_depth, 0)
+        return core_phase.depth_remaining(self.max_depth, self._fts_state._curr_depth)
 
     @staticmethod
     def _supported_strategy_flags() -> Sequence[str]:
@@ -426,14 +429,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert isinstance(self.pl_module, pl.LightningModule)
         assert isinstance(self.trainer, pl.Trainer)
         # if the target depth is 0, implicit optimizer reinitialization should not be executed
-        new_optimizer_cfg = (
-            (self.reinit_optim_cfg or self.ft_schedule[depth].get("new_optimizer", None)) if depth > 0 else None
+        new_optimizer_cfg, thaw_layers = core_phase.thaw_plan(
+            self.ft_schedule, depth, self._fts_state._best_ckpt_depth, depth_sync, self.reinit_optim_cfg
         )
-        restored_depth = -1 if new_optimizer_cfg else self._fts_state._best_ckpt_depth
-        if depth_sync or new_optimizer_cfg:
-            thaw_layers = {d: tl for d, tl in self.ft_schedule.items() if d > restored_depth}.items()
-        else:
-            thaw_layers = {depth: self.ft_schedule[depth]}.items()
         for i, orig_next_tl in thaw_layers:
             self.strategy_adapter._maybe_set_bn_track_running_stats(i)
             next_tl = deepcopy(orig_next_tl)
@@ -472,7 +470,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             pre_reinit_state (Tuple): Contingent on restoration context, lr scheduler and optimizer lr state to restore.
         """
         # if the target depth is 0, lr scheduler reinitialization should not be executed
-        new_scheduler_cfg = (self.reinit_lr_cfg or next_tl.get("new_lr_scheduler", None)) if depth > 0 else None
+        new_scheduler_cfg = core_phase.lr_reinit_cfg_for(next_tl, depth, self.reinit_lr_cfg)
         if is_target_depth and depth > 0:
             # NB: The latest optimizer and lr scheduler lr state will be re-applied to all existing param groups before
             # implementing the next phase.
@@ -495,20 +493,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
 
     def _maybe_warn_lr_lambdas(self) -> None:
         """If appropriate, warn the user that `lr_lambdas` will not be applied given the current configuration."""
-        if self.trainer.lr_scheduler_configs:
-            for config in self.trainer.lr_scheduler_configs:
-                show_warn_lambdas = (
-                    hasattr(config.scheduler, "lr_lambdas")
-                    and config.scheduler.lr_lambdas[-1] is not None  # type: ignore[union-attr]
-                    and not self.apply_lambdas_new_pgs
-                )
-                if show_warn_lambdas:
-                    rank_zero_warn(
-                        "The lr scheduler used in this phase has lr_lambdas but will use a "
-                        "configured lr for new parameter groups because `apply_lambdas_new_pgs` is "
-                        "set to the default of `False`. If you would like new groups to have lr "
-                        "lambdas applied, set `apply_lambdas_new_pgs` to `True`."
-                    )
+        core_optim.warn_unapplied_lr_lambdas(
+            [config.scheduler for config in self.trainer.lr_scheduler_configs], self.apply_lambdas_new_pgs
+        )
 
     def restore_best_ckpt(self) -> None:
         """Restore the current best model checkpoint, according to
@@ -827,14 +814,13 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert self.pl_module is not None
         assert isinstance(self.ft_schedule, dict)
         early_stopping_callback = trainer.early_stopping_callback
-        curr_max_epoch = (
-            self.ft_schedule[self.curr_depth]["max_transition_epoch"]
-            if self.depth_remaining > 0
-            else trainer.fit_loop.max_epochs
+        curr_max_epoch = core_transitions.current_max_epoch(
+            self.ft_schedule, self.curr_depth, self.depth_remaining, trainer.fit_loop.max_epochs  # type: ignore[arg-type]
         )
         assert isinstance(curr_max_epoch, (int, float)), (
             f"Expected max_transition_epoch/max_epochs to be an int or float, but got {type(curr_max_epoch)}"
         )
+        epoch_due = core_transitions.epoch_transition_due(curr_max_epoch, trainer.current_epoch)
         if not self.epoch_transitions_only:  # if we're considering FTSEarlyStopping criteria
             assert early_stopping_callback is not None
             # in the edge case where transition decisions diverge among distributed processes because the user is
@@ -842,16 +828,13 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             # sufficiently low, we should reduce the transition decision over all training processes to avoid deadlocks
             if early_stopping_callback.reduce_transition_decisions:
                 self._sync_es_state(trainer)
-            is_final_phase = early_stopping_callback.final_phase  # type: ignore[attr-defined]
-            epoch_driven_transition = (
-                True if not is_final_phase and (0 <= curr_max_epoch <= trainer.current_epoch) else False
+            phase_transition = core_transitions.compose_transition(
+                early_stopping_callback.es_phase_complete,  # type: ignore[attr-defined]
+                early_stopping_callback.final_phase,  # type: ignore[attr-defined]
+                epoch_due,
             )
-            if early_stopping_callback.es_phase_complete or epoch_driven_transition:  # type: ignore[attr-defined]
-                phase_transition = True
-            else:
-                phase_transition = False
         else:  # we're only considering epoch-driven transition constraints
-            phase_transition = True if 0 <= curr_max_epoch <= trainer.current_epoch else False
+            phase_transition = epoch_due
         return phase_transition
 
     def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:

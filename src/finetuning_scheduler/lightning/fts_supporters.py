@@ -23,9 +23,7 @@ import inspect
 import warnings
 from contextlib import contextmanager
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from collections.abc import KeysView
-from copy import copy, deepcopy
 from dataclasses import fields
 from typing import Any
 from collections.abc import Callable, Iterator
@@ -45,6 +43,7 @@ from lightning.pytorch.utilities.types import LRSchedulerConfig
 
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import schedule as core_schedule
+from finetuning_scheduler.core import transitions as core_transitions
 from finetuning_scheduler.core.state import FTSState
 from finetuning_scheduler.strategy_adapters import StrategyAdapter, FSDPStrategyAdapter, ModelParallelStrategyAdapter
 from finetuning_scheduler.lightning.types import BaseCallbackDepType
@@ -284,45 +283,25 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         Returns:
             tuple[bool, str | None]: Whether the training session should stop and if so, the reason why.
         """
-        should_stop = False
-        reason = None
-        if self.check_finite and not torch.isfinite(current):
-            should_stop = True
-            reason = (
-                f"Monitored metric {self.monitor} = {current} is not finite."
-                f" Previous best value was {self.best_score:.3f}. Signaling Trainer to stop."
-            )
-        elif self.stopping_threshold is not None and self.monitor_op(current, self.stopping_threshold):
-            should_stop = True
-            reason = (
-                "Stopping threshold reached:"
-                f" {self.monitor} = {current} {self.order_dict[self.mode]} {self.stopping_threshold}."
-                " Signaling Trainer to stop."
-            )
-        elif self.divergence_threshold is not None and self.monitor_op(-current, -self.divergence_threshold):
-            should_stop = True
-            reason = (
-                "Divergence threshold reached:"
-                f" {self.monitor} = {current} {self.order_dict[self.mode]} {self.divergence_threshold}."
-                " Signaling Trainer to stop."
-            )
-        elif self.monitor_op(current - self.min_delta, self.best_score.to(current.device)):
-            should_stop = False
-            reason = self._improvement_message(current)
-            self.best_score = current
-            self.wait_count = 0
-        else:
-            self.wait_count += 1
-            if self.wait_count >= self.patience:
-                if self.final_phase:
-                    should_stop = True
-                    reason = (
-                        f"Monitored metric {self.monitor} did not improve in the last {self.wait_count} records."
-                        f" Best score: {self.best_score.item():.3f}. Signaling Trainer to stop."
-                    )
-                else:
-                    self._transition_es_phase()
-        return should_stop, reason
+        outcome = core_transitions.plateau_criteria(
+            current,
+            best_score=self.best_score,
+            wait_count=self.wait_count,
+            patience=self.patience,
+            min_delta=self.min_delta,
+            monitor_op=self.monitor_op,
+            monitor=self.monitor,
+            order=self.order_dict[self.mode],
+            final_phase=self.final_phase,
+            check_finite=self.check_finite,
+            stopping_threshold=self.stopping_threshold,
+            divergence_threshold=self.divergence_threshold,
+            improvement_message=self._improvement_message,
+        )
+        self.best_score, self.wait_count = outcome.best_score, outcome.wait_count
+        if outcome.phase_complete:
+            self._transition_es_phase()
+        return outcome.should_stop, outcome.reason
 
     def _improvement_message(self, current: Tensor) -> str:
         """Override standard EarlyStopping._improvement_message to accommodate loss_parallel/Dtensor."""
@@ -557,16 +536,9 @@ class ScheduleParsingMixin(ABC):
             self._parse_phase(depth, named_params, msp_ref)
             if depth > 0:
                 assert isinstance(self.ft_schedule, dict)
-                curr_max_epoch = self.ft_schedule[depth]["max_transition_epoch"]
-                if 0 <= curr_max_epoch <= max_epoch_wm:
-                    es_addendum = " depending upon EarlyStopping criteria."
-                    rank_zero_info(
-                        f"Specified max_transition_epoch of depth {depth}"
-                        f"({self.ft_schedule[depth]['max_transition_epoch']}) is less than or equal to a "
-                        f"previous max_transition_epoch ({max_epoch_wm}), depth may execute only a single "
-                        f"epoch{'.' if self.epoch_transitions_only else es_addendum}"  # type: ignore[attr-defined]
-                    )
-                max_epoch_wm = max(max_epoch_wm, curr_max_epoch)
+                max_epoch_wm = core_schedule.update_epoch_watermark(
+                    self.ft_schedule, depth, max_epoch_wm, self.epoch_transitions_only  # type: ignore[attr-defined]
+                )
         self._validate_phases_disjoint()
         if self.epoch_transitions_only:  # type: ignore[attr-defined]
             self._validate_epoch_transitions()
@@ -725,24 +697,17 @@ class ScheduleParsingMixin(ABC):
                 training phase.
         """
         assert isinstance(self.ft_schedule, dict)
-        reinit_cfg = {}
-        for reinit_k, attr in zip(ScheduleParsingMixin.VALID_REINIT_KEYS, ScheduleParsingMixin.VALID_REINIT_ATTR):
-            reinit_cfg[reinit_k] = getattr(self, attr) or {
-                k: self.ft_schedule[k].get(reinit_k)
-                for k in self.ft_schedule.keys()
-                if self.ft_schedule[k].get(reinit_k)
-            }
+        reinit_cfg = core_schedule.collect_reinit_cfgs(
+            self.ft_schedule,
+            {k: getattr(self, attr) for k, attr in zip(ScheduleParsingMixin.VALID_REINIT_KEYS,
+                                                       ScheduleParsingMixin.VALID_REINIT_ATTR)},
+        )
         if not any(reinit_cfg.values()):
             return  # no further validation needed since there is no reinitialization configuration
         self._has_reinit_schedule = True  # schedules that reinitialize require special handling in some contexts
         assert self.trainer is not None
         assert self.log_dir is not None
-        for rk, rp in reinit_cfg.items():
-            if isinstance(rp, dict) and 0 in rp.keys():
-                raise MisconfigurationException(
-                    f"You have specified a `{rk}` reinitialization directive for the initial training phase which is an"
-                    "invalid configuration. The initial configuration should be passed to your LightningModule."
-                )
+        core_schedule.refuse_phase0_reinit(reinit_cfg)
         self._reinit_validation(reinit_cfg)
 
     def _convert_phase_keys(self) -> None:
@@ -795,6 +760,7 @@ class ScheduleParsingMixin(ABC):
         self._convert_phase_keys()
         if not core_schedule.ensure_contiguous_phase_keys(self.ft_schedule):
             self._rewrite_schedule(err_msg=core_schedule.NON_CONTIGUOUS_KEYS_MSG)
+        core_schedule.refuse_direct_api_keys(self.ft_schedule)
 
     def _validate_epoch_transitions(self) -> None:
         """If not composing :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` and epoch-driven
@@ -870,11 +836,8 @@ class ScheduleParsingMixin(ABC):
             tuple[Dict, List]: The lr state to restore from the current lr scheduler and the most recent `lr`s for
                 parameter groups associated with the current phases's optimizer.
         """
-        curr_lr_state: dict = {}
-        if trainer.lr_scheduler_configs:
-            curr_lr_state = deepcopy(trainer.lr_scheduler_configs[0].scheduler.state_dict())
-        prev_optimizer_lrs = copy([group["lr"] for group in trainer.strategy.optimizers[0].param_groups])
-        return curr_lr_state, prev_optimizer_lrs
+        scheduler = trainer.lr_scheduler_configs[0].scheduler if trainer.lr_scheduler_configs else None
+        return core_optim.capture_lr_state(scheduler, trainer.strategy.optimizers[0])  # type: ignore[arg-type]
 
     def reinit_optimizer(self, new_optimizer: dict, trainer: pl.Trainer, init_params: list) -> ParamGroupAddable:
         """Reinitialize the optimizer, using a validated optimizer reinitialization configuration.
@@ -891,15 +854,9 @@ class ScheduleParsingMixin(ABC):
         prev_optim_repr = repr(trainer.strategy.optimizers[0])
         optimizer_class = self._import_reinit_class(optimizer_init, reinit_target="optimizer")
         reinit_pgs = self._reinit_phase0_pgs(thawed_pl=init_params)
-        new_optimizer_handle = optimizer_class(
-            reinit_pgs, **optimizer_init.get("init_args", {})  # type: ignore[operator, arg-type]
+        new_optimizer_handle = core_optim.build_phase0_optimizer(
+            optimizer_class, optimizer_init.get("init_args", {}), reinit_pgs  # type: ignore[arg-type]
         )
-        # If the user or optimizer doesn't set `initial_lr` keys, add them based on the initial lr values.
-        # The latest LR state will still be set in subsequent phases, but this allows subsequent lr scheduler
-        # reinitializations to access an `initial_lr` for the existing optimizer if desired (important for consistency
-        # with lr scheduler-only reinitializations).
-        for group in new_optimizer_handle.param_groups:  # type: ignore[union-attr]
-            group["initial_lr"] = group.get("initial_lr", group["lr"])
         trainer.strategy.optimizers = [new_optimizer_handle]  # type: ignore[list-item]
         if trainer.lr_scheduler_configs:
             trainer.lr_scheduler_configs[0].scheduler.optimizer = new_optimizer_handle  # type: ignore[assignment]
@@ -928,15 +885,7 @@ class ScheduleParsingMixin(ABC):
         lr_scheduler_init = new_lr_scheduler["lr_scheduler_init"]
         prev_lrs_repr = repr(trainer.lr_scheduler_configs[0])
         lrs_class = self._import_reinit_class(lr_scheduler_init, reinit_target="lr_scheduler")
-        existing_lr_key = "initial_lr" if not new_lr_scheduler.get("use_current_optimizer_pg_lrs", None) else "lr"
-        curr_optimizer_lrs = [group.get(existing_lr_key, group["lr"]) for group in optimizer.param_groups]
-        reset_init_pg_lrs = True if new_lr_scheduler.get("init_pg_lrs", None) else False
-        initial_optimizer_lrs = new_lr_scheduler.get("init_pg_lrs", curr_optimizer_lrs)
-        for _, data in enumerate(zip(optimizer.param_groups, initial_optimizer_lrs)):
-            param_group, lr = data
-            param_group["lr"] = lr
-            if reset_init_pg_lrs:
-                param_group["initial_lr"] = lr
+        core_optim.apply_reinit_pg_lrs(optimizer, new_lr_scheduler)
         if "pl_lrs_cfg" in new_lr_scheduler.keys():
             new_lr_scheduler["pl_lrs_cfg"] = self._update_pl_lrs(
                 new_lr_scheduler["pl_lrs_cfg"], lrs_class=lrs_class  # type:ignore[arg-type]
@@ -1161,17 +1110,7 @@ class ScheduleImplMixin(ABC):
         if not self.ft_schedule and self.max_depth == -1:
             rank_zero_info("No fine-tuning schedule provided, max_depth set to -1 so iteratively thawing entire model")
         assert self.log_dir is not None
-        if self.ft_schedule and self.reinit_lr_cfg:
-            error_msg = (
-                "Specifying both `ft_schedule` and `reinit_lr_cfg` is an invalid configuration. `reinit_lr_cfg` "
-                "specifies an lr scheduler configuration to reinitialize with at every new phase of an implicitly "
-                "defined fine-tuning shedule whereas `ft_schedule` is an explicity defined schedule. To reinitialize "
-                "a given lr scheduler configuration with an explicit fine-tuning schedule, please add the desired "
-                "lr scheduler configurations to your explicit schedule using the `new_lr_scheduler` key of the "
-                "relevant phases."
-            )
-            rank_zero_warn(error_msg)
-            raise MisconfigurationException(error_msg)
+        core_schedule.check_schedule_vs_reinit_lr(bool(self.ft_schedule), self.reinit_lr_cfg)
         if self.ft_schedule:  # thaw according to an explicit schedule
             self.ft_schedule = (
                 self.load_yaml_schedule(pathlib.Path(self.ft_schedule))
@@ -1196,22 +1135,16 @@ class ScheduleImplMixin(ABC):
         """
         self.gen_or_load_sched()
         assert isinstance(self.ft_schedule, dict)
-        if self.max_depth == -1:
-            self.max_depth = len(self.ft_schedule) - 1
-        else:
-            self.max_depth = min(self.max_depth, len(self.ft_schedule) - 1)
+        self.max_depth = core_schedule.resolve_max_depth(self.max_depth, len(self.ft_schedule))
         # Delegate schedule validation to strategy adapter (allows custom validation logic)
         max_phase, max_epoch_wm = self.strategy_adapter.validate_ft_sched()
         # if the final phase is not using EarlyStopping, apply the maximum phase-specified epoch to global max_epochs
-        if self.ft_schedule[max_phase]["max_transition_epoch"] >= 0:
-            assert self.trainer is not None
-            rank_zero_warn(
-                "Final phase max_transition_epoch"
-                f" ({self.ft_schedule[max_phase]['max_transition_epoch']})"
-                f" will be overidden by the greater of max_epochs ({self.trainer.max_epochs}) and"
-                f" the maximum phase-specified epoch ({max_epoch_wm})."
-            )
-            self.trainer.fit_loop.max_epochs = max(max_epoch_wm, self.trainer.max_epochs)
+        assert self.trainer is not None
+        max_epochs = core_schedule.final_phase_max_epochs(
+            self.ft_schedule, max_phase, max_epoch_wm, self.trainer.max_epochs  # type: ignore[arg-type]
+        )
+        if max_epochs is not None:
+            self.trainer.fit_loop.max_epochs = max_epochs
 
     @rank_zero_only
     def gen_implicit_schedule(self, sched_dir: str | os.PathLike) -> None:
@@ -1414,29 +1347,13 @@ class ScheduleImplMixin(ABC):
             Tuple: Distilled optimizer state to be validated.
         """
         assert isinstance(self.ft_schedule, dict)
-        opt = self.trainer.optimizers[0]
-        sched = self.ft_schedule
-        no_grad_cnt = len([p for pg in opt.param_groups for p in pg["params"] if not p.requires_grad])
-        init_ft_cnt = len(self.strategy_adapter.fts_optim_inspect(sched[0]["params"]))
-        total_ft_cnt = len(
-            [p for phase in sched for p in self.strategy_adapter.fts_optim_inspect(sched[phase]["params"])]
+        return core_optim.inspect_phase0_opt_state(
+            self.trainer.optimizers[0],
+            self.pl_module,
+            self.ft_schedule,
+            self.strategy_adapter.fts_optim_inspect,
+            self.strategy_adapter.logical_param_translation,
         )
-        optim_grad_param_set = {p for pg in opt.param_groups for p in pg["params"] if p.requires_grad}
-        sched_grad_param_set = {
-            p
-            for n, p in self.pl_module.named_parameters()
-            if n in self.strategy_adapter.fts_optim_inspect(sched[0]["params"])
-        }
-        expected_params_sym_diff = optim_grad_param_set ^ sched_grad_param_set
-        p_diff_summary = defaultdict(list)
-        if expected_params_sym_diff:
-            for n, p in self.pl_module.named_parameters():
-                if p in optim_grad_param_set:
-                    p_diff_summary["optim_params"].append(n)
-                if p in sched_grad_param_set:
-                    p_diff_summary["phase_0_params"].append(n)
-        p_diff_summary = {k: self.strategy_adapter.logical_param_translation(v) for k, v in p_diff_summary.items()}
-        return no_grad_cnt, init_ft_cnt, total_ft_cnt, p_diff_summary
 
     @staticmethod
     def _grad_mismatch_feedback(w_msg: str, param_diff_summary: dict) -> str:
@@ -1467,32 +1384,9 @@ class ScheduleImplMixin(ABC):
                 # implemented in `StrategyAdapter` since override behavior may be strategy-dependent in the future
                 self.strategy_adapter.phase0_optimizer_override()
             else:
-                w_msg = ScheduleImplMixin.PHASE_0_DIVERGENCE_MSG + (
-                    " Since `enforce_phase0_params` is currently set to `False`, FinetuningScheduler will not override"
-                    " the user-configured optimizer configuration to enforce the expected phase 0 configuration of"
-                    " thawed parameters."
-                    "\n\n"
-                    "HINT: Leaving `enforce_phase0_params` to its default (`True`) will avoid discrepancies like this"
-                    " in the majority of use cases. If that solution is not desired or sufficient, please find more"
-                    " detailed information about the configuration divergence below. \n\n"
-                    f"In this case, FinetuningScheduler configured the provided model to have {init_ft_cnt} trainable"
-                    " parameters in phase 0 (the initial training phase) but the optimizer has subsequently been"
-                    " initialized with"
+                rank_zero_warn(
+                    core_optim.phase0_divergence_warning(init_ft_cnt, no_grad_cnt, total_ft_cnt, param_diff_summary)
                 )
-                if param_diff_summary:
-                    w_msg = ScheduleImplMixin._grad_mismatch_feedback(w_msg, param_diff_summary)
-                if no_grad_cnt > 0:
-                    w_msg += (
-                        f"Also note that there are {no_grad_cnt} parameters in the optimizer that do not require a"
-                        " gradient. If non-intentional, this state is commonly caused by failing to filter out"
-                        " parameters that do not require a gradient when initializing the optimizer (e.g.,"
-                        " `parameters = list(filter(lambda x: x.requires_grad, self.parameters()))`. If you intended to"
-                        " initialize the optimizer with parameters that do not require a gradient you may want to"
-                        f" ensure they are not included in the {total_ft_cnt} parameters that the FinetuningScheduler"
-                        " is currently configured to thaw (sum of all phases) to avoid triggering a parameter collision"
-                        " and training failure in pytorch during a future fine-tuning phase."
-                    )
-                rank_zero_warn(w_msg)
 
 
 class CallbackDepMixin(ABC):

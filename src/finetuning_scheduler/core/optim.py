@@ -17,10 +17,12 @@ Framework-neutral optimizer and lr scheduler support: reinitialization class res
 group construction and growth, scheduler extension and lr state restoration.
 
 """
+import importlib
 import os
 import warnings
 from collections.abc import Callable, Iterable, Sequence
-from copy import copy
+from collections import defaultdict
+from copy import copy, deepcopy
 from functools import reduce
 from pprint import pformat
 from typing import Any, overload
@@ -81,6 +83,33 @@ class _MockOptimizer(Optimizer):
         return "No Optimizer"
 
 
+# modules searched, in order, for a ``class_path`` given without a module path
+BARE_CLASS_PATH_MODULES = ("torch.optim", "torch.optim.lr_scheduler")
+
+
+def resolve_class_path(class_path: str) -> Any:
+    """Resolve ``class_path`` to a class: a fully qualified path, or the bare name of a ``torch.optim`` optimizer
+    or lr scheduler (for example ``SGD`` or ``StepLR``).
+
+    Raises:
+        ImportError: If the module of a qualified path cannot be imported.
+        AttributeError: If the module has no such attribute.
+        ValueError: If a bare name is not a ``torch.optim`` optimizer or lr scheduler class.
+    """
+    if "." in class_path:
+        class_module, class_name = class_path.rsplit(".", 1)
+        module = __import__(class_module, fromlist=[class_name])
+        return getattr(module, class_name)
+    for module_name in BARE_CLASS_PATH_MODULES:
+        candidate = getattr(importlib.import_module(module_name), class_path, None)
+        if isinstance(candidate, type):
+            return candidate
+    raise ValueError(
+        f"`{class_path}` is not a `torch.optim` optimizer or lr scheduler, so a fully qualified `class_path` is"
+        " required (e.g. `my_package.optim.MyOptimizer`)"
+    )
+
+
 def import_reinit_class(reinit_cfg: dict) -> Any:
     """Import the class named by the ``class_path`` of a reinitialization configuration.
 
@@ -91,17 +120,13 @@ def import_reinit_class(reinit_cfg: dict) -> Any:
         reinit_cfg: The reinitialization configuration.
 
     Raises:
-        FTSConfigurationError: If ``class_path`` is not fully qualified or the class cannot be imported.
+        FTSConfigurationError: If ``class_path`` cannot be resolved (see :func:`resolve_class_path`) or imported.
 
     Returns:
         The imported class.
     """
     try:
-        if "." not in reinit_cfg["class_path"]:
-            raise ValueError("a fully qualified `class_path` is required (e.g. `torch.optim.SGD` rather than `SGD`)")
-        class_module, class_name = reinit_cfg["class_path"].rsplit(".", 1)
-        module = __import__(class_module, fromlist=[class_name])
-        reinit_class = getattr(module, class_name)
+        reinit_class = resolve_class_path(reinit_cfg["class_path"])
     except (ImportError, AttributeError, ValueError) as err:
         error_msg = (
             "Could not import specified reinitialization configuration class using class_path "
@@ -220,27 +245,32 @@ def check_lr_scheduler_init(lrs_class: Any, lr_scheduler_init: dict, is_implicit
     assert issubclass(type(testlr), FTSLRSchedulerTypeTuple)
 
 
-def reinit_phase0_pgs(module: Module, thawed_pl: list, no_decay: list | None = None) -> list:
+def reinit_phase0_pgs(module: Module, thawed_pl: list, no_decay: list | None = None,
+                      pg_overrides: dict | None = None) -> list:
     """Reconstruct the parameter groups associated with phase 0 of the schedule.
 
     Args:
         module: The module whose parameters populate the groups.
         thawed_pl: The names of the parameters from which to construct the initial parameter groups.
         no_decay: Parameter name fragments that should always have ``weight_decay`` set to 0.
+        pg_overrides: Optimizer options applied to each group (a ``no_decay`` group keeps ``weight_decay=0``).
 
     Returns:
         A list of one or two new parameter groups (two when ``no_decay`` is used).
     """
+    overrides = dict(pg_overrides or {})
     if no_decay:
         pgs = [
             {
+                **overrides,
                 "params": [
                     p
                     for n, p in module.named_parameters()
                     if not any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
-                ]
+                ],
             },
             {
+                **overrides,
                 "params": [
                     p
                     for n, p in module.named_parameters()
@@ -250,7 +280,8 @@ def reinit_phase0_pgs(module: Module, thawed_pl: list, no_decay: list | None = N
             },
         ]
     else:
-        pgs = [{"params": [p for n, p in module.named_parameters() if n in thawed_pl and p.requires_grad]}]
+        pgs = [{**overrides,
+                "params": [p for n, p in module.named_parameters() if n in thawed_pl and p.requires_grad]}]
     return pgs
 
 
@@ -293,6 +324,7 @@ def add_optimizer_groups(
     lr: float | None = None,
     apply_lambdas: bool = False,
     schedulers: Sequence[Any] | Callable[[], Sequence[Any]] = (),
+    pg_overrides: dict | None = None,
 ) -> None:
     """Add the parameter groups for the next fine-tuning phase and extend each lr scheduler to cover them.
 
@@ -305,6 +337,7 @@ def add_optimizer_groups(
         apply_lambdas: Whether to apply lr lambdas to the new groups.
         schedulers: The lr schedulers to extend, or a callable returning them (called only when there are
             parameters to add).
+        pg_overrides: Optimizer options applied to each new group.
     """
     if len(thawed_pl) == 0:
         rank_zero_warn("No thawed parameters passed so no new optimizer groups will be added.")
@@ -317,7 +350,7 @@ def add_optimizer_groups(
                 if hasattr(scheduler, "lr_lambdas") and scheduler.lr_lambdas and apply_lambdas:
                     phase_lr = phase_lr * scheduler.lr_lambdas[-1](scheduler.last_epoch)
                 added_pgs = 0
-                added_pgs = add_groups(no_decay, optimizer, module, thawed_pl, phase_lr)
+                added_pgs = add_groups(no_decay, optimizer, module, thawed_pl, phase_lr, pg_overrides)
                 if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                     scheduler.min_lrs.extend([scheduler.min_lrs[0]] * added_pgs)
                 else:
@@ -330,11 +363,12 @@ def add_optimizer_groups(
                         if lambdas_to_sync:
                             scheduler.lr_lambdas.extend([scheduler.lr_lambdas[-1]] * lambdas_to_sync)
         else:
-            _ = add_groups(no_decay, optimizer, module, thawed_pl, phase_lr)
+            _ = add_groups(no_decay, optimizer, module, thawed_pl, phase_lr, pg_overrides)
 
 
 def add_groups(
-    no_decay: list | None, optimizer: ParamGroupAddable, module: Module, thawed_pl: list, phase_lr: float
+    no_decay: list | None, optimizer: ParamGroupAddable, module: Module, thawed_pl: list, phase_lr: float,
+    pg_overrides: dict | None = None,
 ) -> int:
     """Add parameter group(s) holding the thawed parameters not already owned by an existing group.
 
@@ -344,6 +378,7 @@ def add_groups(
         module: The module from which the parameters will be read.
         thawed_pl: The thawed parameters that should be added to the new parameter group(s).
         phase_lr: The initial learning rate for the new parameter group(s).
+        pg_overrides: Optimizer options applied to each new group (a ``no_decay`` group keeps ``weight_decay=0``).
 
     Returns:
         The number of parameter groups added; ``0`` if every candidate parameter already belongs to a group (as when
@@ -361,9 +396,11 @@ def add_groups(
         # nothing left to add: returning 0 keeps the caller from extending `base_lrs`/`min_lrs`/`lr_lambdas`
         # for groups that were never created
         return 0
+    overrides = dict(pg_overrides or {})
     if no_decay:
         optimizer.add_param_group(
             {
+                **overrides,
                 "params": [p for n, p in candidates if not any(nd in n for nd in no_decay)],
                 "lr": phase_lr,
                 "initial_lr": phase_lr,
@@ -371,6 +408,7 @@ def add_groups(
         )
         optimizer.add_param_group(
             {
+                **overrides,
                 "params": [p for n, p in candidates if any(nd in n for nd in no_decay)],
                 "weight_decay": 0.0,
                 "lr": phase_lr,
@@ -381,6 +419,7 @@ def add_groups(
     else:
         optimizer.add_param_group(
             {
+                **overrides,
                 "params": [p for _, p in candidates],
                 "lr": phase_lr,
                 "initial_lr": phase_lr,
@@ -427,4 +466,158 @@ def grad_mismatch_feedback(w_msg: str, param_diff_summary: dict) -> str:
         "Parameters expected to be thawed and optimized in phase 0:\n"
         f"{pformat(param_diff_summary['phase_0_params'])}{os.linesep}"
     )
+    return w_msg
+
+
+def inspect_phase0_opt_state(optimizer: ParamGroupAddable, module: Module, schedule: dict,
+                             optim_inspect: Callable[[list], list], translate: Callable[[list], Any]) -> tuple:
+    """Distill the optimizer state needed to check that the optimizer matches the schedule's phase 0.
+
+    Args:
+        optimizer: The configured optimizer.
+        module: The scheduled module.
+        schedule: The fine-tuning schedule.
+        optim_inspect: Maps a phase's parameter names to the names the optimizer holds (a strategy adapter's
+            ``fts_optim_inspect``).
+        translate: Maps parameter names to the names reported to the user (a strategy adapter's
+            ``logical_param_translation``).
+
+    Returns:
+        The count of optimizer parameters that do not require grad; the counts of scheduled parameters in phase 0 and
+        in all phases; and, when the optimizer's trainable parameters differ from phase 0's, a summary of both name
+        sets (otherwise empty).
+    """
+    no_grad_cnt = len([p for pg in optimizer.param_groups for p in pg["params"] if not p.requires_grad])
+    init_ft_cnt = len(optim_inspect(schedule[0]["params"]))
+    total_ft_cnt = len([p for phase in schedule for p in optim_inspect(schedule[phase]["params"])])
+    optim_grad_param_set = {p for pg in optimizer.param_groups for p in pg["params"] if p.requires_grad}
+    sched_grad_param_set = {p for n, p in module.named_parameters() if n in optim_inspect(schedule[0]["params"])}
+    expected_params_sym_diff = optim_grad_param_set ^ sched_grad_param_set
+    p_diff_summary: dict = defaultdict(list)
+    if expected_params_sym_diff:
+        for n, p in module.named_parameters():
+            if p in optim_grad_param_set:
+                p_diff_summary["optim_params"].append(n)
+            if p in sched_grad_param_set:
+                p_diff_summary["phase_0_params"].append(n)
+    p_diff_summary = {k: translate(v) for k, v in p_diff_summary.items()}
+    return no_grad_cnt, init_ft_cnt, total_ft_cnt, p_diff_summary
+
+
+def clean_optim_lr_pgs(optimizers: Sequence[ParamGroupAddable], schedulers: Sequence[Any]) -> list[int]:
+    """Remove every parameter group from ``optimizers`` and reset ``schedulers`` so phase 0 can be configured
+    afresh.
+
+    Returns:
+        The number of groups removed from each optimizer.
+    """
+    orig_num_pgs = []
+    for optimizer in optimizers:
+        orig_num_pgs.append(len(optimizer.param_groups))
+        optimizer.param_groups = []
+    for scheduler in schedulers:
+        scheduler.last_epoch = -1
+        if not isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.base_lrs = []
+    return orig_num_pgs
+
+
+def reconfigure_lrs_for_phase0(schedulers: Sequence[Any], orig_num_pgs: list[int]) -> None:
+    """Re-derive scheduler state for the reconfigured phase-0 parameter groups.
+
+    Groups may have been added (for example to apply ``no_decay``), so the type-dependent state (``min_lrs``,
+    ``lr_lambdas`` and the initial step) is recomputed.
+    """
+    for scheduler in schedulers:
+        if not isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler._initial_step()
+        scheduler._last_lr = [group["lr"] for group in scheduler.optimizer.param_groups]
+        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.min_lrs = scheduler.min_lrs[orig_num_pgs[0]:]
+
+
+def capture_lr_state(scheduler: Any | None, optimizer: ParamGroupAddable) -> tuple[dict, list]:
+    """Capture the scheduler state and the optimizer's current group ``lr`` s, to restore after a
+    reinitialization."""
+    curr_lr_state: dict = deepcopy(scheduler.state_dict()) if scheduler is not None else {}
+    prev_optimizer_lrs = copy([group["lr"] for group in optimizer.param_groups])
+    return curr_lr_state, prev_optimizer_lrs
+
+
+def build_phase0_optimizer(optimizer_class: Callable, init_args: dict, param_groups: list) -> ParamGroupAddable:
+    """Construct a reinitialized optimizer over ``param_groups``.
+
+    Every group gets an ``initial_lr`` (its ``lr`` unless already set), so a later lr scheduler reinitialization can
+    start from it, as it would after an lr-scheduler-only reinitialization.
+    """
+    optimizer = optimizer_class(param_groups, **init_args)
+    for group in optimizer.param_groups:
+        group["initial_lr"] = group.get("initial_lr", group["lr"])
+    return optimizer
+
+
+def apply_reinit_pg_lrs(optimizer: ParamGroupAddable, new_lr_scheduler: dict) -> None:
+    """Set the existing groups' ``lr`` before an lr scheduler is reinitialized around ``optimizer``.
+
+    Precedence: the directive's ``init_pg_lrs`` (which also become the groups' ``initial_lr``); then, with
+    ``use_current_optimizer_pg_lrs``, the current ``lr`` s; otherwise each group's ``initial_lr``, falling back to its
+    current ``lr``.
+    """
+    existing_lr_key = "initial_lr" if not new_lr_scheduler.get("use_current_optimizer_pg_lrs", None) else "lr"
+    curr_optimizer_lrs = [group.get(existing_lr_key, group["lr"]) for group in optimizer.param_groups]
+    reset_init_pg_lrs = True if new_lr_scheduler.get("init_pg_lrs", None) else False
+    initial_optimizer_lrs = new_lr_scheduler.get("init_pg_lrs", curr_optimizer_lrs)
+    for param_group, lr in zip(optimizer.param_groups, initial_optimizer_lrs):
+        param_group["lr"] = lr
+        if reset_init_pg_lrs:
+            param_group["initial_lr"] = lr
+
+
+def warn_unapplied_lr_lambdas(schedulers: Sequence[Any], apply_lambdas_new_pgs: bool) -> None:
+    """Warn, once per scheduler with ``lr_lambdas``, that new groups will use their configured ``lr`` instead."""
+    for scheduler in schedulers:
+        if hasattr(scheduler, "lr_lambdas") and scheduler.lr_lambdas[-1] is not None and not apply_lambdas_new_pgs:
+            rank_zero_warn(
+                "The lr scheduler used in this phase has lr_lambdas but will use a "
+                "configured lr for new parameter groups because `apply_lambdas_new_pgs` is "
+                "set to the default of `False`. If you would like new groups to have lr "
+                "lambdas applied, set `apply_lambdas_new_pgs` to `True`."
+            )
+
+
+def phase0_divergence_warning(init_ft_cnt: int, no_grad_cnt: int, total_ft_cnt: int, param_diff_summary: dict) -> str:
+    """The warning issued when the optimizer's parameters diverge from phase 0's and ``enforce_phase0_params`` is
+    ``False``.
+
+    Args:
+        init_ft_cnt: The number of parameters scheduled in phase 0.
+        no_grad_cnt: The number of optimizer parameters that do not require grad.
+        total_ft_cnt: The number of parameters scheduled in all phases.
+        param_diff_summary: The ``optim_params`` and ``phase_0_params`` name lists that differ (empty if they agree).
+    """
+    w_msg = PHASE_0_DIVERGENCE_MSG + (
+        " Since `enforce_phase0_params` is currently set to `False`, FinetuningScheduler will not override"
+        " the user-configured optimizer configuration to enforce the expected phase 0 configuration of"
+        " thawed parameters."
+        "\n\n"
+        "HINT: Leaving `enforce_phase0_params` to its default (`True`) will avoid discrepancies like this"
+        " in the majority of use cases. If that solution is not desired or sufficient, please find more"
+        " detailed information about the configuration divergence below. \n\n"
+        f"In this case, FinetuningScheduler configured the provided model to have {init_ft_cnt} trainable"
+        " parameters in phase 0 (the initial training phase) but the optimizer has subsequently been"
+        " initialized with"
+    )
+    if param_diff_summary:
+        w_msg = grad_mismatch_feedback(w_msg, param_diff_summary)
+    if no_grad_cnt > 0:
+        w_msg += (
+            f"Also note that there are {no_grad_cnt} parameters in the optimizer that do not require a"
+            " gradient. If non-intentional, this state is commonly caused by failing to filter out"
+            " parameters that do not require a gradient when initializing the optimizer (e.g.,"
+            " `parameters = list(filter(lambda x: x.requires_grad, self.parameters()))`. If you intended to"
+            " initialize the optimizer with parameters that do not require a gradient you may want to"
+            f" ensure they are not included in the {total_ft_cnt} parameters that the FinetuningScheduler"
+            " is currently configured to thaw (sum of all phases) to avoid triggering a parameter collision"
+            " and training failure in pytorch during a future fine-tuning phase."
+        )
     return w_msg
