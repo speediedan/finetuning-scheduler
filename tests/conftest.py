@@ -197,3 +197,14 @@ def pytest_collection_modifyitems(items):
             for marker in item.own_markers
             if marker.name == "skipif" and marker.kwargs.get("exp_patch")
         ]
+    elif os.getenv("FTS_CUDA_TESTS_ONLY", "0") == "1":
+        # the GPU pipeline's non-standalone CUDA phase: the hosted CPU matrix runs everything else, and the standalone
+        # step runs the standalone tests. `iter_markers` also sees marks applied through parametrized fixtures.
+        def _marked(item, key):
+            return any(marker.kwargs.get(key) for marker in item.iter_markers("skipif"))
+
+        items[:] = [
+            item
+            for item in items
+            if (_marked(item, "min_cuda_gpus") or _marked(item, "bf16_cuda")) and not _marked(item, "standalone")
+        ]

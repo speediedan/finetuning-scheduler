@@ -68,21 +68,17 @@ jobs:
       # serialize against local multi-GPU runs WITHOUT any change to the agent installation itself.
       # Absent on hosts that do not use the lease; the acquire step fails open in that case.
       - /tmp/di_leases:/gpu_leases
+      # The host's lease tool, read-only, so this job queues in the same fair order as every local caller and takes
+      # the cpu-heavy (host memory) lease alongside the GPUs. An operator installs it (and re-installs it after it
+      # changes); the lease step falls back to the plain locks when it is absent. Docker creates a missing bind-mount
+      # source as a DIRECTORY, which the lease step treats as absent.
+      - /opt/az_pipeline_agent/gpu_lease.sh:/gpu_lease_tool:ro
       options: --gpus all --shm-size=512m
 
     workspace:
       clean: outputs
 
     steps:
-
-    # Serialize this job against any local multi-GPU run on the self-hosted host. The agent already
-    # guarantees one Azure job at a time, so this exists purely to avoid colliding with interactive/agent
-    # sessions -- a collision that previously surfaced as OOM or flaky timing rather than a clear error.
-    # Fails open if the lease directory is not mounted, so it can never break a host that lacks it.
-    - bash: |
-        source scripts/gpu_lease_wrap.sh
-        ci_gpu_lease_acquire /gpu_leases /tmp/azp_gpu_lease.pid 2400 "azure-$(Build.BuildId)"
-      displayName: 'Acquire host GPU lease'
 
     - bash: |
         set -e  # Exit on any error
@@ -117,10 +113,21 @@ jobs:
         python -c "import os ; assert os.environ.get('PL_RUN_CUDA_TESTS') == '1', 'PL_RUN_CUDA_TESTS is not set'"
       displayName: 'Env details'
 
+    # Serialize the GPU phases against local GPU work on the self-hosted host (gpu, then cpu-heavy for host memory).
+    # The agent already runs one Azure job at a time, so this exists to avoid colliding with interactive or agent
+    # sessions, a collision that surfaces as OOM or flaky timing rather than a clear error. Taken after the install,
+    # which needs neither. See .azure-pipelines/scripts/gpu_job_lease.sh for the fallbacks.
+    - bash: bash .azure-pipelines/scripts/gpu_job_lease.sh acquire
+      displayName: 'Acquire host GPU leases'
+
+    # Only the CUDA tests that are not standalone: the hosted CPU matrix runs every other test in this collection, and
+    # the standalone step below runs the standalone ones (tests/conftest.py, FTS_CUDA_TESTS_ONLY).
     - bash: |
         source /tmp/venvs/fts_dev/bin/activate
         python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
-      displayName: 'Testing: standard'
+      env:
+        FTS_CUDA_TESTS_ONLY: "1"
+      displayName: 'Testing: CUDA'
 
     - bash: |
         source /tmp/venvs/fts_dev/bin/activate
@@ -176,10 +183,9 @@ jobs:
         sudo chmod -R 775 /__w/1/s || true
         echo "Cleaning up ephemeral directories..."
         sudo rm -rf /__w/1/s/.pytest_cache || true
-        # Release the host GPU lease. Belt-and-braces only: if this job dies or its container is torn
-        # down, every process inside it dies too and the kernel frees the lease automatically.
-        source scripts/gpu_lease_wrap.sh 2>/dev/null && \
-          ci_gpu_lease_release /gpu_leases /tmp/azp_gpu_lease.pid || true
+        # Release the host leases. Belt-and-braces only: if this job dies or its container is torn
+        # down, every process inside it dies too and the kernel frees the leases automatically.
+        bash .azure-pipelines/scripts/gpu_job_lease.sh release || true
         echo 'Agent workspace cleanup completed'
       condition: always()
       displayName: 'Cleaning up agent workspace'

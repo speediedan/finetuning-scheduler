@@ -58,6 +58,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - CUDA tests (`RunIf(min_cuda_gpus=...)` and `RunIf(bf16_cuda=True)`) now run only with `PL_RUN_CUDA_TESTS=1`, as the `min_cuda_gpus` documentation already stated, so a plain `pytest` run never uses a host's GPUs. `tests/special_tests.sh`, `scripts/gen_fts_coverage.sh` and the GPU pipeline set it [#68](https://github.com/speediedan/finetuning-scheduler/issues/68).
 
+- The GPU pipeline now runs only the CUDA tests that are not standalone, in place of the whole suite, which the hosted CPU matrix already runs; of the suite's tests, the hosted matrix lacked only those. It also takes its host leases after installing rather than before, and takes the host's `cpu-heavy` (host memory) lease alongside the GPUs, in the host lease tool's fair order [#57](https://github.com/speediedan/finetuning-scheduler/issues/57).
+
 ### Deprecated
 
 ## [2.14.1] - 2026-10-09

@@ -295,8 +295,10 @@ the `fts-development-branch-version-upgrade` skill.
   `.github/actions/install-ci-dependencies`. Sets `DISABLE_MPS=1` on macOS. The `oldest` leg resolves
   through `requirements/ci/requirements-oldest.txt`.
 - `code-checks.yml` ("Type Checks") — `pyright -p pyproject.toml`.
-- `.azure-pipelines/gpu-tests.yml` — self-hosted, asserts `>= 2` CUDA GPUs. Runs the standard suite,
-  standalone multi-GPU, examples, and multi-GPU examples as separate steps.
+- `.azure-pipelines/gpu-tests.yml` — self-hosted, asserts `>= 2` CUDA GPUs. Runs the non-standalone CUDA tests
+  only (`FTS_CUDA_TESTS_ONLY=1`; the hosted matrix runs every other test in that collection), then standalone
+  multi-GPU, examples, and multi-GPU examples as separate steps. It takes the host's `gpu` and `cpu-heavy` leases
+  after installing, through the host lease tool mounted read-only (`.azure-pipelines/scripts/gpu_job_lease.sh`).
 
 ## Known stale references
 
