@@ -25,6 +25,7 @@ import os
 
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.nn.parallel import DistributedDataParallel
 from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
@@ -53,6 +54,8 @@ class StrategyAdapter:
     fts_handle: Callback
     _ft_schedule_module_map: dict
     _unscheduled_params: list
+    # the trainable parameters the DistributedDataParallel reducer covers (class default: subclasses need not call init)
+    _ddp_reducer_params: frozenset | None = None
 
     def __init__(self) -> None:
         """The default fine-tuning phase execution function is set on
@@ -128,6 +131,43 @@ class StrategyAdapter:
     def on_before_fts_fit_start(self) -> None:
         """Hook executed immediately before the :class:`~finetuning_scheduler.fts.FinetuningScheduler`
         :meth:`~finetuning_scheduler.fts.on_fit_start` hook begins."""
+
+    def on_after_phase_transition(self) -> None:
+        """Hook executed after :class:`~finetuning_scheduler.fts.FinetuningScheduler` thaws the parameters of a new
+        phase (at each phase transition, and when resuming training at a depth beyond phase 0) and configures the
+        optimizer for them.
+
+        By default, keeps ``DistributedDataParallel``'s gradient synchronization covering every trainable parameter
+        (see :meth:`_sync_ddp_reducer`). Adapters that override this hook should call ``super()``.
+        """
+        self._sync_ddp_reducer()
+
+    def _sync_ddp_reducer(self) -> None:
+        """Rebuild the ``DistributedDataParallel`` wrapper when the set of trainable parameters has changed since
+        it was built.
+
+        ``DistributedDataParallel`` registers with its gradient reducer only the parameters that require grad when it
+        wraps the module, so parameters thawed in later phases would otherwise never have their gradients all-reduced
+        and each process would train its replica on its own data alone. Rebuilding detaches the previous reducer's
+        autograd hooks, wraps the same module again (which also re-broadcasts the module state from rank 0) and
+        re-registers any configured communication hooks. A no-op for strategies that do not wrap the module in
+        ``DistributedDataParallel``.
+        """
+        strategy = self.pls_handle
+        ddp_model = getattr(strategy, "model", None)
+        if not isinstance(ddp_model, DistributedDataParallel):
+            return
+        trainable = frozenset(id(p) for p in ddp_model.module.parameters() if p.requires_grad)
+        if trainable == self._ddp_reducer_params:
+            return
+        ddp_model._remove_autograd_hooks()
+        strategy.model = strategy._setup_model(ddp_model.module)  # type: ignore[attr-defined]
+        strategy._register_ddp_hooks()  # type: ignore[attr-defined]
+        self._ddp_reducer_params = trainable
+        rank_zero_debug(
+            "Rebuilt the DistributedDataParallel wrapper so its gradient reducer covers the"
+            f" {len(trainable)} currently trainable parameters."
+        )
 
     def on_validate_monitor_metric(self, monitor: str) -> None:
         should_warn = self.fts_handle._check_sync_dist(monitor)
