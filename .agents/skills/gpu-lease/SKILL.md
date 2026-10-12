@@ -107,6 +107,46 @@ What to do instead, in order of effort:
 **When you see that warning, believe it.** GPU processes running while the lease is free almost always mean
 a notebook or an unwrapped run, not a bug in the lease.
 
+## CI jobs in a container
+
+A self-hosted CI job that runs in a container joins the same lease through two bind mounts, both set up by the
+host's operator and named by the pipeline:
+
+- **the lease directory**, holding the lock files. `flock` works on the inode, so a lock taken inside the container
+  interlocks with processes on the host. The container opens the lock files read-only (`flock(2)` locks either way),
+  because under rootless docker its uid does not own them.
+- **the lease tool**, read-only. Optional: without it the job falls back to plain locks, losing the fair queue and
+  device placement but not the serialization.
+
+A job holds its lease across pipeline steps through the lease wrapper vendored in the repository
+(`gpu_lease_wrap.sh`), not by calling the tool itself, so every repository uses one adapter:
+
+```bash
+ci_host_lease_hold <lease_dir> <tool> <pidfile> <timeout> <label> [--gpus all|1] [--min-vram GB] [--cpu-heavy]
+ci_host_lease_release <lease_dir> <tool> <pidfile>
+```
+
+The grant, `all` or a device UUID, is in `<pidfile>.device`. The hold exits 0 once held, or when the lease directory
+is absent (the host uses no leases); 75 on a timeout, holding nothing; anything else is a misconfiguration and fails
+the step. The label is the build's lease tag, such as `azure-<buildId>`; a repository sharing an agent with another
+adds an infix (`azure-<infix>-<buildId>`) so `--status` shows whose build holds it, and its own instructions say which.
+
+**What the wrapper relies on**, and so what a replacement tool must honor:
+
+- `--hold --pidfile P` with the request options above, plus `--timeout S` and `--project LABEL`. It returns once held,
+  writing the grant to `P.device`. A request that includes `--cpu-heavy` waits, holding nothing, for `cpu-heavy` to be
+  free before it takes the GPUs, so a CPU-only holder never leaves it holding GPUs it cannot use. All waits share
+  `--timeout`, and a timeout exits 75 with nothing held.
+- `--release --pidfile P`, which ends the holder's whole process group.
+- `GPU_LEASE_DIR`, naming the lease directory.
+- For the fallback: one lock file per lease, `<dir>/<key>.lock`, exclusive, and a `<dir>/<key>.holder` record that
+  `--status` reads.
+
+**Operator duties.** Install the tool at the mounted path, and reinstall it whenever it changes, by an atomic
+replace (`install`, or write a temporary file and rename it), never by editing in place: bash reads a running
+script incrementally, so an in-place edit corrupts every job still executing it. A bind mount whose source is
+missing appears in the container as a directory, which the wrapper treats as an absent tool.
+
 ## Recovery: stale, stuck, and confusing states
 
 ```bash

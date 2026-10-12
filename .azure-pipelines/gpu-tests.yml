@@ -69,6 +69,10 @@ jobs:
       # serialize against local multi-GPU runs WITHOUT any change to the agent installation itself.
       # Absent on hosts that do not use the lease; the acquire step fails open in that case.
       - /tmp/di_leases:/gpu_leases
+      # The host's lease tool, read-only, so this job queues in the same fair order as every local caller. An operator
+      # installs it (and re-installs it after it changes); the lease step falls back to the plain locks without it.
+      # Docker creates a missing bind-mount source as a DIRECTORY, which the lease step treats as absent.
+      - /opt/az_pipeline_agent/gpu_lease.sh:/gpu_lease_tool:ro
       options: --gpus all --shm-size=512m
 
     workspace:
@@ -109,27 +113,18 @@ jobs:
         python -c "import os ; assert os.environ.get('PL_RUN_CUDA_TESTS') == '1', 'PL_RUN_CUDA_TESTS is not set'"
       displayName: 'Env details'
 
-    # Serialize the GPU phases against local GPU work on the self-hosted host: the GPUs, then host memory (`cpu-heavy`),
-    # in the host lease tool's order. The agent already runs one Azure job at a time, so this exists to avoid colliding
-    # with interactive or agent sessions, a collision that surfaces as OOM or flaky timing rather than a clear error.
-    # Taken after the install, which needs neither. It first waits, without holding it, for `cpu-heavy` to be free, so
-    # a local CPU-only job holding it does not leave this job holding GPUs it cannot use (racy, which only costs that
-    # wait again). The three waits share one 40-minute budget. Fails open only when the lease directory is not
-    # mounted; `set -e` fails the step on any other acquire failure, and the cleanup step releases whatever is held.
+    # Serialize the GPU phases against local GPU work on the self-hosted host: the whole server, then host memory
+    # (`cpu-heavy`). The agent already runs one Azure job at a time, so this exists to avoid colliding with interactive
+    # or agent sessions, a collision that surfaces as OOM or flaky timing rather than a clear error. Taken after the
+    # install, which needs neither. Through the host's lease tool when it is mounted (fair order, and cpu-heavy waited
+    # for before the GPUs), else through the plain locks (scripts/gpu_lease_wrap.sh, ci_host_lease_hold). Fails open
+    # only when the lease directory is not mounted; any other acquire failure fails the step, and the cleanup step
+    # releases whatever is held.
     - bash: |
         set -e
         source scripts/gpu_lease_wrap.sh
-        deadline=$(( SECONDS + 2400 ))
-        if [[ -e /gpu_leases/cpu-heavy.lock ]]; then
-          exec {fd}</gpu_leases/cpu-heavy.lock
-          wait_s=$(( deadline - SECONDS ))
-          flock -x -w "$wait_s" "$fd" || { echo "##vso[task.logissue type=error]Timed out waiting for the host's cpu-heavy lease."; exit 75; }
-          exec {fd}<&-
-        fi
-        wait_s=$(( deadline - SECONDS > 60 ? deadline - SECONDS : 60 ))
-        ci_gpu_lease_acquire /gpu_leases /tmp/azp_gpu_lease.pid "$wait_s" "azure-$(Build.BuildId)" gpu
-        wait_s=$(( deadline - SECONDS > 60 ? deadline - SECONDS : 60 ))
-        ci_gpu_lease_acquire /gpu_leases /tmp/azp_cpu_heavy_lease.pid "$wait_s" "azure-$(Build.BuildId)" cpu-heavy
+        ci_host_lease_hold /gpu_leases /gpu_lease_tool /tmp/azp_host_lease.pid 2400 "azure-$(Build.BuildId)" \
+          --gpus all --cpu-heavy
       displayName: 'Acquire host GPU leases'
 
     # Only the CUDA tests that are not standalone: the hosted CPU matrix runs every other test in this collection, and
@@ -207,10 +202,8 @@ jobs:
         sudo rm -rf /__w/1/s/.pytest_cache || true
         # Release the host leases, cpu-heavy first. Belt-and-braces only: if this job dies or its container is torn
         # down, every process inside it dies too and the kernel frees the leases automatically.
-        source scripts/gpu_lease_wrap.sh 2>/dev/null && {
-          ci_gpu_lease_release /gpu_leases /tmp/azp_cpu_heavy_lease.pid cpu-heavy
-          ci_gpu_lease_release /gpu_leases /tmp/azp_gpu_lease.pid gpu
-        } || true
+        source scripts/gpu_lease_wrap.sh 2>/dev/null && \
+          ci_host_lease_release /gpu_leases /gpu_lease_tool /tmp/azp_host_lease.pid || true
         echo 'Agent workspace cleanup completed'
       condition: always()
       displayName: 'Cleaning up agent workspace'
