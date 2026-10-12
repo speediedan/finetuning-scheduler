@@ -104,6 +104,10 @@ class FTSController:
             ``"step"``), ``frequency`` and ``monitor``.
         transition: Transition policies composed with the schedule's ``max_transition_epoch`` and
             ``max_transition_step`` keys. With none, every phase but the final one must set one of those keys.
+        reinit_optim_cfg: An optimizer reinitialization configuration applied at every phase transition (implicit
+            mode), as with the Lightning callback; per-phase ``new_optimizer`` keys serve explicit schedules.
+        reinit_lr_cfg: An lr scheduler reinitialization configuration applied at every phase transition (implicit
+            mode); per-phase ``new_lr_scheduler`` keys serve explicit schedules.
         max_depth: The deepest phase to run; ``-1`` runs every phase.
         base_max_lr: The default learning rate of phases after phase 0 that do not set ``lr``.
         enforce_phase0_params: Reconfigure an optimizer instance whose parameters differ from phase 0's.
@@ -133,6 +137,8 @@ class FTSController:
         lr_scheduler: Any | Callable[[Optimizer], Any] | None = None,
         lr_scheduler_cfg: Mapping[str, Any] | None = None,
         transition: TransitionPolicy | Sequence[TransitionPolicy] | None = None,
+        reinit_optim_cfg: Mapping[str, Any] | None = None,
+        reinit_lr_cfg: Mapping[str, Any] | None = None,
         max_depth: int = -1,
         base_max_lr: float = 1e-5,
         enforce_phase0_params: bool = True,
@@ -158,6 +164,8 @@ class FTSController:
                                                   list(transition))
         self._user_policies = policies
         self._policy = AnyOf(*policies)
+        self.reinit_optim_cfg = dict(reinit_optim_cfg) if reinit_optim_cfg else None
+        self.reinit_lr_cfg = dict(reinit_lr_cfg) if reinit_lr_cfg else None
         self._max_depth_arg = max_depth
         self.base_max_lr = base_max_lr
         self.enforce_phase0_params = enforce_phase0_params
@@ -256,12 +264,19 @@ class FTSController:
             )
         self._schedule = schedule
         core_schedule.parse_phase_extensions(schedule)
-        reinit = core_schedule.collect_reinit_cfgs(schedule, {"new_lr_scheduler": None, "new_optimizer": None})
+        core_schedule.check_schedule_vs_reinit_lr(self._schedule_src is not None, self.reinit_lr_cfg)
+        reinit = core_schedule.collect_reinit_cfgs(
+            schedule, {"new_lr_scheduler": self.reinit_lr_cfg, "new_optimizer": self.reinit_optim_cfg}
+        )
         if any(reinit.values()):
-            raise FTSConfigurationError(
-                "Optimizer and lr scheduler reinitialization (`new_optimizer`, `new_lr_scheduler`) is not yet supported"
-                " by the direct PyTorch API."
-            )
+            core_schedule.refuse_phase0_reinit(reinit)
+            for key, cfg in reinit.items():
+                implicit = bool(self.reinit_lr_cfg if key == "new_lr_scheduler" else self.reinit_optim_cfg)
+                for depth, target in ([(None, cfg)] if implicit else list(cfg.items())):
+                    if key == "new_optimizer":
+                        self._validate_optimizer_reinit(target, depth)
+                    else:
+                        self._validate_lr_scheduler_reinit(target, depth, implicit)
         named_params = dict(self.model.named_parameters()).keys()
         shared = core_schedule.shared_params_ref(self.model)
         max_epoch_wm = -1
@@ -292,6 +307,41 @@ class FTSController:
                 self._phase_configs[depth] = self.phase_config_type(**raw) if self.phase_config_type else dict(raw)
             except Exception as err:
                 raise FTSConfigurationError(f"Phase {depth}'s `phase_config` failed validation: {err}") from err
+
+    @staticmethod
+    def _validate_optimizer_reinit(target: dict, depth: int | None) -> None:
+        core_schedule.validate_reinit_keys(target, "optimizer_init", depth)
+        optimizer_init = target["optimizer_init"]
+        optimizer_class = core_optim.import_reinit_class(optimizer_init)
+        core_optim.check_supported_reinit_optimizer(optimizer_class)
+        core_optim.check_optimizer_init(optimizer_class, optimizer_init)
+
+    def _validate_lr_scheduler_reinit(self, target: dict, depth: int | None, implicit: bool) -> None:
+        core_schedule.validate_reinit_keys(target, "lr_scheduler_init", depth)
+        if "init_pg_lrs" in target and implicit:
+            raise FTSConfigurationError(
+                "Specifying a `init_pg_lrs` key in the lr scheduler configuration passed via `reinit_lr_cfg` (i.e. "
+                "implicit mode training) is not a valid configuration since the same lr scheduler configuration "
+                "is intended to be reinitialized at every fine-tuning phase with implicit mode fine-tuning."
+            )
+        step_cfg = target.get("pl_lrs_cfg", {})
+        unsupported = sorted(set(step_cfg) - {"interval", "frequency", "monitor"})
+        if unsupported:
+            raise FTSConfigurationError(
+                f"The direct PyTorch API steps lr schedulers with `interval`, `frequency` and `monitor` only; remove"
+                f" {unsupported} from `pl_lrs_cfg`."
+            )
+        if step_cfg.get("interval", "epoch") not in ("step", "epoch"):
+            raise FTSConfigurationError(
+                f'`pl_lrs_cfg` "interval" must be "step" or "epoch", got "{step_cfg["interval"]}"'
+            )
+        if "init_pg_lrs" in target:
+            assert depth is not None
+            core_schedule.parse_reinit_pg_lrs(depth, target["init_pg_lrs"])
+        lr_scheduler_init = target["lr_scheduler_init"]
+        lrs_class = core_optim.import_reinit_class(lr_scheduler_init)
+        core_optim.check_supported_lr(lrs_class, self.allow_untested)
+        core_optim.check_lr_scheduler_init(lrs_class, lr_scheduler_init, implicit)
 
     def _refuse_unschedulable_params(self) -> None:
         scheduled = {n for d, phase in self._schedule.items() if d <= self._max_depth for n in phase["params"]}
@@ -520,12 +570,17 @@ class FTSController:
         optimizer = self.optimizer
         schedulers = [s for s, _ in self._host.get_lr_schedulers()]
         pre_state = core_optim.capture_lr_state(schedulers[0] if schedulers else None, optimizer)
-        _, phases = core_phase.thaw_plan(self._schedule, self._depth, self._depth - 1, depth_sync=False,
-                                         reinit_optim_cfg=None)
+        new_optimizer_cfg, phases = core_phase.thaw_plan(self._schedule, self._depth, self._depth - 1,
+                                                         depth_sync=False, reinit_optim_cfg=self.reinit_optim_cfg)
         for i, phase in phases:
             if i > self._depth:
                 continue
             self._thaw_phase(i)
+            if new_optimizer_cfg and i == 0:
+                # a reinitialized optimizer starts from phase 0's groups; later phases are replayed onto it
+                optimizer = self._reinit_optimizer(new_optimizer_cfg, phase["params"])
+                schedulers = [s for s, _ in self._host.get_lr_schedulers()]
+                continue
             if i == self._depth and self._depth > 0:
                 core_optim.restore_latest_lr_state(optimizer, schedulers, *pre_state)
             core_optim.add_optimizer_groups(
@@ -533,12 +588,69 @@ class FTSController:
                 lr=phase.get("lr", optimizer.defaults["lr"]), apply_lambdas=self.apply_lambdas_new_pgs,
                 schedulers=schedulers, pg_overrides=phase.get("pg_overrides"),
             )
-            core_optim.warn_unapplied_lr_lambdas(schedulers, self.apply_lambdas_new_pgs)
+            new_scheduler_cfg = core_phase.lr_reinit_cfg_for(phase, self._depth, self.reinit_lr_cfg)
+            if new_scheduler_cfg:
+                self._reinit_lr_scheduler(new_scheduler_cfg, optimizer)
+                schedulers = [s for s, _ in self._host.get_lr_schedulers()]
+            else:
+                core_optim.warn_unapplied_lr_lambdas(schedulers, self.apply_lambdas_new_pgs)
         if self._compile_reset or (self._compile_reset is None and _is_compiled(self.model)):
             self._host.on_compile_reset()
         self._policy.reset(self._depth)
         rank_zero_info(f"Fine-tuning advanced from phase {prev} to phase {self._depth}"
                        f"{f' ({reason})' if reason else ''}.")
+
+    def _reinit_optimizer(self, new_optimizer: dict, init_params: list) -> Optimizer:
+        optimizer_init = new_optimizer["optimizer_init"]
+        optimizer_class = core_optim.import_reinit_class(optimizer_init)
+        reinit_pgs = core_optim.reinit_phase0_pgs(self.model, init_params, self.no_decay,
+                                                  self._schedule[0].get("pg_overrides"))
+        optimizer = core_optim.build_phase0_optimizer(optimizer_class, optimizer_init.get("init_args", {}),
+                                                      reinit_pgs)
+        self._retire_optimizer(self.optimizer)
+        self._host.set_optimizer(0, optimizer)
+        self._step_hook = optimizer.register_step_post_hook(self._on_optimizer_step)  # type: ignore[attr-defined]
+        for sched, _ in self._host.get_lr_schedulers():
+            sched.optimizer = optimizer
+        rank_zero_info(f"Optimizer reinitialized at phase {self._depth}: {optimizer_class.__name__}.")
+        return optimizer  # type: ignore[return-value]
+
+    def _reinit_lr_scheduler(self, new_lr_scheduler: dict, optimizer: Optimizer) -> None:
+        lr_scheduler_init = new_lr_scheduler["lr_scheduler_init"]
+        lrs_class = core_optim.import_reinit_class(lr_scheduler_init)
+        core_optim.apply_reinit_pg_lrs(optimizer, new_lr_scheduler)
+        new_scheduler = lrs_class(optimizer=optimizer, **lr_scheduler_init.get("init_args", {}))
+        existing = self._host.get_lr_schedulers()
+        step_cfg = LRStepConfig(**{**(vars(existing[0][1]) if existing else vars(self._lr_step_cfg)),
+                                   **new_lr_scheduler.get("pl_lrs_cfg", {})})
+        if existing:
+            self._retire_lr_scheduler(existing[0][0])
+        self._host.set_lr_scheduler(0, new_scheduler, step_cfg)
+        rank_zero_info(f"Lr scheduler reinitialized at phase {self._depth}: {lrs_class.__name__}.")
+
+    def _retire_optimizer(self, optimizer: Optimizer) -> None:
+        if self._step_hook is not None:
+            self._step_hook.remove()
+        depth = self._depth
+
+        def _refuse(*_: Any, **__: Any) -> None:
+            raise FTSConfigurationError(
+                f"This optimizer was replaced when phase {depth} reinitialized the optimizer; step"
+                " `FTSController.optimizer` instead."
+            )
+
+        optimizer.register_step_pre_hook(_refuse)
+
+    def _retire_lr_scheduler(self, scheduler: Any) -> None:
+        depth = self._depth
+
+        def _refuse(*_: Any, **__: Any) -> None:
+            raise FTSConfigurationError(
+                f"This lr scheduler was replaced when phase {depth} reinitialized it; use"
+                " `FTSController.lr_scheduler` (or `step_lr_schedulers`) instead."
+            )
+
+        scheduler.step = _refuse
 
     def _thaw_phase(self, depth: int, init_thaw: bool = False) -> None:
         params = self._schedule[depth]["params"]
@@ -682,6 +794,8 @@ class FTSController:
                              else {"class_path": describe_callable(type(sched))}),
             "lr_scheduler_cfg": vars(self._lr_step_cfg),
             "transition": self._policy.config(),
+            "reinit_optim_cfg": self.reinit_optim_cfg,
+            "reinit_lr_cfg": self.reinit_lr_cfg,
             "isolate_rng": self.isolate_rng,
             "fingerprint_batches": self.fingerprint_batches,
             "metadata": self._metadata,

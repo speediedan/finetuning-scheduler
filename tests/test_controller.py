@@ -304,11 +304,12 @@ def test_meta_frozen_allowed_when_unscheduled():
     "schedule, match",
     [
         ({0: {"params": ["l2.weight"], "max_transition_epoch": 1}, 2: {"params": ["l1.weight"]}}, "non-contiguous"),
-        ({0: {"params": ["l2.weight"], "max_transition_epoch": 1},
-          1: {"params": ["l1.weight"], "new_optimizer": {"optimizer_init": {}}}}, "not yet supported"),
+        ({0: {"params": ["l2.weight"], "max_transition_epoch": 1,
+              "new_optimizer": {"optimizer_init": {"class_path": "torch.optim.Adam"}}},
+          1: {"params": ["l1.weight"]}}, "initial training phase which is an invalid"),
         ("not/a/schedule.yaml", "schedule.yaml"),
     ],
-    ids=["noncontiguous", "reinit", "missing_file"],
+    ids=["noncontiguous", "phase0_reinit", "missing_file"],
 )
 def test_schedule_refusals(schedule, match):
     with pytest.raises((FTSConfigurationError, FileNotFoundError), match=match):
@@ -382,3 +383,81 @@ def test_lr_cast_message():
         FTSController(Net(), {0: {"params": ["l2.weight"], "max_transition_epoch": 1},
                               1: {"params": ["l1.weight"], "lr": "fast"}},
                       optimizer=partial(torch.optim.SGD, lr=0.1)).setup()
+
+
+REINIT_SCHEDULE = {
+    0: {"params": ["l2.weight", "l2.bias"], "max_transition_epoch": 1},
+    1: {"params": ["l1.weight", "l1.bias"], "max_transition_epoch": 2, "lr": 0.05,
+        "new_optimizer": {"optimizer_init": {"class_path": "Adam", "init_args": {"lr": 0.01}}},
+        "new_lr_scheduler": {"lr_scheduler_init": {"class_path": "StepLR", "init_args": {"step_size": 1}},
+                             "pl_lrs_cfg": {"interval": "epoch"}}},
+    2: {"params": ["l0.weight", "l0.bias"]},
+}
+
+
+def test_explicit_reinitialization():
+    """A phase's ``new_optimizer`` replaces the optimizer (phase 0's groups rebuilt, later phases replayed) and its
+    ``new_lr_scheduler`` replaces the scheduler; the retired objects refuse to step."""
+    model = Net()
+    fts = FTSController(model, REINIT_SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1),
+                        lr_scheduler=partial(torch.optim.lr_scheduler.ExponentialLR, gamma=0.9))
+    fts.setup()
+    old_opt, old_sched = fts.optimizer, fts.lr_scheduler
+    _run(fts, model, 2)
+    assert isinstance(fts.optimizer, torch.optim.Adam) and fts.optimizer is not old_opt
+    assert isinstance(fts.lr_scheduler, torch.optim.lr_scheduler.StepLR) and fts.lr_scheduler.optimizer is fts.optimizer
+    assert [len(g["params"]) for g in fts.optimizer.param_groups] == [2, 2]
+    assert fts.global_step == 4  # counting moved to the new optimizer
+    with pytest.raises(FTSConfigurationError, match="replaced when phase 1 reinitialized the optimizer"):
+        old_opt.step()
+    with pytest.raises(FTSConfigurationError, match="replaced when phase 1 reinitialized it"):
+        old_sched.step()
+    _run(fts, model, 3)
+    assert fts.curr_depth == 2 and [len(g["params"]) for g in fts.optimizer.param_groups] == [2, 2, 2]
+
+
+def test_implicit_reinitialization():
+    model = Net()
+    fts = FTSController(model, {0: {"params": ["l2.weight", "l2.bias"], "max_transition_epoch": 1},
+                                1: {"params": ["l1.weight", "l1.bias"]}},
+                        optimizer=partial(torch.optim.SGD, lr=0.1),
+                        lr_scheduler=partial(torch.optim.lr_scheduler.StepLR, step_size=1),
+                        reinit_optim_cfg={"optimizer_init": {"class_path": "torch.optim.AdamW",
+                                                             "init_args": {"lr": 0.02}}},
+                        reinit_lr_cfg={"lr_scheduler_init": {"class_path": "torch.optim.lr_scheduler.ConstantLR",
+                                                             "init_args": {"factor": 0.5, "total_iters": 3}}})
+    with pytest.raises(FTSConfigurationError, match="Specifying both `ft_schedule` and `reinit_lr_cfg`"):
+        fts.setup()
+    fts = FTSController(model, None, optimizer=partial(torch.optim.SGD, lr=0.1),
+                        lr_scheduler=partial(torch.optim.lr_scheduler.StepLR, step_size=1),
+                        transition=CallableTransition(lambda ctx: ctx.epoch >= ctx.phase_start_epoch + 1),
+                        reinit_optim_cfg={"optimizer_init": {"class_path": "torch.optim.AdamW",
+                                                             "init_args": {"lr": 0.02}}},
+                        reinit_lr_cfg={"lr_scheduler_init": {"class_path": "torch.optim.lr_scheduler.ConstantLR",
+                                                             "init_args": {"factor": 0.5, "total_iters": 3}}})
+    fts.setup()
+    _run(fts, model, 2)
+    assert isinstance(fts.optimizer, torch.optim.AdamW)
+    assert isinstance(fts.lr_scheduler, torch.optim.lr_scheduler.ConstantLR)
+
+
+@pytest.mark.parametrize(
+    "phase1, kwargs, match",
+    [
+        ({"new_lr_scheduler": {"lr_scheduler_init": {"class_path": "StepLR", "init_args": {"step_size": 1}},
+                               "pl_lrs_cfg": {"name": "x"}}}, {}, r"remove \['name'\]"),
+        ({"new_lr_scheduler": {"lr_scheduler_init": {"class_path": "StepLR", "init_args": {"step_size": 1}},
+                               "pl_lrs_cfg": {"interval": "batch"}}}, {}, "must be \"step\" or \"epoch\""),
+        ({"new_optimizer": {"optimizer_init": {"class_path": "NotAnOptimizer"}}}, {}, "fully qualified"),
+        ({}, {"reinit_lr_cfg": {"lr_scheduler_init": {"class_path": "StepLR", "init_args": {"step_size": 1}},
+                                "init_pg_lrs": [0.1]}}, "init_pg_lrs"),
+    ],
+    ids=["pl_lrs_key", "interval", "class_path", "implicit_init_pg_lrs"],
+)
+def test_reinitialization_refusals(phase1, kwargs, match):
+    schedule = None if kwargs else {0: {"params": ["l2.weight"], "max_transition_epoch": 1},
+                                    1: {"params": ["l1.weight"], **phase1}}
+    transition = CallableTransition(lambda ctx: False) if kwargs else None
+    with pytest.raises(FTSConfigurationError, match=match):
+        FTSController(Net(), schedule, optimizer=partial(torch.optim.SGD, lr=0.1), transition=transition,
+                      **kwargs).setup()
