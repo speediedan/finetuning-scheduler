@@ -143,24 +143,47 @@ def test_a_hung_rank_times_out_and_the_pool_respawns(gloo_pool):
     assert gloo_pool.run(collectives.all_gather_ranks) == [[0, 1]] * 2
 
 
-@_GLOO
-def test_workers_are_measured_when_this_process_is(tmp_path):
-    """Under coverage, the lines only the workers execute (every case's body) reach this process's data."""
+def _measured_pool_run(tmp_path, *cases) -> list:
+    """Run ``(case, kwargs)`` pairs in a fresh pool under a nested coverage of ``collectives``, close the pool, and
+    return the lines of ``collectives`` this process's coverage holds afterwards."""
     coverage = pytest.importorskip("coverage")
-    case_file = collectives.__file__
-    body = collectives.all_reduce_sum.__code__.co_firstlineno + 1
-    cov = coverage.Coverage(data_file=str(tmp_path / "parent.coverage"), include=[case_file])
+    cov = coverage.Coverage(data_file=str(tmp_path / "parent.coverage"), include=[collectives.__file__])
     cov.start()
     try:
         pool = DistPool(2, "gloo", tmp_path)
         try:
-            assert pool.run(collectives.all_reduce_sum, n=4) == [[0, 3, 6, 9]] * 2
+            for case, kwargs in cases:
+                try:
+                    pool.run(case, **kwargs)
+                except pytest.fail.Exception:
+                    pass
         finally:
             pool.close()
     finally:
         cov.stop()
-    assert body in (cov.get_data().lines(case_file) or []), "the case body, run only by the workers, was not measured"
     assert not list((tmp_path / "coverage").iterdir()), "the workers' data files were not merged and removed"
+    return cov.get_data().lines(collectives.__file__) or []
+
+
+@_GLOO
+def test_workers_are_measured_when_this_process_is(tmp_path, monkeypatch):
+    """Under coverage, the lines only the workers execute (every case's body) reach this process's data."""
+    monkeypatch.delenv("COVERAGE_PROCESS_START", raising=False)  # its own route would send the data elsewhere
+    body = collectives.all_reduce_sum.__code__.co_firstlineno + 1
+    lines = _measured_pool_run(tmp_path, (collectives.all_reduce_sum, {"n": 4}))
+    assert body in lines, "the case body, run only by the workers, was not measured"
+
+
+@_GLOO
+def test_a_failed_case_keeps_the_coverage_of_earlier_ones(tmp_path, monkeypatch):
+    """A case that fails on a rank while every rank still replies retires the workers cleanly, so what they
+    measured for earlier cases is kept rather than lost with a killed process."""
+    monkeypatch.delenv("COVERAGE_PROCESS_START", raising=False)
+    body = collectives.all_reduce_sum.__code__.co_firstlineno + 1
+    lines = _measured_pool_run(
+        tmp_path, (collectives.all_reduce_sum, {"n": 4}), (hygiene.skip_on, {"rank": 0, "fail_rank": 1})
+    )
+    assert body in lines, "the earlier case's coverage was lost when the failed case retired the workers"
 
 
 def test_cases_must_live_in_the_case_package():

@@ -72,7 +72,8 @@ Distributed cases that need no Lightning run in a persistent worker pool (`tests
 `tests/dist_cases/`): one process group per test module rather than one process per test. Its tests run in the
 ordinary suite (gloo on Linux, NCCL with `PL_RUN_CUDA_TESTS=1`), not through `special_tests.sh`, whose one process
 per node id would discard the saving. Under `coverage run`, the pool measures its workers with the same settings and
-merges their data into the run's own when it closes, so no `coverage combine` step is needed.
+merges their data into the run's own when it closes, so no `coverage combine` step is needed (under `parallel = true`
+it leaves their files beside the run's own, for the `coverage combine` that mode needs anyway).
 
 When torch or Lightning leaks a new env var, add it to the allowlist in the `restore_env_variables`
 autouse fixture in `tests/conftest.py` rather than working around the failure.

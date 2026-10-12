@@ -128,8 +128,9 @@ def _start_coverage(spec: dict | None) -> None:
     """Measure this worker when the pool's parent is measured, with the parent's settings (``spec``).
 
     Data is saved at exit, which a spawned worker reaches through ``sys.exit``, to a suffixed file that the pool merges
-    into the parent's data when it closes. A worker killed instead (after an error or a timeout) saves nothing.
-    ``COVERAGE_PROCESS_START`` takes precedence: its config governs, and ``coverage combine`` merges those files.
+    into the parent's data when it closes (under ``parallel = true``, the run's ``coverage combine`` merges it). A
+    worker killed instead (after a timeout, or when a rank died) saves nothing. ``COVERAGE_PROCESS_START`` takes
+    precedence: its config governs, and ``coverage combine`` merges those files.
     """
     if os.environ.get("COVERAGE_PROCESS_START"):
         import coverage
