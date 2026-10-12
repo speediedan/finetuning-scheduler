@@ -38,15 +38,6 @@ pr:
       - ".azure-pipelines/**"
   drafts: false  # Only run for PRs that are "ready for review"
 
-parameters:
-  # A pull request into main runs the standalone smoke set (tests/.standalone_smoke) unless it carries the
-  # `full-gpu-suite` label; every other build runs the full standalone suite. This parameter asks for the full suite on a
-  # manual run (.azure-pipelines/scripts/standalone_scope.sh).
-  - name: fullStandalone
-    displayName: "Run every standalone test"
-    type: boolean
-    default: false
-
 jobs:
   - job: pytest
     strategy:
@@ -54,8 +45,8 @@ jobs:
         'PyTorch | latest':
           image: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-azpl-init"
           scope: ""
-    # how long to run the job before automatically cancelling: up to 40 minutes for each host lease, then about 35
-    # minutes of install and tests with the full standalone suite
+    # how long to run the job before automatically cancelling: up to 40 minutes waiting for the host leases, then about
+    # 35 minutes of install and tests with the full standalone suite
     timeoutInMinutes: "120"
     # how much time to give 'run always even if cancelled tasks' before stopping them
     cancelTimeoutInMinutes: "2"
@@ -121,13 +112,24 @@ jobs:
     # Serialize the GPU phases against local GPU work on the self-hosted host: the GPUs, then host memory (`cpu-heavy`),
     # in the host lease tool's order. The agent already runs one Azure job at a time, so this exists to avoid colliding
     # with interactive or agent sessions, a collision that surfaces as OOM or flaky timing rather than a clear error.
-    # Taken after the install, which needs neither. Fails open only when the lease directory is not mounted; `set -e`
-    # fails the step on any other acquire failure, and the cleanup step releases whatever is held.
+    # Taken after the install, which needs neither. It first waits, without holding it, for `cpu-heavy` to be free, so
+    # a local CPU-only job holding it does not leave this job holding GPUs it cannot use (racy, which only costs that
+    # wait again). The three waits share one 40-minute budget. Fails open only when the lease directory is not
+    # mounted; `set -e` fails the step on any other acquire failure, and the cleanup step releases whatever is held.
     - bash: |
         set -e
         source scripts/gpu_lease_wrap.sh
-        ci_gpu_lease_acquire /gpu_leases /tmp/azp_gpu_lease.pid 2400 "azure-$(Build.BuildId)" gpu
-        ci_gpu_lease_acquire /gpu_leases /tmp/azp_cpu_heavy_lease.pid 2400 "azure-$(Build.BuildId)" cpu-heavy
+        deadline=$(( SECONDS + 2400 ))
+        if [[ -e /gpu_leases/cpu-heavy.lock ]]; then
+          exec {fd}</gpu_leases/cpu-heavy.lock
+          wait_s=$(( deadline - SECONDS ))
+          flock -x -w "$wait_s" "$fd" || { echo "##vso[task.logissue type=error]Timed out waiting for the host's cpu-heavy lease."; exit 75; }
+          exec {fd}<&-
+        fi
+        wait_s=$(( deadline - SECONDS > 60 ? deadline - SECONDS : 60 ))
+        ci_gpu_lease_acquire /gpu_leases /tmp/azp_gpu_lease.pid "$wait_s" "azure-$(Build.BuildId)" gpu
+        wait_s=$(( deadline - SECONDS > 60 ? deadline - SECONDS : 60 ))
+        ci_gpu_lease_acquire /gpu_leases /tmp/azp_cpu_heavy_lease.pid "$wait_s" "azure-$(Build.BuildId)" cpu-heavy
       displayName: 'Acquire host GPU leases'
 
     # Only the CUDA tests that are not standalone: the hosted CPU matrix runs every other test in this collection, and
@@ -139,13 +141,14 @@ jobs:
         FTS_CUDA_TESTS_ONLY: "1"
       displayName: 'Testing: CUDA'
 
-    # The standalone tests under tests/, the smoke set or all of them (see the `fullStandalone` parameter). The marker
-    # alone defines the partition, so a standalone test in a module whose name does not start with `test_f` is not
-    # silently left out of the full suite.
+    # The standalone tests under tests/: on a pull request into main, the smoke set unless the pull request carries the
+    # `full-gpu-suite` label, and otherwise all of them (.azure-pipelines/scripts/standalone_scope.sh). The marker alone
+    # defines the partition, so a standalone test in a module whose name does not start with `test_f` is not silently
+    # left out of the full suite.
     - bash: |
         set -e
         source /tmp/venvs/fts_dev/bin/activate
-        scope=$(bash .azure-pipelines/scripts/standalone_scope.sh "${{ parameters.fullStandalone }}")
+        scope=$(bash .azure-pipelines/scripts/standalone_scope.sh)
         if [[ "$scope" == smoke ]]; then
           bash ./tests/special_tests.sh --mark_type=standalone --select_file=tests/.standalone_smoke
         else

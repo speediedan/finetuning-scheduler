@@ -71,7 +71,17 @@ select_tests(){
   # the file's order. A listed test that was not collected fails the run, so the list cannot fall out of date silently.
   local select_file="$1"
   local select_log="$2"
-  local -a wanted=($(grep -vE '^[[:space:]]*(#|$)' "$select_file"))
+  if [[ ! -r "$select_file" ]]; then
+    printf "Cannot read the test list ${select_file}. \n" | tee -a $select_log
+    export collection_failed=1
+    exit 1
+  fi
+  local -a wanted=($(grep -vE '^[[:space:]]*(#|$)' "$select_file" || true))
+  if [[ ${#wanted[@]} -eq 0 ]]; then
+    printf "The test list ${select_file} names no tests. \n" | tee -a $select_log
+    export collection_failed=1
+    exit 1
+  fi
   local -a kept=() missing=()
   for w in "${wanted[@]}"; do
     if printf '%s\n' "${parameterizations[@]}" | grep -qxF -- "$w"; then kept+=("$w"); else missing+=("$w"); fi
@@ -123,11 +133,16 @@ execute_tests(){
     test_to_find=`echo ${parameterization} | sed 's/\[/\\\[/g; s/\]/\\\]/g'`
     # Under Lightning's `ddp` launcher every other rank re-runs this test in its own pytest session, writing to the same
     # output, and only rank zero's exit code reaches this shell. So a FAILED or ERROR line from any rank fails the test,
-    # as does a non-zero exit, whichever rank's verdict is printed first.
+    # as does a non-zero exit, whichever rank's verdict is printed first, and so does a session that never finished (a
+    # rank that died, or was aborted in a collective, prints no verdict at all).
+    sessions=$(grep -c "test session starts" "$test_raw_log" || true)
+    finished=$(grep -cE "^=+ .+ in [0-9.]+s.* =+$" "$test_raw_log" || true)
     if grep -qE "(FAILED|ERROR) .*${test_to_find}" "$test_raw_log"; then
       parameterization_result="${parameterization}: FAILED"
     elif [[ $test_rc -ne 0 ]]; then
       parameterization_result="${parameterization}: FAILED (exit code ${test_rc})"
+    elif [[ $finished -lt $sessions ]]; then
+      parameterization_result="${parameterization}: FAILED (${sessions} pytest sessions started, ${finished} finished)"
     elif pass_or_fail=$(grep -E "(PASSED|XPASS|XFAIL) .*${test_to_find}" "$test_raw_log"); then
       parameterization_result=`echo $pass_or_fail | awk 'NR==1 {print $2 ": "  $1}'`;
     elif skipped=$(grep -E "${test_to_find}.*SKIPPED" "$test_raw_log"); then

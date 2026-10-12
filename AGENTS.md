@@ -304,8 +304,9 @@ the `fts-development-branch-version-upgrade` skill.
   `cpu-heavy` leases after installing.
   - **Standalone scope** (`.azure-pipelines/scripts/standalone_scope.sh`): a pull request into `main` runs the smoke
     set in `tests/.standalone_smoke`, one test per strategy family. Every other build runs every standalone test:
-    release branches and tags, builds of `main`, manual runs (the `fullStandalone` parameter forces it on any run), and
-    a pull request labeled `full-gpu-suite` (read when the build runs, so a label added before the gate is approved counts).
+    release branches and tags, builds of `main`, manual runs (one queued on a pull request's merge ref included), and a
+    pull request labeled `full-gpu-suite` (read when the build runs, so a label added before the gate is approved
+    counts).
   - **The trade:** a regression in one FSDP or model-parallel case that the smoke set does not cover surfaces at the
     next full run rather than on the pull request that caused it, which is why strategy-driving changes take the
     label (see "Checks required before a change is done").

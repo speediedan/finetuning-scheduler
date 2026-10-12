@@ -96,8 +96,8 @@ step. The steps, in order:
 no `--reruns` flags, so a flaky test fails the build on first occurrence.
 
 **Standalone scope.** A pull request into `main` runs only the smoke set in `tests/.standalone_smoke` (one test per
-strategy family) unless it carries the `full-gpu-suite` label; every other build, and a manual run with the
-`fullStandalone` parameter, runs every standalone test. The step's log names the scope and why. So a green gate on a
+strategy family) unless it carries the `full-gpu-suite` label; every other build, a manual run on a pull request's
+merge ref included, runs every standalone test. The step's log names the scope and why. So a green gate on a
 pull request says nothing about the standalone tests outside the smoke set, and a failure that first appears on a
 build of `main` or a release branch may come from a pull request whose gate ran only the smoke set.
 
