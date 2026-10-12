@@ -122,12 +122,14 @@ def test_wrappers_that_miss_late_thaws_are_refused(gloo_pool):
 @RunIf(min_cuda_gpus=2)
 @pytest.mark.parametrize("case", ["fsdp", "fsdp_fp16", "tp"])
 def test_model_parallel_nccl(nccl_pool, tmp_path, case):
-    """The FSDP2 and TP cases on NCCL, plus FSDP2 fp16 mixed precision (one of the CI GPUs has no bf16)."""
+    """The FSDP2 (with an evaluation forward before each ``epoch_end``) and TP cases on NCCL, plus FSDP2 fp16 mixed
+    precision (one of the CI GPUs has no bf16)."""
     if case == "tp":
         results = nccl_pool.run(mp.tp, ckpt_dir=str(tmp_path / "tp"), val=VAL)
         expected, tol = path_tp, 1e-3
     else:
-        results = nccl_pool.run(mp.fsdp, fp16=case == "fsdp_fp16", ckpt_dir=str(tmp_path / "fsdp"), val=VAL)
+        results = nccl_pool.run(mp.fsdp, fp16=case == "fsdp_fp16", ckpt_dir=str(tmp_path / "fsdp"), val=VAL,
+                                evaluate=True)
         expected, tol = path_fsdp_autocm, (2e-2 if case == "fsdp_fp16" else 1e-3)
     agreed = _agreed(results)
     assert _states(agreed["path"]) == _expected(expected)
