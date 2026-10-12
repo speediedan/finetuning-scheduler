@@ -26,7 +26,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import KeysView
 from copy import copy, deepcopy
-from dataclasses import dataclass, field, fields
+from dataclasses import fields
 from typing import Any
 from collections.abc import Callable, Iterator
 from typing_extensions import override
@@ -47,6 +47,7 @@ import finetuning_scheduler.lightning  # noqa: F401  (registers the Lightning ba
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import schedule as core_schedule
 from finetuning_scheduler.core.schedule import UniqueKeyLoader  # noqa: F401  (legacy import path)
+from finetuning_scheduler.core.state import FTSState
 from finetuning_scheduler.strategy_adapters import StrategyAdapter, FSDPStrategyAdapter, ModelParallelStrategyAdapter
 from finetuning_scheduler.types import (FTSLRSchedulerType, ParamGroupAddable,
                                         BaseCallbackDepType)
@@ -109,32 +110,6 @@ def _discover_strategy_adapters() -> None:
             rank_zero_warn(f"Failed to load strategy adapter entry point {ep}: {err}")
 
 # Note: _discover_strategy_adapters() is called lazily during strategy setup
-
-
-@dataclass
-class FTSState:
-    """Dataclass to encapsulate the :class:`~finetuning_scheduler.fts.FinetuningScheduler` internal state."""
-
-    _resume_fit_from_ckpt: bool = False
-    _ft_epoch: int = 0
-    _ft_global_steps: int = 0
-    _curr_depth: int = 0
-    _best_ckpt_depth: int = 0
-    _ft_sync_props: tuple = (
-        ("epoch_progress.current.completed", "_ft_epoch"),
-        ("epoch_loop.global_step", "_ft_global_steps"),
-    )
-    _ft_sync_objects: tuple | None = None
-    _ft_init_epoch: int | None = None
-    _curr_thawed_params: list = field(default_factory=list)
-    _fts_ckpt_metadata: dict = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        self._fts_ckpt_metadata = {
-            "current_ckpt_depth": self._curr_depth,
-            "best_ckpt_depth": self._best_ckpt_depth,
-            "best_ckpt_pgs": {},
-        }
 
 
 class CallbackResolverMixin(ABC):

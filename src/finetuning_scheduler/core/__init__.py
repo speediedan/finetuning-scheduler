@@ -19,6 +19,7 @@ standard library; they never import Lightning.
 """
 from finetuning_scheduler.core.exceptions import (configuration_error_cls, FTSConfigurationError,
                                                   register_configuration_error)
+from finetuning_scheduler.core.state import FTSState
 from finetuning_scheduler.core.types import (AutoStrEnum, FTSLRSchedulerType, FTSLRSchedulerTypeTuple,
                                              ParamGroupAddable, supported_lrs)
 
@@ -28,6 +29,7 @@ __all__ = [
     "FTSConfigurationError",
     "FTSLRSchedulerType",
     "FTSLRSchedulerTypeTuple",
+    "FTSState",
     "ParamGroupAddable",
     "register_configuration_error",
     "supported_lrs",
