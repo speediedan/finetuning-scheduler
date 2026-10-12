@@ -23,7 +23,7 @@ import os
 import pathlib
 import re
 from collections import Counter
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 
 import yaml
 from torch import nn
@@ -472,3 +472,59 @@ def final_phase_max_epochs(schedule: dict, max_phase: int, max_epoch_wm: int, ma
         f" the maximum phase-specified epoch ({max_epoch_wm})."
     )
     return max(max_epoch_wm, max_epochs)
+
+
+# phase keys only the direct PyTorch API interprets in this release
+DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides")
+
+
+def parse_phase_extensions(schedule: dict) -> None:
+    """Validate and normalize, in place, the phase keys the direct PyTorch API adds.
+
+    - ``max_transition_step``: a global optimizer step count at which the phase ends (default ``-1``, unset).
+    - ``phase_config``: an opaque mapping handed to phase hooks and gates.
+    - ``pg_overrides``: optimizer options (other than ``params`` and ``lr``, which have their own keys) applied to the
+      parameter group the phase adds.
+
+    Raises:
+        FTSConfigurationError: If a key has the wrong type.
+    """
+    for depth, phase in schedule.items():
+        mts = phase.setdefault("max_transition_step", -1)
+        if isinstance(mts, bool) or not isinstance(mts, int) or mts < -1:
+            raise FTSConfigurationError(
+                f"Phase {depth}'s `max_transition_step` must be an integer >= 0 (or -1, unset), got {mts!r}."
+            )
+        if "phase_config" in phase and not isinstance(phase["phase_config"], Mapping):
+            raise FTSConfigurationError(
+                f"Phase {depth}'s `phase_config` must be a mapping, got {type(phase['phase_config']).__name__}."
+            )
+        overrides = phase.get("pg_overrides")
+        if overrides is not None:
+            if not isinstance(overrides, Mapping):
+                raise FTSConfigurationError(
+                    f"Phase {depth}'s `pg_overrides` must be a mapping of optimizer options, got "
+                    f"{type(overrides).__name__}."
+                )
+            reserved = sorted({"params", "lr"} & set(overrides))
+            if reserved:
+                raise FTSConfigurationError(
+                    f"Phase {depth}'s `pg_overrides` may not set {reserved}: set the phase's parameters with `params` "
+                    "and its learning rate with `lr`."
+                )
+
+
+def refuse_direct_api_keys(schedule: dict) -> None:
+    """Refuse the phase keys only the direct PyTorch API interprets, naming each phase that uses one.
+
+    Raises:
+        FTSConfigurationError: If any phase uses one.
+    """
+    used = {depth: sorted(k for k in DIRECT_API_PHASE_KEYS if k in phase) for depth, phase in schedule.items()}
+    used = {depth: keys for depth, keys in used.items() if keys}
+    if used:
+        detail = "; ".join(f"phase {depth}: {', '.join(keys)}" for depth, keys in used.items())
+        raise FTSConfigurationError(
+            f"The schedule uses keys only the direct PyTorch API (`FTSController`) supports in this release ({detail})."
+            " Remove them to use the schedule with the Lightning callback."
+        )

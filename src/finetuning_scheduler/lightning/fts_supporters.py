@@ -760,6 +760,7 @@ class ScheduleParsingMixin(ABC):
         self._convert_phase_keys()
         if not core_schedule.ensure_contiguous_phase_keys(self.ft_schedule):
             self._rewrite_schedule(err_msg=core_schedule.NON_CONTIGUOUS_KEYS_MSG)
+        core_schedule.refuse_direct_api_keys(self.ft_schedule)
 
     def _validate_epoch_transitions(self) -> None:
         """If not composing :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` and epoch-driven
