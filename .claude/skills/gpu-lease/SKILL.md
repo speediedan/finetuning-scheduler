@@ -112,9 +112,11 @@ a notebook or an unwrapped run, not a bug in the lease.
 A self-hosted CI job that runs in a container joins the same lease through two bind mounts, both set up by the
 host's operator and named by the pipeline:
 
-- **the lease directory**, holding the lock files. `flock` works on the inode, so a lock taken inside the container
-  interlocks with processes on the host. The container opens the lock files read-only (`flock(2)` locks either way),
-  because under rootless docker its uid does not own them.
+- **the lease directory**, read-write, holding the lock files, the tool's queue tickets and the holder records.
+  `flock` works on the inode, so a lock taken inside the container interlocks with processes on the host. The
+  container's uid (under rootless docker, a subordinate uid) owns none of the operator's files, so it opens the lock
+  files read-only (`flock(2)` locks either way). The tool also writes queue tickets and holder records there, so a
+  read-only mount, or a queue counter it cannot write, makes the tool route fail the step rather than fall back.
 - **the lease tool**, read-only. Optional: without it the job falls back to plain locks, losing the fair queue and
   device placement but not the serialization.
 
@@ -142,10 +144,18 @@ adds an infix (`azure-<infix>-<buildId>`) so `--status` shows whose build holds 
 - For the fallback: one lock file per lease, `<dir>/<key>.lock`, exclusive, and a `<dir>/<key>.holder` record that
   `--status` reads.
 
-**Operator duties.** Install the tool at the mounted path, and reinstall it whenever it changes, by an atomic
-replace (`install`, or write a temporary file and rename it), never by editing in place: bash reads a running
-script incrementally, so an in-place edit corrupts every job still executing it. A bind mount whose source is
-missing appears in the container as a directory, which the wrapper treats as an absent tool.
+**Operator duties.**
+
+- **Provision the lease directory before any job runs**, typically with a boot-time rule: the directory sticky and
+  world-writable, and the lock files, the queue directory and its counter files present, owned by the directory's
+  owner, mode `0666`. Under `fs.protected_regular` (the default on current distributions) a uid cannot open for
+  writing a file another uid created in such a directory, unless the directory's owner owns it, so a file created
+  on the fly by whichever caller came first can lock every other uid out.
+- **Install the tool at the mounted path, and reinstall it whenever it changes**, by an atomic replace (`install`, or
+  write a temporary file and rename it), never by editing in place: bash reads a running script incrementally, so
+  an in-place edit corrupts every job still executing it.
+- A bind mount whose source is missing appears in the container as a directory, which the wrapper treats as an
+  absent tool.
 
 ## Recovery: stale, stuck, and confusing states
 
