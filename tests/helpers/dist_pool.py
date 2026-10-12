@@ -74,6 +74,7 @@ class DistPool:
         grace: float = 5.0,
     ) -> None:
         self.world_size, self.backend, self.tmp_dir = world_size, backend, Path(tmp_dir)
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)  # the rendezvous file goes here; a missing dir hangs the init
         self.case_timeout, self.start_timeout = case_timeout, start_timeout
         self.pg_timeout, self.grace = pg_timeout, grace
         self.spawn_s: list[float] = []  # wall time of each (re)spawn

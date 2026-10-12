@@ -147,7 +147,10 @@ def _measured_pool_run(tmp_path, *cases) -> list:
     """Run ``(case, kwargs)`` pairs in a fresh pool under a nested coverage of ``collectives``, close the pool, and
     return the lines of ``collectives`` this process's coverage holds afterwards."""
     coverage = pytest.importorskip("coverage")
-    cov = coverage.Coverage(data_file=str(tmp_path / "parent.coverage"), include=[collectives.__file__])
+    # config_file=False: a run's own config (`parallel`, `source`) would otherwise change what this coverage measures
+    cov = coverage.Coverage(
+        data_file=str(tmp_path / "parent.coverage"), include=[collectives.__file__], config_file=False
+    )
     cov.start()
     try:
         pool = DistPool(2, "gloo", tmp_path)
