@@ -26,6 +26,7 @@ BASE_WARNINGS = [
     "Please use the new API settings to control TF32 behavior",
     "treespec, LeafSpec",
     "torch.jit.script",
+    "Lightning will become an optional dependency",  # once per process, so whichever test constructs FTS first
     WORKER_WARNING,
 ]
 

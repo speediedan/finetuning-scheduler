@@ -68,6 +68,7 @@ def plateau_criteria(
     stopping_threshold: float | None,
     divergence_threshold: float | None,
     improvement_message: Callable[[Tensor], str],
+    stop_message: str = "Signaling Trainer to stop.",
 ) -> PlateauOutcome:
     """Evaluate the plateau (early-stopping) criteria for one monitored value.
 
@@ -88,6 +89,7 @@ def plateau_criteria(
         stopping_threshold: Stop once the value improves past this threshold.
         divergence_threshold: Stop once the value is worse than this threshold.
         improvement_message: Builds the improvement message from ``current``, before ``best_score`` changes.
+        stop_message: The sentence ending a stop reason; the default is the Lightning callback's.
 
     Returns:
         The :class:`PlateauOutcome`.
@@ -97,19 +99,19 @@ def plateau_criteria(
         should_stop = True
         reason = (
             f"Monitored metric {monitor} = {current} is not finite."
-            f" Previous best value was {best_score:.3f}. Signaling Trainer to stop."
+            f" Previous best value was {best_score:.3f}. {stop_message}"
         )
     elif stopping_threshold is not None and monitor_op(current, stopping_threshold):  # type: ignore[arg-type]
         should_stop = True
         reason = (
             f"Stopping threshold reached: {monitor} = {current} {order} {stopping_threshold}."
-            " Signaling Trainer to stop."
+            f" {stop_message}"
         )
     elif divergence_threshold is not None and monitor_op(-current, -divergence_threshold):  # type: ignore[arg-type]
         should_stop = True
         reason = (
             f"Divergence threshold reached: {monitor} = {current} {order} {divergence_threshold}."
-            " Signaling Trainer to stop."
+            f" {stop_message}"
         )
     elif monitor_op(current - min_delta, best_score.to(current.device)):
         reason = improvement_message(current)
@@ -121,7 +123,7 @@ def plateau_criteria(
                 should_stop = True
                 reason = (
                     f"Monitored metric {monitor} did not improve in the last {wait_count} records."
-                    f" Best score: {best_score.item():.3f}. Signaling Trainer to stop."
+                    f" Best score: {best_score.item():.3f}. {stop_message}"
                 )
             else:
                 phase_complete = True
@@ -319,7 +321,7 @@ class PlateauTransition:
             min_delta=self.min_delta, monitor_op=self.monitor_op, monitor=self.monitor,
             order=self.order_dict[self.mode], final_phase=ctx.is_final_phase, check_finite=self.check_finite,
             stopping_threshold=self.stopping_threshold, divergence_threshold=self.divergence_threshold,
-            improvement_message=self._improvement_message,
+            improvement_message=self._improvement_message, stop_message="Stopping training.",
         )
         self.best_score, self.wait_count = outcome.best_score, outcome.wait_count
         if outcome.should_stop:

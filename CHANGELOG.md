@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Added checkpointing to the experimental direct PyTorch API: a `BestCheckpoint` policy (top-1 by a monitored metric, optionally saving only scheduled parameters), restoring the best checkpoint's model, optimizer and lr scheduler state at phase boundaries (`restore_best`, as the Lightning callback does), phase gates that can veto a phase and roll back to the best as of its start, `register_stateful` for data-loader positions and similar state, and `save()`/`load()` for exact resume (random streams included). Sharded (FSDP2/DTensor) models are checkpointed through `torch.distributed.checkpoint` [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).
+
+- Added the `finetuning-scheduler[lightning]` and `finetuning-scheduler[pytorch-lightning]` extras. While Lightning remains a base dependency they install nothing more; adopting them now makes the planned move of Lightning behind the extra (no earlier than 2.17) a no-op [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).
+
 - Added `FTSController`, an experimental direct PyTorch API for scheduled fine-tuning in a plain training loop. The loop stays the user's: `setup()`, `epochs()` (or `epoch_start()`/`epoch_end()`) and `step_end()` drive phase transitions. It covers schedules loaded, generated or given as mappings; optimizer and lr scheduler factories or instances (with phase-0 enforcement); `max_transition_epoch` and the new `max_transition_step` transitions; pluggable transition policies (`PlateauTransition`, `EpochTransition`, `StepTransition`, `AnyOf`, `CallableTransition`) agreed across ranks; optimizer and lr scheduler reinitialization; per-phase `phase_config` payloads and `pg_overrides`; phase hooks run with the training random streams isolated; batch fingerprints; resumable state; and a configuration hash. A `TrainingHost` protocol (`TorchHost`; `LightningHost` for a Lightning `Trainer`) is the seam between the scheduling core and the loop [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).
 
 - Added `finetuning_scheduler.core`, a scheduling core that does not depend on Lightning. It holds schedule generation, loading, saving and validation; optimizer and lr scheduler reinitialization checks; parameter group growth; lr state restoration; and the scheduler state. It imports only PyTorch, PyYAML, fsspec and the standard library, and the Lightning integration delegates to it. The core raises configuration errors as `FTSConfigurationError`, a `ValueError`. Under Lightning they are raised as `FTSMisconfigurationException`, which is both an `FTSConfigurationError` and a Lightning `MisconfigurationException`, so existing `except MisconfigurationException` handlers keep catching them, and `except ValueError` now catches them too [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
@@ -71,6 +75,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - CUDA tests (`RunIf(min_cuda_gpus=...)` and `RunIf(bf16_cuda=True)`) now run only with `PL_RUN_CUDA_TESTS=1`, as the `min_cuda_gpus` documentation already stated, so a plain `pytest` run never uses a host's GPUs. `tests/special_tests.sh`, `scripts/gen_fts_coverage.sh` and the GPU pipeline set it [#68](https://github.com/speediedan/finetuning-scheduler/issues/68).
 
 ### Deprecated
+
+- Lightning will become an optional dependency, no earlier than 2.17. The first `FinetuningScheduler` constructed in a process issues a one-time `FutureWarning` naming the `finetuning-scheduler[lightning]` extra; the versioning policy now states when moving a dependency behind an extra is a packaging change rather than an API change [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).
 
 ## [2.14.1] - 2026-10-09
 

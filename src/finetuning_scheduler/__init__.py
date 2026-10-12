@@ -55,8 +55,9 @@ def __getattr__(name: str) -> Any:
         if (err.name or "").split(".")[0] not in _LIGHTNING_DISTRIBUTIONS:
             raise
         raise ImportError(
-            f"`{__name__}.{name}` requires Lightning, which could not be imported ({err}). Install `lightning` (or the"
-            " standalone `pytorch-lightning` package) to use the Lightning integration."
+            f"`{__name__}.{name}` requires Lightning, which could not be imported ({err}). Install"
+            " `finetuning-scheduler[lightning]` (or `finetuning-scheduler[pytorch-lightning]` for the standalone"
+            " package) to use the Lightning integration."
         ) from err
     value = getattr(module, name) if name in _LAZY_ATTRS else module
     globals()[name] = value

@@ -82,6 +82,15 @@ class LightningHost:
     def set_max_epochs(self, max_epochs: int) -> None:
         self.trainer.fit_loop.max_epochs = max_epochs
 
+    def advance_epoch(self) -> None:
+        """Lightning's fit loop counts epochs."""
+
+    def advance_step(self, steps: int = 1) -> None:
+        """Lightning's fit loop counts optimizer steps."""
+
+    def load_counters(self, current_epoch: int, global_step: int) -> None:
+        raise NotImplementedError("Under Lightning, resume through the Trainer's checkpointing (`ckpt_path`).")
+
     @property
     def is_global_zero(self) -> bool:
         return self.trainer.is_global_zero

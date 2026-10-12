@@ -134,7 +134,24 @@ The "X+2" rule is a recommendation and not a strict requirement. Longer deprecat
 Breaking Changes
 ================
 
-Since version 2.0.0, any breaking change (within supported PyTorch versions) will occur at ``(MAJOR+1).0.0`` (e.g., 3.0.0), unless it is fixing a critical bug. This provides strong API stability guarantees within major version series.
+Since version 2.0.0, any breaking API change (within supported PyTorch versions) will occur at ``(MAJOR+1).0.0`` (e.g., 3.0.0), unless it is fixing a critical bug. This provides strong API stability guarantees within major version series.
+
+.. _versioning_optional_dependencies:
+
+Moving a Dependency Behind an Extra
+-----------------------------------
+
+Moving an install-time dependency behind an optional extra is a packaging change, not an API change, provided that:
+
+- it is announced at least two minor releases ahead, including with a runtime ``FutureWarning``;
+- the extra exists before the move, so it can be adopted early;
+- after the move, using the affected functionality without the extra fails with an ``ImportError`` naming the exact install command;
+- with the extra installed, the API is unchanged.
+
+Such a move may therefore happen within a major version series; the ``(MAJOR+1).0.0`` rule above covers API changes.
+
+.. note::
+   **Lightning will become an optional dependency, no earlier than FTS 2.17.** From 2.15, the ``finetuning-scheduler[lightning]`` extra (``finetuning-scheduler[pytorch-lightning]`` for the standalone ``pytorch_lightning`` package) is accepted and, while Lightning remains a base dependency, installs nothing more. Installing with the extra now keeps the Lightning integration working unchanged through the move. The direct PyTorch API does not need Lightning.
 
 API Stability Classifications
 ==============================
