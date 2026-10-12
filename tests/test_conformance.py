@@ -252,3 +252,23 @@ def test_testing_package_needs_neither_pytest_nor_lightning():
     env["CUDA_VISIBLE_DEVICES"] = ""
     result = subprocess.run([sys.executable, "-c", ISOLATED], capture_output=True, text=True, env=env, timeout=300)
     assert result.returncode == 0 and result.stdout.strip() == "ok", result.stderr
+
+
+def test_buffer_only_fitted_roles_conform():
+    """A view whose only `fitted` tensors are buffers conforms (the frozen-parameter case does not apply)."""
+    make = lambda: CanonicalView(InterventionModel(), roles={"enforce_mean": "fitted",  # noqa: E731
+                                                             "enforce_mask": "fitted"})
+    report = TunableViewConformance(make).run(raise_on_failure=True)
+    assert "frozen_roles_refuse" in report.skipped and "checkpoint_round_trip" in report.ran
+
+
+class DropsFittedBuffersOnLoad(CanonicalView):
+    def load_checkpoint_state_dict(self, state_dict, strict=True):
+        kept = {k: v for k, v in state_dict.items() if not k.startswith("enforce_")}
+        self.root.load_state_dict(kept, strict=False)
+
+
+def test_checkpoint_case_catches_unrestored_buffers():
+    suite = TunableViewConformance(lambda: DropsFittedBuffersOnLoad(InterventionModel(), roles=ROLES))
+    report = suite.run(select=["checkpoint_round_trip"])
+    assert "checkpoint_round_trip" in report.failures and "enforce_mean" in report.failures["checkpoint_round_trip"]

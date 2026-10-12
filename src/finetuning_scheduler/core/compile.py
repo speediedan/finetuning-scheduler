@@ -24,8 +24,10 @@ that names anything the view cannot resolve, naming the offending input. The sch
 .. warning:: This is an experimental API and may change in a future release.
 """
 import hashlib
+import itertools
 import json
-from collections.abc import Mapping, Sequence
+from collections import Counter
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -104,6 +106,8 @@ def owner_module(physical: str) -> str:
     >>> owner_module("encoder.0.weight"), owner_module("0.parametrizations.weight.original"), owner_module("bias")
     ('encoder.0', '0', '')
     """
+    if physical.startswith("parametrizations."):  # a parametrization on the root module itself
+        return ""
     head, sep, _ = physical.partition(".parametrizations.")
     if sep:
         return head
@@ -111,10 +115,10 @@ def owner_module(physical: str) -> str:
 
 
 def _storage_span(t: Tensor) -> tuple[tuple[str, int], int, int] | None:
-    """A tensor's storage key and byte range, or ``None`` when it has no inspectable storage (meta tensors)."""
-    if hasattr(t, "to_local"):  # a DTensor is keyed by its local shard
-        t = t.to_local()  # type: ignore[operator]
-    if t.device.type == "meta":
+    """A tensor's storage key and byte range, or ``None`` when its storage cannot be compared the same way on every
+    rank (a ``DTensor``, whose local shard differs by rank), when it is empty, or when it has none (meta
+    tensors)."""
+    if hasattr(t, "to_local") or t.device.type == "meta" or t.numel() == 0:
         return None
     storage = t.untyped_storage()
     start = int(t.storage_offset()) * t.element_size()
@@ -143,10 +147,25 @@ def _overlapping(entries: Sequence[tuple[str, int]],
     return pairs
 
 
-def _expand(entries: Sequence[str], depth: int, logical_names: Sequence[str], all_physical: Sequence[str],
-            roles: Mapping[str, str], shared: tuple) -> list[tuple[bool, list[str]]]:
+def _resolves_exactly(bound: BoundView, entry: str, physical: Collection[str]) -> bool:
+    """Whether the view resolves ``entry``, a name it does not list, to parameters of its root (for example a
+    parametrized tensor's unparametrized name)."""
+    try:
+        mapped = bound.to_physical([entry]).get(entry)
+    except FTSConfigurationError:
+        return False
+    return bool(mapped) and all(p in physical for p in mapped)
+
+
+def _expand(entries: Sequence[str], depth: int, bound: BoundView, logical_names: Sequence[str],
+            all_physical: Sequence[str], roles: Mapping[str, str], shared: tuple) -> list[tuple[bool, list[str]]]:
     """Resolve a phase's entries in order: each becomes ``(True, physical names)`` for a role selector or ``(False,
-    logical names)`` for a name or regex."""
+    logical names)`` for a name or regex.
+
+    A name the view lists resolves to itself; a name the view does not list but resolves exactly is kept as is; anything
+    else is a regex over the listed names.
+    """
+    listed = set(logical_names)
     resolved: list[tuple[bool, list[str]]] = []
     for entry in entries:
         if is_role_selector(entry):
@@ -154,6 +173,8 @@ def _expand(entries: Sequence[str], depth: int, logical_names: Sequence[str], al
             if not matched:
                 raise FTSConfigurationError(f"The role selector '{entry}' in phase {depth} matched no parameter.")
             resolved.append((True, matched))
+        elif entry not in listed and _resolves_exactly(bound, entry, all_physical):
+            resolved.append((False, [entry]))
         else:
             resolved.append((False, resolve_param_entries([entry], depth, logical_names, shared)))
     return resolved
@@ -177,6 +198,28 @@ def _check_phase_tensors(cp: CompiledPhase, roles: Mapping[str, str], tensors: M
             raise FTSConfigurationError(
                 f"Phase {cp.depth} schedules quantized or packed tensors through logical names that are views of them,"
                 f" which cannot be thawed safely: {packed}.")
+
+
+def _repeats(lists: Sequence[Sequence[str]]) -> list[str]:
+    """Each name once per extra occurrence across ``lists``, as the Lightning callback lists them."""
+    counts = Counter(itertools.chain(*lists))
+    counts.subtract(Counter(set().union(*map(set, lists))))
+    return list(counts.elements())
+
+
+def _check_disjoint_names(within: Sequence[Sequence[str]], across: Sequence[Sequence[str]], legacy: bool) -> None:
+    """Refuse (or, with ``legacy``, warn about) a name resolved twice within a phase or a physical parameter
+    scheduled by two phases, listing every repeat in the Lightning callback's format.
+
+    Names are compared rather than storage, so the check gives the same answer on every rank.
+    """
+    dup_params = [n for phase in within for n in _repeats([phase])] + _repeats(across)
+    if dup_params:
+        msg = ("Phases are not disjoint. The following parameters are specified in multiple phases: "
+               f"{', '.join(dup_params)}")
+        if not legacy:
+            raise FTSConfigurationError(msg)
+        rank_zero_warn(msg)
 
 
 def _digest(phases: Sequence[CompiledPhase], roles: Mapping[str, str]) -> str:
@@ -219,12 +262,14 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     logical_names = [n for n, _ in bound.logical_named_parameters()]
     shared = shared_params_ref(root) if support.naming_scheme == "physical" else ([], set())
     claimed_primary: dict[str, int] = {}
+    within: list[list[str]] = []
     claimed_coupled: dict[str, int] = {}
     logical_to_physical: dict[str, tuple[str, ...]] = {}
     phases: list[CompiledPhase] = []
     overlaps: list[tuple[str, str]] = []
     for depth in sorted(schedule):
-        resolved = _expand(schedule[depth].get("params", []), depth, logical_names, list(tensors), roles, shared)
+        resolved = _expand(schedule[depth].get("params", []), depth, bound, logical_names, list(tensors), roles,
+                           shared)
         logical = list(dict.fromkeys(n for is_sel, names in resolved if not is_sel for n in names))
         try:
             mapped = dict(bound.to_physical(logical)) if logical else {}
@@ -233,6 +278,9 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
         logical_to_physical.update({k: tuple(v) for k, v in mapped.items()})
         primary = list(dict.fromkeys(p for is_sel, names in resolved
                                      for p in (names if is_sel else (q for n in names for q in mapped[n]))))
+        # the disjointness check counts, within a phase, the names its entries resolved to (a name resolved twice
+        # counts twice, as the Lightning callback counts it) and, across phases, the physical parameters
+        within.append([n for is_sel, names in resolved if not is_sel for n in names])
         unknown = [p for p in primary if p not in tensors]
         if unknown:
             raise FTSConfigurationError(
@@ -249,14 +297,12 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
                 f"The view's coupled tensors for phase {depth} are not parameters of its root module: {unknown}.")
         cp = CompiledPhase(depth, tuple(logical), tuple(primary), tuple(coupled))
         _check_phase_tensors(cp, roles, tensors, support.logical_names_are_views, legacy)
-        tagged = list(claimed_primary.items()) + [(p, depth) for p in primary]
+        tagged = list(claimed_primary.items()) + [(p, depth) for p in primary if p not in claimed_primary]
         for (a, da), (b, db) in _overlapping(tagged, tensors):
             if da == db == depth:
                 overlaps.append((a, b))
-            elif depth in (da, db):
-                msg = (f"Phases are not disjoint: '{a}' is scheduled in phases {min(da, db)} and {max(da, db)}."
-                       if a == b else
-                       f"Phases {min(da, db)} and {max(da, db)} schedule tensors that share storage: '{a}' and '{b}'."
+            elif depth in (da, db) and a != b:  # a name repeated across phases is refused by name, after the loop
+                msg = (f"Phases {min(da, db)} and {max(da, db)} schedule tensors that share storage: '{a}' and '{b}'."
                        " A tensor can be thawed by one phase only.")
                 if not legacy:
                     raise FTSConfigurationError(msg)
@@ -264,6 +310,7 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
         claimed_primary.update(dict.fromkeys(primary, depth))
         claimed_coupled.update(dict.fromkeys(coupled, depth))
         phases.append(cp)
+    _check_disjoint_names(within, [list(dict.fromkeys(cp.physical)) for cp in phases], legacy)
     if overlaps:
         rank_zero_debug(f"Tensors sharing storage within a phase: {overlaps}")
     return CompiledSchedule(phases=tuple(phases), roles=dict(roles), naming_scheme=support.naming_scheme,

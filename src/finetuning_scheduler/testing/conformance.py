@@ -43,8 +43,8 @@ from torch.nn.utils import parametrize
 from finetuning_scheduler.core.compile import compile_schedule, view_default_schedule
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.phase import thaw_params
-from finetuning_scheduler.core.roles import declared_kinds, FROZEN_ROLE_KINDS, is_frozen_role, validate_roles
-from finetuning_scheduler.core.views import as_view, BoundView, TunableSupport, uncheckpointed_keys
+from finetuning_scheduler.core.roles import declared_kinds, is_frozen_role, validate_roles
+from finetuning_scheduler.core.views import as_view, BoundView, instrument_state_keys, TunableSupport
 
 NO_SUCH_NAME = "__fts_conformance_no_such_name__"
 
@@ -104,6 +104,12 @@ def _trainable(root: torch.nn.Module) -> set[str]:
     return {n for n, p in root.named_parameters() if p.requires_grad}
 
 
+def _has_frozen_parameter(view: BoundView) -> bool:
+    """Whether a parameter (not only a buffer) has a role that is never thawed."""
+    params = {n for n, _ in view.root.named_parameters()}
+    return any(n in params and is_frozen_role(r) for n, r in view.roles().items())
+
+
 class TunableViewConformance:
     """Conformance cases for one view implementation.
 
@@ -145,8 +151,7 @@ class TunableViewConformance:
             ConformanceCase("roles_valid", "roles", lambda s, v: s.trainable and (s.declared_roles != {"base"}
                                                                                   or bool(v.roles())),
                             self._roles_valid),
-            ConformanceCase("frozen_roles_refuse", "roles",
-                            lambda s, v: s.trainable and bool(s.declared_roles & FROZEN_ROLE_KINDS),
+            ConformanceCase("frozen_roles_refuse", "roles", lambda s, v: s.trainable and _has_frozen_parameter(v),
                             self._frozen_roles_refuse),
             ConformanceCase("parametrization_mapping", "parametrization",
                             lambda s, v: s.trainable and any(parametrize.is_parametrized(m) for m in v.root.modules()),
@@ -254,26 +259,26 @@ class TunableViewConformance:
         _check(not frozen_changed, f"An optimizer step changed `fitted` or `instrument` tensors: {frozen_changed}.")
 
     def _checkpoint_round_trip(self) -> None:
-        """The view's checkpoint state leaves out ``instrument`` tensors, keeps ``fitted`` ones, and restores every
-        checkpointed parameter exactly through a strict load."""
+        """The view's checkpoint state leaves out ``instrument`` tensors (under any alias), keeps ``fitted`` ones,
+        and restores every checkpointed parameter and buffer exactly through a strict load."""
         view = self._fresh()
         roles = view.roles()
         state = copy.deepcopy(view.checkpoint_state_dict())
-        instrument = uncheckpointed_keys(roles)
+        own = view.root.state_dict(keep_vars=True)
+        instrument = instrument_state_keys(view.root, roles, own.keys())
         saved_instrument = sorted(instrument & set(state))
         _check(not saved_instrument, f"The checkpoint state includes `instrument` tensors: {saved_instrument}.")
-        own_keys = set(view.root.state_dict())
-        fitted = {k for k, r in roles.items() if r == "fitted" and k in own_keys}
+        fitted = {k for k, r in roles.items() if r == "fitted" and k in own}
         unsaved_fitted = sorted(fitted - set(state))
         _check(not unsaved_fitted, f"The checkpoint state leaves out `fitted` tensors: {unsaved_fitted}.")
-        reference = {n: p.detach().clone() for n, p in view.root.named_parameters() if n not in instrument}
+        reference = {k: t.detach().clone() for k, t in own.items() if k not in instrument}
         with torch.no_grad():
-            for p in view.root.parameters():
-                if p.is_floating_point():
-                    p.add_(1.0)
+            for t in own.values():
+                if t.is_floating_point():
+                    t.add_(1.0)
         view.load_checkpoint_state_dict(state, strict=True)
-        named = dict(view.root.named_parameters())
-        differ = sorted(n for n, ref in reference.items() if not torch.equal(named[n].detach(), ref))
+        after = view.root.state_dict(keep_vars=True)
+        differ = sorted(k for k, ref in reference.items() if not torch.equal(after[k].detach(), ref))
         _check(not differ, f"Loading the view's checkpoint state did not restore: {differ}.")
 
     def _unmatched_rule_refuses(self) -> None:
@@ -310,7 +315,6 @@ class TunableViewConformance:
         view = self._fresh()
         params = {n for n, _ in view.root.named_parameters()}
         frozen = [n for n, r in view.roles().items() if n in params and is_frozen_role(r)]
-        _check(bool(frozen), "The view declares `fitted` or `instrument` roles but no parameter has one.")
         for p in frozen:
             fresh = self._fresh()
             logical = fresh.to_logical([p])
@@ -331,8 +335,8 @@ class TunableViewConformance:
                 owner = f"{mod_name}." if mod_name else ""
                 logical, prefix = f"{owner}{tensor_name}", f"{owner}parametrizations.{tensor_name}."
                 originals = {n for n, _ in view.root.named_parameters() if n.startswith(prefix)}
-                try:
-                    got = set(view.to_physical([logical])[logical])
+                try:  # through the schedule path, not only the view's mapping
+                    got = set(compile_schedule({0: {"params": [logical]}}, self._fresh()).physical_for(0))
                 except FTSConfigurationError:
                     got = set()
                 if got != originals:

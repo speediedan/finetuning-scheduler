@@ -254,3 +254,25 @@ def test_resolve_view_refusals():
 
     with pytest.raises(FTSConfigurationError, match="must return a `TunableSupport`"):
         resolve_view(_net(), BadSupport(_net())).support()
+
+
+def test_instrument_keys_cover_aliases_and_wrapper_prefixes():
+    from finetuning_scheduler.core.views import canonical_fqn, instrument_state_keys
+    from finetuning_scheduler.testing.fixtures import TiedNet
+
+    tied = TiedNet()
+    view = CanonicalView(tied, roles={"embed.weight": "instrument"})
+    assert {"embed.weight", "out.weight"} <= set(tied.state_dict())
+    assert not {"embed.weight", "out.weight"} & set(view.checkpoint_state_dict())
+    with pytest.raises(RuntimeError, match="unexpected keys"):
+        view.load_checkpoint_state_dict({**view.checkpoint_state_dict(), "bogus": torch.zeros(1)})
+
+    class Wrapper(nn.Module):
+        def __init__(self, inner):
+            super().__init__()
+            self._orig_mod = inner
+
+    wrapped = Wrapper(nn.Linear(2, 2))
+    roles = {"_orig_mod.weight": "instrument"}
+    assert instrument_state_keys(wrapped, roles, ["weight", "bias"]) == {"weight"}  # a DSD-style unprefixed key
+    assert canonical_fqn("_orig_mod.weight") == "weight"

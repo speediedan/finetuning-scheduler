@@ -27,7 +27,8 @@ Views are discovered, in order, from an explicit ``view`` argument, then a view 
 
 .. warning:: This is an experimental API and may change in a future release.
 """
-from collections.abc import Iterator, Mapping, Sequence
+import itertools
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -154,6 +155,39 @@ def uncheckpointed_keys(roles: Mapping[str, str]) -> set[str]:
     return {k for k, r in roles.items() if role_kind(r) in UNCHECKPOINTED_ROLE_KINDS}
 
 
+# module-name segments that wrappers insert and that state dicts (DSD, activation checkpointing) leave out
+_WRAPPER_SEGMENTS = ("_orig_mod.", "_checkpoint_wrapped_module.", "_fsdp_wrapped_module.")
+
+
+def canonical_fqn(name: str) -> str:
+    """``name`` without wrapper segments (``torch.compile``'s ``_orig_mod.``, activation checkpointing's).
+
+    >>> canonical_fqn("_orig_mod.block._checkpoint_wrapped_module.weight")
+    'block.weight'
+    """
+    for seg in _WRAPPER_SEGMENTS:
+        name = name.replace(seg, "")
+    return name
+
+
+def instrument_state_keys(root: nn.Module, roles: Mapping[str, str], keys: Collection[str]) -> set[str]:
+    """The state-dict ``keys`` that hold ``instrument`` tensors, matched by tensor identity (so every alias of a
+    tied tensor counts) and by wrapper-free name (so keys from modules wrapped by ``torch.compile`` or by
+    activation checkpointing match)."""
+    instrument = uncheckpointed_keys(roles)
+    if not instrument:
+        return set()
+    named = list(itertools.chain(root.named_parameters(remove_duplicate=False),
+                                 root.named_buffers(remove_duplicate=False)))
+    aliases: dict[int, list[str]] = {}
+    for n, t in named:
+        aliases.setdefault(id(t), []).append(n)
+    ids = {id(t) for n, t in named if n in instrument}
+    names = set(instrument) | {a for i in ids for a in aliases[i]}
+    canonical = {canonical_fqn(n) for n in names}
+    return {k for k in keys if canonical_fqn(k) in canonical}
+
+
 def pair_groups(names: Sequence[str]) -> list[list[str]]:
     """Group ``names`` in pairs starting from the last, the order Fine-Tuning Scheduler's generated schedules use.
 
@@ -209,8 +243,9 @@ class ViewDefaults:
 
     def checkpoint_state_dict(self) -> dict[str, Any]:
         """The root's ``state_dict()``, without ``instrument`` tensors (which are never checkpointed)."""
-        instrument = uncheckpointed_keys(self.roles())
-        return {k: v for k, v in self.root.state_dict().items() if k not in instrument}
+        state = self.root.state_dict()
+        instrument = instrument_state_keys(self.root, self.roles(), state.keys())
+        return {k: v for k, v in state.items() if k not in instrument}
 
     def load_checkpoint_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True) -> None:
         """Load into the root. A strict load is strict by role: the keys missing from ``state_dict`` must be
@@ -218,16 +253,18 @@ class ViewDefaults:
         loaded.
 
         Raises:
-            FTSConfigurationError: If a strict load's keys do not match, naming the keys.
+            RuntimeError: If a strict load's keys do not match, naming the keys (as ``load_state_dict`` does).
         """
-        if strict:
-            expected = set(self.root.state_dict())
-            instrument = uncheckpointed_keys(self.roles())
-            missing = sorted(expected - set(state_dict) - instrument)
-            unexpected = sorted(set(state_dict) - expected)
-            if missing or unexpected:
-                raise FTSConfigurationError(
-                    f"The checkpoint does not match the model: missing {missing}, unexpected {unexpected}.")
+        expected = set(self.root.state_dict())
+        instrument = instrument_state_keys(self.root, self.roles(), expected)
+        if not strict or not instrument:
+            self.root.load_state_dict(state_dict, strict=strict)
+            return
+        missing = sorted(expected - set(state_dict) - instrument)
+        unexpected = sorted(set(state_dict) - expected)
+        if missing or unexpected:
+            raise RuntimeError(f"Error(s) in loading state_dict for {type(self.root).__name__}: missing keys"
+                               f" {missing}, unexpected keys {unexpected}.")
         self.root.load_state_dict(state_dict, strict=False)
 
     def promote(self, physical: Sequence[str], role: str) -> Mapping[str, str]:
@@ -352,9 +389,12 @@ class CanonicalView(ViewDefaults):
         """Unparametrized names of parametrized tensors mapped to their underlying physical names."""
         out: dict[str, list[str]] = {}
         for name, _ in self.root.named_parameters():
-            head, sep, tail = name.partition(".parametrizations.")
-            if not sep:
-                continue
+            if name.startswith("parametrizations."):  # a parametrization on the root module itself
+                head, tail = "", name[len("parametrizations."):]
+            else:
+                head, sep, tail = name.partition(".parametrizations.")
+                if not sep:
+                    continue
             tensor_name, _, original = tail.partition(".")
             if original.startswith("original"):
                 logical = f"{head}.{tensor_name}" if head else tensor_name

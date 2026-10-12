@@ -48,7 +48,7 @@ from finetuning_scheduler.core.fingerprint import batch_fingerprint
 from finetuning_scheduler.core.host import LRStepConfig, TorchHost, TrainingHost
 from finetuning_scheduler.core.rng import capture_rng_state, fork_rngs, restore_rng_state
 from finetuning_scheduler.core.roles import is_frozen_role
-from finetuning_scheduler.core.views import BoundView, CanonicalView, resolve_view, uncheckpointed_keys
+from finetuning_scheduler.core.views import BoundView, CanonicalView, instrument_state_keys, resolve_view
 from finetuning_scheduler.core.transitions import (AnyOf, as_decision, Decision, epoch_transition_due, GateEvent,
                                                    GateResult, TransitionContext, TransitionPolicy)
 
@@ -256,6 +256,8 @@ class FTSController:
             raise FTSConfigurationError("`restore_best=True` needs a `checkpoint` policy to restore from.")
         self._refuse_unsupported_model()
         self._view = self._resolve_view()
+        if self._sharded:
+            self._refuse_sharded_key_translation()
         self._schedule = self._load_schedule()
         self._validate_schedule()
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
@@ -982,7 +984,6 @@ class FTSController:
             import torch.distributed.checkpoint as dcp
             from torch.distributed.checkpoint.state_dict import get_model_state_dict, get_state_dict
 
-            self._refuse_sharded_key_translation()
             # written beside `path` and moved over it once complete, so an interrupted save keeps the old one
             # (a fixed name, so a later save clears what an interrupted one left behind)
             tmp = self._host.broadcast_object(f"{path}.tmp")
@@ -997,7 +998,7 @@ class FTSController:
                     model_sd, optim_sd = get_state_dict(self.model, optimizer)
                 else:
                     model_sd, optim_sd = get_model_state_dict(self.model), None
-            instrument = uncheckpointed_keys(self.roles)
+            instrument = instrument_state_keys(self.model, self.roles, model_sd.keys())
             model_sd = {k: v for k, v in model_sd.items() if k not in instrument}
             dcp.save({"model": model_sd, **({"optim": optim_sd} if optim_sd is not None else {})}, checkpoint_id=tmp)
             if self._host.is_global_zero:
@@ -1053,7 +1054,6 @@ class FTSController:
                                                                  set_model_state_dict, set_state_dict,
                                                                  StateDictOptions)
 
-            self._refuse_sharded_key_translation()
             load_optimizer = with_optimizer and meta.get("optim_saved", True)
             if with_optimizer:
                 optimizer.state.clear()  # a checkpoint saved before any step restores an optimizer with no state
@@ -1061,8 +1061,6 @@ class FTSController:
                 # DSD initializes the optimizer's state only when no parameter has a gradient
                 for p in self.model.parameters():
                     p.grad = None
-            # instrument tensors are never saved, so they are the only model keys a load may miss
-            instrument = uncheckpointed_keys(self.roles)
             unsaved: list[str] = []
             with self._suspend_step_counting():
                 if load_optimizer:
@@ -1077,6 +1075,8 @@ class FTSController:
                     state = {"model": model_sd, "optim": optim_sd}
                 else:
                     state = {"model": get_model_state_dict(self.model)}
+                # instrument tensors are never saved, so they are the only model keys a load may miss
+                instrument = instrument_state_keys(self.model, self.roles, state["model"].keys())
                 state["model"] = {k: v for k, v in state["model"].items() if k not in instrument}
                 dcp.load(state, checkpoint_id=path)
                 if load_optimizer:
@@ -1360,14 +1360,19 @@ class FTSController:
     def _view_config(self) -> dict[str, Any]:
         """The view's description, when one other than the default identity view is used (omitted otherwise, so the
         hash of a view-less configuration is unchanged)."""
-        view = self._view.view if self._view is not None else self._view_src
-        if view is None or (type(view) is CanonicalView and not view.roles()):
+        bound = self._view
+        if bound is None:
+            try:
+                bound = resolve_view(self.model, self._view_src)
+            except FTSConfigurationError:  # an invalid view is refused at setup
+                return {"view": {"class_path": describe_callable(type(self._view_src))}}
+        roles = bound.roles()
+        if type(bound.view) is CanonicalView and not roles:
             return {}
-        support = self._view.support() if self._view is not None else view.support()
-        return {"view": {"class_path": describe_callable(type(view)), "naming_scheme": support.naming_scheme,
+        support = bound.support()
+        return {"view": {"class_path": describe_callable(type(bound.view)), "naming_scheme": support.naming_scheme,
                          "logical_names_are_views": support.logical_names_are_views,
-                         "declared_roles": sorted(support.declared_roles), "roles": dict(sorted(view.roles().items())),
-                         "digest": self._compiled.digest if self._compiled is not None else None}}
+                         "declared_roles": sorted(support.declared_roles), "roles": dict(sorted(roles.items()))}}
 
     @property
     def config_hash(self) -> str:

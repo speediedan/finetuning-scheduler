@@ -169,7 +169,7 @@ def test_storage_overlap_across_phases_refuses_and_within_a_phase_is_reported():
 
 def test_same_parameter_in_two_phases_refuses():
     net = _net()
-    with pytest.raises(FTSConfigurationError, match="not disjoint: '4.weight' is scheduled in phases 0 and 1"):
+    with pytest.raises(FTSConfigurationError, match="specified in multiple phases: 4.weight"):
         compile_schedule({0: {"params": ["4.weight"]}, 1: {"params": [r"4\..*"]}}, CanonicalView(net))
 
 
@@ -192,3 +192,45 @@ def test_view_default_schedule():
                                                                           1: {"params": ["block2", "head"]}}
     with pytest.raises(FTSConfigurationError, match="`order` must be"):
         view_default_schedule(BlockView(net), order="sideways")  # type: ignore[arg-type]
+
+
+def test_duplicates_are_refused_by_name_with_the_callback_message():
+    """Every repeat is listed, within a phase and across phases, and empty tensors are compared by name (their
+    storage cannot overlap, and a sharded parameter's local shard can be empty on some ranks only)."""
+    net = _net()
+    with pytest.raises(FTSConfigurationError, match=r"multiple phases: 4.weight$"):
+        compile_schedule({0: {"params": [r"4\..*", "4.weight"]}}, CanonicalView(net))
+    with pytest.raises(FTSConfigurationError, match="multiple phases: 4.weight, 4.bias"):
+        compile_schedule({0: {"params": ["4.weight", "4.bias"]}, 1: {"params": [r"4\..*"]}}, CanonicalView(net))
+    net.empty = nn.Parameter(torch.zeros(0))
+    with pytest.raises(FTSConfigurationError, match="multiple phases: empty"):
+        compile_schedule({0: {"params": ["empty"]}, 1: {"params": ["empty", "0.weight"]}}, CanonicalView(net))
+
+
+def test_tied_logical_names_in_one_phase_are_not_duplicates():
+    from finetuning_scheduler.testing.fixtures import one_to_many_view
+
+    view = one_to_many_view()
+    compiled = compile_schedule({0: {"params": ["unembed.W_U", "embed.W_E"]}}, view)
+    assert compiled.phases[0].physical == ("embed.weight",)
+
+
+def test_parametrized_tensors_are_schedulable_by_unparametrized_name():
+    from torch.nn.utils import parametrize
+
+    from finetuning_scheduler.testing.fixtures import parametrized_view
+
+    view = parametrized_view()
+    compiled = compile_schedule({0: {"params": ["0.weight"]}, 1: {"params": [r"2\..*"]}}, view)
+    assert compiled.phases[0].physical == ("0.parametrizations.weight.original",)
+    assert compiled.module_map()[0] == {"0"}
+    root = nn.Linear(2, 2)  # a parametrization on the root module itself
+
+    class Neg(nn.Module):
+        def forward(self, w):
+            return -w
+
+    parametrize.register_parametrization(root, "weight", Neg())
+    compiled = compile_schedule({0: {"params": ["weight"]}, 1: {"params": ["bias"]}}, CanonicalView(root))
+    assert compiled.phases[0].physical == ("parametrizations.weight.original",)
+    assert compiled.module_map() == {0: {""}, 1: {""}}

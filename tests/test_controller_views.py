@@ -85,7 +85,7 @@ def test_logical_view_thaws_physical_and_coupled():
     assert events[1][0] == 1 and events[1][1] == ("blocks.1.mlp.W_out", "blocks.1.mlp.W_in", "blocks.1.attn.W_QK")
     assert set(events[1][2]) == block1
     assert fts.compiled_schedule.naming_scheme == "tiny-logical"
-    assert "view" in fts.config_dict() and fts.config_dict()["view"]["digest"] == fts.compiled_schedule.digest
+    assert fts.config_dict()["view"]["naming_scheme"] == "tiny-logical"
     assert "blocks.0.fused_qk" not in {n for n, p in model.named_parameters() if p.requires_grad}
 
 
@@ -180,3 +180,58 @@ def test_view_refusals():
 
     with pytest.raises(FTSConfigurationError, match="cannot be fine-tuned through Remote: remote execution"):
         FTSController(model, SEQ_SCHEDULE, optimizer=SGD, view=Remote(model)).setup()
+
+
+class MinimalView:
+    """Only the four required members."""
+
+    def __init__(self, root):
+        self.root = root
+
+    def support(self):
+        return TunableSupport(trainable=True)
+
+    def to_physical(self, logical):
+        return {n: (n,) for n in logical}
+
+    def to_logical(self, physical):
+        return list(physical)
+
+
+def test_minimal_view_hashes_saves_and_loads(tmp_path):
+    """Optional members default everywhere, including the configuration hash and checkpoints."""
+    model = _seq()
+    fts = FTSController(model, SEQ_SCHEDULE, optimizer=SGD, view=MinimalView(model))
+    before = fts.config_dict()["view"]  # before setup, the view is described the same way
+    fts.setup()
+    assert fts.config_dict()["view"] == before
+    _run(fts, 2)
+    fts.save(tmp_path / "last.pt")
+    model2 = _seq()
+    fts2 = FTSController(model2, SEQ_SCHEDULE, optimizer=SGD, view=MinimalView(model2))
+    fts2.setup()
+    fts2.load(tmp_path / "last.pt")
+    assert all(torch.equal(a, b) for a, b in zip(model.parameters(), model2.parameters()))
+
+
+def test_attached_view_is_described_before_setup():
+    view = one_to_many_view()
+    view.root.fts_tunable_view = view
+    fts = FTSController(view.root, {0: {"params": ["embed.W_E"]}}, optimizer=SGD)
+    before = fts.config_dict()["view"]
+    fts.setup()
+    assert fts.config_dict()["view"] == before
+
+
+def test_canonical_strict_load_mismatch_raises_runtime_error(tmp_path):
+    """Without roles, a strict load behaves as ``load_state_dict`` does."""
+    model = _seq()
+    fts = FTSController(model, SEQ_SCHEDULE, optimizer=SGD)
+    fts.setup()
+    fts.save(tmp_path / "last.pt")
+    other = nn.Sequential(nn.Linear(4, 4), nn.LayerNorm(4), nn.Linear(4, 4), nn.LayerNorm(4), nn.Linear(4, 2),
+                          nn.Linear(2, 2))
+    fts2 = FTSController(other, SEQ_SCHEDULE, optimizer=SGD)
+    fts2.setup()
+    with pytest.raises(RuntimeError, match="Missing key"):
+        fts2._view.load_checkpoint_state_dict(torch.load(tmp_path / "last.pt", weights_only=False)["model"])
