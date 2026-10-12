@@ -55,6 +55,7 @@ LIGHTNING_PACKAGES = {
 BASE_DEPENDENCIES = [
     "torch>=2.12.0",
     "PyYAML>=6.0.2",
+    "fsspec>=2023.5.0",
 ]
 
 # Files to exclude from modification to prevent self-modification

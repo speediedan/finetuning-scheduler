@@ -447,7 +447,7 @@ class StrategyAdapter:
                 2. The maximum epoch watermark explicitly specified in the schedule
         """
         # Import here to avoid circular dependency
-        from finetuning_scheduler.fts_supporters import ScheduleParsingMixin
+        from finetuning_scheduler.lightning.fts_supporters import ScheduleParsingMixin
         from typing import cast
 
         rank_zero_debug(
@@ -473,7 +473,7 @@ class StrategyAdapter:
             ``_ft_schedule.yaml``)
         """
         # Import here to avoid circular dependency
-        from finetuning_scheduler.fts_supporters import ScheduleImplMixin
+        from finetuning_scheduler.lightning.fts_supporters import ScheduleImplMixin
 
         rank_zero_debug(
             f"[base StrategyAdapter.gen_ft_schedule] Generating schedule for {self.pl_module.__class__.__name__}"

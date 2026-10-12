@@ -362,6 +362,9 @@ MOCK_PACKAGES = [PACKAGE_MAPPING.get(pkg, pkg) for pkg in MOCK_PACKAGES]
 autodoc_mock_imports = MOCK_PACKAGES
 
 autosummary_generate = True
+# document the names a module lists in ``__all__``, so a module re-exporting its implementation from elsewhere
+# (``finetuning_scheduler.fts``, ``finetuning_scheduler.fts_supporters``) keeps its classes, summaries and anchors
+autosummary_ignore_module_all = False
 
 autodoc_member_order = "groupwise"
 
