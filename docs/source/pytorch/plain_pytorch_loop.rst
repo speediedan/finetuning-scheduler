@@ -169,7 +169,10 @@ Distributed Training
 ********************
 Shard the model yourself with FSDP2 (``torch.distributed.fsdp.fully_shard``) before handing it to the controller, and
 call the controller on every rank. Transition decisions and gate results are agreed across ranks. For sharded models,
-checkpoints are written with ``torch.distributed.checkpoint``.
+checkpoints are written with ``torch.distributed.checkpoint``. The
+:ref:`model-parallel example for the PyTorch API<model-parallel-plain-loop>` shards a Llama model this way, and also
+runs it with tensor parallelism, mapping each part of the Lightning model-parallel example's configuration to its
+plain-loop equivalent.
 
 Two configurations are currently refused:
 
