@@ -14,7 +14,7 @@ from finetuning_scheduler.__about__ import *  # noqa: F401, F403
 from finetuning_scheduler.core import optim as _core_optim  # noqa: F401
 from finetuning_scheduler.core.state import FTSState
 
-# the direct PyTorch API (experimental): Lightning-free, so imported eagerly
+# the PyTorch API (experimental): Lightning-free, so imported eagerly
 from finetuning_scheduler.core.controller import FTSController, PhaseEvent
 from finetuning_scheduler.core.host import LRStepConfig, TorchHost, TrainingHost
 from finetuning_scheduler.core.transitions import (AnyOf, CallableTransition, Decision, EpochTransition, GateEvent,

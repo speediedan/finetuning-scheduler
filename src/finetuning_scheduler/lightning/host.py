@@ -18,7 +18,7 @@ Lightning integration's uses of ``Trainer`` and ``Strategy`` internals are to be
 
 .. warning::
 
-    Experimental: the ``TrainingHost`` protocol may change in minor releases until the direct PyTorch API stabilizes.
+    Experimental: the ``TrainingHost`` protocol may change in minor releases until the PyTorch API stabilizes.
 
 """
 import os

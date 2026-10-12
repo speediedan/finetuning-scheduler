@@ -51,9 +51,10 @@ from finetuning_scheduler.types import ParamGroupAddable
 log = logging.getLogger("finetuning_scheduler.fts")
 
 LIGHTNING_EXTRA_NOTICE = (
-    "Lightning will become an optional dependency of finetuning-scheduler, no earlier than 2.17. To keep the Lightning"
-    " integration unchanged, install `finetuning-scheduler[lightning]` (or `[pytorch-lightning]` for the standalone"
-    " package); the extra is already accepted."
+    "Lightning will become an optional dependency of finetuning-scheduler, no earlier than 2.17. Nothing changes before"
+    " then: Lightning remains a base dependency and the Lightning integration works as it does today. Depending on"
+    " `finetuning-scheduler[lightning]` (or `[pytorch-lightning]` for the standalone package) now means the change"
+    " needs no edit to your requirements; the extra is already accepted."
 )
 _lightning_extra_notice_issued = False
 

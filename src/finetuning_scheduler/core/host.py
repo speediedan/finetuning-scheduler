@@ -19,7 +19,7 @@ reaches into a training framework itself.
 
 .. warning::
 
-    Experimental: the ``TrainingHost`` protocol may change in minor releases until the direct PyTorch API stabilizes.
+    Experimental: the ``TrainingHost`` protocol may change in minor releases until the PyTorch API stabilizes.
 
 """
 import os
@@ -171,12 +171,15 @@ class TorchHost:
         return self._global_step
 
     def advance_epoch(self) -> None:
+        """Count a completed epoch."""
         self._current_epoch += 1
 
     def advance_step(self, steps: int = 1) -> None:
+        """Count ``steps`` completed optimizer steps."""
         self._global_step += steps
 
     def load_counters(self, current_epoch: int, global_step: int) -> None:
+        """Restore the epoch and step counters from a checkpoint."""
         self._current_epoch, self._global_step = current_epoch, global_step
 
     @property

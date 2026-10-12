@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Host parity: one scenario run by the Lightning callback and by the direct PyTorch controller must follow the same
+"""Host parity: one scenario run by the Lightning callback and by ``FTSController`` must follow the same
 phase path (#51).
 
 Transitions are driven by scripted validation metrics, so the path does not depend on numerics. Each run records, at

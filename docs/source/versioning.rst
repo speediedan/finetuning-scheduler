@@ -151,7 +151,15 @@ Moving an install-time dependency behind an optional extra is a packaging change
 Such a move may therefore happen within a major version series; the ``(MAJOR+1).0.0`` rule above covers API changes.
 
 .. note::
-   **Lightning will become an optional dependency, no earlier than FTS 2.17.** From 2.15, the ``finetuning-scheduler[lightning]`` extra (``finetuning-scheduler[pytorch-lightning]`` for the standalone ``pytorch_lightning`` package) is accepted and, while Lightning remains a base dependency, installs nothing more. Installing with the extra now keeps the Lightning integration working unchanged through the move. The direct PyTorch API does not need Lightning.
+   **Lightning will become an optional dependency, no earlier than FTS 2.17.** Until then Lightning remains a base dependency, so a plain ``pip install finetuning-scheduler`` keeps the Lightning integration working as before, and the ``finetuning-scheduler[lightning]`` extra (``finetuning-scheduler[pytorch-lightning]`` for the standalone ``pytorch_lightning`` package), accepted from 2.15, installs nothing more. The extra matters only at the change itself: a requirement that names it keeps installing Lightning afterwards, with no edit. The PyTorch API does not need Lightning.
+
+   The Lightning callback announces the change once per process with a ``FutureWarning``. A project that already depends on the extra can silence it:
+
+   .. code-block:: python
+
+      import warnings
+
+      warnings.filterwarnings("ignore", message="Lightning will become an optional dependency", category=FutureWarning)
 
 API Stability Classifications
 ==============================

@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tests for the direct PyTorch controller (#51).
+"""Tests for ``FTSController``, the PyTorch API's controller (#51).
 
 Lightning-free: these run in the ``core-no-lightning`` job too.
 """

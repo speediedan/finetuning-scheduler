@@ -18,7 +18,7 @@ controller is driven by explicit calls, in the spirit of ``torch.optim.lr_schedu
 
 .. warning::
 
-    Experimental: the direct PyTorch API may change in minor releases until it stabilizes.
+    Experimental: the PyTorch API may change in minor releases until it stabilizes.
 
 """
 import os
@@ -270,7 +270,7 @@ class FTSController:
             )
         if isinstance(self._optimizer_src, core_optim.ZeroRedundancyOptimizer):
             raise FTSConfigurationError(
-                "`ZeroRedundancyOptimizer` is not supported by the direct PyTorch API; shard with FSDP2 instead."
+                "`ZeroRedundancyOptimizer` is not supported by `FTSController`; shard with FSDP2 instead."
             )
 
     def _load_schedule(self) -> dict:
@@ -361,7 +361,7 @@ class FTSController:
         unsupported = sorted(set(step_cfg) - {"interval", "frequency", "monitor"})
         if unsupported:
             raise FTSConfigurationError(
-                f"The direct PyTorch API steps lr schedulers with `interval`, `frequency` and `monitor` only; remove"
+                f"`FTSController` steps lr schedulers with `interval`, `frequency` and `monitor` only; remove"
                 f" {unsupported} from `pl_lrs_cfg`."
             )
         if step_cfg.get("interval", "epoch") not in ("step", "epoch"):
@@ -1292,10 +1292,12 @@ class FTSController:
 
     @property
     def should_stop(self) -> bool:
+        """Whether training should stop, after an agreed ``STOP`` or a gate's veto (see :attr:`stop_reason`)."""
         return self._should_stop
 
     @property
     def stop_reason(self) -> str | None:
+        """Why :attr:`should_stop` was set, or ``None`` while training continues."""
         return self._stop_reason
 
     @property

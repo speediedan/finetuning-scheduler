@@ -19,7 +19,7 @@ PyTorch API composes.
 
 .. warning::
 
-    Experimental: the policy and gate types may change in minor releases until the direct PyTorch API stabilizes.
+    Experimental: the policy and gate types may change in minor releases until the PyTorch API stabilizes.
 
 """
 from collections.abc import Callable, Mapping

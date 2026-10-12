@@ -53,13 +53,13 @@ def test_refuse_direct_api_keys():
 
 
 def test_lightning_refuses_direct_api_keys(tmpdir):
-    """The Lightning callback refuses, rather than silently ignores, the direct API's phase keys."""
+    """The Lightning callback refuses, rather than silently ignores, the PyTorch API's phase keys."""
     seed_everything(42)
     schedule = {0: {"params": ["model.3.weight", "model.3.bias"]},
                 1: {"params": ["model.2.weight", "model.2.bias"], "max_transition_step": 10}}
     trainer = Trainer(default_root_dir=tmpdir, callbacks=[FinetuningScheduler(ft_schedule=schedule)], devices=1,
                       max_epochs=1, logger=False, enable_checkpointing=False, enable_progress_bar=False)
-    with pytest.raises(MisconfigurationException, match="only the direct PyTorch API"):
+    with pytest.raises(MisconfigurationException, match="only the PyTorch API"):
         trainer.fit(FinetuningSchedulerBoringModel())
 
 

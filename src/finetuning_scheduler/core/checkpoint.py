@@ -13,13 +13,13 @@ r"""
 Fine-Tuning Scheduler Checkpoints
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-What the direct PyTorch API needs from checkpointing: a policy that tracks the best monitored value and saves the
+What the PyTorch API needs from checkpointing: a policy that tracks the best monitored value and saves the
 training state when it improves, pins the best as of each phase boundary (so a vetoed phase can be rolled back), and
 reads and writes checkpoint payloads.
 
 .. warning::
 
-    Experimental: the checkpoint policy protocol may change in minor releases until the direct PyTorch API
+    Experimental: the checkpoint policy protocol may change in minor releases until the PyTorch API
     stabilizes. Checkpoints are written with ``torch.save`` and read with ``weights_only=False``: load only checkpoints
     you trust.
 
@@ -108,28 +108,48 @@ class CheckpointPolicy(Protocol):
 
     monitor: str | None
 
-    def observe(self, metrics: Mapping[str, Any], depth: int) -> bool: ...
+    def observe(self, metrics: Mapping[str, Any], depth: int) -> bool:
+        """Record an epoch's ``metrics`` at phase ``depth``; return whether they are a new best to save."""
+        ...
 
-    def path_for(self, tag: str) -> str: ...
-
-    @property
-    def best_path(self) -> str | None: ...
-
-    @property
-    def best_depth(self) -> int | None: ...
+    def path_for(self, tag: str) -> str:
+        """The path of the checkpoint named ``tag`` (``"best"``, ``"boundary"`` or ``"initial"``)."""
+        ...
 
     @property
-    def best_score(self) -> Tensor | None: ...
+    def best_path(self) -> str | None:
+        """The best checkpoint's path, or ``None`` before the first save."""
+        ...
 
-    def pin_boundary(self, depth: int, initial_path: str | None = None, copy: bool = True) -> None: ...
+    @property
+    def best_depth(self) -> int | None:
+        """The phase depth at which the best checkpoint was saved."""
+        ...
 
-    def boundary_path(self, depth: int) -> str | None: ...
+    @property
+    def best_score(self) -> Tensor | None:
+        """The best monitored value so far."""
+        ...
 
-    def state_dict(self) -> dict[str, Any]: ...
+    def pin_boundary(self, depth: int, initial_path: str | None = None, copy: bool = True) -> None:
+        """Pin the current best, or ``initial_path`` before any best, as phase ``depth``'s rollback point."""
+        ...
 
-    def load_state_dict(self, state_dict: Mapping[str, Any]) -> None: ...
+    def boundary_path(self, depth: int) -> str | None:
+        """The checkpoint a gate's veto of phase ``depth`` rolls back to, or ``None`` if none was pinned."""
+        ...
 
-    def config(self) -> dict[str, Any]: ...
+    def state_dict(self) -> dict[str, Any]:
+        """The policy's own state, saved with the training state."""
+        ...
+
+    def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
+        """Restore the policy's state from :meth:`state_dict`'s output."""
+        ...
+
+    def config(self) -> dict[str, Any]:
+        """The policy's settings, recorded in each checkpoint and compared on resume."""
+        ...
 
 
 class BestCheckpoint:
