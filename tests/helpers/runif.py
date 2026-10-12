@@ -77,11 +77,13 @@ class RunIf:
         Args:
             *args: Any :class:`pytest.mark.skipif` arguments.
             min_cuda_gpus: Require this number of gpus and that the ``PL_RUN_CUDA_TESTS=1`` environment variable is set.
+                The variable is an explicit opt-in, so a plain ``pytest`` run never uses a host's GPUs: the special test
+                runner, the coverage script and the GPU pipeline set it, and they run under the host's GPU lease.
             min_torch: Require that PyTorch is greater or equal to this version.
             max_torch: Require that PyTorch is less than or equal to this version.
             min_python: Require that Python is greater or equal to this version.
             max_python: Require that Python is less than this version.
-            bf16_cuda: Require that CUDA device supports bf16.
+            bf16_cuda: Require that CUDA device supports bf16, and that ``PL_RUN_CUDA_TESTS=1`` is set.
             skip_windows: Skip for Windows platform.
             skip_mac_os: Skip Mac OS platform.
             standalone: Mark the test as standalone, our CI will run it in a separate process.
@@ -92,11 +94,13 @@ class RunIf:
         """
         conditions = []
         reasons = []
+        cuda_tests = os.getenv("PL_RUN_CUDA_TESTS", "0") == "1"
 
         if min_cuda_gpus:
             cuda_device_fx = num_cuda_devices if RunIf.standalone_ctx == "1" else torch.cuda.device_count
-            conditions.append(cuda_device_fx() < min_cuda_gpus)
-            reasons.append(f"GPUs>={min_cuda_gpus}")
+            # short-circuits, so without the opt-in no device is queried
+            conditions.append(not cuda_tests or cuda_device_fx() < min_cuda_gpus)
+            reasons.append(f"GPUs>={min_cuda_gpus} with PL_RUN_CUDA_TESTS=1")
             # used in conftest.py::pytest_collection_modifyitems
             kwargs["min_cuda_gpus"] = True
 
@@ -124,7 +128,7 @@ class RunIf:
 
         if bf16_cuda:
             try:
-                cond = not (torch.cuda.is_available() and torch.cuda.is_bf16_supported())
+                cond = not (cuda_tests and torch.cuda.is_available() and torch.cuda.is_bf16_supported())
             except (AssertionError, RuntimeError) as e:
                 # AssertionError: Torch not compiled with CUDA enabled
                 # RuntimeError: Found no NVIDIA driver on your system.
@@ -134,7 +138,7 @@ class RunIf:
                 cond = True
 
             conditions.append(cond)
-            reasons.append("CUDA device bf16")
+            reasons.append("CUDA device bf16 with PL_RUN_CUDA_TESTS=1")
 
         if skip_windows:
             conditions.append(sys.platform == "win32")

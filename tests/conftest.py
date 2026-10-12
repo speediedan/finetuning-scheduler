@@ -165,6 +165,19 @@ def single_process_pg():
         os.environ.clear()
         os.environ.update(orig_environ)
 
+def pytest_terminal_summary(terminalreporter):
+    """Say so when CUDA tests were skipped only because ``PL_RUN_CUDA_TESTS=1`` was not set on a host with GPUs."""
+    if os.getenv("PL_RUN_CUDA_TESTS", "0") == "1" or not torch.cuda.is_available():
+        return
+    gated = [r for r in terminalreporter.stats.get("skipped", []) if "PL_RUN_CUDA_TESTS=1" in str(r.longrepr)]
+    if gated:
+        terminalreporter.write_line(
+            f"{len(gated)} CUDA test(s) skipped: set PL_RUN_CUDA_TESTS=1 to run them (under the GPU lease, if the host"
+            " uses one)",
+            yellow=True,
+        )
+
+
 def pytest_collection_modifyitems(items):
     # select special tests, all special tests run standalone
     # note standalone tests take precedence over experimental tests if both env vars are set

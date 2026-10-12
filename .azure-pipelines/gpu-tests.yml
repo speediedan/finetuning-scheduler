@@ -52,6 +52,12 @@ jobs:
 
     pool: default
 
+    variables:
+      # RunIf(min_cuda_gpus=...) and RunIf(bf16_cuda=True) tests run only with this opt-in, so a plain `pytest` on a
+      # shared GPU host never uses the GPUs unleased (tests/helpers/runif.py). This job holds the host lease, so it
+      # opts in once, for every step.
+      PL_RUN_CUDA_TESTS: "1"
+
     container:
       image: $(image)
       mapDockerSocket: false
@@ -107,6 +113,8 @@ jobs:
         source /tmp/venvs/fts_dev/bin/activate
         python requirements/collect_env_details.py
         python -c "import torch ; print(f'PyTorch CUDA version: {torch.version.cuda}') ; mgpu = torch.cuda.device_count() ; assert mgpu >= 2, f'GPU: {mgpu}'"
+        # without the opt-in every CUDA test skips and the phases still pass, so fail here instead
+        python -c "import os ; assert os.environ.get('PL_RUN_CUDA_TESTS') == '1', 'PL_RUN_CUDA_TESTS is not set'"
       displayName: 'Env details'
 
     - bash: |

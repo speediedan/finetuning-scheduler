@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Added `scripts/rocm_smoke.py`, a self-contained distributed smoke check (PyTorch only) for vetting a multi-GPU host, ROCm in particular, before relying on it: checked collectives and bandwidth, a collective soak, a two-phase FSDP2 schedule against a single-process run, bf16 mixed precision, a distributed-checkpoint restore and compilation at a phase transition, each run as configured and with `NCCL_PROTO=Simple` [#74](https://github.com/speediedan/finetuning-scheduler/issues/74).
 
+- Added a persistent distributed test pool (`tests/helpers/dist_pool.py`) that serves many distributed test cases from one process group per test module instead of launching processes per test. Validity rules enforced around every case keep cases from inheriting each other's state, a failure on any rank fails the case, and an error, timeout or violation respawns the pool [#56](https://github.com/speediedan/finetuning-scheduler/issues/56).
+
 ### Fixed
 
 - Fixed the examples' environment logging (`collect_env_info`) failing under PyTorch `2.15`, which added a `rocm_compiled_version` field to `torch.utils.collect_env.SystemEnv`. The examples build that tuple themselves to avoid initializing CUDA; they now pass only the fields the installed PyTorch defines and mark any they do not inspect, so a future field no longer breaks every example.
@@ -29,6 +31,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Fixed `scripts/gen_fts_coverage.sh` sending its commands' stderr to the terminal instead of the coverage session log, and its `--dry-run` listing no standalone tests: it selected with pytest markers this repository does not define, and set an environment variable nothing reads [#67](https://github.com/speediedan/finetuning-scheduler/issues/67).
 
 - Fixed `ci_gpu_lease_release` freeing the GPU lease before removing its holder record, so a local job that acquired the lease at that moment could not replace the record and ran unattributed. The record is now removed first, and an existing record is overwritten without a creating open, which `fs.protected_regular` forbids for another user's file [#73](https://github.com/speediedan/finetuning-scheduler/issues/73).
+
+- Fixed `tests/special_tests.sh` reporting success when test collection failed, building its default experiment mask from `tests/.experiments` whatever `--experiments_list` named, and failing when `--log-dir` did not exist. It and `scripts/gen_fts_coverage.sh` now reject a bad flag before waiting for the GPU lease [#68](https://github.com/speediedan/finetuning-scheduler/issues/68).
 
 ### Changed
 
@@ -51,6 +55,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Importing `finetuning_scheduler` no longer imports Lightning. The Lightning integration (`FinetuningScheduler`, `FTSCheckpoint`, `FTSEarlyStopping`, the scheduling mixins, the `fts`, `fts_supporters` and `strategy_adapters` modules, and `types.BaseCallbackDepType`) loads on first access, and raises an `ImportError` naming the missing package when Lightning is not installed. Lightning remains a base dependency [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
 
 - Moved the Lightning integration modules to `finetuning_scheduler.lightning.fts` and `finetuning_scheduler.lightning.fts_supporters`. `finetuning_scheduler.fts` and `finetuning_scheduler.fts_supporters` remain importable and keep their API documentation pages and anchors. The classes' `__module__` (and so their `repr`) now names the new modules; logger names are unchanged [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
+
+- CUDA tests (`RunIf(min_cuda_gpus=...)` and `RunIf(bf16_cuda=True)`) now run only with `PL_RUN_CUDA_TESTS=1`, as the `min_cuda_gpus` documentation already stated, so a plain `pytest` run never uses a host's GPUs. `tests/special_tests.sh`, `scripts/gen_fts_coverage.sh` and the GPU pipeline set it [#68](https://github.com/speediedan/finetuning-scheduler/issues/68).
 
 ### Deprecated
 

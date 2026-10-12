@@ -63,7 +63,15 @@ Other flags: `--log_file`, `--log-dir`, `--experiments_list`, `--allow-failures`
 `PL_RUN_STANDALONE_TESTS=1 python -m pytest tests/test_x.py::test_y -v`.
 
 `RunIf` conditions live in `tests/helpers/runif.py` (`min_cuda_gpus`, `standalone`, `bf16_cuda`,
-`exp_patch`; aliases `alone`, `bf16_alone`). CUDA-marked tests gate on `PL_RUN_CUDA_TESTS=1`.
+`exp_patch`; aliases `alone`, `bf16_alone`). `min_cuda_gpus` and `bf16_cuda` tests run only with
+`PL_RUN_CUDA_TESTS=1`, an explicit opt-in so that a plain `pytest` never uses a host's GPUs. `special_tests.sh`,
+`gen_fts_coverage.sh` and the Azure job set it, under the GPU lease. Set it yourself only for GPU work you have
+leased; a terminal-summary line counts the CUDA tests skipped for want of it.
+
+Distributed cases that need no Lightning run in a persistent worker pool (`tests/helpers/dist_pool.py`, cases in
+`tests/dist_cases/`): one process group per test module rather than one process per test. Its tests run in the
+ordinary suite (gloo on Linux, NCCL with `PL_RUN_CUDA_TESTS=1`), not through `special_tests.sh`, whose one process
+per node id would discard the saving.
 
 When torch or Lightning leaks a new env var, add it to the allowlist in the `restore_env_variables`
 autouse fixture in `tests/conftest.py` rather than working around the failure.
