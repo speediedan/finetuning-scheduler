@@ -16,6 +16,7 @@ Transitions are driven by scripted validation metrics, so the path does not depe
 the first batch of every epoch, the depth, the number of trainable parameters and every optimizer group's learning
 rate.
 """
+import os
 from functools import partial
 
 import pytest
@@ -24,7 +25,9 @@ from lightning.pytorch import Callback, LightningModule, seed_everything, Traine
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from finetuning_scheduler import FinetuningScheduler, FTSController, FTSEarlyStopping, PlateauTransition
+from finetuning_scheduler import (FinetuningScheduler, FTSCheckpoint, FTSController, FTSEarlyStopping,
+                                  PlateauTransition)
+from finetuning_scheduler.core.checkpoint import BestCheckpoint
 
 
 def _layers(module: nn.Module) -> None:
@@ -144,6 +147,11 @@ SCENARIOS = {
                                           "init_args": {"step_size": 1, "gamma": 0.5}}}}},
         scripted=[1.0] * 5, max_epochs=5, plateau=False, max_depth=-1,
     ),
+    # plateau-driven with the best checkpoint restored at each boundary (epochs 1 and 3 are worse than their best)
+    "restore_best": dict(
+        schedule=THREE_PHASES, scripted=[1.0, 2.0, 0.5, 3.0, 0.25, 0.3, 0.3], max_epochs=7, plateau=True,
+        max_depth=-1, restore_best=True,
+    ),
     # a metric-driven lr scheduler
     "rlrop": dict(
         schedule=EPOCH_DRIVEN, scripted=[1.0, 0.5, 0.5, 0.25, 0.25], max_epochs=5, plateau=False, max_depth=-1,
@@ -152,13 +160,16 @@ SCENARIOS = {
 }
 
 
-def _lightning_path(tmpdir, schedule, scripted, max_epochs, plateau, max_depth, all_params=False, rlrop=False):
+def _lightning_path(tmpdir, schedule, scripted, max_epochs, plateau, max_depth, all_params=False, rlrop=False,
+                    restore_best=False):
     seed_everything(7)
     recorder = PathRecorder()
-    callbacks = [FinetuningScheduler(ft_schedule=schedule, restore_best=False, epoch_transitions_only=not plateau,
-                                     max_depth=max_depth), recorder]
+    callbacks = [FinetuningScheduler(ft_schedule=schedule, restore_best=restore_best,
+                                     epoch_transitions_only=not plateau, max_depth=max_depth), recorder]
     if plateau:
         callbacks.append(FTSEarlyStopping(monitor="val_loss", patience=1))
+    if restore_best:
+        callbacks.append(FTSCheckpoint(monitor="val_loss", save_top_k=1, dirpath=tmpdir))
     trainer = Trainer(default_root_dir=tmpdir, accelerator="cpu", devices=1, max_epochs=max_epochs,
                       num_sanity_val_steps=0, callbacks=callbacks, logger=False, enable_progress_bar=False,
                       enable_model_summary=False)
@@ -166,7 +177,8 @@ def _lightning_path(tmpdir, schedule, scripted, max_epochs, plateau, max_depth, 
     return recorder.path
 
 
-def _torch_path(schedule, scripted, max_epochs, plateau, max_depth, all_params=False, rlrop=False):
+def _torch_path(schedule, scripted, max_epochs, plateau, max_depth, all_params=False, rlrop=False,
+                restore_best=False, ckpt_dir=None):
     seed_everything(7)
     model = RawNet()
     if all_params:
@@ -179,7 +191,8 @@ def _torch_path(schedule, scripted, max_epochs, plateau, max_depth, all_params=F
     fts = FTSController(model, schedule, optimizer=optimizer, lr_scheduler=lr_scheduler,
                         lr_scheduler_cfg={"interval": "epoch", "monitor": "val_loss" if rlrop else None},
                         max_depth=max_depth,
-                        transition=PlateauTransition("val_loss", patience=1) if plateau else None)
+                        transition=PlateauTransition("val_loss", patience=1) if plateau else None,
+                        checkpoint=BestCheckpoint(ckpt_dir, "val_loss") if restore_best else None)
     fts.setup()
     path = []
     for epoch in fts.epochs(max_epochs):
@@ -212,6 +225,10 @@ EXPECTED_PATHS = {
                   (2, 6, (0.081, 0.0405, 1e-05), "SGD"), (2, 6, (0.0729, 0.03645, 9e-06), "SGD")],
     "reinit_optimizer": [(0, 2, (0.1,), "SGD"), (1, 4, (0.01, 0.05), "Adam"), (1, 4, (0.005, 0.025), "Adam"),
                          (2, 6, (0.0025, 0.0125, 1e-05), "Adam"), (2, 6, (0.00125, 0.00625, 5e-06), "Adam")],
+    # restoring the best at each boundary keeps the lr progression (the latest lrs are re-applied after the restore)
+    "restore_best": [(0, 2, (0.1,), "SGD"), (0, 2, (0.05,), "SGD"), (1, 4, (0.025, 0.05), "SGD"),
+                     (1, 4, (0.0125, 0.025), "SGD"), (2, 6, (0.00625, 0.0125, 1e-05), "SGD"),
+                     (2, 6, (0.003125, 0.00625, 5e-06), "SGD")],
     "rlrop": [(0, 2, (0.1,), "SGD"), (1, 4, (0.1, 0.05), "SGD"), (1, 4, (0.1, 0.05), "SGD"),
               (2, 6, (0.05, 0.025, 1e-05), "SGD"), (2, 6, (0.05, 0.025, 1e-05), "SGD")],
 }
@@ -221,6 +238,7 @@ EXPECTED_PATHS = {
 def test_host_parity(tmpdir, scenario):
     """Both hosts follow the scenario's expected path."""
     cfg = SCENARIOS[scenario]
-    lightning_path, torch_path = _lightning_path(tmpdir, **cfg), _torch_path(**cfg)
+    lightning_path = _lightning_path(os.path.join(tmpdir, "lightning"), **cfg)
+    torch_path = _torch_path(**cfg, ckpt_dir=os.path.join(tmpdir, "torch"))
     assert torch_path == lightning_path
     assert lightning_path == EXPECTED_PATHS[scenario]
