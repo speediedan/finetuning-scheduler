@@ -9,8 +9,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import json
+import math
 import os.path
 import subprocess
+import sys
 from unittest import mock
 from itertools import chain
 import re
@@ -137,6 +140,36 @@ def test_model_parallel_examples(tmpdir, config_files):
     assert cp.returncode == 0
     unexpected = unexpected_warns(rec_warns=warn_lines, expected_warns=MODEL_PARALLEL_EXAMPLE_WARNS, raw_warns=True)
     assert not unexpected, unexpected
+
+
+@RunIf(min_cuda_gpus=2, standalone=True)
+@pytest.mark.parametrize("config_file", ["torch_fsdp_plan.yaml", "torch_tp_plan.yaml"],
+                         ids=["torch_fsdp_plan", "torch_tp_plan"])
+def test_model_parallel_examples_torch(tmpdir, config_file):
+    """The PyTorch API model-parallel example runs its schedule under ``torchrun`` without importing Lightning."""
+    mp_example_base = os.path.join(os.path.dirname(__file__), "model_parallel")
+    example_script = os.path.join(mp_example_base, "torch_mp_example.py")
+    config = os.path.join(mp_example_base, "config", config_file)
+    command = [sys.executable, "-m", "torch.distributed.run", "--standalone", "--nproc_per_node=2", example_script,
+               "--config", config, "--output-dir", tmpdir.strpath, "--max-epochs=3", "--limit-train-batches=2"]
+    # `MKL_THREADING_LAYER`: see https://github.com/pytorch/pytorch/issues/37377; setting `OMP_NUM_THREADS` keeps
+    # `torchrun` from warning that it set it
+    env = {**os.environ, "MKL_THREADING_LAYER": "GNU", "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS", "1")}
+    cp = subprocess.run(command, capture_output=True, text=True, env=env)
+    assert cp.returncode == 0, cp.stdout[-3000:] + cp.stderr[-3000:]
+    warn_lines = [line for line in chain(cp.stdout.splitlines(), cp.stderr.splitlines())
+                  if re.search(r"[^\s]+\.py:\d+", line)]
+    unexpected = unexpected_warns(rec_warns=warn_lines, expected_warns=MODEL_PARALLEL_EXAMPLE_WARNS, raw_warns=True)
+    assert not unexpected, unexpected
+    with open(os.path.join(tmpdir, config_file.removesuffix(".yaml"), "summary.json")) as f:
+        summary = json.load(f)
+    # one phase per epoch (each phase's `max_transition_epoch`), each thawing the scheduled parameters
+    assert [(e["depth"], e["trainable_params"]) for e in summary["epochs"]] == [(0, 2), (1, 11), (2, 39)]
+    assert summary["final_depth"] == 2
+    assert all(math.isfinite(e["train_loss"]) and math.isfinite(e["val_loss"]) for e in summary["epochs"])
+    assert summary["restored_count"] == 2  # the best checkpoint restored at both phase boundaries
+    assert summary["param_types"] == ["DTensor"]  # nothing left unsharded
+    assert summary["lightning_modules"] == []
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 @RunIf(min_cuda_gpus=1, skip_windows=True)

@@ -7,7 +7,7 @@ from datetime import datetime
 import torch
 from torch.utils import collect_env
 from torch.optim import Optimizer
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import lightning as L
 from lightning.fabric.utilities import rank_zero_warn
 from lightning.pytorch.cli import LightningCLI
@@ -16,6 +16,9 @@ from lightning.pytorch.utilities.types import STEP_OUTPUT
 
 from finetuning_scheduler.types import FTSLRSchedulerTypeTuple
 from fts_examples.model_parallel.torchtitan_llama import ModelCfg
+# the dataset lives in the Lightning-free `parallel_plans` module, shared with `torch_mp_example.py`; it remains
+# importable from here
+from fts_examples.model_parallel.parallel_plans import RandomTokenDataset
 from fts_examples.profiling import MemProfiler, MemProfilerCfg, ProfilerHooksMixin
 from fts_examples.cfg_utils import LightningLRSCfg, OptimizerCfg, LRSchedulerCfg, ExperimentCfg
 
@@ -204,25 +207,6 @@ def collect_env_info() -> dict:
         sys_dict["pip_packages"] = {}
     return sys_dict
 
-
-class RandomTokenDataset(Dataset):
-    def __init__(self, vocab_size: int, seq_length: int, dataset_length: int = 64):
-        self.vocab_size = vocab_size
-        self.seq_length = seq_length
-        self.dataset_length = dataset_length
-        self.tokens = torch.randint(
-            self.vocab_size,
-            size=(len(self), self.seq_length + 1),
-            # Set a seed to make this toy dataset the same on each rank
-            # Fabric will add a `DistributedSampler` to shard the data correctly
-            generator=torch.Generator().manual_seed(42),
-        )
-
-    def __len__(self) -> int:
-        return self.dataset_length
-
-    def __getitem__(self, item: int):
-        return self.tokens[item]
 
 class ExpHarness(ProfilerHooksMixin, L.LightningModule):
     def __init__(self, model_cfg: ModelCfg, exp_cfg: ExperimentCfg,

@@ -1,0 +1,42 @@
+# Shared defaults for every `torch_mp_example.py` configuration, the plain PyTorch counterpart of
+# `fts_mp_example_defaults.yaml`. A configuration passed with `--config` is merged over these (mappings key by key).
+# Relative paths resolve against the example's directory (`fts_examples/model_parallel`).
+seed: 42
+model_cfg: config/defaults/torchtitan_llama.yaml
+ft_schedule: config/defaults/llama_ft_schedule.yaml
+max_depth: 2
+max_epochs: 4
+output_dir: torch_mp_logs  # relative to the working directory; each run writes to `<output_dir>/<run_name>`
+run_name: torch_mp_example_default
+mesh:
+  data_parallel_size: 2
+  tensor_parallel_size: 1
+loss_parallel: true  # used only when `tensor_parallel_size` > 1
+fsdp_default_kwargs: {}
+fsdp_plan: {}
+data:
+  batch_size: 4
+  seq_length: 128
+  dataset_length: 32
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    weight_decay: 1.0e-05
+    eps: 1.0e-07
+    lr: 1.0e-05
+lr_scheduler:
+  class_path: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+  init_args:
+    T_0: 1
+    T_mult: 2
+    eta_min: 1.0e-07
+# `PlateauTransition` arguments, the counterpart of the Lightning example's `FTSEarlyStopping`
+transition:
+  monitor: val_loss
+  min_delta: 0.001
+  patience: 2  # limited patience for example
+  mode: min
+# `BestCheckpoint` arguments, the counterpart of the Lightning example's `FTSCheckpoint(save_top_k=1)`
+checkpoint:
+  monitor: val_loss
+  mode: min
