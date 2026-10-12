@@ -144,4 +144,4 @@ jobs:
         PY
 
     - name: Tests
-      run: python -m pytest --noconftest tests/test_core_import_isolation.py tests/test_controller.py tests/test_views.py tests/test_compile.py -v
+      run: python -m pytest --noconftest tests/test_core_import_isolation.py tests/test_controller.py tests/test_views.py tests/test_compile.py tests/test_conformance.py -v

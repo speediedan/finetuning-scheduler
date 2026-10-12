@@ -18,6 +18,8 @@ are not documented as public API.
     core.views
     core.roles
     core.compile
+    testing.conformance
+    testing.fixtures
     core.schedule
     core.state
     core.rng

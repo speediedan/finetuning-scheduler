@@ -272,6 +272,9 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
 def view_default_schedule(view: Any, order: Literal["output_first", "input_first"] = "output_first") -> dict:
     """Generate a default schedule over a view's logical names.
 
+    Logical names whose physical tensors all have a role that is never thawed (``fitted`` or ``instrument``) are left
+    out, and groups left empty are dropped.
+
     Args:
         view: A tunable view (bound or not).
         order: ``"output_first"`` (the default, as Fine-Tuning Scheduler has always generated schedules) uses the
@@ -282,7 +285,14 @@ def view_default_schedule(view: Any, order: Literal["output_first", "input_first
     """
     if order not in ("output_first", "input_first"):
         raise FTSConfigurationError(f"`order` must be 'output_first' or 'input_first', got {order!r}.")
-    groups = as_view(view).depth_groups()
+    bound = as_view(view)
+    groups = bound.depth_groups()
+    roles = bound.roles()
+    if any(is_frozen_role(r) for r in roles.values()):
+        names = list(dict.fromkeys(n for g in groups for n in g))
+        mapped = bound.to_physical(names)
+        frozen = {n for n in names if mapped[n] and all(is_frozen_role(roles.get(p, "base")) for p in mapped[n])}
+        groups = [kept for g in groups if (kept := [n for n in g if n not in frozen])]
     if order == "input_first":
         groups = [list(reversed(g)) for g in reversed(groups)]
     return {depth: {"params": list(g)} for depth, g in enumerate(groups)}
