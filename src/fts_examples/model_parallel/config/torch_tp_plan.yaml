@@ -1,0 +1,6 @@
+# Tensor parallelism on two ranks: the plain PyTorch counterpart of `fts_tp_plan.yaml`. The TP plan is
+# `parallel_plans.apply_tp_plan`, with loss parallelism.
+run_name: torch_tp_plan
+mesh:
+  data_parallel_size: 1
+  tensor_parallel_size: 2

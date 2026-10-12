@@ -384,6 +384,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             only supports single-schedule/optimizer fine-tuning configurations
         """
         assert self.trainer is not None
+        # the validation loop's forward-only pass leaves an FSDP2 root module's unsharded parameters registered
+        core_phase.reshard_fsdp_modules(self.pl_module)
         pre_reinit_state = self._save_pre_reinit_lr_state(self.trainer)
         if not self._fts_state._resume_fit_from_ckpt:
             if self.restore_best:
@@ -445,6 +447,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert isinstance(self.ft_schedule, dict)
         assert isinstance(self.pl_module, pl.LightningModule)
         assert isinstance(self.trainer, pl.Trainer)
+        core_phase.reshard_fsdp_modules(self.pl_module)  # thaw and optimize the parameters FSDP2 trains
         # if the target depth is 0, implicit optimizer reinitialization should not be executed
         new_optimizer_cfg, thaw_layers = core_phase.thaw_plan(
             self.ft_schedule, depth, self._fts_state._best_ckpt_depth, depth_sync, self.reinit_optim_cfg

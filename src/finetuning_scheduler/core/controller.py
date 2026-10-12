@@ -244,6 +244,8 @@ class FTSController:
         self._validate_schedule()
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
         self._refuse_unschedulable_params()
+        core_phase.reshard_fsdp_modules(self.model)
+        self._warn_unsynchronized_params()
         core_phase.freeze_module_tree(self.model, train_bn=False,
                                       bn_track_running_stats=self.frozen_bn_track_running_stats)
         self._thaw_phase(0, init_thaw=True)
@@ -262,12 +264,22 @@ class FTSController:
         rank_zero_info(f"Fine-tuning schedule set up with {len(self._schedule)} phases (max_depth {self._max_depth}).")
 
     def _refuse_unsupported_model(self) -> None:
-        if isinstance(self.model, nn.parallel.DistributedDataParallel):
-            raise FTSConfigurationError(
-                "`DistributedDataParallel` registers only the parameters that require grad when it wraps the module,"
-                " so parameters thawed in later phases would never be gradient-synchronized. Pass the unwrapped module"
-                " and shard it with FSDP2 (`fully_shard`) instead."
-            )
+        # the composable `replicate()` mixes this marker class into a module's class rather than wrapping the module
+        replicated = getattr(sys.modules.get("torch.distributed._composable.replicate"), "DDP", None)
+        for name, module in self.model.named_modules():
+            where = f"`{name}`" if name else "the model"
+            if isinstance(module, nn.parallel.DistributedDataParallel):
+                raise FTSConfigurationError(
+                    f"{where} is wrapped in `DistributedDataParallel`, which registers only the parameters that require"
+                    " grad when it wraps the module, so parameters thawed in later phases would never be"
+                    " gradient-synchronized. Pass the unwrapped module and shard it with FSDP2 (`fully_shard`) instead."
+                )
+            if replicated is not None and isinstance(module, replicated):
+                raise FTSConfigurationError(
+                    f"{where} is under the composable `replicate()`, which builds its `DistributedDataParallel` at the"
+                    " first forward, after the controller has frozen the model, so parameters thawed in later phases"
+                    " would never be gradient-synchronized. Shard it with FSDP2 (`fully_shard`) instead."
+                )
         if isinstance(self._optimizer_src, core_optim.ZeroRedundancyOptimizer):
             raise FTSConfigurationError(
                 "`ZeroRedundancyOptimizer` is not supported by `FTSController`; shard with FSDP2 instead."
@@ -375,6 +387,32 @@ class FTSController:
         lrs_class = core_optim.import_reinit_class(lr_scheduler_init)
         core_optim.check_supported_lr(lrs_class, self.allow_untested)
         core_optim.check_lr_scheduler_init(lrs_class, lr_scheduler_init, implicit)
+
+    def _warn_unsynchronized_params(self) -> None:
+        """Warn about scheduled parameters no FSDP2 module manages in a data-parallel run (a plan that does not
+        shard the root module): nothing synchronizes their gradients, so each rank would train its own copy."""
+        if self._host.world_size < 2 or not torch.distributed.is_available():
+            return
+        from torch.distributed.fsdp import FSDPModule
+
+        fsdp_modules = {name for name, m in self.model.named_modules() if isinstance(m, FSDPModule)}
+        if not fsdp_modules:
+            return
+
+        def managed(param_name: str) -> bool:  # FSDP2 manages a parameter of the module it shards or any descendant
+            parts = param_name.split(".")[:-1]
+            return any(".".join(parts[:i]) in fsdp_modules for i in range(len(parts) + 1))
+
+        scheduled = {n for d, phase in self._schedule.items() if d <= self._max_depth for n in phase["params"]}
+        # a tensor-parallel DTensor outside every FSDP module is not averaged across data-parallel ranks either
+        plain = [n for n, _ in self.model.named_parameters() if n in scheduled and not managed(n)]
+        if plain:
+            shown = ", ".join(plain[:5]) + (f" and {len(plain) - 5} more" if len(plain) > 5 else "")
+            rank_zero_warn(
+                f"FSDP2 does not manage these scheduled parameters, so their gradients are not synchronized across"
+                f" ranks: {shown}. Apply `fully_shard` to the root module as well (last), so every parameter is"
+                " sharded."
+            )
 
     def _refuse_unschedulable_params(self) -> None:
         scheduled = {n for d, phase in self._schedule.items() if d <= self._max_depth for n in phase["params"]}
@@ -641,6 +679,7 @@ class FTSController:
         its gates (a veto stops here), advance and pin the boundary best, run the new phase's start hooks, then
         thaw and configure the optimizer for it."""
         prev = self._depth
+        core_phase.reshard_fsdp_modules(self.model)
         schedulers = [s for s, _ in self._host.get_lr_schedulers()]
         pre_state = core_optim.capture_lr_state(schedulers[0] if schedulers else None, self.optimizer)
         restored_depth = self._restore_best_state() if self._restore_best else None
@@ -668,6 +707,8 @@ class FTSController:
         """Thaw ``depth``'s parameters (and, after a restore or an optimizer reinitialization, every phase the
         optimizer lacks) and configure the optimizer and lr schedulers for them, as the callback's ``step_pg``
         does."""
+        # after any phase hooks and gates, which may have run a forward-only pass, and on `load_state_dict`'s replay
+        core_phase.reshard_fsdp_modules(self.model)
         optimizer = self.optimizer
         schedulers = [s for s, _ in self._host.get_lr_schedulers()]
         new_optimizer_cfg, phases = core_phase.thaw_plan(self._schedule, depth, restored_depth, depth_sync=depth_sync,
@@ -873,6 +914,7 @@ class FTSController:
         a directory written by every rank through DCP, with the non-tensor state in ``fts_meta.pt`` and each rank's
         random generator state (if given) beside it."""
         path = os.path.normpath(os.fspath(path))  # `ckpt/` and `ckpt` are one checkpoint
+        core_phase.reshard_fsdp_modules(self.model)
         # registered state (a data-loader position, for example) and random streams are per rank
         statefuls = {name: obj.state_dict() for name, (obj, _) in self._statefuls.items()}
         per_rank = (self._host.all_gather_object({"statefuls": statefuls, "rng": rng_state})
@@ -921,6 +963,7 @@ class FTSController:
                             meta: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Restore the model (and, when its type still matches, the optimizer and lr scheduler state) and
         registered state from a checkpoint written by :meth:`_write_checkpoint`; return its metadata."""
+        core_phase.reshard_fsdp_modules(self.model)
         meta = dict(meta) if meta is not None else self._read_meta(path)
         optimizer = self.optimizer
         same_optimizer = meta["optimizer_class"] == type(optimizer).__qualname__

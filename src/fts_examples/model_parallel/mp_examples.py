@@ -5,68 +5,17 @@ import warnings
 
 import torch
 import torch.nn.functional as F
-from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor import Replicate, Shard
-from torch.distributed.tensor.parallel import (ColwiseParallel, PrepareModuleInput, RowwiseParallel,
-                                                SequenceParallel, parallelize_module, loss_parallel)
+from torch.distributed.tensor.parallel import loss_parallel
 import lightning as L
 
 from fts_examples.cli_experiment_utils import ExpHarness, FTSExperimentCLI, ExperimentCfg
+# the TP plan lives in the Lightning-free `parallel_plans` module, shared with `torch_mp_example.py`; it remains
+# importable from here
+from fts_examples.model_parallel.parallel_plans import apply_tp_plan
 from fts_examples.model_parallel.torchtitan_llama import ModelCfg, Transformer
 
 # Lightning ModelParallel still uses `torch.load` with `weights_only=False`
 warnings.filterwarnings("ignore", ".*uses the default pickle.*")
-
-
-# modified version of https://bit.ly/torchtitan_transformer_tp_plan
-def apply_tp_plan(model: Transformer, device_mesh: DeviceMesh, loss_parallel: bool) -> Transformer:
-    """Apply parallelism."""
-    tp_mesh = device_mesh["tensor_parallel"]
-
-    # 1. Parallelize the pre-transformer block layers
-    non_transformerblock_tp_plan = {
-        # Parallelize the embedding and shard its outputs (which are the first transformer block's inputs)
-        "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(1),),
-        "norm": SequenceParallel(),  # Parallelize the root norm layer over the sequence dim
-    }
-    model = parallelize_module(model, tp_mesh, non_transformerblock_tp_plan)
-
-    # 2. Parallelize each transformer block
-    for transformer_block in model.layers.values():
-        plan = {
-            "attention": PrepareModuleInput(
-            input_layouts=(Shard(1), None),
-            desired_input_layouts=(Replicate(), None),
-            ),
-            "attention_norm": SequenceParallel(),
-            "attention.wq": ColwiseParallel(),
-            "attention.wk": ColwiseParallel(),
-            "attention.wv": ColwiseParallel(),
-            "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
-            "ffn_norm": SequenceParallel(),
-            "feed_forward": PrepareModuleInput(
-                input_layouts=(Shard(1),),
-                desired_input_layouts=(Replicate(),),
-            ),
-            "feed_forward.w1": ColwiseParallel(),
-            "feed_forward.w2": RowwiseParallel(output_layouts=Shard(1)),
-            "feed_forward.w3": ColwiseParallel(),
-
-        }
-
-        parallelize_module(transformer_block, tp_mesh, plan)
-
-    # 3. Parallelize the output layer
-    output_parallelize_plan = (
-        ColwiseParallel(
-            input_layouts=Shard(1),
-            output_layouts=Shard(-1) if loss_parallel else Replicate(),
-            use_local_output=not loss_parallel,
-        )
-    )
-    parallelize_module(model.output, tp_mesh, output_parallelize_plan)
-
-    return model
 
 
 class ModParallelExample(ExpHarness, L.LightningModule):
