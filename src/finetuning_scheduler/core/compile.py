@@ -254,7 +254,9 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
             if da == db == depth:
                 overlaps.append((a, b))
             elif depth in (da, db):
-                msg = (f"Phases {min(da, db)} and {max(da, db)} schedule tensors that share storage: '{a}' and '{b}'."
+                msg = (f"Phases are not disjoint: '{a}' is scheduled in phases {min(da, db)} and {max(da, db)}."
+                       if a == b else
+                       f"Phases {min(da, db)} and {max(da, db)} schedule tensors that share storage: '{a}' and '{b}'."
                        " A tensor can be thawed by one phase only.")
                 if not legacy:
                     raise FTSConfigurationError(msg)

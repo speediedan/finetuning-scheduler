@@ -18,16 +18,19 @@ lines and the generated schedule, plus the construction, reflection and subclass
 rely on. A later change to the adapter layer must leave every pin unchanged.
 """
 import inspect
+from functools import partial
 from types import SimpleNamespace
 
 import pytest
+import torch
 import yaml
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.callbacks import Callback
 
-from finetuning_scheduler import FinetuningScheduler
+from finetuning_scheduler import FinetuningScheduler, FTSController, TunableSupport
 from finetuning_scheduler.strategy_adapters import StrategyAdapter
-from tests.helpers.legacy_naming_adapter import LegacyNamingAdapter, LogicalNamesBoringModel
+from tests.helpers.legacy_naming_adapter import (COUPLED_NORMS, LegacyNamingAdapter, LOGICAL_TO_PHYSICAL,
+                                                 LogicalNamesBoringModel)
 from tests.test_phase_characterization import _rank_zero_debug_records
 
 ADAPTER_PATH = "tests.helpers.legacy_naming_adapter:LegacyNamingAdapter"
@@ -139,3 +142,45 @@ def test_base_adapter_naming_defaults():
     assert adapter.fts_optim_transform(names) == names
     assert adapter.logical_param_translation(names) == names
     assert list(adapter.get_named_params_for_schedule_validation()) == names
+
+
+class EquivalentView:
+    """The legacy adapter's naming as a tunable view: the same logical names, physical tensors and coupled
+    norms."""
+
+    def __init__(self, root):
+        self.root = root
+
+    def support(self):
+        return TunableSupport(trainable=True, naming_scheme="logical-blocks")
+
+    def to_physical(self, logical):
+        return {n: tuple(LOGICAL_TO_PHYSICAL[n]) for n in logical}
+
+    def to_logical(self, physical):
+        rev = {p: lg for lg, ps in LOGICAL_TO_PHYSICAL.items() for p in ps}
+        return list(dict.fromkeys(rev.get(p, p) for p in physical))
+
+    def logical_named_parameters(self):
+        for lg, ps in LOGICAL_TO_PHYSICAL.items():
+            yield lg, self.root.get_parameter(ps[0])
+
+    def coupled(self, physical):
+        pulled = [lg for lg, ps in LOGICAL_TO_PHYSICAL.items() if set(ps) & set(physical)]
+        return [c for lg in pulled for c in COUPLED_NORMS.get(lg, [])]
+
+
+def test_equivalent_view_follows_the_legacy_path_on_the_plain_loop():
+    """The legacy adapter's phase path (pinned above, under Lightning) is reproduced by an equivalent view driving the
+    direct PyTorch controller: the same depth, thawed tensors and parameter groups at every epoch."""
+    seed_everything(42)
+    model = LogicalNamesBoringModel()
+    sgd = partial(torch.optim.SGD, lr=1e-3)
+    fts = FTSController(model, LOGICAL_SCHEDULE, optimizer=sgd, view=EquivalentView(model))
+    fts.setup()
+    path = []
+    for epoch in fts.epochs(max_epochs=4):
+        path.append((epoch, fts.curr_depth, sorted(n for n, p in model.named_parameters() if p.requires_grad),
+                     len(fts.optimizer.param_groups)))
+        fts.epoch_end()
+    assert path == [(e, d, thawed, groups) for e, d, thawed, _, groups in EXPECTED_PATH]

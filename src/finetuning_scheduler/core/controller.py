@@ -40,12 +40,15 @@ from finetuning_scheduler.core import phase as core_phase
 from finetuning_scheduler.core import schedule as core_schedule
 from finetuning_scheduler.core.checkpoint import (CheckpointPolicy, load_payload, remove_checkpoint, replace_checkpoint,
                                                   save_payload)
+from finetuning_scheduler.core.compile import CompiledSchedule, compile_schedule, owner_module, view_default_schedule
 from finetuning_scheduler.core.config import config_hash, describe_callable
 from finetuning_scheduler.core.dist import rank_zero_info, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.fingerprint import batch_fingerprint
 from finetuning_scheduler.core.host import LRStepConfig, TorchHost, TrainingHost
 from finetuning_scheduler.core.rng import capture_rng_state, fork_rngs, restore_rng_state
+from finetuning_scheduler.core.roles import is_frozen_role
+from finetuning_scheduler.core.views import BoundView, CanonicalView, resolve_view, uncheckpointed_keys
 from finetuning_scheduler.core.transitions import (AnyOf, as_decision, Decision, epoch_transition_due, GateEvent,
                                                    GateResult, TransitionContext, TransitionPolicy)
 
@@ -65,6 +68,8 @@ class PhaseEvent:
         phase_config: The phase's payload: the ``phase_config_type`` instance if one was given, otherwise the mapping.
         metadata: The run's user metadata.
         controller: The controller, for access to the module, optimizer and schedule.
+        physical_params: The physical parameters the phase thaws (its own, then its coupled ones).
+        logical_params: The logical names the phase's schedule entries resolved to (role selectors excluded).
     """
 
     depth: int
@@ -73,6 +78,8 @@ class PhaseEvent:
     phase_config: Any
     metadata: Mapping[str, Any]
     controller: "FTSController" = field(repr=False)
+    physical_params: tuple[str, ...] = ()
+    logical_params: tuple[str, ...] = ()
 
 
 def _is_compiled(module: nn.Module) -> bool:
@@ -140,6 +147,9 @@ class FTSController:
             :class:`~finetuning_scheduler.core.host.TorchHost` by default.
         compile_reset: Reset dynamo's compiled graphs at each transition; by default when the module is compiled.
         allow_meta_frozen: Allow meta-device parameters that no phase schedules (they are warned about).
+        view: The :class:`~finetuning_scheduler.core.views.TunableView` through which the schedule names the model's
+            parameters (experimental). By default, a view attached to the model as ``fts_tunable_view``, else the
+            identity :class:`~finetuning_scheduler.core.views.CanonicalView`. Its ``root`` must be ``model``.
     """
 
     def __init__(
@@ -171,6 +181,7 @@ class FTSController:
         host: TrainingHost | None = None,
         compile_reset: bool | None = None,
         allow_meta_frozen: bool = False,
+        view: Any | None = None,
     ) -> None:
         self.model = model
         self._schedule_src = schedule
@@ -201,6 +212,10 @@ class FTSController:
         self._host = host if host is not None else TorchHost(model, log_dir=log_dir)
         self._compile_reset = compile_reset
         self.allow_meta_frozen = allow_meta_frozen
+        self._view_src = view
+        self._view: BoundView | None = None
+        self._compiled: CompiledSchedule | None = None
+        self._logical_params: dict[int, tuple[str, ...]] = {}
 
         self._schedule: dict = {}
         self._phase_configs: dict[int, Any] = {}
@@ -240,6 +255,7 @@ class FTSController:
         if self._restore_best and self._checkpoint is None:
             raise FTSConfigurationError("`restore_best=True` needs a `checkpoint` policy to restore from.")
         self._refuse_unsupported_model()
+        self._view = self._resolve_view()
         self._schedule = self._load_schedule()
         self._validate_schedule()
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
@@ -285,10 +301,24 @@ class FTSController:
                 "`ZeroRedundancyOptimizer` is not supported by `FTSController`; shard with FSDP2 instead."
             )
 
+    def _resolve_view(self) -> BoundView:
+        view = resolve_view(self.model, self._view_src)
+        if view.root is not self.model:
+            raise FTSConfigurationError(
+                f"The view's `root` ({type(view.root).__name__}) must be the module given to the controller"
+                f" ({type(self.model).__name__}): the optimizer and checkpoints see the root's parameters."
+            )
+        support = view.support()
+        if not support.trainable:
+            raise FTSConfigurationError(
+                f"The model cannot be fine-tuned through {type(view.view).__name__}: {support.reason}")
+        return view
+
     def _load_schedule(self) -> dict:
         src = self._schedule_src
         if src is None:
-            schedule = core_schedule.build_default_schedule(self.model)
+            assert self._view is not None
+            schedule = view_default_schedule(self._view)
             if self.log_dir is not None and self._host.is_global_zero:
                 core_schedule.save_schedule(f"{type(self.model).__name__}_ft_schedule.yaml", schedule, self.log_dir)
             return self._host.broadcast_object(schedule)
@@ -321,17 +351,20 @@ class FTSController:
                         self._validate_optimizer_reinit(target, depth)
                     else:
                         self._validate_lr_scheduler_reinit(target, depth, implicit)
-        named_params = dict(self.model.named_parameters()).keys()
-        shared = core_schedule.shared_params_ref(self.model)
         max_epoch_wm = -1
         for depth in schedule:
             schedule[depth].setdefault("max_transition_epoch", -1)
             core_schedule.parse_phase_lr(schedule, depth, self.base_max_lr)
-            core_schedule.resolve_phase_params(schedule, depth, named_params, shared)
             if depth > 0:
                 max_epoch_wm = core_schedule.update_epoch_watermark(schedule, depth, max_epoch_wm,
                                                                     epoch_transitions_only=not self._user_policies)
-        core_schedule.validate_phases_disjoint(schedule)
+        # compile once through the view: each phase's `params` become the physical parameters it thaws, and the
+        # logical names it resolved are kept for display
+        assert self._view is not None
+        self._compiled = compile_schedule(schedule, self._view)
+        for cp in self._compiled.phases:
+            self._logical_params[cp.depth] = cp.logical
+            schedule[cp.depth]["params"] = list(cp.thawed)
         self._epoch_watermark = max_epoch_wm
         if not self._user_policies:
             final = core_schedule.resolve_max_depth(self._max_depth_arg, len(schedule))
@@ -442,6 +475,7 @@ class FTSController:
         phase0 = self._schedule[0]
         src = self._optimizer_src
         if isinstance(src, Optimizer):
+            self._refuse_frozen_roles_in(src)
             if phase0.get("pg_overrides"):
                 raise FTSConfigurationError(
                     "Phase 0's `pg_overrides` needs an optimizer factory: an optimizer instance's groups were built"
@@ -800,12 +834,34 @@ class FTSController:
 
     def _thaw_phase(self, depth: int, init_thaw: bool = False) -> None:
         params = self._schedule[depth]["params"]
-        core_phase.thaw_params(self.model, params, init_thaw=init_thaw)
+        assert self._view is not None
+        core_phase.thaw_params(self.model, params, translation_func=self._view.to_logical, init_thaw=init_thaw)
+        self._refuse_trainable_frozen_roles()
         if not self.frozen_bn_track_running_stats:
-            owners = {n.rsplit(".", 1)[0] if "." in n else "" for n in params}
+            owners = {owner_module(n) for n in params}
             for name, mod in self.model.named_modules():
                 if name in owners and isinstance(mod, nn.modules.batchnorm._BatchNorm):
                     mod.track_running_stats = True
+
+    def _refuse_frozen_roles_in(self, optimizer: Optimizer) -> None:
+        """An optimizer instance may not hold a `fitted` or `instrument` parameter, even with
+        ``enforce_phase0_params=False``."""
+        roles = self.roles
+        names = {id(p): n for n, p in self.model.named_parameters()}
+        held = sorted(names[id(p)] for g in optimizer.param_groups for p in g["params"]
+                      if id(p) in names and is_frozen_role(roles.get(names[id(p)], "base")))
+        if held:
+            raise FTSConfigurationError(
+                f"The optimizer holds parameters whose role is never optimized (`fitted` or `instrument`): {held}.")
+
+    def _refuse_trainable_frozen_roles(self) -> None:
+        """Guard: no `fitted` or `instrument` tensor may require grad (a view's coupled tensors could leak one)."""
+        roles = self.roles
+        leaked = sorted(n for n, p in self.model.named_parameters()
+                        if p.requires_grad and is_frozen_role(roles.get(n, "base")))
+        if leaked:
+            raise FTSConfigurationError(
+                f"Tensors whose role is never thawed (`fitted` or `instrument`) require grad: {leaked}.")
 
     # ------------------------------------------------------------------------------------------------------------------
     # checkpoints, gates and registered state
@@ -900,10 +956,13 @@ class FTSController:
                          "gate_records": list(self._gate_records), "fingerprints": deepcopy(self._fingerprints)},
         }
         if with_tensors:
-            model_state = self.model.state_dict()
+            assert self._view is not None
+            model_state = self._view.checkpoint_state_dict()
             if include == "scheduled":
+                roles = self.roles
                 scheduled = {n for phase in self._schedule.values() for n in phase["params"]}
-                model_state = {k: v for k, v in model_state.items() if k in scheduled or k not in named}
+                model_state = {k: v for k, v in model_state.items()
+                               if k in scheduled or k not in named or roles.get(k) == "fitted"}
             payload["model"] = model_state
             payload["optimizer"] = optimizer.state_dict()
         return payload
@@ -923,6 +982,7 @@ class FTSController:
             import torch.distributed.checkpoint as dcp
             from torch.distributed.checkpoint.state_dict import get_model_state_dict, get_state_dict
 
+            self._refuse_sharded_key_translation()
             # written beside `path` and moved over it once complete, so an interrupted save keeps the old one
             # (a fixed name, so a later save clears what an interrupted one left behind)
             tmp = self._host.broadcast_object(f"{path}.tmp")
@@ -937,6 +997,8 @@ class FTSController:
                     model_sd, optim_sd = get_state_dict(self.model, optimizer)
                 else:
                     model_sd, optim_sd = get_model_state_dict(self.model), None
+            instrument = uncheckpointed_keys(self.roles)
+            model_sd = {k: v for k, v in model_sd.items() if k not in instrument}
             dcp.save({"model": model_sd, **({"optim": optim_sd} if optim_sd is not None else {})}, checkpoint_id=tmp)
             if self._host.is_global_zero:
                 save_payload({**self._training_payload(with_tensors=False), "optim_saved": optim_saved,
@@ -954,6 +1016,14 @@ class FTSController:
             save_payload(payload, path)
         self._host.barrier("fts_checkpoint_written")
         return path
+
+    def _refuse_sharded_key_translation(self) -> None:
+        assert self._view is not None
+        translating = [m for m in ("checkpoint_state_dict", "load_checkpoint_state_dict") if self._view.overrides(m)]
+        if translating:
+            raise FTSConfigurationError(
+                f"{type(self._view.view).__name__} overrides {translating}; checkpoint key translation is not supported"
+                " for sharded models yet.")
 
     @staticmethod
     def _read_meta(path: str) -> dict[str, Any]:
@@ -983,6 +1053,7 @@ class FTSController:
                                                                  set_model_state_dict, set_state_dict,
                                                                  StateDictOptions)
 
+            self._refuse_sharded_key_translation()
             load_optimizer = with_optimizer and meta.get("optim_saved", True)
             if with_optimizer:
                 optimizer.state.clear()  # a checkpoint saved before any step restores an optimizer with no state
@@ -990,6 +1061,8 @@ class FTSController:
                 # DSD initializes the optimizer's state only when no parameter has a gradient
                 for p in self.model.parameters():
                     p.grad = None
+            # instrument tensors are never saved, so they are the only model keys a load may miss
+            instrument = uncheckpointed_keys(self.roles)
             unsaved: list[str] = []
             with self._suspend_step_counting():
                 if load_optimizer:
@@ -1004,19 +1077,21 @@ class FTSController:
                     state = {"model": model_sd, "optim": optim_sd}
                 else:
                     state = {"model": get_model_state_dict(self.model)}
+                state["model"] = {k: v for k, v in state["model"].items() if k not in instrument}
                 dcp.load(state, checkpoint_id=path)
                 if load_optimizer:
-                    # `dcp.load` has already required every model key; relax only the optimizer's per-parameter check
-                    # when some parameters (never stepped before the save) have no state to load
-                    options = StateDictOptions(strict=not unsaved)
+                    # `dcp.load` has already required every saved key; relax the per-parameter checks only for what
+                    # is legitimately absent (instrument tensors, and optimizer state of never-stepped parameters)
+                    options = StateDictOptions(strict=not (unsaved or instrument))
                     set_state_dict(self.model, optimizer, model_state_dict=state["model"],
                                    optim_state_dict=state["optim"], options=options)  # type: ignore[arg-type]
                 else:
-                    set_model_state_dict(self.model, state["model"])
+                    set_model_state_dict(self.model, state["model"], options=StateDictOptions(strict=not instrument))
         else:
             if with_optimizer:
                 optimizer.load_state_dict(meta["optimizer"])
-            self.model.load_state_dict(meta["model"], strict=meta["include"] == "all")
+            assert self._view is not None
+            self._view.load_checkpoint_state_dict(meta["model"], strict=meta["include"] == "all")
         if with_optimizer:
             for sched, state_ in zip(self.lr_schedulers, meta["lr_schedulers"]):
                 sched.load_state_dict(state_)
@@ -1136,7 +1211,9 @@ class FTSController:
 
     def _run_hooks(self, when: str, depth: int) -> None:
         event = PhaseEvent(depth=depth, epoch=self._host.current_epoch, global_step=self._host.global_step,
-                           phase_config=self._phase_configs.get(depth), metadata=self._metadata, controller=self)
+                           phase_config=self._phase_configs.get(depth), metadata=self._metadata, controller=self,
+                           physical_params=tuple(self._schedule[depth]["params"]),
+                           logical_params=self._logical_params.get(depth, ()))
         for fn, isolate in list(self._hooks[when].values()):
             isolate = self.isolate_rng if isolate is None else isolate
             with self._suspend_step_counting(), (fork_rngs(self._host.rng_devices()) if isolate else nullcontext()):
@@ -1204,6 +1281,7 @@ class FTSController:
             "policy": self._policy.state_dict(),
             "fingerprints": deepcopy(self._fingerprints),
             "schedule_hash": config_hash({"schedule": self._schedule}),
+            "view_digest": self._compiled.digest if self._compiled is not None else None,
             "config_hash": self.config_hash,
             "gate_records": list(self._gate_records),
             "ended_depths": sorted(self._ended_depths),
@@ -1223,6 +1301,11 @@ class FTSController:
         self._require_setup()
         if state_dict["schedule_hash"] != config_hash({"schedule": self._schedule}):
             raise FTSConfigurationError("The saved state belongs to a different fine-tuning schedule.")
+        saved_digest = state_dict.get("view_digest")
+        if saved_digest is not None and self._compiled is not None and saved_digest != self._compiled.digest:
+            raise FTSConfigurationError(
+                "The saved state was compiled through a view that maps the schedule to different tensors or roles; it"
+                " would thaw different parameters on resume.")
         if state_dict["config_hash"] != self.config_hash:
             rank_zero_warn("The saved state was produced with a different controller configuration.")
         for depth in range(1, state_dict["depth"] + 1):
@@ -1271,7 +1354,20 @@ class FTSController:
             "isolate_rng": self.isolate_rng,
             "fingerprint_batches": self.fingerprint_batches,
             "metadata": self._metadata,
+            **self._view_config(),
         }
+
+    def _view_config(self) -> dict[str, Any]:
+        """The view's description, when one other than the default identity view is used (omitted otherwise, so the
+        hash of a view-less configuration is unchanged)."""
+        view = self._view.view if self._view is not None else self._view_src
+        if view is None or (type(view) is CanonicalView and not view.roles()):
+            return {}
+        support = self._view.support() if self._view is not None else view.support()
+        return {"view": {"class_path": describe_callable(type(view)), "naming_scheme": support.naming_scheme,
+                         "logical_names_are_views": support.logical_names_are_views,
+                         "declared_roles": sorted(support.declared_roles), "roles": dict(sorted(view.roles().items())),
+                         "digest": self._compiled.digest if self._compiled is not None else None}}
 
     @property
     def config_hash(self) -> str:
@@ -1312,6 +1408,27 @@ class FTSController:
     @property
     def schedule(self) -> dict:
         return self._schedule
+
+    @property
+    def view(self) -> BoundView:
+        """The (bound) view the schedule names the model's parameters through."""
+        self._require_setup()
+        assert self._view is not None
+        return self._view
+
+    @property
+    def compiled_schedule(self) -> CompiledSchedule:
+        """The schedule compiled through the view: each phase's physical parameters."""
+        self._require_setup()
+        assert self._compiled is not None
+        return self._compiled
+
+    @property
+    def roles(self) -> dict[str, str]:
+        """Physical parameter and buffer names mapped to roles (anything unlisted is ``base``)."""
+        if self._compiled is not None:
+            return dict(self._compiled.roles)
+        return dict(self._view.roles()) if self._view is not None else {}
 
     @property
     def curr_depth(self) -> int:

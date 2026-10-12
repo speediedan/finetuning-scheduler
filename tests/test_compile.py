@@ -169,7 +169,7 @@ def test_storage_overlap_across_phases_refuses_and_within_a_phase_is_reported():
 
 def test_same_parameter_in_two_phases_refuses():
     net = _net()
-    with pytest.raises(FTSConfigurationError, match="Phases 0 and 1 schedule tensors that share storage"):
+    with pytest.raises(FTSConfigurationError, match="not disjoint: '4.weight' is scheduled in phases 0 and 1"):
         compile_schedule({0: {"params": ["4.weight"]}, 1: {"params": [r"4\..*"]}}, CanonicalView(net))
 
 

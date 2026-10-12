@@ -34,7 +34,7 @@ from typing import Any, Protocol, runtime_checkable
 from torch import nn, Tensor
 
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.core.roles import declared_kinds, validate_roles
+from finetuning_scheduler.core.roles import declared_kinds, role_kind, UNCHECKPOINTED_ROLE_KINDS, validate_roles
 
 # the module attribute a view is attached under for discovery
 VIEW_ATTR = "fts_tunable_view"
@@ -149,6 +149,11 @@ class TunableViewExtras(Protocol):
         ...
 
 
+def uncheckpointed_keys(roles: Mapping[str, str]) -> set[str]:
+    """The tensor names whose role is never checkpointed (``instrument``)."""
+    return {k for k, r in roles.items() if role_kind(r) in UNCHECKPOINTED_ROLE_KINDS}
+
+
 def pair_groups(names: Sequence[str]) -> list[list[str]]:
     """Group ``names`` in pairs starting from the last, the order Fine-Tuning Scheduler's generated schedules use.
 
@@ -203,12 +208,27 @@ class ViewDefaults:
         return {}
 
     def checkpoint_state_dict(self) -> dict[str, Any]:
-        """The root's ``state_dict()``."""
-        return self.root.state_dict()
+        """The root's ``state_dict()``, without ``instrument`` tensors (which are never checkpointed)."""
+        instrument = uncheckpointed_keys(self.roles())
+        return {k: v for k, v in self.root.state_dict().items() if k not in instrument}
 
     def load_checkpoint_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True) -> None:
-        """Load into the root with ``load_state_dict``."""
-        self.root.load_state_dict(state_dict, strict=strict)
+        """Load into the root. A strict load is strict by role: the keys missing from ``state_dict`` must be
+        exactly the ``instrument`` keys, and it may hold no key the root lacks. It is checked before anything is
+        loaded.
+
+        Raises:
+            FTSConfigurationError: If a strict load's keys do not match, naming the keys.
+        """
+        if strict:
+            expected = set(self.root.state_dict())
+            instrument = uncheckpointed_keys(self.roles())
+            missing = sorted(expected - set(state_dict) - instrument)
+            unexpected = sorted(set(state_dict) - expected)
+            if missing or unexpected:
+                raise FTSConfigurationError(
+                    f"The checkpoint does not match the model: missing {missing}, unexpected {unexpected}.")
+        self.root.load_state_dict(state_dict, strict=False)
 
     def promote(self, physical: Sequence[str], role: str) -> Mapping[str, str]:
         """Keep every name: only the role changes."""
@@ -277,8 +297,13 @@ class BoundView:
         return dict(self._member("promote")(physical, role))
 
     def defines(self, member: str) -> bool:
-        """Whether the bound view defines ``member`` itself (rather than taking the default)."""
+        """Whether the bound view has ``member`` (its own or inherited from :class:`ViewDefaults`)."""
         return callable(getattr(self.view, member, None))
+
+    def overrides(self, member: str) -> bool:
+        """Whether the bound view implements ``member`` differently from Fine-Tuning Scheduler's default."""
+        impl = getattr(type(self.view), member, None)
+        return callable(impl) and impl is not getattr(ViewDefaults, member)
 
 
 def as_view(view: Any) -> BoundView:

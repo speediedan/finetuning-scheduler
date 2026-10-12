@@ -44,7 +44,7 @@ from finetuning_scheduler.core.compile import compile_schedule, view_default_sch
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.phase import thaw_params
 from finetuning_scheduler.core.roles import declared_kinds, FROZEN_ROLE_KINDS, is_frozen_role, validate_roles
-from finetuning_scheduler.core.views import as_view, BoundView, TunableSupport
+from finetuning_scheduler.core.views import as_view, BoundView, TunableSupport, uncheckpointed_keys
 
 NO_SUCH_NAME = "__fts_conformance_no_such_name__"
 
@@ -254,16 +254,26 @@ class TunableViewConformance:
         _check(not frozen_changed, f"An optimizer step changed `fitted` or `instrument` tensors: {frozen_changed}.")
 
     def _checkpoint_round_trip(self) -> None:
-        """The view's checkpoint state restores every parameter exactly, with a strict load."""
+        """The view's checkpoint state leaves out ``instrument`` tensors, keeps ``fitted`` ones, and restores every
+        checkpointed parameter exactly through a strict load."""
         view = self._fresh()
+        roles = view.roles()
         state = copy.deepcopy(view.checkpoint_state_dict())
-        reference = {n: p.detach().clone() for n, p in view.root.named_parameters()}
+        instrument = uncheckpointed_keys(roles)
+        saved_instrument = sorted(instrument & set(state))
+        _check(not saved_instrument, f"The checkpoint state includes `instrument` tensors: {saved_instrument}.")
+        own_keys = set(view.root.state_dict())
+        fitted = {k for k, r in roles.items() if r == "fitted" and k in own_keys}
+        unsaved_fitted = sorted(fitted - set(state))
+        _check(not unsaved_fitted, f"The checkpoint state leaves out `fitted` tensors: {unsaved_fitted}.")
+        reference = {n: p.detach().clone() for n, p in view.root.named_parameters() if n not in instrument}
         with torch.no_grad():
             for p in view.root.parameters():
                 if p.is_floating_point():
                     p.add_(1.0)
         view.load_checkpoint_state_dict(state, strict=True)
-        differ = sorted(n for n, p in view.root.named_parameters() if not torch.equal(p.detach(), reference[n]))
+        named = dict(view.root.named_parameters())
+        differ = sorted(n for n, ref in reference.items() if not torch.equal(named[n].detach(), ref))
         _check(not differ, f"Loading the view's checkpoint state did not restore: {differ}.")
 
     def _unmatched_rule_refuses(self) -> None:
