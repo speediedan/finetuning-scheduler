@@ -96,14 +96,18 @@ def test_epoch_and_step_transitions():
 @pytest.mark.parametrize("case", list(PLATEAU_CASES), ids=list(PLATEAU_CASES))
 def test_plateau_transition_matches_lightning(case):
     """``PlateauTransition`` reaches the same best score, patience count and outcome as ``FTSEarlyStopping`` on
-    every characterized sequence (stop maps to ``STOP``; a completed phase to ``ADVANCE`` with patience reset)."""
+    every characterized sequence (stop maps to ``STOP``; a completed phase to ``ADVANCE`` with patience reset).
+
+    Only the stop reason's last sentence differs: it names no ``Trainer``.
+    """
     kwargs, final_phase, values, expected = PLATEAU_CASES[case]
     policy = PlateauTransition("val_loss", **kwargs)
     for v, (should_stop, reason, best, wait, phase_complete) in zip(values, expected):
         decision, why = as_decision(policy.evaluate(_ctx(is_final_phase=final_phase,
                                                          metrics={"val_loss": torch.tensor(v)})))
         if should_stop:
-            assert (decision, why) == (Decision.STOP, reason)
+            plain_loop_reason = reason.replace("Signaling Trainer to stop.", "Stopping training.")
+            assert (decision, why) == (Decision.STOP, plain_loop_reason)
         elif phase_complete and decision == Decision.ADVANCE:
             policy.reset(0)  # the controller resets policies at the phase boundary
         else:
