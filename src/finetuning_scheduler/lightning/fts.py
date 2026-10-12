@@ -382,6 +382,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 )
         else:
             self.thaw_to_depth()
+        self.strategy_adapter.on_after_phase_transition()
         if self.depth_remaining == 0 and not self.epoch_transitions_only:
             assert self.trainer.early_stopping_callback is not None
             self.trainer.early_stopping_callback.final_phase = True  # type: ignore[attr-defined]

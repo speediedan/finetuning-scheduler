@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Fixed the gradients of parameters thawed after phase 0 never being synchronized across processes under the DDP strategies (`ddp`, `ddp_spawn`, `ddp_fork`, `ddp_notebook` and the `ddp_find_unused_parameters_*` variants). `DistributedDataParallel` registers with its gradient reducer only the parameters that require grad when it wraps the module, so each process trained the later phases' parameters on its own data alone and the replicas diverged silently. Fine-Tuning Scheduler now rebuilds the `DistributedDataParallel` wrapper whenever a phase transition (or resuming at a later depth) changes the trainable parameters, through a new `StrategyAdapter.on_after_phase_transition` hook. Custom strategy adapters inherit the fix; an adapter that overrides the new hook should call `super()` [#72](https://github.com/speediedan/finetuning-scheduler/issues/72).
+
 - Fixed the examples' environment logging (`collect_env_info`) failing under PyTorch `2.15`, which added a `rocm_compiled_version` field to `torch.utils.collect_env.SystemEnv`. The examples build that tuple themselves to avoid initializing CUDA; they now pass only the fields the installed PyTorch defines and mark any they do not inspect, so a future field no longer breaks every example.
 
 - Fixed a reinitialization `class_path` without a module path (for example `class_path: SGD`) raising an uncaught `ValueError` from tuple unpacking. It now raises a `MisconfigurationException` that names the `class_path` and asks for a fully qualified path [#61](https://github.com/speediedan/finetuning-scheduler/issues/61).
