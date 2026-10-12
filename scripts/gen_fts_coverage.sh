@@ -245,8 +245,8 @@ collect_env_coverage(){
                     failures_flag="--allow-failures"
                 fi
 
-                log_msg "Running standalone tests (pattern: test_f)"
-                (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f' --log_file=${coverage_session_log} ${failures_flag} >> ${temp_special_log} 2>&1) > /dev/null
+                log_msg "Running standalone tests"
+                (./tests/special_tests.sh --mark_type=standalone --log_file=${coverage_session_log} ${failures_flag} >> ${temp_special_log} 2>&1) > /dev/null
 
                 if [[ $run_all_and_examples -eq 1 ]]; then
                     log_msg "Running all FTS example tests (non-standalone)"

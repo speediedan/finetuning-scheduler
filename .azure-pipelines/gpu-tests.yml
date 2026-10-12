@@ -129,9 +129,11 @@ jobs:
         FTS_CUDA_TESTS_ONLY: "1"
       displayName: 'Testing: CUDA'
 
+    # Every standalone test under tests/: the marker alone defines the partition, so a standalone test in a module whose
+    # name does not start with `test_f` is not silently left out.
     - bash: |
         source /tmp/venvs/fts_dev/bin/activate
-        bash ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
+        bash ./tests/special_tests.sh --mark_type=standalone
       displayName: 'Testing: standalone multi-gpu'
 
     # - bash: |

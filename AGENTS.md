@@ -99,9 +99,9 @@ export GPU_LEASE_CMD=/path/to/gpu_lease.sh        # opt in for this shell
 `tests/special_tests.sh` and `scripts/gen_fts_coverage.sh` self re-exec under the lease, so one acquisition covers a
 whole suite. The Azure GPU pipeline participates too, by bind-mounting the lease directory into the job
 container (`flock` works on the inode, so container and host processes interlock). It tags its lease
-`project=azure-<buildId>` with **no project infix** (`.azure-pipelines/gpu-tests.yml`, the "Acquire host GPU
-lease" step), so that is the shape to recognize in `--status` output. `interpretune` builds share this
-agent and tag `azure-it-<buildId>`, so the infix is how you tell whose build holds the lease.
+`project=azure-<buildId>` with **no project infix** (`.azure-pipelines/scripts/gpu_job_lease.sh`, run by the
+"Acquire host GPU leases" step), so that is the shape to recognize in `--status` output. `interpretune` builds
+share this agent and tag `azure-it-<buildId>`, so the infix is how you tell whose build holds the lease.
 
 Two things worth knowing up front:
 
@@ -296,9 +296,10 @@ the `fts-development-branch-version-upgrade` skill.
   through `requirements/ci/requirements-oldest.txt`.
 - `code-checks.yml` ("Type Checks") — `pyright -p pyproject.toml`.
 - `.azure-pipelines/gpu-tests.yml` — self-hosted, asserts `>= 2` CUDA GPUs. Runs the non-standalone CUDA tests
-  only (`FTS_CUDA_TESTS_ONLY=1`; the hosted matrix runs every other test in that collection), then standalone
-  multi-GPU, examples, and multi-GPU examples as separate steps. It takes the host's `gpu` and `cpu-heavy` leases
-  after installing, through the host lease tool mounted read-only (`.azure-pipelines/scripts/gpu_job_lease.sh`).
+  only (`FTS_CUDA_TESTS_ONLY=1`; the hosted matrix runs every other test in that collection), then every standalone
+  test under `tests/`, examples, and multi-GPU examples as separate steps. It takes the host's `gpu` and
+  `cpu-heavy` leases after installing, through the host lease tool mounted read-only
+  (`.azure-pipelines/scripts/gpu_job_lease.sh`).
 
 ## Known stale references
 

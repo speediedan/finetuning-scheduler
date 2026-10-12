@@ -82,35 +82,38 @@ step. The steps, in order:
 | Step                              | What it runs                                                                                                                                                                    |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Install dependencies`            | `uv pip install -e . -r requirements/ci/requirements.txt --excludes /tmp/venvs/fts_dev/torch-excludes.txt`                                                                      |
-| `Env details`                     | `collect_env_details.py` + the `>= 2` GPU assertion                                                                                                                             |
-| `Testing: standard`               | `coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v`                                                                                    |
-| `Testing: standalone multi-gpu`   | `bash ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'`                                                                                                |
+| `Env details`                     | `collect_env_details.py`, the `>= 2` GPU assertion and the `PL_RUN_CUDA_TESTS=1` assertion                                                                                      |
+| `Acquire host GPU leases`         | `gpu_job_lease.sh acquire`: `gpu` and `cpu-heavy` through the host lease tool, or the plain locks without it                                                                    |
+| `Testing: CUDA`                   | `coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v` with `FTS_CUDA_TESTS_ONLY=1`                                                       |
+| `Testing: standalone multi-gpu`   | `bash ./tests/special_tests.sh --mark_type=standalone`                                                                                                                          |
 | `Testing: Experimental Multi-GPU` | **currently commented out** (`--mark_type=exp_patch --experiment_patch_mask="1 0 0 1"`)                                                                                         |
 | `Statistics`                      | codecov CLI upload, flags `gpu,pytest`                                                                                                                                          |
 | `Testing: Examples`               | `python -m pytest src/fts_examples -v --maxfail=1 --durations=0`                                                                                                                |
 | `Testing: Multi-GPU Examples`     | `special_tests.sh --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'`, with `PYTORCH_KERNEL_CACHE_PATH=/__w/_temp/kernel_cache` |
-| `Cleaning up agent workspace`     | `sudo chmod -R 775 /__w/1/s`, `condition: always()`                                                                                                                             |
+| `Cleaning up agent workspace`     | `sudo chmod -R 775 /__w/1/s`, `gpu_job_lease.sh release`, `condition: always()`                                                                                                 |
 
 `timeoutInMinutes: 100`. Marks are `standalone` and `exp_patch` only — there is no `profile_ci` mark, and
 no `--reruns` flags, so a flaky test fails the build on first occurrence.
 
 ## GPU lease
 
-This pipeline participates in the host GPU lease: it bind-mounts the lease directory into the job
-container, acquires in the first step for the life of the job, releases in `Cleaning up agent workspace`,
-and fails open when the directory is absent. The mechanics are commented inline in
-`.azure-pipelines/gpu-tests.yml`, and AGENTS.md carries the repo-level summary and the CI lease tag shape.
+This pipeline participates in the host GPU lease: it bind-mounts the lease directory and the host lease tool
+(read-only) into the job container, takes the `gpu` and `cpu-heavy` leases in `Acquire host GPU leases` after the
+install, holds them for the rest of the job and releases them in `Cleaning up agent workspace`. Without the tool it
+takes the plain locks, and when the directory is absent it runs unleased. The mechanics are commented inline in
+`.azure-pipelines/gpu-tests.yml` and `.azure-pipelines/scripts/gpu_job_lease.sh`, and AGENTS.md carries the
+repo-level summary and the CI lease tag shape.
 
 **For everything else about the lease, including the hard rule that a CI-held lease is never
 force-reset, use the `gpu-lease` skill.**
 
 ## Step 1: Triage the Failure Class
 
-**Queue / approval** — the build never left `notStarted`. This is not a triage case; go to
+**Queue / approval**: the build never left `notStarted`. This is not a triage case; go to
 `az-pipelines-ops` Step 1 and read the timeline. Do not conclude anything from the approvals endpoint
 alone.
 
-**Infra / runner** — exit `137`, "shutdown signal", agent log shows a restart, or Docker socket errors.
+**Infra / runner**: exit `137`, "shutdown signal", agent log shows a restart, or Docker socket errors.
 Memory pressure is the usual cause, especially on a host with little swap relative to RAM (the current
 host is an example: roughly 62 GiB RAM against 2 GiB swap). Multi-GPU standalone tests each spawn a fresh
 process, so peak usage scales with parallelism. Read the agent's own logs before concluding:
@@ -129,8 +132,9 @@ sudo "$AGENT_HOME"/restart-stack.sh
 Check for orphaned processes from an interrupted standalone run before re-queuing —
 `scripts/manage_standalone_processes.sh` is the tool for reaping them.
 
-**Test failure** — reproduce locally (Step 2). Note which step failed: a `Testing: standard` failure is
-usually reproducible on any machine; a `standalone multi-gpu` or `Multi-GPU Examples` failure usually is not.
+**Test failure**: reproduce locally (Step 2). Note which step failed: a `Testing: CUDA` failure reproduces on
+any CUDA host with `PL_RUN_CUDA_TESTS=1` (CPU-only tests do not run in this pipeline; the hosted matrix runs them); a
+`standalone multi-gpu` or `Multi-GPU Examples` failure usually needs a host with two GPUs.
 
 ## Step 2: Reproduce Locally
 
@@ -170,9 +174,10 @@ Faster iteration without the container, when the failure is not image-specific:
 
 ```bash
 source ${FTS_VENV_BASE}/${FTS_TARGET_VENV}/bin/activate
-python -m pytest src/finetuning_scheduler tests -v
-PL_RUN_STANDALONE_TESTS=1 python -m pytest tests/test_model_parallel.py::test_name -v
-bash ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
+# CUDA tests use the host's GPUs: on a shared host, run them under the GPU lease
+PL_RUN_CUDA_TESTS=1 FTS_CUDA_TESTS_ONLY=1 python -m pytest src/finetuning_scheduler tests -v
+PL_RUN_CUDA_TESTS=1 PL_RUN_STANDALONE_TESTS=1 python -m pytest tests/test_model_parallel.py::test_name -v
+bash ./tests/special_tests.sh --mark_type=standalone
 ```
 
 `special_tests.sh` runs `set -e`; to see every failure in one pass rather than stopping at the first:
