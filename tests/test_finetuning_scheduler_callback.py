@@ -3035,12 +3035,15 @@ def test_fts_ckpt_load_state_dict_resets_wait_count_with_es(tmpdir):
     assert early_stopping.wait_count == 0
 
 
-def test_fts_import_reinit_class_requires_qualified_class_path():
-    """Validate a reinitialization ``class_path`` without a module path raises a ``MisconfigurationException``
-    rather than an uncaught ``ValueError`` (issue #61)."""
+def test_fts_import_reinit_class_bare_class_path():
+    """A reinitialization ``class_path`` without a module path resolves bare ``torch.optim`` optimizer and lr
+    scheduler names; any other bare name raises a ``MisconfigurationException`` rather than an uncaught
+    ``ValueError`` (issue #61)."""
     fts = FinetuningScheduler()
-    with pytest.raises(MisconfigurationException, match=r"\(SGD\).*fully qualified `class_path` is required"):
-        fts._import_reinit_class({"class_path": "SGD"}, "optimizer")
+    assert fts._import_reinit_class({"class_path": "SGD"}, "optimizer") is torch.optim.SGD
+    assert fts._import_reinit_class({"class_path": "StepLR"}, "lr_scheduler") is torch.optim.lr_scheduler.StepLR
+    with pytest.raises(MisconfigurationException, match=r"\(NotAnOptimizer\).*fully qualified `class_path` is"):
+        fts._import_reinit_class({"class_path": "NotAnOptimizer"}, "optimizer")
 
 
 def test_fts_sync_reads_but_never_writes_dotted_paths():

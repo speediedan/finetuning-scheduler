@@ -32,7 +32,9 @@ from finetuning_scheduler.lightning import FTSMisconfigurationException, LIGHTNI
 THIS_FILE = os.path.abspath(__file__)
 CORE_DIR = Path(finetuning_scheduler.__file__).parent / "core"
 CORE_IMPORT_ALLOWLIST = {"torch", "yaml", "fsspec", "typing_extensions"}
-CORE_FTS_IMPORT_ALLOWLIST = ("finetuning_scheduler.core", "finetuning_scheduler.setup_tools")
+# besides the core itself: the build-time helpers and the package metadata (version strings)
+CORE_FTS_IMPORT_ALLOWLIST = ("finetuning_scheduler.core", "finetuning_scheduler.setup_tools",
+                             "finetuning_scheduler.__about__")
 
 
 @pytest.fixture

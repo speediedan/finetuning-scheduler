@@ -23,6 +23,11 @@ foundation model experimentation with flexible fine-tuning schedules. Training w
    useful and for those using the :py:class:`~lightning.pytorch.cli.LightningCLI`, there is a
    :ref:`CLI-based<scheduled-fine-tuning-superglue>` example at the bottom of this introduction.
 
+.. note::
+   New in 2.15 (experimental): Fine-Tuning Scheduler's schedules also run in a plain PyTorch training loop, without
+   Lightning, through :class:`~finetuning_scheduler.core.controller.FTSController`. See
+   :ref:`plain-pytorch-loop`.
+
 Setup
 *****
 Starting with version 2.10, `uv <https://docs.astral.sh/uv/>`_ is the preferred installation approach for
@@ -384,6 +389,11 @@ should install them using the ``[examples]`` extra:
 
    uv pip install finetuning-scheduler['examples']
 
+.. note::
+   The extras that install jsonargparse (``cli``, ``examples``, ``extra`` and ``all``) cap it below 5.0, because
+   :py:class:`~lightning.pytorch.cli.LightningCLI` does not yet support jsonargparse 5. The cap will be lifted once a
+   Lightning release does. Fine-Tuning Scheduler's core and its PyTorch API do not use jsonargparse.
+
 There are three different demo schedule configurations composed with shared defaults (./config/fts_defaults.yaml)
 provided for the default 'rte' task. Note DDP (with auto-selected GPUs) is the default configuration so ensure you
 adjust the configuration files referenced below as desired for other configurations.
@@ -502,6 +512,13 @@ Footnotes
 
 .. toctree::
    :maxdepth: 1
+   :name: PyTorch API
+   :caption: PyTorch API (experimental)
+
+   pytorch/plain_pytorch_loop
+
+.. toctree::
+   :maxdepth: 1
    :name: Enhanced Distributed Strategies
    :caption: Enhanced Distributed Strategies
 
@@ -551,6 +568,7 @@ Footnotes
    :caption: APIs
 
    fts_api
+   core_api
    memprofiler_api
 
 .. toctree::

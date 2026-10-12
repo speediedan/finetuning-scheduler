@@ -14,6 +14,13 @@ from finetuning_scheduler.__about__ import *  # noqa: F401, F403
 from finetuning_scheduler.core import optim as _core_optim  # noqa: F401
 from finetuning_scheduler.core.state import FTSState
 
+# the PyTorch API (experimental): Lightning-free, so imported eagerly
+from finetuning_scheduler.core.controller import FTSController, PhaseEvent
+from finetuning_scheduler.core.host import LRStepConfig, TorchHost, TrainingHost
+from finetuning_scheduler.core.transitions import (AnyOf, CallableTransition, Decision, EpochTransition, GateEvent,
+                                                   GateResult, PlateauTransition, StepTransition, TransitionContext,
+                                                   TransitionPolicy)
+
 if TYPE_CHECKING:  # pragma: no cover
     from finetuning_scheduler.lightning.fts import FinetuningScheduler
     from finetuning_scheduler.lightning.fts_supporters import (CallbackDepMixin, CallbackResolverMixin, FTSCheckpoint,
@@ -48,8 +55,9 @@ def __getattr__(name: str) -> Any:
         if (err.name or "").split(".")[0] not in _LIGHTNING_DISTRIBUTIONS:
             raise
         raise ImportError(
-            f"`{__name__}.{name}` requires Lightning, which could not be imported ({err}). Install `lightning` (or the"
-            " standalone `pytorch-lightning` package) to use the Lightning integration."
+            f"`{__name__}.{name}` requires Lightning, which could not be imported ({err}). Install"
+            " `finetuning-scheduler[lightning]` (or `finetuning-scheduler[pytorch-lightning]` for the standalone"
+            " package) to use the Lightning integration."
         ) from err
     value = getattr(module, name) if name in _LAZY_ATTRS else module
     globals()[name] = value
@@ -61,6 +69,21 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "AnyOf",
+    "CallableTransition",
+    "Decision",
+    "EpochTransition",
+    "FTSController",
+    "GateEvent",
+    "GateResult",
+    "LRStepConfig",
+    "PhaseEvent",
+    "PlateauTransition",
+    "StepTransition",
+    "TorchHost",
+    "TrainingHost",
+    "TransitionContext",
+    "TransitionPolicy",
     "FTSState",
     "FTSCheckpoint",
     "FTSEarlyStopping",

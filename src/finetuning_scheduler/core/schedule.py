@@ -23,7 +23,7 @@ import os
 import pathlib
 import re
 from collections import Counter
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 
 import yaml
 from torch import nn
@@ -100,23 +100,20 @@ def save_schedule(schedule_name: str, layer_config: dict, dump_loc: str | os.Pat
     return ft_schedule_yaml
 
 
-def gen_ft_schedule(module: nn.Module, dump_loc: str | os.PathLike) -> os.PathLike | None:
-    """Generate the default fine-tuning schedule for ``module`` and save it to ``dump_loc``.
-
-    Parameters are thawed in pairs, starting from the last registered parameter.
+def build_default_schedule(module: nn.Module) -> dict:
+    """Build the default fine-tuning schedule for ``module``: parameters are thawed in pairs, starting from the
+    last registered parameter.
 
     Args:
-        module: The module for which a fine-tuning schedule will be generated.
-        dump_loc: The directory to which the generated schedule (.yaml) should be written.
+        module: The module for which to build a schedule.
 
     Returns:
-        The path to the generated schedule.
+        The schedule, mapping each phase to its ``params``.
     """
     # Note: This initial default fine-tuning schedule generation approach is intentionally simple/naive but is
     # effective for a surprising fraction of models. Future versions of this callback may use module
     # introspection to generate default schedules that better accommodate more complex structures and
     # specific architectures if the callback proves sufficiently useful.
-    rank_zero_info(f"Proceeding with dumping default fine-tuning schedule for {module.__class__.__name__}")
     param_lists: list = []
     cur_group: list = []
     model_params = list(module.named_parameters())[::-1]
@@ -132,6 +129,22 @@ def gen_ft_schedule(module: nn.Module, dump_loc: str | os.PathLike) -> os.PathLi
     layer_config = {}
     for i, param_l in enumerate(param_lists):
         layer_config[i] = {"params": param_l}
+    return layer_config
+
+
+def gen_ft_schedule(module: nn.Module, dump_loc: str | os.PathLike) -> os.PathLike | None:
+    """Generate the default fine-tuning schedule for ``module`` (see :func:`build_default_schedule`) and save it to
+    ``dump_loc``.
+
+    Args:
+        module: The module for which a fine-tuning schedule will be generated.
+        dump_loc: The directory to which the generated schedule (.yaml) should be written.
+
+    Returns:
+        The path to the generated schedule.
+    """
+    rank_zero_info(f"Proceeding with dumping default fine-tuning schedule for {module.__class__.__name__}")
+    layer_config = build_default_schedule(module)
     schedule_name = f"{module.__class__.__name__}_ft_schedule.yaml"
     assert dump_loc is not None
     return save_schedule(schedule_name, layer_config, dump_loc)
@@ -247,7 +260,7 @@ def parse_phase_lr(schedule: dict, depth: int, base_max_lr: float) -> None:
         except ValueError:
             raise FTSConfigurationError(
                 f"The lr '{schedule[depth]['lr']}' in phase {depth} of the provided explicit schedule"
-                "could not be cast to a float. Specified learning rates must be convertable to a float."
+                " could not be cast to a float. Specified learning rates must be convertable to a float."
             )
     else:
         if schedule[depth].get("lr", None):
@@ -370,3 +383,148 @@ def parse_reinit_pg_lrs(depth: int, init_pg_lrs: list) -> None:
                 "the provided explicit schedule could be cast to a float. Specified learning rates must be "
                 "convertable to a float."
             )
+
+
+def update_epoch_watermark(schedule: dict, depth: int, max_epoch_wm: int, epoch_transitions_only: bool) -> int:
+    """Raise the schedule's epoch watermark to phase ``depth``'s ``max_transition_epoch``, reporting a phase whose
+    ``max_transition_epoch`` does not exceed an earlier phase's (it may then run for a single epoch).
+
+    Phase 0 does not participate: callers start at depth 1.
+
+    Returns:
+        The updated watermark.
+    """
+    curr_max_epoch = schedule[depth]["max_transition_epoch"]
+    if 0 <= curr_max_epoch <= max_epoch_wm:
+        es_addendum = " depending upon EarlyStopping criteria."
+        rank_zero_info(
+            f"Specified max_transition_epoch of depth {depth}"
+            f"({schedule[depth]['max_transition_epoch']}) is less than or equal to a "
+            f"previous max_transition_epoch ({max_epoch_wm}), depth may execute only a single "
+            f"epoch{'.' if epoch_transitions_only else es_addendum}"
+        )
+    return max(max_epoch_wm, curr_max_epoch)
+
+
+def collect_reinit_cfgs(schedule: dict, implicit_cfgs: dict[str, dict | None]) -> dict[str, dict]:
+    """Gather each reinitialization directive: the implicit-mode configuration if given, otherwise the per-phase
+    configurations keyed by depth.
+
+    Args:
+        schedule: The fine-tuning schedule.
+        implicit_cfgs: Each reinitialization key (``new_optimizer``, ``new_lr_scheduler``) mapped to its implicit-mode
+            configuration, or ``None``.
+    """
+    return {
+        reinit_k: implicit or {d: schedule[d].get(reinit_k) for d in schedule.keys() if schedule[d].get(reinit_k)}
+        for reinit_k, implicit in implicit_cfgs.items()
+    }
+
+
+def refuse_phase0_reinit(reinit_cfg: dict[str, dict]) -> None:
+    """Refuse a reinitialization directive on the initial phase, whose configuration belongs to the model itself.
+
+    Raises:
+        FTSConfigurationError: If any directive targets phase 0.
+    """
+    for rk, rp in reinit_cfg.items():
+        if isinstance(rp, dict) and 0 in rp.keys():
+            raise FTSConfigurationError(
+                f"You have specified a `{rk}` reinitialization directive for the initial training phase which is an "
+                "invalid configuration. The initial configuration should be passed to your LightningModule."
+            )
+
+
+def check_schedule_vs_reinit_lr(explicit_schedule: bool, reinit_lr_cfg: dict | None) -> None:
+    """Refuse an implicit-mode lr scheduler reinitialization configuration alongside an explicit schedule.
+
+    Raises:
+        FTSConfigurationError: If both are given.
+    """
+    if explicit_schedule and reinit_lr_cfg:
+        error_msg = (
+            "Specifying both `ft_schedule` and `reinit_lr_cfg` is an invalid configuration. `reinit_lr_cfg` "
+            "specifies an lr scheduler configuration to reinitialize with at every new phase of an implicitly "
+            "defined fine-tuning shedule whereas `ft_schedule` is an explicity defined schedule. To reinitialize "
+            "a given lr scheduler configuration with an explicit fine-tuning schedule, please add the desired "
+            "lr scheduler configurations to your explicit schedule using the `new_lr_scheduler` key of the "
+            "relevant phases."
+        )
+        rank_zero_warn(error_msg)
+        raise FTSConfigurationError(error_msg)
+
+
+def resolve_max_depth(max_depth: int, num_phases: int) -> int:
+    """The deepest phase to run: every phase when ``max_depth`` is ``-1``, otherwise ``max_depth`` capped at the
+    final phase."""
+    return num_phases - 1 if max_depth == -1 else min(max_depth, num_phases - 1)
+
+
+def final_phase_max_epochs(schedule: dict, max_phase: int, max_epoch_wm: int, max_epochs: int) -> int | None:
+    """When the final phase sets ``max_transition_epoch``, warn that it is overridden and return the run's maximum
+    epoch count (the greater of ``max_epochs`` and the schedule's epoch watermark); otherwise ``None``."""
+    if schedule[max_phase]["max_transition_epoch"] < 0:
+        return None
+    rank_zero_warn(
+        "Final phase max_transition_epoch"
+        f" ({schedule[max_phase]['max_transition_epoch']})"
+        f" will be overidden by the greater of max_epochs ({max_epochs}) and"
+        f" the maximum phase-specified epoch ({max_epoch_wm})."
+    )
+    return max(max_epoch_wm, max_epochs)
+
+
+# phase keys only the PyTorch API interprets in this release
+DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides")
+
+
+def parse_phase_extensions(schedule: dict) -> None:
+    """Validate and normalize, in place, the phase keys the PyTorch API adds.
+
+    - ``max_transition_step``: a global optimizer step count at which the phase ends (default ``-1``, unset).
+    - ``phase_config``: an opaque mapping handed to phase hooks and gates.
+    - ``pg_overrides``: optimizer options (other than ``params`` and ``lr``, which have their own keys) applied to the
+      parameter group the phase adds.
+
+    Raises:
+        FTSConfigurationError: If a key has the wrong type.
+    """
+    for depth, phase in schedule.items():
+        mts = phase.setdefault("max_transition_step", -1)
+        if isinstance(mts, bool) or not isinstance(mts, int) or mts < -1:
+            raise FTSConfigurationError(
+                f"Phase {depth}'s `max_transition_step` must be an integer >= 0 (or -1, unset), got {mts!r}."
+            )
+        if "phase_config" in phase and not isinstance(phase["phase_config"], Mapping):
+            raise FTSConfigurationError(
+                f"Phase {depth}'s `phase_config` must be a mapping, got {type(phase['phase_config']).__name__}."
+            )
+        overrides = phase.get("pg_overrides")
+        if overrides is not None:
+            if not isinstance(overrides, Mapping):
+                raise FTSConfigurationError(
+                    f"Phase {depth}'s `pg_overrides` must be a mapping of optimizer options, got "
+                    f"{type(overrides).__name__}."
+                )
+            reserved = sorted({"params", "lr"} & set(overrides))
+            if reserved:
+                raise FTSConfigurationError(
+                    f"Phase {depth}'s `pg_overrides` may not set {reserved}: set the phase's parameters with `params` "
+                    "and its learning rate with `lr`."
+                )
+
+
+def refuse_direct_api_keys(schedule: dict) -> None:
+    """Refuse the phase keys only the PyTorch API interprets, naming each phase that uses one.
+
+    Raises:
+        FTSConfigurationError: If any phase uses one.
+    """
+    used = {depth: sorted(k for k in DIRECT_API_PHASE_KEYS if k in phase) for depth, phase in schedule.items()}
+    used = {depth: keys for depth, keys in used.items() if keys}
+    if used:
+        detail = "; ".join(f"phase {depth}: {', '.join(keys)}" for depth, keys in used.items())
+        raise FTSConfigurationError(
+            f"The schedule uses keys only the PyTorch API (`FTSController`) supports in this release ({detail})."
+            " Remove them to use the schedule with the Lightning callback."
+        )
