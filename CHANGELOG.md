@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Added `finetuning_scheduler.core`, a scheduling core that does not depend on Lightning. It holds schedule generation, loading, saving and validation; optimizer and lr scheduler reinitialization checks; parameter group growth; lr state restoration; and the scheduler state. It imports only PyTorch, PyYAML, fsspec and the standard library, and the Lightning integration delegates to it. The core raises configuration errors as `FTSConfigurationError`, a `ValueError`. Under Lightning they are raised as `FTSMisconfigurationException`, which is both an `FTSConfigurationError` and a Lightning `MisconfigurationException`, so existing `except MisconfigurationException` handlers keep catching them, and `except ValueError` now catches them too [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
+
 ### Fixed
 
 - Fixed the examples' environment logging (`collect_env_info`) failing under PyTorch `2.15`, which added a `rocm_compiled_version` field to `torch.utils.collect_env.SystemEnv`. The examples build that tuple themselves to avoid initializing CUDA; they now pass only the fields the installed PyTorch defines and mark any they do not inspect, so a future field no longer breaks every example.
@@ -35,6 +37,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Capped `jsonargparse` below `5.0` in the `cli`, `extra`, `examples` and `all` extras. jsonargparse `5.0` removes `ArgumentParser.add_instantiator`, which `LightningCLI` still calls, and Lightning's own `<5.0` cap applies only to Lightning's extras, which FTS does not install. The examples now call `add_class_arguments` in place of `add_dataclass_arguments`, which `5.0` also removes [#60](https://github.com/speediedan/finetuning-scheduler/issues/60).
 
 - Declared `PyYAML>=6.0.2` as a base dependency. FTS imports `yaml` directly but previously received it only through Lightning. The floor is the first release with wheels for every supported Python version [#64](https://github.com/speediedan/finetuning-scheduler/issues/64).
+
+- Declared `fsspec>=2023.5.0` as a base dependency. The scheduling core reads and writes schedules through it directly; it previously arrived only through Lightning [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
+
+- Importing `finetuning_scheduler` no longer imports Lightning. The Lightning integration (`FinetuningScheduler`, `FTSCheckpoint`, `FTSEarlyStopping`, the scheduling mixins, the `fts`, `fts_supporters` and `strategy_adapters` modules, and `types.BaseCallbackDepType`) loads on first access, and raises an `ImportError` naming the missing package when Lightning is not installed. Lightning remains a base dependency [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
+
+- Moved the Lightning integration modules to `finetuning_scheduler.lightning.fts` and `finetuning_scheduler.lightning.fts_supporters`. `finetuning_scheduler.fts` and `finetuning_scheduler.fts_supporters` remain importable and keep their API documentation pages and anchors. The classes' `__module__` (and so their `repr`) now names the new modules; logger names are unchanged [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
 
 ### Deprecated
 

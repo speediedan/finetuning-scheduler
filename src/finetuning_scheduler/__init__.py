@@ -15,20 +15,20 @@ from finetuning_scheduler.core import optim as _core_optim  # noqa: F401
 from finetuning_scheduler.core.state import FTSState
 
 if TYPE_CHECKING:
-    from finetuning_scheduler.fts import FinetuningScheduler
-    from finetuning_scheduler.fts_supporters import (CallbackDepMixin, CallbackResolverMixin, FTSCheckpoint,
+    from finetuning_scheduler.lightning.fts import FinetuningScheduler
+    from finetuning_scheduler.lightning.fts_supporters import (CallbackDepMixin, CallbackResolverMixin, FTSCheckpoint,
                                                      FTSEarlyStopping, ScheduleImplMixin, ScheduleParsingMixin)
 
 # The Lightning-bound names, with the module defining each. They (and the Lightning-bound submodules) load on first
 # access, so importing this package does not import Lightning.
 _LAZY_ATTRS = {
-    "FinetuningScheduler": "finetuning_scheduler.fts",
-    "FTSCheckpoint": "finetuning_scheduler.fts_supporters",
-    "FTSEarlyStopping": "finetuning_scheduler.fts_supporters",
-    "ScheduleImplMixin": "finetuning_scheduler.fts_supporters",
-    "ScheduleParsingMixin": "finetuning_scheduler.fts_supporters",
-    "CallbackDepMixin": "finetuning_scheduler.fts_supporters",
-    "CallbackResolverMixin": "finetuning_scheduler.fts_supporters",
+    "FinetuningScheduler": "finetuning_scheduler.lightning.fts",
+    "FTSCheckpoint": "finetuning_scheduler.lightning.fts_supporters",
+    "FTSEarlyStopping": "finetuning_scheduler.lightning.fts_supporters",
+    "ScheduleImplMixin": "finetuning_scheduler.lightning.fts_supporters",
+    "ScheduleParsingMixin": "finetuning_scheduler.lightning.fts_supporters",
+    "CallbackDepMixin": "finetuning_scheduler.lightning.fts_supporters",
+    "CallbackResolverMixin": "finetuning_scheduler.lightning.fts_supporters",
 }
 _LAZY_SUBMODULES = ("fts", "fts_supporters", "lightning", "strategy_adapters", "types")
 _LIGHTNING_DISTRIBUTIONS = ("lightning", "pytorch_lightning", "lightning_fabric", "lightning_utilities", "torchmetrics")

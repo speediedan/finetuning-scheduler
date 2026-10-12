@@ -13,6 +13,11 @@ r"""
 Fine-Tuning Scheduler Lightning Integration
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+The Lightning integration: the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback
+(``finetuning_scheduler.lightning.fts``) and its supporting callbacks and mixins
+(``finetuning_scheduler.lightning.fts_supporters``). Their established import paths, ``finetuning_scheduler.fts`` and
+``finetuning_scheduler.fts_supporters``, remain available.
+
 Importing this package registers Lightning's rank-zero utilities and exception type with the Fine-Tuning Scheduler
 core, so core code reports ranks, logs, warns and raises exactly as the rest of a Lightning program does.
 
