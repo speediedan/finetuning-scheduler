@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
-- Added a warning when an FSDP2 data-parallel run under `FTSController` leaves scheduled parameters unsharded (a plan that does not shard the root module), since nothing synchronizes their gradients across ranks [#87](https://github.com/speediedan/finetuning-scheduler/issues/87).
+- Added a warning when an FSDP2 data-parallel run under `FTSController` leaves scheduled parameters outside every FSDP2 module (a plan that does not shard the root module), including tensor-parallel `DTensor` parameters, since nothing synchronizes their gradients across data-parallel ranks [#87](https://github.com/speediedan/finetuning-scheduler/issues/87).
 
 - Added an FSDP2 and tensor-parallel example for the experimental PyTorch API (`fts_examples/model_parallel/torch_mp_example.py`), the plain-loop counterpart of the Lightning model-parallel example. A `torchrun` script with no Lightning import, it builds the same Llama model on the meta device, applies the tensor-parallel plan and then an FSDP2 plan over a data-parallel by tensor-parallel device mesh, and runs the same schedule with `FTSController`, `PlateauTransition`, `max_transition_epoch` and `BestCheckpoint`, using loss parallelism under tensor parallelism. The plan helpers and the random-token dataset the two examples share moved to a Lightning-free module, `fts_examples/model_parallel/parallel_plans.py` (still importable from their old locations), which also gains `apply_fsdp_plan`: it applies the Lightning example's `fsdp_plan` format by hand and shards the root module last, so no parameter is left unsharded [#88](https://github.com/speediedan/finetuning-scheduler/issues/88).
 
@@ -28,7 +28,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Fixed the callback thawing unsharded copies of the root FSDP2 module's parameters after a validation pass, so they never trained, when `restore_best` is off and no checkpoint is written at that validation. The callback now reshards every FSDP2 module before it restores and thaws parameters at a phase transition [#92](https://github.com/speediedan/finetuning-scheduler/issues/92).
 
-- Fixed `FTSController` thawing FSDP2's unsharded parameters, which then never trained: FSDP2 can leave a module's unsharded parameters registered between steps (the root module's after a forward-only evaluation pass, or a root module's whose parameters were all frozen). The controller now reshards every FSDP2 module before it freezes or thaws parameters, restores a checkpoint or writes one [#90](https://github.com/speediedan/finetuning-scheduler/issues/90).
+- Fixed `FTSController` thawing FSDP2's unsharded parameters, which then never trained: FSDP2 can leave a module's unsharded parameters registered between steps (a root module's after a forward-only evaluation pass, or after a training forward when all of its parameters were frozen). The controller now reshards every FSDP2 module before it freezes or thaws parameters, restores a checkpoint or writes one [#90](https://github.com/speediedan/finetuning-scheduler/issues/90).
 
 - Fixed `FTSController` accepting a `DistributedDataParallel` wrapper on a submodule, or a module under torch's composable `replicate()`, neither of which synchronizes parameters thawed after phase 0. Both are now refused, as a `DistributedDataParallel`-wrapped model already was [#89](https://github.com/speediedan/finetuning-scheduler/issues/89).
 

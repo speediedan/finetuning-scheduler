@@ -516,6 +516,7 @@ Footnotes
    :caption: PyTorch API (experimental)
 
    pytorch/plain_pytorch_loop
+   pytorch/model_parallel_plain_loop
 
 .. toctree::
    :maxdepth: 1
