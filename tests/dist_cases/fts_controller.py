@@ -122,3 +122,106 @@ def veto_on_rank(ctx, ckpt_dir: str, veto_rank: int = 1, epochs: int = 7, steps:
     shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
     path = _train(fts, model, x, y, shard, ctx.device, epochs)
     return {"path": path, "depth": fts.curr_depth, "stop": fts.stop_reason, "params": _params(model)}
+
+
+def unsynced_metrics(ctx, ckpt_dir: str, epochs: int = 5, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
+    """Ranks report different metrics: the best-checkpoint decision (which gates collective saves) must still be
+    agreed, so the run neither deadlocks nor diverges."""
+    model = _model(seed).to(ctx.device)
+    fts = _controller(model, ckpt_dir, True)
+    x, y = _data(epochs, steps, batch, seed)
+    val = [1.0, 0.8, 0.7, 0.6, 0.5] if ctx.rank == 0 else [1.0, 1.1, 1.2, 1.3, 1.4]
+    path = []
+    for epoch in fts.epochs(epochs):
+        path.append((epoch, fts.curr_depth))
+        for step in range(steps):
+            F.mse_loss(model(x[epoch, step].to(ctx.device)), y[epoch, step].to(ctx.device)).backward()
+            fts.optimizer.step()
+            fts.optimizer.zero_grad()
+        fts.epoch_end({"val_loss": val[epoch]})
+    return {"path": path, "best_depth": fts._checkpoint.best_depth, "restored": fts.restored_count}
+
+
+def optimizer_state_edges(ctx, ckpt_dir: str, epochs: int = 7, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
+    """Sharded checkpoint edge cases around DSD's optimizer-state initialization: saving before any step must not
+    change the optimizer (Adam, ``save_initial``); restoring while gradients are present must still load the state
+    (``zero_grad(set_to_none=False)``)."""
+    x, y = _data(epochs, steps, batch, seed)
+    shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
+    out = {}
+    for save_initial in (False, True):
+        model = _sharded_model(ctx, seed)
+        fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.Adam, lr=0.01),
+                            transition=PlateauTransition("val_loss", patience=1), host=TorchHost(model),
+                            checkpoint=BestCheckpoint(os.path.join(ckpt_dir, f"adam_{save_initial}"), "val_loss",
+                                                      save_initial=save_initial))
+        fts.setup()
+        _train(fts, model, x, y, shard, ctx.device, 2)
+        out[f"adam_save_initial_{save_initial}"] = _params(model)
+    for set_to_none in (True, False):
+        model = _sharded_model(ctx, seed)
+        fts = _controller(model, os.path.join(ckpt_dir, f"stn_{set_to_none}"), True)
+        for epoch in fts.epochs(epochs):
+            for step in range(steps):
+                F.mse_loss(model(x[epoch, step, shard].to(ctx.device)),
+                           y[epoch, step, shard].to(ctx.device)).backward()
+                fts.optimizer.step()
+                fts.optimizer.zero_grad(set_to_none=set_to_none)
+            fts.epoch_end({"val_loss": VAL[epoch]})
+        out[f"set_to_none_{set_to_none}"] = _params(model)
+    return out
+
+
+def save_at_boundary(ctx, ckpt_dir: str, epochs: int = 7, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
+    """A sharded save right after a phase boundary, before the new phase's parameters have optimizer state, loads
+    and resumes exactly."""
+    x, y = _data(epochs, steps, batch, seed)
+    shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
+    first_model = _sharded_model(ctx, seed)
+    first = _controller(first_model, os.path.join(ckpt_dir, "first"), True)
+    path, saved = [], None
+    for epoch in first.epochs(epochs):
+        path.append((epoch, first.curr_depth, len(first.optimizer.param_groups)))
+        if first.curr_depth == 1:
+            saved = first.save(os.path.join(ckpt_dir, "boundary_resume"))
+            break
+        for step in range(steps):
+            F.mse_loss(first_model(x[epoch, step, shard].to(ctx.device)),
+                       y[epoch, step, shard].to(ctx.device)).backward()
+            first.optimizer.step()
+            first.optimizer.zero_grad()
+        first.epoch_end({"val_loss": VAL[epoch]})
+    model = _sharded_model(ctx, seed + 100)
+    fts = _controller(model, os.path.join(ckpt_dir, "first"), True)
+    fts.load(saved)
+    path.pop()  # the boundary epoch is run again by the resumed controller
+    path = _train(fts, model, x, y, shard, ctx.device, epochs, path=path)
+    return {"path": path, "params": _params(model)}
+
+
+class _Position:
+    def __init__(self, n):
+        self.n = n
+
+    def state_dict(self):
+        return {"n": self.n}
+
+    def load_state_dict(self, state):
+        self.n = state["n"]
+
+
+def per_rank_state(ctx, ckpt_dir: str, sharded: bool, seed: int = 7) -> dict:
+    """Registered state and random streams are per rank, and each rank gets its own back on load."""
+    model = _sharded_model(ctx, seed) if sharded else _model(seed).to(ctx.device)
+    fts = _controller(model, os.path.join(ckpt_dir, "first"), True)
+    position = _Position(100 + ctx.rank)
+    fts.register_stateful("loader", position)
+    torch.manual_seed(1000 + ctx.rank)
+    saved = fts.save(os.path.join(ckpt_dir, "state" if sharded else "state.pt"))
+    expected = torch.rand(3).tolist()
+    model2 = _sharded_model(ctx, seed) if sharded else _model(seed).to(ctx.device)
+    fts2 = _controller(model2, os.path.join(ckpt_dir, "first"), True)
+    position2 = _Position(-1)
+    fts2.register_stateful("loader", position2)
+    fts2.load(saved)
+    return {"rank": ctx.rank, "position": position2.n, "rng_matches": torch.rand(3).tolist() == expected}

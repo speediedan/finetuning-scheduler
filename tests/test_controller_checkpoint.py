@@ -19,7 +19,7 @@ import torch
 from finetuning_scheduler.core.checkpoint import BestCheckpoint, load_payload
 from finetuning_scheduler.core.controller import FTSController
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.core.transitions import GateResult
+from finetuning_scheduler.core.transitions import GateResult, PlateauTransition
 from tests.test_controller import _run, _train_epoch, Net, SCHEDULE
 
 
@@ -186,3 +186,71 @@ def test_save_load_resumes_exactly(tmp_path):
     assert trace == ref_trace
     for (n, p), (_, q) in zip(ref_model.named_parameters(), resumed_model.named_parameters()):
         assert torch.equal(p, q), n
+
+
+def test_checkpoint_files_are_replaced_only_when_complete(tmp_path):
+    """Writes go beside the target and are moved over it, and a copy replaces a file or a directory alike."""
+    from finetuning_scheduler.core.checkpoint import copy_checkpoint, save_payload
+
+    target = tmp_path / "ckpt.pt"
+    save_payload({"v": 1}, target)
+    save_payload({"v": 2}, target)
+    assert load_payload(target) == {"v": 2} and sorted(p.name for p in tmp_path.iterdir()) == ["ckpt.pt"]
+    shard_dir = tmp_path / "sharded"
+    shard_dir.mkdir()
+    (shard_dir / "part").write_text("x")
+    copy_checkpoint(str(shard_dir), str(target))  # a directory over an existing file
+    assert (target / "part").read_text() == "x"
+    copy_checkpoint(str(tmp_path / "sharded" / "part"), str(target))  # and a file over a directory
+    assert target.is_file()
+    assert not [p for p in tmp_path.iterdir() if ".tmp-" in p.name]
+
+
+def test_resume_keeps_the_metrics_a_pending_boundary_sees(tmp_path):
+    """A state saved while a transition is pending resumes with the metrics the boundary's gate receives."""
+    events = {}
+
+    def run(save_at=None, load_from=None):
+        torch.manual_seed(0)
+        model = Net()
+        fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1),
+                            transition=PlateauTransition("loss", patience=1),
+                            checkpoint=BestCheckpoint(tmp_path / "c", "loss"))
+        seen = []
+        fts.add_gate(lambda e: seen.append(dict(e.metrics)) or True)
+        fts.setup()
+        if load_from is not None:
+            fts.load(load_from)
+        for epoch in fts.epochs(4):
+            _train_epoch(fts, model, steps=1, seed=epoch)
+            fts.epoch_end({"loss": 1.0})
+            if epoch == save_at:
+                fts.save(tmp_path / "pending.pt")
+                return seen
+        return seen
+
+    events["straight"] = run()
+    run(save_at=1)  # loss plateaus with patience 1, so an ADVANCE is pending after epoch 1
+    events["resumed"] = run(load_from=tmp_path / "pending.pt")
+    assert events["straight"] and events["resumed"]
+    assert {k: float(v) for k, v in events["resumed"][0].items()} == {"loss": 1.0}
+    assert {k: float(v) for k, v in events["straight"][0].items()} == {"loss": 1.0}
+
+
+def test_resuming_a_finished_run_reopens_its_phase(tmp_path):
+    """A state saved after ``epochs`` returned (training ended) resumes with the current phase open: its end hooks
+    run again at its real end."""
+    ends = []
+    torch.manual_seed(0)
+    model = Net()
+    first = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1))
+    first.setup()
+    _run(first, model, 2)
+    first.save(tmp_path / "ended.pt")
+    model2 = Net()
+    fts = FTSController(model2, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1))
+    fts.add_phase_hook(lambda e: ends.append(e.depth), when="end")
+    fts.setup()
+    fts.load(tmp_path / "ended.pt")
+    _run(fts, model2, 5)
+    assert ends == [1, 2]  # phase 1 (current when saved) ends at its real boundary, then the final phase

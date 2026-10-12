@@ -535,3 +535,14 @@ def test_in_place_compile_is_detected():
     assert not _is_compiled(model)
     model.compile()
     assert _is_compiled(model)
+
+
+def test_max_epochs_extension_follows_the_schedules_last_phase():
+    """As the Lightning callback does, ``max_epochs`` is extended only when the schedule's last phase sets
+    ``max_transition_epoch``, even when ``max_depth`` stops earlier."""
+    schedule = {0: {"params": ["l2.weight", "l2.bias"], "max_transition_epoch": 1},
+                1: {"params": ["l1.weight", "l1.bias"], "max_transition_epoch": 3}, 2: {"params": ["l0.weight"]}}
+    model = Net()
+    fts = FTSController(model, schedule, optimizer=partial(torch.optim.SGD, lr=0.1), max_depth=1)
+    fts.setup()
+    assert len(_run(fts, model, 2)) == 2

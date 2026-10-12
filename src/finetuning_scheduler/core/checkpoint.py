@@ -36,10 +36,16 @@ from finetuning_scheduler.core.dist import rank_zero_warn
 
 
 def save_payload(payload: Mapping[str, Any], path: str | os.PathLike) -> str:
-    """Write a checkpoint payload to ``path`` (creating its directory) and return the path."""
+    """Write a checkpoint payload to ``path`` (creating its directory) and return the path.
+
+    The payload is written
+    beside ``path`` and then moved over it, so an interrupted write never destroys an existing checkpoint.
+    """
     path = os.fspath(path)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    torch.save(dict(payload), path)
+    tmp = f"{path}.tmp-{os.getpid()}"
+    torch.save(dict(payload), tmp)
+    os.replace(tmp, path)
     return path
 
 
@@ -48,15 +54,35 @@ def load_payload(path: str | os.PathLike) -> dict[str, Any]:
     return torch.load(os.fspath(path), map_location="cpu", weights_only=False)
 
 
+def remove_checkpoint(path: str) -> None:
+    """Remove a checkpoint file or directory, if there is one."""
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path)
+    elif os.path.lexists(path):
+        os.remove(path)
+
+
+def replace_checkpoint(source: str, target: str) -> None:
+    """Move a freshly written checkpoint file or directory over ``target`` (whatever ``target`` holds)."""
+    if os.path.isdir(source) or os.path.isdir(target):
+        remove_checkpoint(target)
+    os.replace(source, target)
+
+
 def copy_checkpoint(source: str, target: str) -> None:
-    """Copy a checkpoint file, or a sharded checkpoint's directory, to ``target`` (replacing it)."""
+    """Copy a checkpoint file, or a sharded checkpoint's directory, to ``target`` (replacing it, whether it is a
+    file or a directory).
+
+    The copy is made beside ``target`` first, so ``target`` is replaced only by a complete
+    copy.
+    """
+    tmp = f"{target}.tmp-{os.getpid()}"
+    remove_checkpoint(tmp)
     if os.path.isdir(source):
-        shutil.rmtree(target, ignore_errors=True)
-        shutil.copytree(source, target)
+        shutil.copytree(source, tmp)
     else:
-        if os.path.isdir(target):
-            shutil.rmtree(target)
-        shutil.copyfile(source, target)
+        shutil.copyfile(source, tmp)
+    replace_checkpoint(tmp, target)
 
 
 @runtime_checkable

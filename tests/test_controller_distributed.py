@@ -65,3 +65,33 @@ def test_fsdp2_matches_single_process_nccl(nccl_pool, tmp_path):
     ref = fts_controller.reference(ckpt_dir=str(tmp_path / "ref"), restore_best=True)
     assert sharded["path"] == ref["path"]
     assert _close(results[0]["params"], ref["params"], tol=1e-4)
+
+
+@GLOO
+def test_unsynced_metrics_agree_on_the_best(gloo_pool, tmp_path):
+    results = gloo_pool.run(fts_controller.unsynced_metrics, ckpt_dir=str(tmp_path / "unsynced"))
+    assert_ranks_agree(results)
+
+
+@GLOO
+def test_sharded_optimizer_state_edges(gloo_pool, tmp_path):
+    results = gloo_pool.run(fts_controller.optimizer_state_edges, ckpt_dir=str(tmp_path / "edges"))
+    r = results[0]
+    assert _close(r["adam_save_initial_True"], r["adam_save_initial_False"], tol=0.0)
+    assert _close(r["set_to_none_False"], r["set_to_none_True"], tol=0.0)
+
+
+@GLOO
+def test_sharded_save_at_a_boundary_resumes(gloo_pool, tmp_path):
+    resumed = gloo_pool.run(fts_controller.save_at_boundary, ckpt_dir=str(tmp_path / "boundary"))
+    straight = gloo_pool.run(fts_controller.phases, ckpt_dir=str(tmp_path / "straight"))
+    assert resumed[0]["path"] == straight[0]["path"]
+    assert _close(resumed[0]["params"], straight[0]["params"], tol=1e-6)
+
+
+@GLOO
+@pytest.mark.parametrize("sharded", [False, True], ids=["unsharded", "sharded"])
+def test_per_rank_state_is_restored_per_rank(gloo_pool, tmp_path, sharded):
+    results = gloo_pool.run(fts_controller.per_rank_state, ckpt_dir=str(tmp_path / "per_rank"), sharded=sharded)
+    assert sorted((r["rank"], r["position"]) for r in results) == [(0, 100), (1, 101)]
+    assert all(r["rng_matches"] for r in results)

@@ -38,7 +38,8 @@ from torch.utils.hooks import RemovableHandle
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import phase as core_phase
 from finetuning_scheduler.core import schedule as core_schedule
-from finetuning_scheduler.core.checkpoint import CheckpointPolicy, load_payload, save_payload
+from finetuning_scheduler.core.checkpoint import (CheckpointPolicy, load_payload, remove_checkpoint, replace_checkpoint,
+                                                  save_payload)
 from finetuning_scheduler.core.config import config_hash, describe_callable
 from finetuning_scheduler.core.dist import rank_zero_info, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
@@ -474,8 +475,9 @@ class FTSController:
         ``max_epochs`` and the schedule's highest ``max_transition_epoch`` (with a warning).
         """
         self._require_setup()
-        extended = core_schedule.final_phase_max_epochs(self._schedule, self._max_depth, self._epoch_watermark,
-                                                        max_epochs)
+        # as the Lightning callback does, the schedule's last phase (not `max_depth`'s) decides the extension
+        extended = core_schedule.final_phase_max_epochs(self._schedule, len(self._schedule) - 1,
+                                                        self._epoch_watermark, max_epochs)
         max_epochs = extended if extended is not None else max_epochs
         self._host.set_max_epochs(max_epochs)
         while self._host.current_epoch < max_epochs and not self._should_stop:
@@ -515,7 +517,7 @@ class FTSController:
         self._epoch_end_called = True
         self._last_metrics = dict(metrics or {})
         decision, reason = self._evaluate("epoch", metrics, completed_epochs=self._host.current_epoch + 1)
-        if self._checkpoint is not None and metrics is not None and self._checkpoint.observe(metrics, self._depth):
+        if self._checkpoint is not None and metrics is not None and self._observe_best(metrics):
             self._write_checkpoint(self._checkpoint.path_for("best"))
         self._host.advance_epoch()
         if decision >= Decision.STOP:
@@ -861,21 +863,39 @@ class FTSController:
         a directory written by every rank through DCP, with the non-tensor state in ``fts_meta.pt`` and each rank's
         random generator state (if given) beside it."""
         path = os.fspath(path)
+        # registered state (a data-loader position, for example) and random streams are per rank
+        statefuls = {name: obj.state_dict() for name, (obj, _) in self._statefuls.items()}
+        per_rank = (self._host.all_gather_object({"statefuls": statefuls, "rng": rng_state})
+                    if self._host.world_size > 1 else None)
         if self._sharded:
             import torch.distributed.checkpoint as dcp
-            from torch.distributed.checkpoint.state_dict import get_state_dict
+            from torch.distributed.checkpoint.state_dict import get_model_state_dict, get_state_dict
 
-            with self._suspend_step_counting():  # DSD may step an optimizer with no state yet
-                model_sd, optim_sd = get_state_dict(self.model, self.optimizer)
-            dcp.save({"model": model_sd, "optim": optim_sd}, checkpoint_id=path)
+            # written beside `path` and moved over it once complete, so an interrupted save keeps the old one
+            tmp = self._host.broadcast_object(f"{path}.tmp-{os.getpid()}")
             if self._host.is_global_zero:
-                save_payload({**self._training_payload(with_tensors=False), **(extra or {})},
-                             os.path.join(path, META_FILE))
+                remove_checkpoint(tmp)
+            self._host.barrier("fts_checkpoint_tmp")
+            optimizer = self.optimizer
+            # DSD initializes an optimizer with no state by stepping it, which would change the live training state
+            optim_saved = bool(optimizer.state)
+            with self._suspend_step_counting():
+                if optim_saved:
+                    model_sd, optim_sd = get_state_dict(self.model, optimizer)
+                else:
+                    model_sd, optim_sd = get_model_state_dict(self.model), None
+            dcp.save({"model": model_sd, **({"optim": optim_sd} if optim_sd is not None else {})}, checkpoint_id=tmp)
+            if self._host.is_global_zero:
+                save_payload({**self._training_payload(with_tensors=False), "optim_saved": optim_saved,
+                              "per_rank": per_rank, **(extra or {})}, os.path.join(tmp, META_FILE))
             if rng_state is not None:
                 rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-                save_payload({"rng": rng_state}, os.path.join(path, f"rng_rank{rank}.pt"))
+                save_payload({"rng": rng_state}, os.path.join(tmp, f"rng_rank{rank}.pt"))
+            self._host.barrier("fts_checkpoint_staged")
+            if self._host.is_global_zero:
+                replace_checkpoint(tmp, path)
         elif self._host.is_global_zero:
-            payload = {**self._training_payload(with_tensors=True), **(extra or {})}
+            payload = {**self._training_payload(with_tensors=True), "per_rank": per_rank, **(extra or {})}
             if rng_state is not None:
                 payload["rng"] = rng_state
             save_payload(payload, path)
@@ -905,17 +925,38 @@ class FTSController:
                                                                  dict(self.model.named_parameters()))
         if meta.get("sharded"):
             import torch.distributed.checkpoint as dcp
-            from torch.distributed.checkpoint.state_dict import get_state_dict, set_model_state_dict, set_state_dict
+            from torch.distributed.checkpoint.state_dict import (get_model_state_dict, get_state_dict,
+                                                                 set_model_state_dict, set_state_dict,
+                                                                 StateDictOptions)
 
+            load_optimizer = with_optimizer and meta.get("optim_saved", True)
             if with_optimizer:
-                optimizer.state.clear()
+                optimizer.state.clear()  # a checkpoint saved before any step restores an optimizer with no state
+            if load_optimizer:
+                # DSD initializes the optimizer's state only when no parameter has a gradient
+                for p in self.model.parameters():
+                    p.grad = None
+            unsaved: list[str] = []
             with self._suspend_step_counting():
-                model_sd, optim_sd = get_state_dict(self.model, optimizer)
-                state = {"model": model_sd, "optim": optim_sd} if with_optimizer else {"model": model_sd}
+                if load_optimizer:
+                    model_sd, optim_sd = get_state_dict(self.model, optimizer)
+                    # parameters with no state in the checkpoint (never stepped) must get none, not DSD's zeros
+                    saved = set(dcp.FileSystemReader(path).read_metadata().state_dict_metadata)
+                    optim_state: dict = optim_sd["state"]  # type: ignore[assignment]
+                    unsaved = [fqn for fqn in optim_state
+                               if not any(k.startswith(f"optim.state.{fqn}.") for k in saved)]
+                    for fqn in unsaved:
+                        del optim_state[fqn]
+                    state = {"model": model_sd, "optim": optim_sd}
+                else:
+                    state = {"model": get_model_state_dict(self.model)}
                 dcp.load(state, checkpoint_id=path)
-                if with_optimizer:
+                if load_optimizer:
+                    # `dcp.load` has already required every model key; relax only the optimizer's per-parameter check
+                    # when some parameters (never stepped before the save) have no state to load
+                    options = StateDictOptions(strict=not unsaved)
                     set_state_dict(self.model, optimizer, model_state_dict=state["model"],
-                                   optim_state_dict=state["optim"])  # type: ignore[arg-type]
+                                   optim_state_dict=state["optim"], options=options)  # type: ignore[arg-type]
                 else:
                     set_model_state_dict(self.model, state["model"])
         else:
@@ -925,10 +966,32 @@ class FTSController:
         if with_optimizer:
             for sched, state_ in zip(self.lr_schedulers, meta["lr_schedulers"]):
                 sched.load_state_dict(state_)
+        saved_statefuls = self._for_this_rank(meta, "statefuls") or meta["statefuls"]
         for name, (obj, restore_on_best) in self._statefuls.items():
-            if name in meta["statefuls"] and (statefuls == "all" or restore_on_best):
-                obj.load_state_dict(meta["statefuls"][name])
+            if name in saved_statefuls and (statefuls == "all" or restore_on_best):
+                obj.load_state_dict(saved_statefuls[name])
         return meta
+
+    def _for_this_rank(self, meta: Mapping[str, Any], key: str) -> Any:
+        """This rank's entry of a checkpoint's per-rank state (``None`` for a single-process checkpoint)."""
+        per_rank = meta.get("per_rank")
+        if not per_rank:
+            return None
+        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+        return per_rank[rank][key] if rank < len(per_rank) else None
+
+    def _observe_best(self, metrics: Mapping[str, Any]) -> bool:
+        """Offer ``metrics`` to the checkpoint policy.
+
+        Saving is collective, so every rank must agree: rank zero's decision is used, and its policy state is shared, so
+        the ranks keep one record of the best.
+        """
+        assert self._checkpoint is not None
+        improved = self._checkpoint.observe(metrics, self._depth)
+        if self._host.world_size > 1:
+            improved, state = self._host.broadcast_object((improved, self._checkpoint.state_dict()))
+            self._checkpoint.load_state_dict(state)
+        return bool(improved)
 
     def _restore_best_state(self) -> int | None:
         """Restore the best checkpoint's model, optimizer and lr scheduler state (as the callback does at a phase
@@ -961,7 +1024,12 @@ class FTSController:
         registered state, the checkpoint policy's state and (with ``capture_rng``) every random generator's state.
 
         An unsharded model is saved to the file ``path`` (by global rank zero); a sharded (FSDP2/DTensor) model to the
-        directory ``path``, written by every rank through DCP.
+        directory ``path``, written by every rank through DCP. Either way the new checkpoint replaces ``path`` only once
+        it is complete. Each rank's registered state and random streams are saved, and restored to the same rank.
+
+        Save inside the training loop for an exact resume. A state saved after :meth:`train_end` (for example after
+        :meth:`epochs` returned) records what ending did: the final best-checkpoint restore and gates, when configured.
+        Resuming it reopens the run, so the current phase's end hooks run again at its real end.
         """
         self._require_setup()
         rng_state = capture_rng_state(self._host.rng_devices()) if self.capture_rng else None
@@ -984,6 +1052,8 @@ class FTSController:
             rng_file = os.path.join(path, f"rng_rank{rank}.pt")
             if os.path.exists(rng_file):
                 restore_rng_state(load_payload(rng_file)["rng"])
+        elif self._for_this_rank(meta, "rng") is not None:
+            restore_rng_state(self._for_this_rank(meta, "rng"))
         elif "rng" in meta:
             restore_rng_state(meta["rng"])
 
@@ -1084,6 +1154,8 @@ class FTSController:
             "gate_records": list(self._gate_records),
             "ended_depths": sorted(self._ended_depths),
             "checkpoint": self._checkpoint.state_dict() if self._checkpoint is not None else None,
+            "last_metrics": dict(self._last_metrics),
+            "finished": self._finished,
         }
 
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
@@ -1112,6 +1184,10 @@ class FTSController:
         self._fingerprints = deepcopy(state_dict["fingerprints"])
         self._gate_records = list(state_dict.get("gate_records", []))
         self._ended_depths = set(state_dict.get("ended_depths", []))
+        if state_dict.get("finished") and not self._should_stop:
+            # saved after `train_end`: resuming reopens the run, so the phase's end hooks run again at its real end
+            self._ended_depths.discard(self._depth)
+        self._last_metrics = dict(state_dict.get("last_metrics", {}))
         if self._checkpoint is not None and state_dict.get("checkpoint") is not None:
             self._checkpoint.load_state_dict(state_dict["checkpoint"])
 
