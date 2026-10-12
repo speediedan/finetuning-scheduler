@@ -260,7 +260,7 @@ def parse_phase_lr(schedule: dict, depth: int, base_max_lr: float) -> None:
         except ValueError:
             raise FTSConfigurationError(
                 f"The lr '{schedule[depth]['lr']}' in phase {depth} of the provided explicit schedule"
-                "could not be cast to a float. Specified learning rates must be convertable to a float."
+                " could not be cast to a float. Specified learning rates must be convertable to a float."
             )
     else:
         if schedule[depth].get("lr", None):

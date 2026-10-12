@@ -329,3 +329,56 @@ def test_setup_guards():
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         FTSController(Net(), SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1)).setup()
+
+
+def test_pg_overrides():
+    """Phase-0 overrides reach the factory's groups; later phases' overrides reach the groups they add, while a
+    ``no_decay`` group keeps ``weight_decay=0``."""
+    model = Net()
+    sched = {
+        0: {"params": ["l2.weight", "l2.bias"], "max_transition_epoch": 1, "pg_overrides": {"weight_decay": 0.1}},
+        1: {"params": ["l1.weight", "l1.bias"], "pg_overrides": {"weight_decay": 0.01, "momentum": 0.5}},
+    }
+    fts = FTSController(model, sched, optimizer=partial(torch.optim.SGD, lr=0.1, momentum=0.9), no_decay=["bias"])
+    fts.setup()
+    assert [(g["weight_decay"], g["momentum"]) for g in fts.optimizer.param_groups] == [(0.1, 0.9), (0.0, 0.9)]
+    _run(fts, model, 2)
+    assert [(g["weight_decay"], g["momentum"]) for g in fts.optimizer.param_groups[2:]] == [(0.01, 0.5), (0.0, 0.5)]
+    with pytest.raises(FTSConfigurationError, match="needs an optimizer factory"):
+        FTSController(Net(), sched, optimizer=torch.optim.SGD(Net().parameters(), lr=0.1)).setup()
+
+
+def test_step_transitions_and_guard():
+    """``max_transition_step`` and step-granular policies advance between steps via ``step_end``; skipping
+    ``step_end`` while a step transition is configured is refused."""
+    model = Net()
+    sched = {0: {"params": ["l2.weight", "l2.bias"], "max_transition_step": 3},
+             1: {"params": ["l1.weight", "l1.bias"], "max_transition_step": 5},
+             2: {"params": ["l0.weight", "l0.bias"]}}
+    fts = FTSController(model, sched, optimizer=partial(torch.optim.SGD, lr=0.1))
+    fts.setup()
+    depths = []
+    for _ in range(7):
+        _train_epoch(fts, model, steps=1)
+        fts.step_end()
+        depths.append(fts.curr_depth)
+    assert depths == [0, 0, 1, 1, 2, 2, 2]
+    guarded = FTSController(Net(), sched, optimizer=partial(torch.optim.SGD, lr=0.1))
+    guarded.setup()
+    with pytest.raises(FTSConfigurationError, match="without `FTSController.step_end"):
+        _train_epoch(guarded, guarded.model, steps=2)
+    policy = CallableTransition(lambda ctx: ctx.global_step >= ctx.phase_start_step + 2, granularity="step")
+    fts2 = FTSController(Net(), {0: {"params": ["l2.weight"]}, 1: {"params": ["l1.weight"]}},
+                         optimizer=partial(torch.optim.SGD, lr=0.1), transition=policy)
+    fts2.setup()
+    for _ in range(3):
+        _train_epoch(fts2, fts2.model, steps=1)
+        fts2.step_end()
+    assert fts2.curr_depth == 1
+
+
+def test_lr_cast_message():
+    with pytest.raises(FTSConfigurationError, match="explicit schedule could not be cast to a float"):
+        FTSController(Net(), {0: {"params": ["l2.weight"], "max_transition_epoch": 1},
+                              1: {"params": ["l1.weight"], "lr": "fast"}},
+                      optimizer=partial(torch.optim.SGD, lr=0.1)).setup()

@@ -189,6 +189,7 @@ class FTSController:
                                                                                   "end": OrderedDict()}
         self._epoch_end_called = False
         self._counting_suspended = False
+        self._steps_since_step_end = 0
         self._step_hook: RemovableHandle | None = None
         self._is_setup = False
         self._finished = False
@@ -320,6 +321,11 @@ class FTSController:
         phase0 = self._schedule[0]
         src = self._optimizer_src
         if isinstance(src, Optimizer):
+            if phase0.get("pg_overrides"):
+                raise FTSConfigurationError(
+                    "Phase 0's `pg_overrides` needs an optimizer factory: an optimizer instance's groups were built"
+                    " before the schedule was read."
+                )
             optimizer = src
             schedulers = self._build_schedulers(optimizer)
             no_grad_cnt, init_cnt, total_cnt, diff = core_optim.inspect_phase0_opt_state(optimizer, self.model,
@@ -339,7 +345,8 @@ class FTSController:
                         "Since `enforce_phase0_params` is `True` (the default), the optimizer was reconfigured to"
                         " optimize the parameters (and only those parameters) scheduled in phase 0."))
         elif callable(src):
-            optimizer = src(core_optim.reinit_phase0_pgs(self.model, phase0["params"], self.no_decay))
+            optimizer = src(core_optim.reinit_phase0_pgs(self.model, phase0["params"], self.no_decay,
+                                                         phase0.get("pg_overrides")))
             if not isinstance(optimizer, Optimizer):
                 raise FTSConfigurationError(f"The optimizer factory returned {type(optimizer).__name__}, not an"
                                             " `Optimizer`.")
@@ -421,6 +428,33 @@ class FTSController:
             self._pending, self._pending_reason = decision, reason
         return decision
 
+    def step_end(self, metrics: Mapping[str, Any] | None = None) -> Decision:
+        """End an optimizer step: evaluate the step-granular transition policies and the schedule's
+        ``max_transition_step`` on ``metrics``, agree across ranks, and apply an ``ADVANCE`` at once (between steps).
+
+        Call it after each optimizer step when a step-granular transition is configured.
+
+        Returns:
+            The agreed decision.
+        """
+        self._require_setup()
+        self._steps_since_step_end = 0
+        decision, reason = self._evaluate("step", metrics, completed_epochs=self._host.current_epoch)
+        if not self.is_final_phase:
+            mts = self._schedule[self._depth]["max_transition_step"]
+            if decision < Decision.ADVANCE and 0 <= mts <= self._host.global_step:
+                decision, reason = Decision.ADVANCE, f"max_transition_step ({mts}) reached"
+        if decision >= Decision.STOP:
+            self._stop(reason or decision.name.lower())
+        elif decision == Decision.ADVANCE and not self.is_final_phase:
+            self._advance(reason)
+        return decision
+
+    @property
+    def _step_granular(self) -> bool:
+        return "step" in self._policy.granularity or any(
+            p["max_transition_step"] >= 0 for d, p in self._schedule.items() if d < self._max_depth)
+
     def train_end(self) -> None:
         """End training: run the final phase's end hooks (once)."""
         if self._is_setup and not self._finished:
@@ -497,7 +531,7 @@ class FTSController:
             core_optim.add_optimizer_groups(
                 self.model, optimizer, phase["params"], no_decay=self.no_decay,
                 lr=phase.get("lr", optimizer.defaults["lr"]), apply_lambdas=self.apply_lambdas_new_pgs,
-                schedulers=schedulers,
+                schedulers=schedulers, pg_overrides=phase.get("pg_overrides"),
             )
             core_optim.warn_unapplied_lr_lambdas(schedulers, self.apply_lambdas_new_pgs)
         if self._compile_reset or (self._compile_reset is None and _is_compiled(self.model)):
@@ -562,8 +596,15 @@ class FTSController:
             self._counting_suspended = prev
 
     def _on_optimizer_step(self, optimizer: Optimizer, args: Any, kwargs: Any) -> None:
-        if not self._counting_suspended:
-            self._host.advance_step(1)
+        if self._counting_suspended:
+            return
+        self._host.advance_step(1)
+        self._steps_since_step_end += 1
+        if self._steps_since_step_end > 1 and self._step_granular and not self.is_final_phase:
+            raise FTSConfigurationError(
+                "Two optimizer steps ran without `FTSController.step_end()` between them, but a step-granular"
+                " transition is configured. Call `step_end()` after each optimizer step."
+            )
 
     # ------------------------------------------------------------------------------------------------------------------
     # state and configuration
@@ -611,7 +652,7 @@ class FTSController:
             core_optim.add_optimizer_groups(
                 self.model, optimizer, phase["params"], no_decay=self.no_decay,
                 lr=phase.get("lr", optimizer.defaults["lr"]), apply_lambdas=self.apply_lambdas_new_pgs,
-                schedulers=schedulers,
+                schedulers=schedulers, pg_overrides=phase.get("pg_overrides"),
             )
         self._depth = state_dict["depth"]
         self._host.load_counters(state_dict["epoch"], state_dict["global_step"])  # type: ignore[attr-defined]
