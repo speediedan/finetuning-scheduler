@@ -84,7 +84,12 @@ SCHEDULE = {
 }
 
 
-def _fit_and_measure(tmpdir, strategy: str, accelerator: str, **fts_kwargs) -> dict:
+def _fit_and_measure(tmpdir, strategy: str, accelerator: str, **fts_kwargs) -> dict | None:
+    """Fit, then return each parameter's largest difference across ranks, or ``None`` on a rank other than zero.
+
+    Under the ``ddp`` launcher each other rank re-runs the calling test in its own session, with its own ``tmpdir``, so
+    it has no file to read. Rank zero's result covers every rank, since it gathered their parameters.
+    """
     seed_everything(1)
     out_file = os.path.join(tmpdir, "rank_parity.json")
     trainer = Trainer(
@@ -94,6 +99,8 @@ def _fit_and_measure(tmpdir, strategy: str, accelerator: str, **fts_kwargs) -> d
         logger=False, enable_checkpointing=False, enable_progress_bar=False, enable_model_summary=False,
     )
     trainer.fit(TwoLayerModule())
+    if not trainer.is_global_zero:
+        return None
     with open(out_file) as f:
         return json.load(f)
 
@@ -120,7 +127,8 @@ def test_ddp_reducer_not_rebuilt_diverges(tmpdir):
 def test_ddp_syncs_parameters_thawed_after_wrapping_cuda(tmpdir):
     """The same check with NCCL on two GPUs."""
     diffs = _fit_and_measure(tmpdir, "ddp", "gpu")
-    assert diffs == {name: 0.0 for name in diffs}, diffs
+    if diffs is not None:
+        assert diffs == {name: 0.0 for name in diffs}, diffs
 
 
 def test_sync_ddp_reducer_is_noop_without_ddp():
