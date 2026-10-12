@@ -38,6 +38,15 @@ pr:
       - ".azure-pipelines/**"
   drafts: false  # Only run for PRs that are "ready for review"
 
+parameters:
+  # A pull request into main runs the standalone smoke set (tests/.standalone_smoke) unless it carries the
+  # `full-gpu-suite` label; every other build runs the full standalone suite. This parameter asks for the full suite on a
+  # manual run (.azure-pipelines/scripts/standalone_scope.sh).
+  - name: fullStandalone
+    displayName: "Run every standalone test"
+    type: boolean
+    default: false
+
 jobs:
   - job: pytest
     strategy:
@@ -45,8 +54,9 @@ jobs:
         'PyTorch | latest':
           image: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-azpl-init"
           scope: ""
-    # how long to run the job before automatically cancelling
-    timeoutInMinutes: "100"
+    # how long to run the job before automatically cancelling: up to 40 minutes for each host lease, then about 35
+    # minutes of install and tests with the full standalone suite
+    timeoutInMinutes: "120"
     # how much time to give 'run always even if cancelled tasks' before stopping them
     cancelTimeoutInMinutes: "2"
 
@@ -68,11 +78,6 @@ jobs:
       # serialize against local multi-GPU runs WITHOUT any change to the agent installation itself.
       # Absent on hosts that do not use the lease; the acquire step fails open in that case.
       - /tmp/di_leases:/gpu_leases
-      # The host's lease tool, read-only, so this job queues in the same fair order as every local caller and takes
-      # the cpu-heavy (host memory) lease alongside the GPUs. An operator installs it (and re-installs it after it
-      # changes); the lease step falls back to the plain locks when it is absent. Docker creates a missing bind-mount
-      # source as a DIRECTORY, which the lease step treats as absent.
-      - /opt/az_pipeline_agent/gpu_lease.sh:/gpu_lease_tool:ro
       options: --gpus all --shm-size=512m
 
     workspace:
@@ -113,11 +118,16 @@ jobs:
         python -c "import os ; assert os.environ.get('PL_RUN_CUDA_TESTS') == '1', 'PL_RUN_CUDA_TESTS is not set'"
       displayName: 'Env details'
 
-    # Serialize the GPU phases against local GPU work on the self-hosted host (gpu, then cpu-heavy for host memory).
-    # The agent already runs one Azure job at a time, so this exists to avoid colliding with interactive or agent
-    # sessions, a collision that surfaces as OOM or flaky timing rather than a clear error. Taken after the install,
-    # which needs neither. See .azure-pipelines/scripts/gpu_job_lease.sh for the fallbacks.
-    - bash: bash .azure-pipelines/scripts/gpu_job_lease.sh acquire
+    # Serialize the GPU phases against local GPU work on the self-hosted host: the GPUs, then host memory (`cpu-heavy`),
+    # in the host lease tool's order. The agent already runs one Azure job at a time, so this exists to avoid colliding
+    # with interactive or agent sessions, a collision that surfaces as OOM or flaky timing rather than a clear error.
+    # Taken after the install, which needs neither. Fails open only when the lease directory is not mounted; `set -e`
+    # fails the step on any other acquire failure, and the cleanup step releases whatever is held.
+    - bash: |
+        set -e
+        source scripts/gpu_lease_wrap.sh
+        ci_gpu_lease_acquire /gpu_leases /tmp/azp_gpu_lease.pid 2400 "azure-$(Build.BuildId)" gpu
+        ci_gpu_lease_acquire /gpu_leases /tmp/azp_cpu_heavy_lease.pid 2400 "azure-$(Build.BuildId)" cpu-heavy
       displayName: 'Acquire host GPU leases'
 
     # Only the CUDA tests that are not standalone: the hosted CPU matrix runs every other test in this collection, and
@@ -129,11 +139,18 @@ jobs:
         FTS_CUDA_TESTS_ONLY: "1"
       displayName: 'Testing: CUDA'
 
-    # Every standalone test under tests/: the marker alone defines the partition, so a standalone test in a module whose
-    # name does not start with `test_f` is not silently left out.
+    # The standalone tests under tests/, the smoke set or all of them (see the `fullStandalone` parameter). The marker
+    # alone defines the partition, so a standalone test in a module whose name does not start with `test_f` is not
+    # silently left out of the full suite.
     - bash: |
+        set -e
         source /tmp/venvs/fts_dev/bin/activate
-        bash ./tests/special_tests.sh --mark_type=standalone
+        scope=$(bash .azure-pipelines/scripts/standalone_scope.sh "${{ parameters.fullStandalone }}")
+        if [[ "$scope" == smoke ]]; then
+          bash ./tests/special_tests.sh --mark_type=standalone --select_file=tests/.standalone_smoke
+        else
+          bash ./tests/special_tests.sh --mark_type=standalone
+        fi
       displayName: 'Testing: standalone multi-gpu'
 
     # - bash: |
@@ -185,9 +202,12 @@ jobs:
         sudo chmod -R 775 /__w/1/s || true
         echo "Cleaning up ephemeral directories..."
         sudo rm -rf /__w/1/s/.pytest_cache || true
-        # Release the host leases. Belt-and-braces only: if this job dies or its container is torn
+        # Release the host leases, cpu-heavy first. Belt-and-braces only: if this job dies or its container is torn
         # down, every process inside it dies too and the kernel frees the leases automatically.
-        bash .azure-pipelines/scripts/gpu_job_lease.sh release || true
+        source scripts/gpu_lease_wrap.sh 2>/dev/null && {
+          ci_gpu_lease_release /gpu_leases /tmp/azp_cpu_heavy_lease.pid cpu-heavy
+          ci_gpu_lease_release /gpu_leases /tmp/azp_gpu_lease.pid gpu
+        } || true
         echo 'Agent workspace cleanup completed'
       condition: always()
       displayName: 'Cleaning up agent workspace'

@@ -54,10 +54,12 @@ class TwoLayerModule(LightningModule):
 
 
 class RankParity(Callback):
-    """At the end of training, rank 0 records each parameter's largest difference across ranks."""
+    """At the end of training, every rank records each parameter's largest difference across ranks, and rank 0 also
+    saves it for a launcher whose ranks are worker processes."""
 
     def __init__(self, out_file: str):
         self.out_file = out_file
+        self.diffs: dict | None = None
 
     def on_train_end(self, trainer, pl_module):
         diffs = {}
@@ -65,6 +67,7 @@ class RankParity(Callback):
             gathered = [torch.empty_like(p) for _ in range(dist.get_world_size())]
             dist.all_gather(gathered, p.detach().contiguous())
             diffs[name] = max((g - gathered[0]).abs().max().item() for g in gathered)
+        self.diffs = diffs
         if trainer.is_global_zero:
             with open(self.out_file, "w") as f:
                 json.dump(diffs, f)
@@ -84,24 +87,25 @@ SCHEDULE = {
 }
 
 
-def _fit_and_measure(tmpdir, strategy: str, accelerator: str, **fts_kwargs) -> dict | None:
-    """Fit, then return each parameter's largest difference across ranks, or ``None`` on a rank other than zero.
+def _fit_and_measure(tmpdir, strategy: str, accelerator: str, **fts_kwargs) -> dict:
+    """Fit, then return each parameter's largest difference across ranks.
 
-    Under the ``ddp`` launcher each other rank re-runs the calling test in its own session, with its own ``tmpdir``, so
-    it has no file to read. Rank zero's result covers every rank, since it gathered their parameters.
+    Under the ``ddp`` launcher every rank runs the calling test (the others re-run it in their own sessions), so each
+    rank returns the differences it gathered and asserts on them: a failure is reported by every rank, not only by the
+    one whose output a test runner happens to read first. Under ``ddp_spawn`` the ranks are worker processes and this
+    process reads the result rank 0 saved.
     """
     seed_everything(1)
-    out_file = os.path.join(tmpdir, "rank_parity.json")
+    parity = RankParity(os.path.join(tmpdir, "rank_parity.json"))
     trainer = Trainer(
         default_root_dir=tmpdir, accelerator=accelerator, devices=2, strategy=strategy, max_epochs=3,
-        callbacks=[FinetuningScheduler(ft_schedule=SCHEDULE, epoch_transitions_only=True, **fts_kwargs),
-                   RankParity(out_file)],
+        callbacks=[FinetuningScheduler(ft_schedule=SCHEDULE, epoch_transitions_only=True, **fts_kwargs), parity],
         logger=False, enable_checkpointing=False, enable_progress_bar=False, enable_model_summary=False,
     )
     trainer.fit(TwoLayerModule())
-    if not trainer.is_global_zero:
-        return None
-    with open(out_file) as f:
+    if parity.diffs is not None:
+        return parity.diffs
+    with open(parity.out_file) as f:
         return json.load(f)
 
 
@@ -127,8 +131,7 @@ def test_ddp_reducer_not_rebuilt_diverges(tmpdir):
 def test_ddp_syncs_parameters_thawed_after_wrapping_cuda(tmpdir):
     """The same check with NCCL on two GPUs."""
     diffs = _fit_and_measure(tmpdir, "ddp", "gpu")
-    if diffs is not None:
-        assert diffs == {name: 0.0 for name in diffs}, diffs
+    assert diffs == {name: 0.0 for name in diffs}, diffs
 
 
 def test_sync_ddp_reducer_is_noop_without_ddp():

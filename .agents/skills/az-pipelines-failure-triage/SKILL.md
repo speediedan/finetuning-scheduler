@@ -83,26 +83,31 @@ step. The steps, in order:
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Install dependencies`            | `uv pip install -e . -r requirements/ci/requirements.txt --excludes /tmp/venvs/fts_dev/torch-excludes.txt`                                                                      |
 | `Env details`                     | `collect_env_details.py`, the `>= 2` GPU assertion and the `PL_RUN_CUDA_TESTS=1` assertion                                                                                      |
-| `Acquire host GPU leases`         | `gpu_job_lease.sh acquire`: `gpu` and `cpu-heavy` through the host lease tool, or the plain locks without it                                                                    |
+| `Acquire host GPU leases`         | `ci_gpu_lease_acquire` from `scripts/gpu_lease_wrap.sh`: `gpu`, then `cpu-heavy`, as plain locks on the mounted lease directory                                                  |
 | `Testing: CUDA`                   | `coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v` with `FTS_CUDA_TESTS_ONLY=1`                                                       |
-| `Testing: standalone multi-gpu`   | `bash ./tests/special_tests.sh --mark_type=standalone`                                                                                                                          |
+| `Testing: standalone multi-gpu`   | `special_tests.sh --mark_type=standalone`, plus `--select_file=tests/.standalone_smoke` when `standalone_scope.sh` picks the smoke set (see below)                              |
 | `Testing: Experimental Multi-GPU` | **currently commented out** (`--mark_type=exp_patch --experiment_patch_mask="1 0 0 1"`)                                                                                         |
 | `Statistics`                      | codecov CLI upload, flags `gpu,pytest`                                                                                                                                          |
 | `Testing: Examples`               | `python -m pytest src/fts_examples -v --maxfail=1 --durations=0`                                                                                                                |
 | `Testing: Multi-GPU Examples`     | `special_tests.sh --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'`, with `PYTORCH_KERNEL_CACHE_PATH=/__w/_temp/kernel_cache` |
-| `Cleaning up agent workspace`     | `sudo chmod -R 775 /__w/1/s`, `gpu_job_lease.sh release`, `condition: always()`                                                                                                 |
+| `Cleaning up agent workspace`     | `sudo chmod -R 775 /__w/1/s`, `ci_gpu_lease_release` for both leases, `condition: always()`                                                                                     |
 
-`timeoutInMinutes: 100`. Marks are `standalone` and `exp_patch` only — there is no `profile_ci` mark, and
+`timeoutInMinutes: 120`. Marks are `standalone` and `exp_patch` only: there is no `profile_ci` mark, and
 no `--reruns` flags, so a flaky test fails the build on first occurrence.
+
+**Standalone scope.** A pull request into `main` runs only the smoke set in `tests/.standalone_smoke` (one test per
+strategy family) unless it carries the `full-gpu-suite` label; every other build, and a manual run with the
+`fullStandalone` parameter, runs every standalone test. The step's log names the scope and why. So a green gate on a
+pull request says nothing about the standalone tests outside the smoke set, and a failure that first appears on a
+build of `main` or a release branch may come from a pull request whose gate ran only the smoke set.
 
 ## GPU lease
 
-This pipeline participates in the host GPU lease: it bind-mounts the lease directory and the host lease tool
-(read-only) into the job container, takes the `gpu` and `cpu-heavy` leases in `Acquire host GPU leases` after the
-install, holds them for the rest of the job and releases them in `Cleaning up agent workspace`. Without the tool it
-takes the plain locks, and when the directory is absent it runs unleased. The mechanics are commented inline in
-`.azure-pipelines/gpu-tests.yml` and `.azure-pipelines/scripts/gpu_job_lease.sh`, and AGENTS.md carries the
-repo-level summary and the CI lease tag shape.
+This pipeline participates in the host GPU lease: it bind-mounts the lease directory into the job container,
+takes the `gpu` and then the `cpu-heavy` lease in `Acquire host GPU leases` after the install, holds them for the
+rest of the job and releases them in `Cleaning up agent workspace`. It fails open only when the directory is absent.
+The mechanics are commented inline in `.azure-pipelines/gpu-tests.yml` and `scripts/gpu_lease_wrap.sh`, and
+AGENTS.md carries the repo-level summary and the CI lease tag shape.
 
 **For everything else about the lease, including the hard rule that a CI-held lease is never
 force-reset, use the `gpu-lease` skill.**
@@ -132,9 +137,11 @@ sudo "$AGENT_HOME"/restart-stack.sh
 Check for orphaned processes from an interrupted standalone run before re-queuing —
 `scripts/manage_standalone_processes.sh` is the tool for reaping them.
 
-**Test failure**: reproduce locally (Step 2). Note which step failed: a `Testing: CUDA` failure reproduces on
-any CUDA host with `PL_RUN_CUDA_TESTS=1` (CPU-only tests do not run in this pipeline; the hosted matrix runs them); a
-`standalone multi-gpu` or `Multi-GPU Examples` failure usually needs a host with two GPUs.
+**Test failure**: reproduce locally (Step 2). Note which step failed. A `Testing: CUDA` failure reproduces with
+`PL_RUN_CUDA_TESTS=1`, on two GPUs for most of that phase's tests (`min_cuda_gpus=2`) and on one for the single-GPU
+cases; CPU-only tests do not run in this pipeline, since the hosted matrix runs them. A `standalone multi-gpu` or
+`Multi-GPU Examples` failure needs a host with two GPUs. Under the `ddp` launcher every rank prints its own verdict,
+and `special_tests.sh` fails the test on any rank's failure, so read every rank's traceback in the raw log.
 
 ## Step 2: Reproduce Locally
 

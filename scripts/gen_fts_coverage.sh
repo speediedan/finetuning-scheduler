@@ -218,8 +218,8 @@ collect_env_coverage(){
         log_msg "Tests that would be collected:"
         python -m pytest src/finetuning_scheduler tests --collect-only -q >> $coverage_session_log 2>&1
         log_msg ""
-        log_msg "Standalone tests that would run (pattern: test_f):"
-        PL_RUN_STANDALONE_TESTS=1 python -m pytest tests --collect-only -q -k 'test_f' >> $coverage_session_log 2>&1 || true
+        log_msg "Standalone tests that would run:"
+        PL_RUN_STANDALONE_TESTS=1 python -m pytest tests --collect-only -q >> $coverage_session_log 2>&1 || true
         if [[ $include_experimental -eq 1 ]]; then
             log_msg ""
             log_msg "Experimental patch tests that would run:"
