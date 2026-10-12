@@ -27,9 +27,7 @@ unset FTS_EXPERIMENTAL_PATCH_TESTS
 
 source $(dirname "$0")/test_utils.sh
 
-# Serialize this run against other GPU work on the host (no-op unless GPU_LEASE_CMD is set).
-# Done before arg parsing so the whole suite is covered by a single lease acquisition.
-gpu_lease_reexec "$0" "$@"
+orig_args=("$@")
 
 usage(){
 >&2 cat << EOF
@@ -86,17 +84,24 @@ do
   esac
 done
 
+# Serialize this run against other GPU work on the host (no-op unless GPU_LEASE_CMD is set). Done after argument
+# parsing, so a bad flag is reported at once rather than after waiting for the lease, and before any GPU work, so the
+# whole suite is covered by a single lease acquisition.
+gpu_lease_reexec "$0" "${orig_args[@]}"
+
 d=`date +%Y%m%d%H%M%S`
 tmp_log_dir="${log_dir:-/tmp}"
+mkdir -p "${tmp_log_dir}"
 mark_type=${mark_type:-"standalone"}
 experiments_list=${experiments_list:-$(dirname "$0")/.experiments}
 if [ -s "${experiments_list}" ]; then
   if [ -z "${experiment_patch_mask:-}" ]; then
-    experiment_patch_mask=($(cat tests/.experiments | awk '{for(i=1;i<=NF;i++) print "0"}'))
+    experiment_patch_mask=($(awk '{for(i=1;i<=NF;i++) print "0"}' "${experiments_list}"))
   fi
 fi
 collect_dir=${collect_dir:-"tests"}
 special_test_session_log=${log_file:-"${tmp_log_dir}/special_tests_${mark_type}_${d}.log"}
+mkdir -p "$(dirname "${special_test_session_log}")"
 test_session_tmp_log="${tmp_log_dir}/special_tests_raw_${mark_type}_${d}.log"
 
 # default python coverage arguments
@@ -112,6 +117,8 @@ define_configuration(){
   echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $special_test_session_log
   printf "Run configuration: \n" | tee -a $special_test_session_log
   echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $special_test_session_log
+  # special tests use the GPUs, and this run holds the GPU lease (when the host uses one), so it opts in
+  export PL_RUN_CUDA_TESTS=1
   case ${mark_type} in
     standalone)
       echo "Collecting and running standalone tests." | tee -a $special_test_session_log

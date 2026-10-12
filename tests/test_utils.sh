@@ -39,7 +39,9 @@ toggle_experimental_patches() {
 collect_tests(){
   local collect_def="$1"
   local collect_log="$2"
-  if special_tests=$(python3 ${collect_def}); then
+  local collect_rc=0
+  special_tests=$(python ${collect_def}) || collect_rc=$?
+  if [[ $collect_rc -eq 0 ]]; then
     # match only lines with tests
     declare -a -g parameterizations=($(grep -oP '\S+::test_\S+' <<< "$special_tests"))
     echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $collect_log
@@ -49,12 +51,18 @@ collect_tests(){
     num_collected_tests="${#parameterizations[@]}"
     echo "Total number of tests: ${#parameterizations[@]}" | tee -a  $collect_log
     printf '\n' | tee -a  $collect_log
-  else
-    printf "No tests were found with the following collection command: python3 ${collect_def} \n" | tee -a $collect_log
-    printf "If running that command directly works as expected, run special tests with 'bash -x tests/special_tests.sh' to debug potential collection errors." | tee -a $collect_log
+  elif [[ $collect_rc -eq 5 ]]; then
+    # pytest's exit code 5 means nothing was selected, which is legitimate (e.g. an empty experimental-patch partition)
+    printf "No tests were selected by the following collection command: python ${collect_def} \n" | tee -a $collect_log
     printf "Exiting without running tests. \n" | tee -a $collect_log
     export no_tests_collected=1
     exit 0
+  else
+    # any other non-zero exit is a collection error: fail, rather than report a phase that ran nothing as green
+    printf "Test collection failed (pytest exit code ${collect_rc}): python ${collect_def} \n" | tee -a $collect_log
+    printf '%s\n' "$special_tests" | tail -n 40 | tee -a $collect_log
+    export collection_failed=1
+    exit 1
   fi
 }
 
@@ -172,6 +180,9 @@ ensure_tests(){
 }
 
 show_test_results(){
+  if [ -n "$collection_failed" ]; then
+    exit 1
+  fi
   ensure_tests
   local test_log="$1"
   local tmp_raw_log="$2"

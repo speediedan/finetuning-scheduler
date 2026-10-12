@@ -21,9 +21,7 @@ declare -a from_source_specs=()
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/infra_utils.sh"
 
-# Serialize the whole coverage run against other GPU work on the host (no-op unless GPU_LEASE_CMD
-# is set). Held once for the entire run; the nested special_tests.sh calls inherit it.
-gpu_lease_reexec "$0" "$@"
+orig_args=("$@")
 
 usage(){
 >&2 cat << EOF
@@ -94,6 +92,13 @@ do
        usage ;;
   esac
 done
+
+# Serialize the whole coverage run against other GPU work on the host (no-op unless GPU_LEASE_CMD
+# is set). Held once for the entire run; the nested special_tests.sh calls inherit it. Taken after
+# argument parsing, so a bad flag is reported at once rather than after waiting for the lease.
+gpu_lease_reexec "$0" "${orig_args[@]}"
+# this run holds the GPU lease (when the host uses one), so it opts in to the CUDA tests (see tests/helpers/runif.py)
+export PL_RUN_CUDA_TESTS=1
 
 d=`date +%Y%m%d%H%M%S`
 tmp_coverage_dir="/tmp"
