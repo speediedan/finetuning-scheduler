@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Added a warning when an FSDP2 data-parallel run under `FTSController` leaves scheduled parameters unsharded (a plan that does not shard the root module), since nothing synchronizes their gradients across ranks [#87](https://github.com/speediedan/finetuning-scheduler/issues/87).
+
 - Added checkpointing to the experimental PyTorch API: a `BestCheckpoint` policy (top-1 by a monitored metric, optionally saving only scheduled parameters), restoring the best checkpoint's model, optimizer and lr scheduler state at phase boundaries (`restore_best`, as the Lightning callback does), phase gates that can veto a phase and roll back to the best as of its start, `register_stateful` for data-loader positions and similar state, and `save()`/`load()` for exact resume (random streams included). Sharded (FSDP2/DTensor) models are checkpointed through `torch.distributed.checkpoint` [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).
 
 - Added the `finetuning-scheduler[lightning]` and `finetuning-scheduler[pytorch-lightning]` extras. While Lightning remains a base dependency they install nothing more; adopting them now makes the planned move of Lightning behind the extra (no earlier than 2.17) a no-op [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).
@@ -21,6 +23,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Added a persistent distributed test pool (`tests/helpers/dist_pool.py`) that serves many distributed test cases from one process group per test module instead of launching processes per test. Validity rules enforced around every case keep cases from inheriting each other's state, a failure on any rank fails the case, and an error, timeout or violation respawns the pool [#56](https://github.com/speediedan/finetuning-scheduler/issues/56).
 
 ### Fixed
+
+- Fixed `FTSController` thawing FSDP2's unsharded parameters, which then never trained: FSDP2 can leave a module's unsharded parameters registered between steps (the root module's after a forward-only evaluation pass, or a root module's whose parameters were all frozen). The controller now reshards every FSDP2 module before it freezes or thaws parameters, restores a checkpoint or writes one [#90](https://github.com/speediedan/finetuning-scheduler/issues/90).
+
+- Fixed `FTSController` accepting a `DistributedDataParallel` wrapper on a submodule, or a module under torch's composable `replicate()`, neither of which synchronizes parameters thawed after phase 0. Both are now refused, as a `DistributedDataParallel`-wrapped model already was [#89](https://github.com/speediedan/finetuning-scheduler/issues/89).
 
 - Fixed the gradients of parameters thawed after phase 0 never being synchronized across processes under the DDP strategies (`ddp`, `ddp_spawn`, `ddp_fork`, `ddp_notebook` and the `ddp_find_unused_parameters_*` variants). `DistributedDataParallel` registers with its gradient reducer only the parameters that require grad when it wraps the module, so each process trained the later phases' parameters on its own data alone and the replicas diverged silently. Fine-Tuning Scheduler now rebuilds the `DistributedDataParallel` wrapper whenever a phase transition (or resuming at a later depth) changes the trainable parameters, through a new `StrategyAdapter.on_after_phase_transition` hook. Custom strategy adapters inherit the fix; an adapter that overrides the new hook should call `super()` [#72](https://github.com/speediedan/finetuning-scheduler/issues/72).
 

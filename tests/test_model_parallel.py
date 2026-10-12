@@ -13,13 +13,11 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.utils.data import DataLoader
-from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.nn.attention import SDPBackend
 from torch.distributed._composable.fsdp import FSDPModule, fully_shard
-from torch.distributed.tensor.parallel import (ColwiseParallel, PrepareModuleInput, RowwiseParallel,
-                                                SequenceParallel, parallelize_module, loss_parallel)
+from torch.distributed.tensor.parallel import (parallelize_module, loss_parallel)
 
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.plugins.precision.fsdp import FSDPPrecision
@@ -30,6 +28,7 @@ from lightning.pytorch.utilities.types import STEP_OUTPUT
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from finetuning_scheduler.strategy_adapters.model_parallel import ActCkptEnum
 from tests.helpers.boring_models import FTSToyTransformer, TestModelArgs, FTSWikiText2
+from tests.dist_cases._mp_models import gen_apply_transformer_tp_plan
 from tests.helpers.common import (ExpectedResults, fts_check_warns, pytest_param_factory, get_fts,
                                   default_fts_sanity_chk, DeviceMeshSummary)
 from tests.model_parallel_expected_paths import (path_fsdp_autocm, path_tp_fsdp_autocm,
@@ -328,64 +327,6 @@ def model_parallel_ft_schedule(tmpdir_factory) -> tuple[Path, dict]:
         mp_tp_sched_dict,
         mp_tp_dbg_req_grad,
     )
-
-# modified version of https://bit.ly/torchtitan_transformer_tp_plan
-def gen_apply_transformer_tp_plan(model: nn.Module, device_mesh: DeviceMesh, loss_parallel: bool) -> nn.Module:
-    """Apply tensor parallelism."""
-
-    # we're only applying tensor parallelism, composable fsdp is applied subsequently elsewhere if requested
-    tp_mesh = device_mesh["tensor_parallel"]
-
-    # 1. Parallelize the embedding and shard its outputs
-    # 2. Parallelize the root norm layer over the sequence dim
-    non_transformerblock_tp_plan = {
-            "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(1),),
-            "pos_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(0)),
-            "norm": SequenceParallel(),
-        }
-
-    model = parallelize_module(model, tp_mesh, non_transformerblock_tp_plan)
-
-    # N.B. We're not supporting Float8 parallelism in this test initially (e.g. Float8RowwiseParallel)
-
-    # Apply tensor + sequence parallelism to every transformer block
-    for transformer_block in model.layers:
-        layer_plan = {
-            "attention": PrepareModuleInput(
-                input_layouts=Shard(1),
-                desired_input_layouts=Replicate(),
-            ),
-            "attention_norm": SequenceParallel(),
-            "attention.wq": ColwiseParallel(use_local_output=False),
-            "attention.wk": ColwiseParallel(use_local_output=False),
-            "attention.wv": ColwiseParallel(use_local_output=False),
-            "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
-            "ffn_norm": SequenceParallel(),
-            "feed_forward.w1": ColwiseParallel(input_layouts=Shard(1)),
-            "feed_forward.w2": RowwiseParallel(output_layouts=Shard(1)),
-        }
-
-        parallelize_module(
-            module=transformer_block,
-            device_mesh=tp_mesh,
-            parallelize_plan=layer_plan,
-        )
-
-    output_parallelize_plan = (
-        ColwiseParallel(
-            input_layouts=Shard(1),
-            output_layouts=Shard(-1) if loss_parallel else Replicate(),
-            use_local_output=not loss_parallel,
-        )
-    )
-    parallelize_module(model.output, tp_mesh, output_parallelize_plan)
-
-    # Manually set output.weight so that parameters and gradients are shared.
-    if model.init_args.weight_tying:
-        model.output.weight = model.tok_embeddings.weight
-
-    return model
-
 
 ################################################################################
 # Model Parallel Test Configuration Aliases
