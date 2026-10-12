@@ -17,7 +17,7 @@ import pytest
 import torch
 
 from tests.dist_cases import collectives, fsdp2, hygiene
-from tests.helpers.dist_pool import assert_ranks_agree, case_ref, dist_pool_fixture
+from tests.helpers.dist_pool import DistPool, assert_ranks_agree, case_ref, dist_pool_fixture
 from tests.helpers.runif import RunIf
 
 gloo_pool = dist_pool_fixture(world_size=2, backend="gloo")
@@ -141,6 +141,26 @@ def test_a_hung_rank_times_out_and_the_pool_respawns(gloo_pool):
     with pytest.raises(pytest.fail.Exception, match="no reply before the deadline"):
         gloo_pool.run(hygiene.sleep_on, rank=1, seconds=60, timeout=3)
     assert gloo_pool.run(collectives.all_gather_ranks) == [[0, 1]] * 2
+
+
+@_GLOO
+def test_workers_are_measured_when_this_process_is(tmp_path):
+    """Under coverage, the lines only the workers execute (every case's body) reach this process's data."""
+    coverage = pytest.importorskip("coverage")
+    case_file = collectives.__file__
+    body = collectives.all_reduce_sum.__code__.co_firstlineno + 1
+    cov = coverage.Coverage(data_file=str(tmp_path / "parent.coverage"), include=[case_file])
+    cov.start()
+    try:
+        pool = DistPool(2, "gloo", tmp_path)
+        try:
+            assert pool.run(collectives.all_reduce_sum, n=4) == [[0, 3, 6, 9]] * 2
+        finally:
+            pool.close()
+    finally:
+        cov.stop()
+    assert body in (cov.get_data().lines(case_file) or []), "the case body, run only by the workers, was not measured"
+    assert not list((tmp_path / "coverage").iterdir()), "the workers' data files were not merged and removed"
 
 
 def test_cases_must_live_in_the_case_package():

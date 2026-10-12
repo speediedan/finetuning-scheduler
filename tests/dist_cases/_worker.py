@@ -124,16 +124,21 @@ def _die_with_parent() -> None:
         ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGKILL)  # 1 == PR_SET_PDEATHSIG
 
 
-def _start_coverage() -> None:
-    """Measure this worker when ``COVERAGE_PROCESS_START`` names a config, which must set ``parallel = true``.
+def _start_coverage(spec: dict | None) -> None:
+    """Measure this worker when the pool's parent is measured, with the parent's settings (``spec``).
 
-    A no-op when coverage's own ``.pth`` hook already started it. Data is saved at exit, which a spawned worker
-    reaches through ``sys.exit``, so ``coverage combine`` then merges every worker's file.
+    Data is saved at exit, which a spawned worker reaches through ``sys.exit``, to a suffixed file that the pool merges
+    into the parent's data when it closes. A worker killed instead (after an error or a timeout) saves nothing.
+    ``COVERAGE_PROCESS_START`` takes precedence: its config governs, and ``coverage combine`` merges those files.
     """
     if os.environ.get("COVERAGE_PROCESS_START"):
         import coverage
 
-        coverage.process_startup()
+        coverage.process_startup()  # a no-op when coverage's own ``.pth`` hook already started it
+    elif spec is not None:
+        import coverage
+
+        coverage.Coverage(data_suffix=True, auto_data=True, **spec).start()
 
 
 def _init(rank: int, world_size: int, backend: str, init_file: str, pg_timeout: float) -> CaseContext:
@@ -219,10 +224,11 @@ def worker_main(
     requests: Any,
     responses: Any,
     pg_timeout: float,
+    coverage_spec: dict | None = None,
 ) -> None:
     """Entry point of one pool worker (a spawned process)."""
     _die_with_parent()
-    _start_coverage()
+    _start_coverage(coverage_spec)
     started = time.perf_counter()
     try:
         ctx = _init(rank, world_size, backend, init_file, pg_timeout)

@@ -32,6 +32,7 @@ Usage::
 import atexit
 import multiprocessing
 import queue
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,7 @@ class DistPool:
         self._procs: list = []
         self._requests: list = []
         self._responses: Any = None
+        self._coverage, self._coverage_spec = _parent_coverage(self.tmp_dir / "coverage")
         atexit.register(self.kill)  # runs before multiprocessing's own exit hook, which would join live workers
 
     def _start(self) -> None:
@@ -85,7 +87,7 @@ class DistPool:
         self._procs = [
             ctx.Process(
                 target=worker_main,
-                args=(rank, *args, self._requests[rank], self._responses, self.pg_timeout),
+                args=(rank, *args, self._requests[rank], self._responses, self.pg_timeout, self._coverage_spec),
                 name=f"dist_pool_{self.backend}_rank{rank}",
             )
             for rank in range(self.world_size)
@@ -153,6 +155,12 @@ class DistPool:
                 proc.join(max(0.0, deadline - time.monotonic()))
         self.kill()
         atexit.unregister(self.kill)
+        self._combine_coverage()
+
+    def _combine_coverage(self) -> None:
+        """Merge the data the workers saved at exit into this process's coverage, which saves it with its own."""
+        if self._coverage is not None and (files := sorted(Path(self._coverage_spec["data_file"]).parent.glob("*"))):
+            self._coverage.combine(data_paths=[str(f) for f in files], keep=False)
 
     def kill(self) -> None:
         for proc in self._procs:
@@ -167,6 +175,22 @@ class DistPool:
             q.close()
             q.cancel_join_thread()
         self._procs, self._requests, self._responses = [], [], None
+
+
+def _parent_coverage(data_dir: Path) -> tuple[Any, dict | None]:
+    """This process's running coverage, if any, and the settings that measure the workers the same way.
+
+    Without this, code that runs only in the workers (every case) would be missing from a plain ``coverage run`` of the
+    suite, since nothing measures a spawned process by default.
+    """
+    coverage = sys.modules.get("coverage")
+    cov = coverage.Coverage.current() if coverage is not None else None
+    if cov is None:
+        return None, None
+    data_dir.mkdir(parents=True, exist_ok=True)
+    spec = {opt: cov.get_option(f"run:{opt}") for opt in ("branch", "source", "source_pkgs", "include", "omit")}
+    spec.update(data_file=str(data_dir / ".coverage"), config_file=cov.config.config_file or False)
+    return cov, spec
 
 
 def _report(replies: dict[int, tuple]) -> str:
