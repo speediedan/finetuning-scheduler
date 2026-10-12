@@ -48,6 +48,17 @@ def load_payload(path: str | os.PathLike) -> dict[str, Any]:
     return torch.load(os.fspath(path), map_location="cpu", weights_only=False)
 
 
+def copy_checkpoint(source: str, target: str) -> None:
+    """Copy a checkpoint file, or a sharded checkpoint's directory, to ``target`` (replacing it)."""
+    if os.path.isdir(source):
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.copytree(source, target)
+    else:
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+        shutil.copyfile(source, target)
+
+
 @runtime_checkable
 class CheckpointPolicy(Protocol):
     """Decides when the controller saves the training state, and where the best checkpoints are.
@@ -72,7 +83,7 @@ class CheckpointPolicy(Protocol):
     @property
     def best_score(self) -> Tensor | None: ...
 
-    def pin_boundary(self, depth: int, initial_path: str | None = None) -> None: ...
+    def pin_boundary(self, depth: int, initial_path: str | None = None, copy: bool = True) -> None: ...
 
     def boundary_path(self, depth: int) -> str | None: ...
 
@@ -88,15 +99,16 @@ class BestCheckpoint:
     does: the first observation always saves, later ones only on strict improvement, and a non-finite value counts
     as the worst possible.
 
-    It also pins the best as of each phase's start (copied to ``boundary.pt``, so at most two files are kept), which a
-    gate's veto rolls back to.
+    It also pins the best as of each phase's start (copied to ``boundary.pt``, so at most two checkpoints are kept),
+    which a gate's veto rolls back to. A sharded model's checkpoints are directories of the same names.
 
     Args:
         dirpath: Where checkpoints are written.
         monitor: The metric to monitor.
         mode: ``"min"`` or ``"max"``.
         include: Save every parameter (``"all"``) or only the scheduled ones plus buffers (``"scheduled"``), so a
-            large frozen base is not rewritten on every save.
+            large frozen base is not rewritten on every save (single-process checkpoints; sharded checkpoints are
+            written by DCP and hold every shard).
         save_initial: Also save the state at setup, so a veto of the first trained phase has something to roll back to.
         metadata: Extra metadata stored in every checkpoint.
     """
@@ -150,12 +162,12 @@ class BestCheckpoint:
     def best_score(self) -> Tensor | None:
         return self._best_score
 
-    def pin_boundary(self, depth: int, initial_path: str | None = None) -> None:
+    def pin_boundary(self, depth: int, initial_path: str | None = None, copy: bool = True) -> None:
         """Pin the current best as the rollback point for phase ``depth`` (copying it, since the best is
         overwritten as training continues).
 
-        Before any best exists, ``initial_path`` (a state saved at setup) is
-        pinned instead.
+        Before any best exists, ``initial_path`` (a state saved at setup) is pinned instead. In a distributed run
+        every rank records the pin but only one copies (``copy=True``).
         """
         source, source_depth = self._best_path, self._best_depth
         if source is None and initial_path is not None:
@@ -163,8 +175,8 @@ class BestCheckpoint:
         pinned = None
         if source is not None and os.path.exists(source):
             pinned = self.path_for("boundary")
-            if os.path.abspath(source) != os.path.abspath(pinned):
-                shutil.copyfile(source, pinned)
+            if copy and os.path.abspath(source) != os.path.abspath(pinned):
+                copy_checkpoint(source, pinned)
         self._boundaries = {depth: (pinned, source_depth)}
 
     def boundary_path(self, depth: int) -> str | None:

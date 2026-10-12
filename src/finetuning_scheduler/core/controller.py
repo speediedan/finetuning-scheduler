@@ -49,6 +49,8 @@ from finetuning_scheduler.core.transitions import (AnyOf, as_decision, Decision,
                                                    GateResult, TransitionContext, TransitionPolicy)
 
 STATE_VERSION = 1
+# the non-tensor state of a sharded (DCP) checkpoint directory
+META_FILE = "fts_meta.pt"
 
 
 @dataclass(frozen=True)
@@ -250,8 +252,8 @@ class FTSController:
         self._fingerprints.setdefault(0, [])
         self._is_setup = True
         if self._checkpoint is not None and getattr(self._checkpoint, "save_initial", False):
-            initial = self._save_training_state(self._checkpoint.path_for("initial"))
-            self._checkpoint.pin_boundary(0, initial_path=initial)  # type: ignore[call-arg]
+            initial = self._write_checkpoint(self._checkpoint.path_for("initial"))
+            self._pin_boundary(0, initial_path=initial)
         self._run_hooks("start", 0)
         rank_zero_info(f"Fine-tuning schedule set up with {len(self._schedule)} phases (max_depth {self._max_depth}).")
 
@@ -509,7 +511,7 @@ class FTSController:
         self._last_metrics = dict(metrics or {})
         decision, reason = self._evaluate("epoch", metrics, completed_epochs=self._host.current_epoch + 1)
         if self._checkpoint is not None and metrics is not None and self._checkpoint.observe(metrics, self._depth):
-            self._save_training_state(self._checkpoint.path_for("best"))
+            self._write_checkpoint(self._checkpoint.path_for("best"))
         self._host.advance_epoch()
         if decision >= Decision.STOP:
             self._stop(reason or decision.name.lower())
@@ -621,7 +623,7 @@ class FTSController:
         self._phase_start_epoch, self._phase_start_step = self._host.current_epoch, self._host.global_step
         self._fingerprints.setdefault(self._depth, [])
         if self._checkpoint is not None:
-            self._checkpoint.pin_boundary(self._depth)
+            self._pin_boundary(self._depth)
         self._run_hooks("start", self._depth)
         if restored_depth is not None:
             self._configure_phase(self._depth, restored_depth, depth_sync=True, pre_state=pre_state)
@@ -664,6 +666,11 @@ class FTSController:
                 schedulers = [s for s, _ in self._host.get_lr_schedulers()]
             else:
                 core_optim.warn_unapplied_lr_lambdas(schedulers, self.apply_lambdas_new_pgs)
+
+    def _pin_boundary(self, depth: int, initial_path: str | None = None) -> None:
+        assert self._checkpoint is not None
+        self._checkpoint.pin_boundary(depth, initial_path=initial_path, copy=self._host.is_global_zero)
+        self._host.barrier("fts_boundary_pinned")
 
     def _end_phase(self, depth: int) -> None:
         if depth not in self._ended_depths:
@@ -788,28 +795,30 @@ class FTSController:
                 reasons.append(result.reason or describe_callable(fn))
         if not self._host.reduce_any(not accepted):
             return True
+        # every rank reports the same reasons, whichever rank vetoed
+        gathered = [r for rank_reasons in self._host.all_gather_object(reasons) for r in rank_reasons]
+        reasons = list(dict.fromkeys(gathered))
         boundary = cp.boundary_path(depth) if cp else None
         if boundary is not None:
-            self._load_training_state(load_payload(boundary), restore_optimizer=True)
+            self._restore_checkpoint(boundary, restore_optimizer=True)
         self._ended_depths.add(depth)
-        self._stop(f"veto: phase {depth} was rejected ({'; '.join(reasons) or 'by a gate on another rank'})"
+        self._stop(f"veto: phase {depth} was rejected ({'; '.join(reasons)})"
                    + ("" if boundary else "; no earlier checkpoint to restore"))
         return False
 
-    def _training_payload(self) -> dict[str, Any]:
+    @property
+    def _sharded(self) -> bool:
+        return any(type(p).__name__ == "DTensor" for p in self.model.parameters())
+
+    def _training_payload(self, with_tensors: bool) -> dict[str, Any]:
         named = dict(self.model.named_parameters())
         include = getattr(self._checkpoint, "include", "all")
-        model_state = self.model.state_dict()
-        if include == "scheduled":
-            scheduled = {n for phase in self._schedule.values() for n in phase["params"]}
-            model_state = {k: v for k, v in model_state.items() if k in scheduled or k not in named}
         optimizer = self.optimizer
-        return {
+        payload: dict[str, Any] = {
             "version": STATE_VERSION,
             "depth": self._depth,
             "include": include,
-            "model": model_state,
-            "optimizer": optimizer.state_dict(),
+            "sharded": not with_tensors,
             "optimizer_class": type(optimizer).__qualname__,
             "param_groups": core_phase.map_param_groups(optimizer.param_groups, {p: n for n, p in named.items()}),
             "lr_schedulers": [s.state_dict() for s in self.lr_schedulers],
@@ -821,33 +830,89 @@ class FTSController:
                          "phase_config": self._schedule[self._depth].get("phase_config"),
                          "gate_records": list(self._gate_records), "fingerprints": deepcopy(self._fingerprints)},
         }
+        if with_tensors:
+            model_state = self.model.state_dict()
+            if include == "scheduled":
+                scheduled = {n for phase in self._schedule.values() for n in phase["params"]}
+                model_state = {k: v for k, v in model_state.items() if k in scheduled or k not in named}
+            payload["model"] = model_state
+            payload["optimizer"] = optimizer.state_dict()
+        return payload
 
-    def _save_training_state(self, path: str) -> str:
-        if self._host.is_global_zero:
-            save_payload(self._training_payload(), path)
-        self._host.barrier("fts_checkpoint_saved")
+    def _write_checkpoint(self, path: str, extra: Mapping[str, Any] | None = None,
+                          rng_state: dict | None = None) -> str:
+        """Write the training state to ``path``: one file (rank zero) for an unsharded model; for a sharded model,
+        a directory written by every rank through DCP, with the non-tensor state in ``fts_meta.pt`` and each rank's
+        random generator state (if given) beside it."""
+        path = os.fspath(path)
+        if self._sharded:
+            import torch.distributed.checkpoint as dcp
+            from torch.distributed.checkpoint.state_dict import get_state_dict
+
+            with self._suspend_step_counting():  # DSD may step an optimizer with no state yet
+                model_sd, optim_sd = get_state_dict(self.model, self.optimizer)
+            dcp.save({"model": model_sd, "optim": optim_sd}, checkpoint_id=path)
+            if self._host.is_global_zero:
+                save_payload({**self._training_payload(with_tensors=False), **(extra or {})},
+                             os.path.join(path, META_FILE))
+            if rng_state is not None:
+                rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+                save_payload({"rng": rng_state}, os.path.join(path, f"rng_rank{rank}.pt"))
+        elif self._host.is_global_zero:
+            payload = {**self._training_payload(with_tensors=True), **(extra or {})}
+            if rng_state is not None:
+                payload["rng"] = rng_state
+            save_payload(payload, path)
+        self._host.barrier("fts_checkpoint_written")
         return path
 
-    def _load_training_state(self, payload: Mapping[str, Any], restore_optimizer: bool,
-                             statefuls: Literal["all", "on_best"] = "on_best") -> None:
-        if restore_optimizer:
-            optimizer = self.optimizer
-            if payload["optimizer_class"] == type(optimizer).__qualname__:
-                # match the saved parameter groups first, so the saved optimizer state lines up with them
-                optimizer.param_groups = core_phase.map_param_groups(payload["param_groups"],
-                                                                     dict(self.model.named_parameters()))
-                optimizer.load_state_dict(payload["optimizer"])
-                for sched, state in zip(self.lr_schedulers, payload["lr_schedulers"]):
-                    sched.load_state_dict(state)
-            else:
-                rank_zero_info(
-                    f"The checkpoint's optimizer ({payload['optimizer_class']}) predates an optimizer reinitialization;"
-                    " restoring the model state only."
-                )
-        self.model.load_state_dict(payload["model"], strict=payload["include"] == "all")
+    @staticmethod
+    def _read_meta(path: str) -> dict[str, Any]:
+        return load_payload(os.path.join(path, META_FILE)) if os.path.isdir(path) else load_payload(path)
+
+    def _restore_checkpoint(self, path: str, restore_optimizer: bool, statefuls: Literal["all", "on_best"] = "on_best",
+                            meta: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Restore the model (and, when its type still matches, the optimizer and lr scheduler state) and
+        registered state from a checkpoint written by :meth:`_write_checkpoint`; return its metadata."""
+        meta = dict(meta) if meta is not None else self._read_meta(path)
+        optimizer = self.optimizer
+        same_optimizer = meta["optimizer_class"] == type(optimizer).__qualname__
+        if restore_optimizer and not same_optimizer:
+            rank_zero_info(
+                f"The checkpoint's optimizer ({meta['optimizer_class']}) predates an optimizer reinitialization;"
+                " restoring the model state only."
+            )
+        with_optimizer = restore_optimizer and same_optimizer
+        if with_optimizer:
+            # match the saved parameter groups first, so the saved optimizer state lines up with them
+            optimizer.param_groups = core_phase.map_param_groups(meta["param_groups"],
+                                                                 dict(self.model.named_parameters()))
+        if meta.get("sharded"):
+            import torch.distributed.checkpoint as dcp
+            from torch.distributed.checkpoint.state_dict import get_state_dict, set_model_state_dict, set_state_dict
+
+            if with_optimizer:
+                optimizer.state.clear()
+            with self._suspend_step_counting():
+                model_sd, optim_sd = get_state_dict(self.model, optimizer)
+                state = {"model": model_sd, "optim": optim_sd} if with_optimizer else {"model": model_sd}
+                dcp.load(state, checkpoint_id=path)
+                if with_optimizer:
+                    set_state_dict(self.model, optimizer, model_state_dict=state["model"],
+                                   optim_state_dict=state["optim"])  # type: ignore[arg-type]
+                else:
+                    set_model_state_dict(self.model, state["model"])
+        else:
+            if with_optimizer:
+                optimizer.load_state_dict(meta["optimizer"])
+            self.model.load_state_dict(meta["model"], strict=meta["include"] == "all")
+        if with_optimizer:
+            for sched, state_ in zip(self.lr_schedulers, meta["lr_schedulers"]):
+                sched.load_state_dict(state_)
         for name, (obj, restore_on_best) in self._statefuls.items():
-            if name in payload["statefuls"] and (statefuls == "all" or restore_on_best):
-                obj.load_state_dict(payload["statefuls"][name])
+            if name in meta["statefuls"] and (statefuls == "all" or restore_on_best):
+                obj.load_state_dict(meta["statefuls"][name])
+        return meta
 
     def _restore_best_state(self) -> int | None:
         """Restore the best checkpoint's model, optimizer and lr scheduler state (as the callback does at a phase
@@ -856,10 +921,9 @@ class FTSController:
         if cp is None or cp.best_path is None:
             return None
         self._host.barrier("fts_restore_best")
-        payload = load_payload(cp.best_path)
-        self._load_training_state(payload, restore_optimizer=True)
+        meta = self._restore_checkpoint(cp.best_path, restore_optimizer=True)
         self._restored_count += 1
-        return payload["depth"]
+        return meta["depth"]
 
     def restore_best(self) -> bool:
         """Load the best checkpoint's model state (and registered state marked ``restore_on_best``), for example
@@ -873,21 +937,19 @@ class FTSController:
         if cp is None or cp.best_path is None:
             return False
         self._host.barrier("fts_restore_best")
-        self._load_training_state(load_payload(cp.best_path), restore_optimizer=False)
+        self._restore_checkpoint(cp.best_path, restore_optimizer=False)
         return True
 
     def save(self, path: str | os.PathLike) -> str:
         """Save everything needed to resume exactly: the controller's state, the model, optimizer, lr schedulers,
-        registered state, the checkpoint policy's state and (with ``capture_rng``) every random generator's state."""
+        registered state, the checkpoint policy's state and (with ``capture_rng``) every random generator's state.
+
+        An unsharded model is saved to the file ``path`` (by global rank zero); a sharded (FSDP2/DTensor) model to the
+        directory ``path``, written by every rank through DCP.
+        """
         self._require_setup()
-        payload = self._training_payload()
-        payload["controller"] = self.state_dict()
-        if self.capture_rng:
-            payload["rng"] = capture_rng_state(self._host.rng_devices())
-        if self._host.is_global_zero:
-            save_payload(payload, path)
-        self._host.barrier("fts_saved")
-        return os.fspath(path)
+        rng_state = capture_rng_state(self._host.rng_devices()) if self.capture_rng else None
+        return self._write_checkpoint(os.fspath(path), extra={"controller": self.state_dict()}, rng_state=rng_state)
 
     def load(self, path: str | os.PathLike) -> None:
         """Resume from :meth:`save`: rebuild the optimizer and lr schedulers phase by phase up to the saved depth
@@ -897,11 +959,17 @@ class FTSController:
             FTSConfigurationError: If the checkpoint belongs to a different fine-tuning schedule.
         """
         self._require_setup()
-        payload = load_payload(path)
-        self.load_state_dict(payload["controller"])
-        self._load_training_state(payload, restore_optimizer=True, statefuls="all")
-        if "rng" in payload:
-            restore_rng_state(payload["rng"])
+        path = os.fspath(path)
+        meta = self._read_meta(path)
+        self.load_state_dict(meta["controller"])
+        self._restore_checkpoint(path, restore_optimizer=True, statefuls="all", meta=meta)
+        if meta.get("sharded"):
+            rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+            rng_file = os.path.join(path, f"rng_rank{rank}.pt")
+            if os.path.exists(rng_file):
+                restore_rng_state(load_payload(rng_file)["rng"])
+        elif "rng" in meta:
+            restore_rng_state(meta["rng"])
 
     # ------------------------------------------------------------------------------------------------------------------
     # hooks, fingerprints and step counting
