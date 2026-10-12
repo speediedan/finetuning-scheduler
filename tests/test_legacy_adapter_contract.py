@@ -171,8 +171,8 @@ class EquivalentView:
 
 
 def test_equivalent_view_follows_the_legacy_path_on_the_plain_loop():
-    """The legacy adapter's phase path (pinned above, under Lightning) is reproduced by an equivalent view driving the
-    direct PyTorch controller: the same depth, thawed tensors and parameter groups at every epoch."""
+    """The legacy adapter's phase path (pinned above, under Lightning) is reproduced by an equivalent view driving
+    ``FTSController``: the same depth, thawed tensors and parameter groups at every epoch."""
     seed_everything(42)
     model = LogicalNamesBoringModel()
     sgd = partial(torch.optim.SGD, lr=1e-3)

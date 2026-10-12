@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tests for the direct PyTorch controller scheduling a model through a tunable view.
+"""Tests for ``FTSController`` scheduling a model through a tunable view.
 
 These need only PyTorch and the scheduling core (the ``core-no-lightning`` job runs them with ``--noconftest``).
 """
