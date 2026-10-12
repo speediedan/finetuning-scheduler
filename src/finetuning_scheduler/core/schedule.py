@@ -100,23 +100,20 @@ def save_schedule(schedule_name: str, layer_config: dict, dump_loc: str | os.Pat
     return ft_schedule_yaml
 
 
-def gen_ft_schedule(module: nn.Module, dump_loc: str | os.PathLike) -> os.PathLike | None:
-    """Generate the default fine-tuning schedule for ``module`` and save it to ``dump_loc``.
-
-    Parameters are thawed in pairs, starting from the last registered parameter.
+def build_default_schedule(module: nn.Module) -> dict:
+    """Build the default fine-tuning schedule for ``module``: parameters are thawed in pairs, starting from the
+    last registered parameter.
 
     Args:
-        module: The module for which a fine-tuning schedule will be generated.
-        dump_loc: The directory to which the generated schedule (.yaml) should be written.
+        module: The module for which to build a schedule.
 
     Returns:
-        The path to the generated schedule.
+        The schedule, mapping each phase to its ``params``.
     """
     # Note: This initial default fine-tuning schedule generation approach is intentionally simple/naive but is
     # effective for a surprising fraction of models. Future versions of this callback may use module
     # introspection to generate default schedules that better accommodate more complex structures and
     # specific architectures if the callback proves sufficiently useful.
-    rank_zero_info(f"Proceeding with dumping default fine-tuning schedule for {module.__class__.__name__}")
     param_lists: list = []
     cur_group: list = []
     model_params = list(module.named_parameters())[::-1]
@@ -132,6 +129,22 @@ def gen_ft_schedule(module: nn.Module, dump_loc: str | os.PathLike) -> os.PathLi
     layer_config = {}
     for i, param_l in enumerate(param_lists):
         layer_config[i] = {"params": param_l}
+    return layer_config
+
+
+def gen_ft_schedule(module: nn.Module, dump_loc: str | os.PathLike) -> os.PathLike | None:
+    """Generate the default fine-tuning schedule for ``module`` (see :func:`build_default_schedule`) and save it to
+    ``dump_loc``.
+
+    Args:
+        module: The module for which a fine-tuning schedule will be generated.
+        dump_loc: The directory to which the generated schedule (.yaml) should be written.
+
+    Returns:
+        The path to the generated schedule.
+    """
+    rank_zero_info(f"Proceeding with dumping default fine-tuning schedule for {module.__class__.__name__}")
+    layer_config = build_default_schedule(module)
     schedule_name = f"{module.__class__.__name__}_ft_schedule.yaml"
     assert dump_loc is not None
     return save_schedule(schedule_name, layer_config, dump_loc)

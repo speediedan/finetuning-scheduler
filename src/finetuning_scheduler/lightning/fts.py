@@ -34,6 +34,7 @@ from lightning.pytorch.trainer.connectors.logger_connector.result import _Result
 
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import phase as core_phase
+from finetuning_scheduler.core import transitions as core_transitions
 from finetuning_scheduler.lightning.fts_supporters import (
     CallbackDepMixin,
     FTSEarlyStopping,
@@ -813,14 +814,13 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert self.pl_module is not None
         assert isinstance(self.ft_schedule, dict)
         early_stopping_callback = trainer.early_stopping_callback
-        curr_max_epoch = (
-            self.ft_schedule[self.curr_depth]["max_transition_epoch"]
-            if self.depth_remaining > 0
-            else trainer.fit_loop.max_epochs
+        curr_max_epoch = core_transitions.current_max_epoch(
+            self.ft_schedule, self.curr_depth, self.depth_remaining, trainer.fit_loop.max_epochs  # type: ignore[arg-type]
         )
         assert isinstance(curr_max_epoch, (int, float)), (
             f"Expected max_transition_epoch/max_epochs to be an int or float, but got {type(curr_max_epoch)}"
         )
+        epoch_due = core_transitions.epoch_transition_due(curr_max_epoch, trainer.current_epoch)
         if not self.epoch_transitions_only:  # if we're considering FTSEarlyStopping criteria
             assert early_stopping_callback is not None
             # in the edge case where transition decisions diverge among distributed processes because the user is
@@ -828,16 +828,13 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             # sufficiently low, we should reduce the transition decision over all training processes to avoid deadlocks
             if early_stopping_callback.reduce_transition_decisions:
                 self._sync_es_state(trainer)
-            is_final_phase = early_stopping_callback.final_phase  # type: ignore[attr-defined]
-            epoch_driven_transition = (
-                True if not is_final_phase and (0 <= curr_max_epoch <= trainer.current_epoch) else False
+            phase_transition = core_transitions.compose_transition(
+                early_stopping_callback.es_phase_complete,  # type: ignore[attr-defined]
+                early_stopping_callback.final_phase,  # type: ignore[attr-defined]
+                epoch_due,
             )
-            if early_stopping_callback.es_phase_complete or epoch_driven_transition:  # type: ignore[attr-defined]
-                phase_transition = True
-            else:
-                phase_transition = False
         else:  # we're only considering epoch-driven transition constraints
-            phase_transition = True if 0 <= curr_max_epoch <= trainer.current_epoch else False
+            phase_transition = epoch_due
         return phase_transition
 
     def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:

@@ -87,3 +87,22 @@ def test_lr_reinit_cfg_for_and_depth_remaining():
     assert lr_reinit_cfg_for(SCHEDULE[1], 0, {"implicit": True}) is None
     assert lr_reinit_cfg_for(SCHEDULE[3], 3, None) is None
     assert depth_remaining(3, 1) == 2 and depth_remaining(1, 3) == 0
+
+
+@pytest.mark.parametrize(
+    "plateau_complete, final_phase, curr_max_epoch, current_epoch, expected",
+    [
+        (False, False, 3, 2, False),
+        (False, False, 3, 3, True),  # epoch-driven
+        (False, True, 3, 5, False),  # never epoch-driven in the final phase
+        (True, True, -1, 0, True),  # plateau ends any phase
+        (False, False, -1, 99, False),  # a negative max_transition_epoch disables epoch-driven transitions
+    ],
+)
+def test_transition_composition(plateau_complete, final_phase, curr_max_epoch, current_epoch, expected):
+    from finetuning_scheduler.core.transitions import compose_transition, current_max_epoch, epoch_transition_due
+
+    due = epoch_transition_due(curr_max_epoch, current_epoch)
+    assert compose_transition(plateau_complete, final_phase, due) is expected
+    assert current_max_epoch(SCHEDULE | {1: {"params": ["b"], "max_transition_epoch": 4}}, 1, 2, 10) == 4
+    assert current_max_epoch(SCHEDULE, 3, 0, 10) == 10

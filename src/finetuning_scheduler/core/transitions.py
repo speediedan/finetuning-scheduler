@@ -13,7 +13,8 @@ r"""
 Fine-Tuning Scheduler Transitions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Framework-neutral phase-transition logic: the plateau (early-stopping) criteria evaluated within a phase.
+Framework-neutral phase-transition logic: the plateau (early-stopping) criteria evaluated within a phase, and the
+composition of plateau and epoch-driven transitions.
 
 """
 from collections.abc import Callable
@@ -115,3 +116,21 @@ def plateau_criteria(
             else:
                 phase_complete = True
     return PlateauOutcome(should_stop, reason, best_score, wait_count, phase_complete)
+
+
+def current_max_epoch(schedule: dict, curr_depth: int, depth_remaining: int, max_epochs: int | float) -> int | float:
+    """The epoch bounding the current phase: its ``max_transition_epoch``, or the run's ``max_epochs`` in the final
+    phase."""
+    return schedule[curr_depth]["max_transition_epoch"] if depth_remaining > 0 else max_epochs
+
+
+def epoch_transition_due(curr_max_epoch: int | float, current_epoch: int) -> bool:
+    """Whether an epoch-driven transition is due (a negative ``curr_max_epoch`` disables epoch-driven
+    transitions)."""
+    return 0 <= curr_max_epoch <= current_epoch
+
+
+def compose_transition(plateau_phase_complete: bool, final_phase: bool, epoch_due: bool) -> bool:
+    """Compose plateau and epoch-driven transitions: either ends a phase, except that an epoch-driven transition never
+    ends the final phase."""
+    return plateau_phase_complete or (not final_phase and epoch_due)
