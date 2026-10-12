@@ -75,22 +75,6 @@ class PhaseEvent:
     controller: "FTSController" = field(repr=False)
 
 
-def _reshard_fsdp_modules(model: nn.Module) -> None:
-    """Register every FSDP2 module's sharded parameters.
-
-    FSDP2 can leave a module's unsharded parameters registered between steps: a root module whose parameters are all
-    frozen keeps them after its forward, since no backward hook reshards it. Thawing, optimizing or checkpointing those
-    would miss the sharded parameters the next all-gather registers again, so the controller reshards first.
-    """
-    if not torch.distributed.is_available():
-        return
-    from torch.distributed.fsdp import FSDPModule
-
-    for module in model.modules():
-        if isinstance(module, FSDPModule):
-            module.reshard()
-
-
 def _is_compiled(module: nn.Module) -> bool:
     """Whether ``module`` or a submodule is compiled, by ``torch.compile(module)`` or in place by
     ``module.compile()``."""
@@ -260,7 +244,7 @@ class FTSController:
         self._validate_schedule()
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
         self._refuse_unschedulable_params()
-        _reshard_fsdp_modules(self.model)
+        core_phase.reshard_fsdp_modules(self.model)
         self._warn_unsynchronized_params()
         core_phase.freeze_module_tree(self.model, train_bn=False,
                                       bn_track_running_stats=self.frozen_bn_track_running_stats)
@@ -695,7 +679,7 @@ class FTSController:
         its gates (a veto stops here), advance and pin the boundary best, run the new phase's start hooks, then
         thaw and configure the optimizer for it."""
         prev = self._depth
-        _reshard_fsdp_modules(self.model)
+        core_phase.reshard_fsdp_modules(self.model)
         schedulers = [s for s, _ in self._host.get_lr_schedulers()]
         pre_state = core_optim.capture_lr_state(schedulers[0] if schedulers else None, self.optimizer)
         restored_depth = self._restore_best_state() if self._restore_best else None
@@ -724,7 +708,7 @@ class FTSController:
         optimizer lacks) and configure the optimizer and lr schedulers for them, as the callback's ``step_pg``
         does."""
         # after any phase hooks and gates, which may have run a forward-only pass, and on `load_state_dict`'s replay
-        _reshard_fsdp_modules(self.model)
+        core_phase.reshard_fsdp_modules(self.model)
         optimizer = self.optimizer
         schedulers = [s for s, _ in self._host.get_lr_schedulers()]
         new_optimizer_cfg, phases = core_phase.thaw_plan(self._schedule, depth, restored_depth, depth_sync=depth_sync,
@@ -930,7 +914,7 @@ class FTSController:
         a directory written by every rank through DCP, with the non-tensor state in ``fts_meta.pt`` and each rank's
         random generator state (if given) beside it."""
         path = os.path.normpath(os.fspath(path))  # `ckpt/` and `ckpt` are one checkpoint
-        _reshard_fsdp_modules(self.model)
+        core_phase.reshard_fsdp_modules(self.model)
         # registered state (a data-loader position, for example) and random streams are per rank
         statefuls = {name: obj.state_dict() for name, (obj, _) in self._statefuls.items()}
         per_rank = (self._host.all_gather_object({"statefuls": statefuls, "rng": rng_state})
@@ -979,7 +963,7 @@ class FTSController:
                             meta: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Restore the model (and, when its type still matches, the optimizer and lr scheduler state) and
         registered state from a checkpoint written by :meth:`_write_checkpoint`; return its metadata."""
-        _reshard_fsdp_modules(self.model)
+        core_phase.reshard_fsdp_modules(self.model)
         meta = dict(meta) if meta is not None else self._read_meta(path)
         optimizer = self.optimizer
         same_optimizer = meta["optimizer_class"] == type(optimizer).__qualname__

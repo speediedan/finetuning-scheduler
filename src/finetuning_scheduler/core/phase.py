@@ -21,10 +21,29 @@ from collections.abc import Callable, Iterable
 from pprint import pformat as pfmt
 from typing import Any
 
+import torch
 from torch.nn import Module, ModuleDict
 from torch.nn.modules.batchnorm import _BatchNorm
 
 from finetuning_scheduler.core.dist import rank_zero_debug
+
+
+def reshard_fsdp_modules(module: Module) -> None:
+    """Register every FSDP2 module's sharded parameters, before parameters are frozen, thawed, optimized or
+    checkpointed.
+
+    FSDP2 can leave a module's unsharded parameters registered between steps: the root module's after a forward-only
+    pass (a validation or evaluation pass), and a root module's whose parameters are all frozen after its forward, since
+    no backward hook reshards it. Thawing those would miss the sharded parameters the next all-gather registers again,
+    which stay frozen.
+    """
+    if not torch.distributed.is_available():
+        return
+    from torch.distributed.fsdp import FSDPModule
+
+    for submodule in module.modules():
+        if isinstance(submodule, FSDPModule):
+            submodule.reshard()
 
 
 def thaw_params(module: Module, thaw_pl: list, translation_func: Callable | None = None,
