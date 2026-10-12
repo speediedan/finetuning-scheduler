@@ -20,6 +20,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Fixed `lock_ci_requirements.sh` ignoring the CUDA target configured in `requirements/ci/torch-pre.txt`. The generated `torch-override.txt` header and the printed installation commands hardcoded the `nightly/cu130` index, so a `test` channel or `cu132` configuration documented the wrong index.
 
+- Fixed `scripts/gpu_lease_wrap.sh` having drifted from the copy it shares with interpretune. `ci_gpu_lease_acquire` and `ci_gpu_lease_release` now take an optional lease name (default `gpu`), so a CI job can also take the host's `cpu-heavy` lease. Existing callers are unchanged [#66](https://github.com/speediedan/finetuning-scheduler/issues/66).
+
+- Fixed `scripts/gen_fts_coverage.sh` sending its commands' stderr to the terminal instead of the coverage session log, and its `--dry-run` listing no standalone tests: it selected with pytest markers this repository does not define, and set an environment variable nothing reads [#67](https://github.com/speediedan/finetuning-scheduler/issues/67).
+
 ### Changed
 
 - Raised the minimum supported PyTorch version to `2.12.0`, maintaining the "latest 4 PyTorch minor releases" support window documented in `docs/source/versioning.rst`.

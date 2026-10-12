@@ -98,18 +98,22 @@ gpu_lease_reexec() {
 # Fail-open by design: if the lease directory is not mounted, CI proceeds unserialized rather than
 # failing. A missing convenience must never break the build.
 #
-#   ci_gpu_lease_acquire <lease_dir> <pidfile> [timeout_secs] [label]
-#   ci_gpu_lease_release <lease_dir> <pidfile>
+#   ci_gpu_lease_acquire <lease_dir> <pidfile> [timeout_secs] [label] [lease_name]
+#   ci_gpu_lease_release <lease_dir> <pidfile> [lease_name]
+#
+# `lease_name` selects the lock (`<lease_dir>/<lease_name>.lock`, default `gpu`); the host tool keeps one lock per
+# resource (`gpu`, `cpu-heavy`), and a job that needs both takes them in the host tool's order, gpu then cpu-heavy,
+# so no caller can hold one while waiting for the other in the opposite order.
 
 ci_gpu_lease_acquire() {
-    local dir="${1:?lease dir}" pidfile="${2:?pidfile}" timeout="${3:-2700}" label="${4:-ci-job}"
+    local dir="${1:?lease dir}" pidfile="${2:?pidfile}" timeout="${3:-2700}" label="${4:-ci-job}" lease="${5:-gpu}"
     # Fail open ONLY when the host does not use leases at all (directory not mounted). Any other failure
     # below is a real misconfiguration and is reported as such -- see the note on the permission trap.
     if [[ ! -d "$dir" ]]; then
         echo "ci_gpu_lease: '${dir}' not mounted; this host does not use GPU leases. Proceeding." >&2
         return 0
     fi
-    local lock="${dir}/gpu.lock" ready="${pidfile}.ready"
+    local lock="${dir}/${lease}.lock" ready="${pidfile}.ready"
     rm -f "$pidfile" "$ready"
     # The lock is opened READ-ONLY. Under rootless docker with userns remapping this container's uid is a
     # host subuid that does not own the lock file, so opening it read-write fails with EACCES. flock(2)
@@ -138,8 +142,8 @@ ci_gpu_lease_acquire() {
     local deadline=$(( $(date +%s) + timeout + 15 ))
     while [[ ! -e "$ready" ]]; do
         if (( $(date +%s) > deadline )); then
-            echo "ci_gpu_lease: timed out after ${timeout}s waiting for the GPU lease." >&2
-            [[ -r "${dir}/gpu.holder" ]] && { echo "  current holder:" >&2; sed 's/^/    /' "${dir}/gpu.holder" >&2; }
+            echo "ci_gpu_lease: timed out after ${timeout}s waiting for the ${lease} lease." >&2
+            [[ -r "${dir}/${lease}.holder" ]] && { echo "  current holder:" >&2; sed 's/^/    /' "${dir}/${lease}.holder" >&2; }
             return 75
         fi
         sleep 2
@@ -147,33 +151,33 @@ ci_gpu_lease_acquire() {
     rm -f "$ready"
     { echo "pid=$(cat "$pidfile")"; echo "started=$(date -Iseconds)"; echo "epoch=$(date +%s)"
       echo "project=${label}"; echo "host=$(hostname)"; echo "container=yes"
-      echo "cmd=azure pipeline job"; } > "${dir}/gpu.holder" 2>/dev/null || true
+      echo "cmd=azure pipeline job"; } > "${dir}/${lease}.holder" 2>/dev/null || true
     # Make the holder repairable by whoever takes the lease next. This container owns the file it just
     # created so the chmod succeeds HERE, whereas a local uid could never repair it later: chmod(2)
     # requires ownership, and unlink in the sticky lease dir does too, and a local user owns neither the
-    # file (written as a rootless-docker subuid) nor the directory (the pipeline agent's own user).
+    # file (written as a rootless-docker subuid) nor the directory (az_pipeline_agent).
     #
     # Scope, so this is not read as fixing a recurring failure: the normal path never needs it, because
     # ci_gpu_lease_release below removes the holder outright and runs under `condition: always()`.
-    # Handoffs have been measured clean in both directions across several consecutive builds. It matters
-    # only when a termination bypasses that cleanup (container teardown mid-step, agent kill, host crash),
-    # which would otherwise leave a 0644 container-owned holder that the next LOCAL acquire cannot
-    # overwrite, so `--status` would misattribute a local hold to a finished build. That is the attribution
-    # the "never force-reset a CI-held lease" rule depends on. It self-heals at the next CI build, which
+    # Measured clean in both directions across consecutive builds; handoffs are clean. It matters only when a
+    # termination bypasses that cleanup (container teardown mid-step, agent kill, host crash), which
+    # would otherwise leave a 0644 container-owned holder that the next LOCAL acquire cannot overwrite,
+    # so `--status` would misattribute a local hold to a finished build. That is the attribution the
+    # "never force-reset a CI-held lease" rule depends on. It self-heals at the next CI build, which
     # shares the subuid, so the exposure is one abnormal termination wide. At ACQUIRE rather than at
     # release precisely because a torn-down job never reaches its release step.
-    chmod 0666 "${dir}/gpu.holder" 2>/dev/null || true
-    echo "ci_gpu_lease: acquired the GPU lease (holder $(cat "$pidfile"))." >&2
+    chmod 0666 "${dir}/${lease}.holder" 2>/dev/null || true
+    echo "ci_gpu_lease: acquired the ${lease} lease (holder $(cat "$pidfile"))." >&2
 }
 
 ci_gpu_lease_release() {
-    local dir="${1:?lease dir}" pidfile="${2:?pidfile}"
-    [[ -f "$pidfile" ]] || { echo "ci_gpu_lease: nothing to release." >&2; return 0; }
+    local dir="${1:?lease dir}" pidfile="${2:?pidfile}" lease="${3:-gpu}"
+    [[ -f "$pidfile" ]] || { echo "ci_gpu_lease: nothing to release for ${lease}." >&2; return 0; }
     local hpid; hpid=$(cat "$pidfile" 2>/dev/null); rm -f "$pidfile"
     # Kill the process GROUP: the holder's `sleep` child inherits the flock'd fd, so killing only the
     # holder shell would leave the lock held by an orphan.
     [[ -n "$hpid" ]] && { kill -TERM -- "-${hpid}" 2>/dev/null || kill -TERM "$hpid" 2>/dev/null; sleep 1
                           kill -KILL -- "-${hpid}" 2>/dev/null || kill -KILL "$hpid" 2>/dev/null; }
-    rm -f "${dir}/gpu.holder" 2>/dev/null || true
-    echo "ci_gpu_lease: released the GPU lease." >&2
+    rm -f "${dir}/${lease}.holder" 2>/dev/null || true
+    echo "ci_gpu_lease: released the ${lease} lease." >&2
 }
