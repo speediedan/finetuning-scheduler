@@ -185,6 +185,7 @@ class FTSController:
         self._schedule: dict = {}
         self._phase_configs: dict[int, Any] = {}
         self._max_depth = -1
+        self._epoch_watermark = -1
         self._depth = 0
         self._phase_start_epoch = 0
         self._phase_start_step = 0
@@ -288,6 +289,7 @@ class FTSController:
                 max_epoch_wm = core_schedule.update_epoch_watermark(schedule, depth, max_epoch_wm,
                                                                     epoch_transitions_only=not self._user_policies)
         core_schedule.validate_phases_disjoint(schedule)
+        self._epoch_watermark = max_epoch_wm
         if not self._user_policies:
             final = len(schedule) - 1
             unset = [d for d in schedule if d < final and schedule[d]["max_transition_epoch"] < 0
@@ -433,8 +435,15 @@ class FTSController:
     def epochs(self, max_epochs: int) -> Iterator[int]:
         """Iterate over epoch indices, calling :meth:`epoch_start` before each epoch and :meth:`epoch_end` after it
         (with no metrics) unless the loop called it; stops early once :attr:`should_stop`, then calls
-        :meth:`train_end`."""
+        :meth:`train_end`.
+
+        As with the Lightning callback, when the final phase sets ``max_transition_epoch`` the run lasts the greater of
+        ``max_epochs`` and the schedule's highest ``max_transition_epoch`` (with a warning).
+        """
         self._require_setup()
+        extended = core_schedule.final_phase_max_epochs(self._schedule, self._max_depth, self._epoch_watermark,
+                                                        max_epochs)
+        max_epochs = extended if extended is not None else max_epochs
         self._host.set_max_epochs(max_epochs)
         try:
             while self._host.current_epoch < max_epochs and not self._should_stop:
