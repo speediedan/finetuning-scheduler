@@ -17,6 +17,7 @@ are not documented as public API.
     core.checkpoint
     core.views
     core.roles
+    core.compile
     core.schedule
     core.state
     core.rng

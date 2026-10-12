@@ -23,7 +23,7 @@ import os
 import pathlib
 import re
 from collections import Counter
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterable, Mapping
 
 import yaml
 from torch import nn
@@ -272,25 +272,30 @@ def parse_phase_lr(schedule: dict, depth: int, base_max_lr: float) -> None:
             del schedule[depth]["lr"]
 
 
-def resolve_phase_params(schedule: dict, depth: int, named_params: Collection[str], shared_params: tuple) -> None:
-    """Expand the parameter names and regexes of phase ``depth`` in place to fully qualified parameter names.
+def resolve_param_entries(entries: Iterable[str], depth: int, named_params: Collection[str],
+                          shared_params: tuple) -> list[str]:
+    """Resolve a phase's parameter names and regexes to fully qualified parameter names, without modifying the
+    schedule.
 
-    Explicitly specified copies of shared parameters are pruned with a warning, since they are thawed with their
-    registered source parameter.
+    A name present in ``named_params`` resolves to itself; any other entry is a regex matched (``re.match``) against
+    every name. Explicitly specified copies of shared parameters are pruned with a warning, since they are thawed with
+    their registered source parameter.
 
     Args:
-        schedule: The fine-tuning schedule.
-        depth: The phase to resolve.
-        named_params: The names of the model's parameters.
+        entries: The phase's ``params`` entries.
+        depth: The phase, for messages.
+        named_params: The names entries resolve against.
         shared_params: The model's shared parameter names, as a tuple of (a list of per-tensor name lists, a set of
             all shared names).
+
+    Returns:
+        The resolved names, in entry order.
 
     Raises:
         FTSConfigurationError: If a specified parameter or regex matches no parameter.
     """
-    orig_params = schedule[depth].get("params", [])
     resolved_params = []
-    for p in orig_params:
+    for p in entries:
         regex_params = []
         explicit_params = False
         if p in named_params:
@@ -314,7 +319,25 @@ def resolve_phase_params(schedule: dict, depth: int, named_params: Collection[st
                     "provided explicit schedule did not match any named parameter in the "
                     "model."
                 )
-    schedule[depth]["params"] = resolved_params
+    return resolved_params
+
+
+def resolve_phase_params(schedule: dict, depth: int, named_params: Collection[str], shared_params: tuple) -> None:
+    """Expand the parameter names and regexes of phase ``depth`` in place to fully qualified parameter names (see
+    :func:`resolve_param_entries`).
+
+    Args:
+        schedule: The fine-tuning schedule.
+        depth: The phase to resolve.
+        named_params: The names of the model's parameters.
+        shared_params: The model's shared parameter names, as a tuple of (a list of per-tensor name lists, a set of
+            all shared names).
+
+    Raises:
+        FTSConfigurationError: If a specified parameter or regex matches no parameter.
+    """
+    schedule[depth]["params"] = resolve_param_entries(schedule[depth].get("params", []), depth, named_params,
+                                                      shared_params)
 
 
 def shared_params_ref(module: nn.Module) -> tuple:
