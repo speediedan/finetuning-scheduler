@@ -32,6 +32,7 @@ from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 from lightning.pytorch.trainer.connectors.logger_connector.result import _ResultMetric
 
+from finetuning_scheduler.core import phase as core_phase
 from finetuning_scheduler.lightning.fts_supporters import (
     CallbackDepMixin,
     FTSEarlyStopping,
@@ -319,7 +320,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         Returns:
             int: The number of remaining fine-tuning training levels
         """
-        return max(self.max_depth - self._fts_state._curr_depth, 0)
+        return core_phase.depth_remaining(self.max_depth, self._fts_state._curr_depth)
 
     @staticmethod
     def _supported_strategy_flags() -> Sequence[str]:
@@ -426,14 +427,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert isinstance(self.pl_module, pl.LightningModule)
         assert isinstance(self.trainer, pl.Trainer)
         # if the target depth is 0, implicit optimizer reinitialization should not be executed
-        new_optimizer_cfg = (
-            (self.reinit_optim_cfg or self.ft_schedule[depth].get("new_optimizer", None)) if depth > 0 else None
+        new_optimizer_cfg, thaw_layers = core_phase.thaw_plan(
+            self.ft_schedule, depth, self._fts_state._best_ckpt_depth, depth_sync, self.reinit_optim_cfg
         )
-        restored_depth = -1 if new_optimizer_cfg else self._fts_state._best_ckpt_depth
-        if depth_sync or new_optimizer_cfg:
-            thaw_layers = {d: tl for d, tl in self.ft_schedule.items() if d > restored_depth}.items()
-        else:
-            thaw_layers = {depth: self.ft_schedule[depth]}.items()
         for i, orig_next_tl in thaw_layers:
             self.strategy_adapter._maybe_set_bn_track_running_stats(i)
             next_tl = deepcopy(orig_next_tl)
@@ -472,7 +468,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             pre_reinit_state (Tuple): Contingent on restoration context, lr scheduler and optimizer lr state to restore.
         """
         # if the target depth is 0, lr scheduler reinitialization should not be executed
-        new_scheduler_cfg = (self.reinit_lr_cfg or next_tl.get("new_lr_scheduler", None)) if depth > 0 else None
+        new_scheduler_cfg = core_phase.lr_reinit_cfg_for(next_tl, depth, self.reinit_lr_cfg)
         if is_target_depth and depth > 0:
             # NB: The latest optimizer and lr scheduler lr state will be re-applied to all existing param groups before
             # implementing the next phase.

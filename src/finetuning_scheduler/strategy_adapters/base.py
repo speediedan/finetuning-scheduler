@@ -17,7 +17,6 @@ Base adapter class to extend Fine-Tuning Scheduler support of complex or custom 
 
 """
 from functools import partialmethod
-from pprint import pformat as pfmt
 from typing import Any  # Dict used for runtime isinstance() checks
 from collections.abc import Callable, Iterable
 import logging
@@ -32,6 +31,9 @@ from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.callbacks import BaseFinetuning
 from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
+
+import finetuning_scheduler.lightning  # noqa: F401  (registers the Lightning backends the core logs through)
+from finetuning_scheduler.core import phase as core_phase
 
 log = logging.getLogger(__name__)
 
@@ -356,25 +358,7 @@ class StrategyAdapter:
                 1. The list of newly thawed/unfrozen parameters thawed by this function
                 2. A list of all currently thawed/unfrozen parameters in the target :class:`~torch.nn.Module`
         """
-        thawed_p_names = []
-        curr_thawed = []
-        for n, p in module.named_parameters():
-            if not p.requires_grad and n in thaw_pl:
-                p.requires_grad = True
-                thawed_p_names.append(n)
-            elif p.requires_grad:
-                curr_thawed.append(n)
-        if thawed_p_names:
-            rank_zero_debug(
-                f"{'Initializing with' if init_thaw else 'Thawed'} the following module parameters: "
-                f"{pfmt(translation_func(thawed_p_names)) if translation_func else pfmt([n for n in thawed_p_names])}"
-            )
-        curr_thawed.extend(thawed_p_names)
-        rank_zero_debug(
-            f"The following module parameters are currently thawed: "
-            f"{pfmt(translation_func(curr_thawed)) if translation_func else pfmt([n for n in curr_thawed])}"
-        )
-        return thawed_p_names, curr_thawed
+        return core_phase.thaw_params(module, thaw_pl, translation_func=translation_func, init_thaw=init_thaw)
 
     ####################################################################################################################
     # BatchNorm module-specific handling

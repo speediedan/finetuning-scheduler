@@ -45,6 +45,7 @@ from lightning.pytorch.utilities.types import LRSchedulerConfig
 
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import schedule as core_schedule
+from finetuning_scheduler.core import transitions as core_transitions
 from finetuning_scheduler.core.state import FTSState
 from finetuning_scheduler.strategy_adapters import StrategyAdapter, FSDPStrategyAdapter, ModelParallelStrategyAdapter
 from finetuning_scheduler.lightning.types import BaseCallbackDepType
@@ -284,45 +285,25 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         Returns:
             tuple[bool, str | None]: Whether the training session should stop and if so, the reason why.
         """
-        should_stop = False
-        reason = None
-        if self.check_finite and not torch.isfinite(current):
-            should_stop = True
-            reason = (
-                f"Monitored metric {self.monitor} = {current} is not finite."
-                f" Previous best value was {self.best_score:.3f}. Signaling Trainer to stop."
-            )
-        elif self.stopping_threshold is not None and self.monitor_op(current, self.stopping_threshold):
-            should_stop = True
-            reason = (
-                "Stopping threshold reached:"
-                f" {self.monitor} = {current} {self.order_dict[self.mode]} {self.stopping_threshold}."
-                " Signaling Trainer to stop."
-            )
-        elif self.divergence_threshold is not None and self.monitor_op(-current, -self.divergence_threshold):
-            should_stop = True
-            reason = (
-                "Divergence threshold reached:"
-                f" {self.monitor} = {current} {self.order_dict[self.mode]} {self.divergence_threshold}."
-                " Signaling Trainer to stop."
-            )
-        elif self.monitor_op(current - self.min_delta, self.best_score.to(current.device)):
-            should_stop = False
-            reason = self._improvement_message(current)
-            self.best_score = current
-            self.wait_count = 0
-        else:
-            self.wait_count += 1
-            if self.wait_count >= self.patience:
-                if self.final_phase:
-                    should_stop = True
-                    reason = (
-                        f"Monitored metric {self.monitor} did not improve in the last {self.wait_count} records."
-                        f" Best score: {self.best_score.item():.3f}. Signaling Trainer to stop."
-                    )
-                else:
-                    self._transition_es_phase()
-        return should_stop, reason
+        outcome = core_transitions.plateau_criteria(
+            current,
+            best_score=self.best_score,
+            wait_count=self.wait_count,
+            patience=self.patience,
+            min_delta=self.min_delta,
+            monitor_op=self.monitor_op,
+            monitor=self.monitor,
+            order=self.order_dict[self.mode],
+            final_phase=self.final_phase,
+            check_finite=self.check_finite,
+            stopping_threshold=self.stopping_threshold,
+            divergence_threshold=self.divergence_threshold,
+            improvement_message=self._improvement_message,
+        )
+        self.best_score, self.wait_count = outcome.best_score, outcome.wait_count
+        if outcome.phase_complete:
+            self._transition_es_phase()
+        return outcome.should_stop, outcome.reason
 
     def _improvement_message(self, current: Tensor) -> str:
         """Override standard EarlyStopping._improvement_message to accommodate loss_parallel/Dtensor."""
