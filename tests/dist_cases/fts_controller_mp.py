@@ -95,7 +95,10 @@ def _state(model: nn.Module) -> dict:
     params = dict(model.named_parameters())
     return {"p_states": {n: {"requires_grad": params[n].requires_grad, "is_DTensor": isinstance(params[n], DTensor)}
                          for n in SAMPLED},
-            "thawed": sum(p.requires_grad for p in model.parameters())}
+            "thawed": sum(p.requires_grad for p in model.parameters()),
+            # thawed parameters that are plain tensors: with every parameter under an FSDP2 module, an unsharded copy
+            # thawed in place of its sharded DTensor (#90), which neither ``SAMPLED`` nor the count shows
+            "thawed_plain": sorted(n for n, p in params.items() if p.requires_grad and not isinstance(p, DTensor))}
 
 
 def _fsdp_layout(model: nn.Module, planned: list[str], world_size: int) -> dict:
