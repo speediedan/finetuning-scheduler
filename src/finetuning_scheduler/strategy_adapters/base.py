@@ -541,7 +541,8 @@ class StrategyAdapter:
         """
         if self.attached_view:
             assert self.tunable_view is not None
-            return dict(self.tunable_view.logical_named_parameters())
+            # a view's logical names map to tensors (parameters, or views of them)
+            return dict(self.tunable_view.logical_named_parameters())  # type: ignore[arg-type]
         return dict(self.pl_module.named_parameters())
 
     def validate_ft_sched(self) -> tuple[int, int]:

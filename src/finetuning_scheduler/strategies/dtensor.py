@@ -93,7 +93,8 @@ class DTensorAdapter:
                 # `dcp.load` has already required every saved key; relax the per-parameter checks only for what is
                 # legitimately absent (excluded tensors, and optimizer state of never-stepped parameters)
                 options = StateDictOptions(strict=not (unsaved or excluded))
-                set_state_dict(model, optimizer, model_state_dict=state["model"], optim_state_dict=state["optim"],
-                               options=options)  # type: ignore[arg-type]
+                set_state_dict(model, optimizer, model_state_dict=state["model"],
+                               optim_state_dict=state["optim"],  # type: ignore[arg-type]
+                               options=options)
             else:
                 set_model_state_dict(model, state["model"], options=StateDictOptions(strict=not excluded))
