@@ -19,6 +19,8 @@ stays with the gloo tests in ``tests/test_controller_model_parallel.py``.
 The ``core-no-lightning`` CI job runs this module with ``--noconftest``, so it must not import Lightning or
 ``tests.helpers``.
 """
+import sys
+
 import pytest
 import torch
 import torch.distributed as dist
@@ -40,6 +42,12 @@ def _states(path: list) -> list:
     return [(state["p_states"], state["thawed"]) for _, _, state in path]
 
 
+def _thawed_plain(path: list) -> list:
+    """Per epoch, the thawed parameters that are plain tensors rather than DTensors: an unsharded copy thawed in
+    place of its sharded parameter (#90), which the sampled states and the thawed count do not show."""
+    return [state["thawed_plain"] for _, _, state in path]
+
+
 def _scheduling(results: list, *keys: str) -> dict:
     """What every simulated rank must agree on: the phase path, and any of ``keys`` the case returns."""
     return assert_ranks_agree([{k: r[k] for k in ("path", *keys) if k in r} for r in results])
@@ -55,6 +63,7 @@ def test_fsdp_plan_follows_the_lightning_path(world_size, kwargs):
     checkpointing and a forward-only evaluation before ``epoch_end`` or inside a gate or a phase hook."""
     agreed = _scheduling(run_fake(mp.fsdp, world_size=world_size, **kwargs), "layout")
     assert _states(agreed["path"]) == _expected(path_fsdp_autocm)
+    assert _thawed_plain(agreed["path"]) == [[], [], []]
     assert agreed["layout"] == {"fsdp_modules": ["", "layers.0", "layers.1", "norm", "output"], "uneven": []}
 
 
@@ -62,6 +71,7 @@ def test_root_only_plan_follows_the_lightning_path():
     """With FSDP2 on the root alone and an evaluation forward before each ``epoch_end``, the path is unchanged."""
     agreed = _scheduling(run_fake(mp.fsdp, root_only=True, evaluate=True), "layout")
     assert _states(agreed["path"]) == _expected(path_fsdp_autocm)
+    assert _thawed_plain(agreed["path"]) == [[], [], []]
     assert agreed["layout"]["fsdp_modules"] == [""]
 
 
@@ -72,6 +82,7 @@ def test_fsdp_fp16_computes_in_half_precision():
     """Under an fp16 ``MixedPrecisionPolicy`` the path is unchanged and each FSDP module computes in fp16."""
     agreed = _scheduling(run_fake(mp.fsdp, fp16=True), "unsharded_dtypes")
     assert _states(agreed["path"]) == _expected(path_fsdp_autocm)
+    assert _thawed_plain(agreed["path"]) == [[], [], []]
     assert agreed["unsharded_dtypes"] == ["torch.float16"]
 
 
@@ -80,6 +91,7 @@ def test_tp_follows_the_lightning_path(tp_loss_parallel):
     """Tensor parallelism over both ranks follows the Lightning test's TP path on every rank."""
     agreed = _scheduling(run_fake(mp.tp, tp_loss_parallel=tp_loss_parallel))
     assert _states(agreed["path"]) == _expected(path_tp)
+    assert _thawed_plain(agreed["path"]) == [[], [], []]
 
 
 def test_partial_plan_thaws_on_schedule_and_warns_once():
@@ -90,6 +102,8 @@ def test_partial_plan_thaws_on_schedule_and_warns_once():
     results = run_fake(mp.partial_plan)
     path = _scheduling(results)["path"]
     assert [state["thawed"] for _, _, state in path] == [3, 15, 29]
+    # the embeddings, which no FSDP module manages, are plain by design; every FSDP-managed parameter is sharded
+    assert _thawed_plain(path) == [[], [], ["pos_embeddings.weight", "tok_embeddings.weight"]]
     assert len(results[0]["warned"]) == 1 and "tok_embeddings.weight" in results[0]["warned"][0]
     assert results[1]["warned"] == []
 
@@ -112,13 +126,21 @@ def test_wrappers_that_miss_late_thaws_are_refused():
 
 
 def test_run_fake_leaves_no_process_group():
-    """The harness itself: no group outlives a run, and a case may not create or destroy the default group."""
+    """The harness itself: no group outlives a run, a case may neither create or destroy the default group nor
+    broadcast an object, and the hooks and RNG states ``init_process_group`` and the seeding change are restored."""
 
     def owns_the_group(ctx):
         dist.destroy_process_group()
 
+    def broadcasts(ctx):
+        dist.broadcast_object_list([None], src=0)
+
+    excepthook, rng = sys.excepthook, torch.get_rng_state()
     with pytest.raises(AssertionError, match="must not create or destroy"):
         run_fake(owns_the_group)
+    with pytest.raises(AssertionError, match="cannot broadcast objects"):
+        run_fake(broadcasts)
     assert not dist.is_initialized()
     assert run_fake(lambda ctx: (ctx.rank, dist.get_world_size()), world_size=3) == [(0, 3), (1, 3), (2, 3)]
     assert not dist.is_initialized()
+    assert sys.excepthook is excepthook and torch.equal(torch.get_rng_state(), rng)

@@ -14,6 +14,10 @@
 The fake group's collectives communicate nothing, so a case's numerics are meaningless here: what it checks is the
 logic that does not depend on them (which parameters each phase thaws, which modules are sharded and how, which
 configurations are refused or warned about). That runs on every hosted OS, where the gloo pool (Linux only) cannot.
+Object collectives say nothing either: ``all_gather_object`` returns each rank's own object, so cross-rank agreement
+checks pass vacuously, and ``broadcast_object_list`` would hand a non-source rank uninitialized bytes, so it raises
+here instead. A case that broadcasts (a generated schedule, a rank-zero gate, a best-checkpoint policy) belongs in the
+gloo pool.
 
 Only ``torch.testing._internal.distributed.fake_pg`` is imported from PyTorch's private testing package: unlike the
 rest of it, that module imports nothing beyond ``torch.distributed`` and changes no global state other than
@@ -22,6 +26,7 @@ the ``core-no-lightning`` CI job can run the tests that use it.
 """
 import os
 import random
+import sys
 from typing import Any
 from collections.abc import Callable
 
@@ -37,35 +42,53 @@ def _fake_store() -> Any:
     return FakeStore()
 
 
+def _forbidden(what: str) -> Callable:
+    def _raise(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError(what)
+
+    return _raise
+
+
 def run_fake(case: Callable, world_size: int = 2, ranks: list[int] | None = None, seed: int = 1234,
              **kwargs: Any) -> list:
     """Run ``case(ctx, **kwargs)`` once for each simulated rank (every rank by default), each in its own fake
     process group, and return the results in rank order.
 
-    As in the pool, the case may not create or destroy the default process group, and the environment it leaves is
-    restored.
+    As in the pool, the case may not create or destroy the default process group. The environment, the global RNG
+    states and ``sys.excepthook`` (which every ``init_process_group`` wraps with a rank prefix) are restored after
+    each rank.
     """
     if dist.is_initialized():
         raise RuntimeError("a process group is already initialized in this process")
+    group_fns = {name: getattr(dist, name) for name in ("init_process_group", "destroy_process_group")}
+    broadcast = dist.broadcast_object_list
     results = []
     for rank in range(world_size) if ranks is None else ranks:
-        env = dict(os.environ)
-        dist.init_process_group("fake", store=_fake_store(), rank=rank, world_size=world_size)
-        init, destroy = dist.init_process_group, dist.destroy_process_group
+        env, excepthook = dict(os.environ), sys.excepthook
+        torch_rng, py_rng = torch.get_rng_state(), random.getstate()
+        group_fns["init_process_group"]("fake", store=_fake_store(), rank=rank, world_size=world_size)
         try:
             random.seed(seed)
             torch.manual_seed(seed)
-
-            def _forbidden(*args: Any, **kw: Any) -> None:
-                raise AssertionError("the code under test must not create or destroy the default process group")
-
-            dist.init_process_group = dist.destroy_process_group = _forbidden  # type: ignore[assignment]
+            for module in (dist, dist.distributed_c10d):
+                for name in group_fns:
+                    setattr(module, name, _forbidden(
+                        "the code under test must not create or destroy the default process group"))
+                module.broadcast_object_list = _forbidden(  # type: ignore[attr-defined]
+                    "the fake process group cannot broadcast objects (a non-source rank would read uninitialized"
+                    " bytes); run this case in the gloo pool")
             results.append(case(CaseContext(rank, world_size, "fake", torch.device("cpu")), **kwargs))
         finally:
-            dist.init_process_group, dist.destroy_process_group = init, destroy  # type: ignore[assignment]
-            destroy()
+            for module in (dist, dist.distributed_c10d):
+                for name, fn in group_fns.items():
+                    setattr(module, name, fn)
+                module.broadcast_object_list = broadcast  # type: ignore[attr-defined]
+            group_fns["destroy_process_group"]()
             os.environ.clear()
             os.environ.update(env)
+            sys.excepthook = excepthook
+            torch.set_rng_state(torch_rng)
+            random.setstate(py_rng)
     return results
 
 
