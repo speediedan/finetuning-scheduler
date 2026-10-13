@@ -1462,6 +1462,113 @@ def test_fts_callback_resume_gpu(tmpdir, ckpt_set, recwarn):
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
 
 
+class ScriptedLossModel(LightningModule):
+    """Reports a scripted ``val_loss`` per epoch (independent of the parameters), so which checkpoint is best is
+    fixed in advance."""
+
+    def __init__(self, losses):
+        super().__init__()
+        torch.manual_seed(0)
+        self.losses = losses
+        self.model = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8), nn.Linear(8, 1))
+        self.x = torch.randn(32, 8, generator=torch.Generator().manual_seed(0))
+
+    def forward(self, x):
+        return self.model(x)
+
+    def training_step(self, batch, batch_idx):
+        (x,) = batch
+        return (self(x) - x.sum(1, keepdim=True)).pow(2).mean()
+
+    def validation_step(self, batch, batch_idx):
+        self.log("val_loss", torch.tensor(self.losses[self.current_epoch]))
+
+    def configure_optimizers(self):
+        return torch.optim.SGD([p for p in self.parameters() if p.requires_grad], lr=0.05)
+
+    def train_dataloader(self):
+        return DataLoader(torch.utils.data.TensorDataset(self.x), batch_size=8)
+
+    def val_dataloader(self):
+        return DataLoader(torch.utils.data.TensorDataset(self.x[:8]), batch_size=8)
+
+
+class SnapshotAndStop(Callback):
+    """Save a snapshot after epoch ``snap_at``, and interrupt the fit after epoch ``stop_after``."""
+
+    def __init__(self, snapshot=None, snap_at=None, stop_after=None):
+        self.snapshot, self.snap_at, self.stop_after = snapshot, snap_at, stop_after
+        self.resumed_best_score = []
+
+    def on_train_epoch_start(self, trainer, pl_module):
+        self.resumed_best_score.append(trainer.checkpoint_callback.best_model_score)
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        if trainer.current_epoch == self.snap_at:
+            trainer.save_checkpoint(self.snapshot)
+        if trainer.current_epoch == self.stop_after:
+            raise RuntimeError("interrupted")
+
+
+def _scripted_fit(dirpath, losses, transitions, save_top_k, resume=None, resume_via="attr", **snapshot_kwargs):
+    """Fit ``ScriptedLossModel`` with phases at the ``transitions`` epochs, optionally resuming from ``resume``
+    (via ``trainer.ckpt_path`` or ``trainer.fit(ckpt_path=...)``); return the model, trainer and snapshot
+    callback."""
+    t0, t1 = transitions
+    schedule = {0: {"params": ["model.2.weight", "model.2.bias"], "max_transition_epoch": t0},
+                1: {"params": ["model.1.weight", "model.1.bias"], "max_transition_epoch": t1},
+                2: {"params": ["model.0.weight", "model.0.bias"], "max_transition_epoch": len(losses)}}
+    model, snap = ScriptedLossModel(losses), SnapshotAndStop(**snapshot_kwargs)
+    callbacks = [FinetuningScheduler(ft_schedule=schedule, epoch_transitions_only=True),
+                 FTSCheckpoint(monitor="val_loss", dirpath=dirpath, save_top_k=save_top_k), snap]
+    trainer = Trainer(max_epochs=len(losses), accelerator="cpu", devices=1, logger=False, callbacks=callbacks,
+                      enable_progress_bar=False, enable_model_summary=False, default_root_dir=dirpath,
+                      num_sanity_val_steps=0)
+    if resume is not None and resume_via == "attr":
+        trainer.ckpt_path = resume
+    try:
+        trainer.fit(model, ckpt_path=resume if resume_via == "arg" else None)
+    except RuntimeError as err:
+        if str(err) != "interrupted":
+            raise
+    return model, trainer, snap
+
+
+@pytest.mark.parametrize("resume_via", ["attr", "arg"], ids=["trainer_ckpt_path", "fit_ckpt_path"])
+def test_fts_resume_restores_best_at_next_transition(tmp_path, resume_via):
+    """However the checkpoint path is given, a resumed fit restores the best checkpoint at its next phase
+    transition and ends as an uninterrupted fit does, with ``best_model_score`` restored (#86)."""
+    losses, transitions = [1.0, 2.0, 0.5, 3.0, 3.0], (2, 3)
+    ref, *_ = _scripted_fit(tmp_path / "ref", losses, transitions, 1)
+    snapshot = tmp_path / "snap" / "e1.ckpt"
+    _scripted_fit(tmp_path / "run", losses, transitions, 1, snapshot=snapshot, snap_at=1, stop_after=2)
+    resumed, trainer, snap = _scripted_fit(tmp_path / "run", losses, transitions, 1, resume=snapshot,
+                                           resume_via=resume_via)
+    assert float(snap.resumed_best_score[0]) == 1.0
+    assert get_fts(trainer).curr_depth == 2
+    assert all(torch.equal(p, q) for p, q in zip(ref.parameters(), resumed.parameters()))
+
+
+def test_fts_resume_with_removed_checkpoints(tmp_path):
+    """Resuming a checkpoint whose best a continued run removed fails at once, rather than at the next transition;
+    a removed non-best top-k entry is dropped with a warning (#86)."""
+    losses, transitions = [1.0, 2.0, 0.5, 3.0, 0.4, 0.3], (1, 3)
+    snapshot = tmp_path / "snap" / "e0.ckpt"
+    _scripted_fit(tmp_path / "run", losses, transitions, 2, snapshot=snapshot, snap_at=0, stop_after=4)
+    with pytest.raises(FileNotFoundError, match="best checkpoint this resumed state refers to"):
+        _scripted_fit(tmp_path / "run", losses, transitions, 2, resume=snapshot)
+    # a snapshot after epoch 2 keeps epochs 0 and 2 (the best); remove epoch 0's
+    snapshot = tmp_path / "snap" / "e2.ckpt"
+    _, first, _ = _scripted_fit(tmp_path / "run2", losses, transitions, 2, snapshot=snapshot, snap_at=2,
+                                stop_after=2)
+    worst = first.checkpoint_callback.kth_best_model_path
+    assert worst != first.checkpoint_callback.best_model_path
+    os.remove(worst)
+    with pytest.warns(UserWarning, match="Dropping 1 top-k checkpoint"):
+        _, trainer, _ = _scripted_fit(tmp_path / "run2", losses, transitions, 2, resume=snapshot)
+    assert worst not in trainer.checkpoint_callback.best_k_models and get_fts(trainer).curr_depth == 2
+
+
 @RunIf(skip_windows=True, skip_mac_os=True, min_python="3.12")
 def test_fts_dynamo_resume(tmpdir, ckpt_set, boring_ft_schedule, recwarn):
     """Validate scheduled fine-tuning resumption functions as expected with a default dynamo configuration."""

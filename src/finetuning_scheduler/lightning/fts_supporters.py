@@ -448,6 +448,7 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         if self.finetuningscheduler_callback._fts_state._resume_fit_from_ckpt:
             dirpath_from_ckpt = state_dict.get("dirpath", self.dirpath)
             if self.dirpath == dirpath_from_ckpt:
+                self.best_model_score = state_dict["best_model_score"]
                 self.best_k_models = state_dict.get("best_k_models", self.best_k_models)
                 self.kth_best_model_path = state_dict.get("kth_best_model_path", self.kth_best_model_path)
                 self.kth_value = state_dict.get("kth_value", self.kth_value)
@@ -463,6 +464,39 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
                 self.best_ckpt_depth = self.current_ckpt_depth
             self.last_model_path = state_dict.get("last_model_path", self.last_model_path)
             self.best_model_path = state_dict["best_model_path"]
+            self._verify_resumed_checkpoints(self.finetuningscheduler_callback.pl_module.trainer)
+
+    def _verify_resumed_checkpoints(self, trainer: "pl.Trainer") -> None:
+        """Check that the checkpoints a resumed state refers to still exist, since a run that continued past the
+        checkpoint being resumed may have removed them.
+
+        A missing top-k entry is dropped with a warning. A missing best checkpoint raises at once when
+        :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.restore_best` is set, rather than at the next phase
+        transition, which restores it.
+
+        Raises:
+            FileNotFoundError: If the best checkpoint no longer exists and is restored at phase transitions.
+        """
+
+        def exists(path: str) -> bool:  # global rank zero checks and every rank agrees
+            local = bool(path) and self._fs.exists(path) if trainer.is_global_zero else False
+            return trainer.strategy.reduce_boolean_decision(local, all=False)
+
+        if self.best_model_path and not exists(self.best_model_path):
+            msg = (f"The best checkpoint this resumed state refers to, {self.best_model_path!r}, no longer exists. A"
+                   " run that continued past the checkpoint being resumed may have removed it.")
+            if self.finetuningscheduler_callback.restore_best:  # type: ignore[union-attr]
+                raise FileNotFoundError(msg + " Resume from a later checkpoint of that run, or set"
+                                        " `restore_best=False`.")
+            rank_zero_warn(msg)
+        missing = [path for path in self.best_k_models if path != self.best_model_path and not exists(path)]
+        if missing:
+            rank_zero_warn(f"Dropping {len(missing)} top-k checkpoint(s) that no longer exist: {missing}.")
+            for path in missing:
+                del self.best_k_models[path]
+            # the k-th best is recomputed once the top-k is full again
+            self.kth_best_model_path = ""
+            self.kth_value = torch.tensor(torch.inf if self.mode == "min" else -torch.inf)
 
     @property
     def _should_update_depth_meta(self) -> bool:

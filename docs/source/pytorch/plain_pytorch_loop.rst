@@ -148,8 +148,9 @@ Gate outcomes are kept in ``fts.gate_records`` and, after a veto, ``fts.stop_rea
 
 Checkpoints and Resuming
 ************************
-:class:`~finetuning_scheduler.core.checkpoint.BestCheckpoint` keeps the best checkpoint by a monitored metric (top 1),
-optionally saving only the scheduled parameters (``include="scheduled"``), and pins a copy at each phase boundary.
+:class:`~finetuning_scheduler.core.checkpoint.BestCheckpoint` keeps the ``save_top_k`` best checkpoints by a monitored
+metric (one by default), optionally saving only the scheduled parameters (``include="scheduled"``), and pins the best at
+each phase boundary as the rollback point for a gate's veto. Each checkpoint gets a new name and is never rewritten.
 :meth:`~finetuning_scheduler.core.controller.FTSController.save` and
 :meth:`~finetuning_scheduler.core.controller.FTSController.load` save and restore the full training state for an exact
 resume: the model, optimizer and lr scheduler; the controller's own state; every random stream; and anything registered
@@ -164,6 +165,12 @@ example):
     # later, in a fresh process, after building the same model, schedule and controller
     fts.setup()
     fts.load("run/last.pt")
+
+A save keeps the checkpoints it refers to until the next save, so resuming from the latest save always finds them, even
+when the run went on to write newer best checkpoints before it stopped. An older save can be resumed while its
+checkpoints remain; if its best checkpoint or rollback point has been removed,
+:meth:`~finetuning_scheduler.core.controller.FTSController.load` raises ``FileNotFoundError`` rather than restoring the
+wrong state later.
 
 Distributed Training
 ********************
