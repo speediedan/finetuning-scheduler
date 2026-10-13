@@ -564,10 +564,16 @@ class FTSController:
         self._last_metrics = dict(metrics or {})
         decision, reason = self._evaluate("epoch", metrics, completed_epochs=self._host.current_epoch + 1)
         # with several ranks, every rank joins the agreement, even one that reported no metrics this epoch
-        if self._checkpoint is not None and (metrics is not None or self._host.world_size > 1) and \
-                self._observe_best(metrics):
-            self._write_checkpoint(self._checkpoint.path_for("best"))
-            self._checkpoint_hook("prune")
+        if self._checkpoint is not None and (metrics is not None or self._host.world_size > 1):
+            before = self._checkpoint.state_dict()
+            if self._observe_best(metrics):
+                try:
+                    self._write_checkpoint(self._checkpoint.path_for("best"))
+                except BaseException:
+                    # a failed write keeps the previous best (and whatever it would have replaced)
+                    self._checkpoint.load_state_dict(before)
+                    raise
+                self._checkpoint_hook("prune")
         self._host.advance_epoch()
         if decision >= Decision.STOP:
             self._stop(reason or decision.name.lower())
@@ -743,12 +749,12 @@ class FTSController:
         self._host.barrier("fts_boundary_pinned")
         self._checkpoint_hook("prune")
 
-    def _checkpoint_hook(self, name: Literal["prune", "mark_resume_point"]) -> None:
+    def _checkpoint_hook(self, name: Literal["prune", "mark_resume_point"], **kwargs: Any) -> None:
         """Call the checkpoint policy's optional ``name`` hook, if it has one; only global rank zero removes
         files."""
         hook = getattr(self._checkpoint, name, None)
         if hook is not None:
-            hook(remove=self._host.is_global_zero)
+            hook(remove=self._host.is_global_zero, **kwargs)
 
     def _verify_checkpoint_resume(self) -> None:
         """Have the checkpoint policy check, on global rank zero, that the checkpoints a loaded state refers to
@@ -952,7 +958,7 @@ class FTSController:
             from torch.distributed.checkpoint.state_dict import get_model_state_dict, get_state_dict
 
             # written beside `path` and moved over it once complete, so an interrupted save keeps the old one
-            # (a fixed name, so a later save clears what an interrupted one left behind)
+            # (a fixed name, so a later save to the same path clears what an interrupted one left behind)
             tmp = self._host.broadcast_object(f"{path}.tmp")
             if self._host.is_global_zero:
                 remove_checkpoint(tmp)
@@ -1259,8 +1265,8 @@ class FTSController:
         if self._checkpoint is not None and state_dict.get("checkpoint") is not None:
             self._checkpoint.load_state_dict(state_dict["checkpoint"])
             self._verify_checkpoint_resume()
-            # keep what this state refers to until the next save
-            self._checkpoint_hook("mark_resume_point")
+            # keep what this state refers to until the next save, beside what the latest save refers to
+            self._checkpoint_hook("mark_resume_point", keep_previous=True)
         for depth in range(1, state_dict["depth"] + 1):
             self._depth = depth
             self._configure_phase(depth, depth - 1, depth_sync=False, pre_state=None)

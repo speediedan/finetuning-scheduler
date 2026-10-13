@@ -419,3 +419,65 @@ def test_resuming_a_save_whose_checkpoints_are_gone(tmp_path):
     with pytest.warns(UserWarning, match="Dropping 1 kept checkpoint"):
         _, fts = _resumable_run(tmp_path / "run", 2, init, losses=losses, load_from=saves[3])
     assert worst not in fts._checkpoint.best_k_models
+
+
+def test_resuming_into_another_directory_leaves_the_source_run_intact(tmp_path):
+    """A state resumed into a policy with another ``dirpath`` never removes the source run's checkpoints, so the
+    source run's latest save still resumes (#52)."""
+    torch.manual_seed(0)
+    init = Net().state_dict()
+    losses = (1.0, 0.9, 0.8, 0.7, 0.6)
+    _resumable_run(tmp_path / "a", 1, init, losses=losses, saves={0: tmp_path / "a.pt"}, stop_after=0)
+    source = _ckpt_names(tmp_path / "a")
+    _, fts = _resumable_run(tmp_path / "b", 1, init, losses=losses, saves={4: tmp_path / "b.pt"},
+                            load_from=tmp_path / "a.pt")
+    assert fts.curr_depth == 2 and _ckpt_names(tmp_path / "a") == source
+    _resumable_run(tmp_path / "a", 1, init, losses=losses, load_from=tmp_path / "a.pt")
+
+
+def test_loading_an_older_save_in_process_keeps_the_latest_saves_checkpoints(tmp_path):
+    """Loading a state does not supersede the latest save on disk: its checkpoints are kept (#52)."""
+    torch.manual_seed(0)
+    init = Net().state_dict()
+    model = Net()
+    model.load_state_dict(init)
+    cp = BestCheckpoint(tmp_path / "c", "val_loss", save_top_k=2)
+    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp, transition=None)
+    fts.setup()
+    for epoch, loss in zip(fts.epochs(3), (1.0, 0.9, 0.8)):
+        _train_epoch(fts, model, seed=epoch)
+        fts.epoch_end({"val_loss": loss})
+        if epoch:
+            fts.save(tmp_path / f"s{epoch}.pt")
+    latest_best = cp.best_path
+    fts.load(tmp_path / "s1.pt")
+    assert os.path.exists(latest_best)
+    _resumable_run(tmp_path / "c", 2, init, losses=(1.0, 0.9, 0.8, 0.7, 0.6), load_from=tmp_path / "s2.pt")
+
+
+def test_a_failed_best_write_keeps_the_previous_best(tmp_path, monkeypatch):
+    """When writing a new best fails, the policy keeps the previous best (#52)."""
+    import finetuning_scheduler.core.controller as controller_module
+
+    torch.manual_seed(0)
+    model = Net()
+    cp = BestCheckpoint(tmp_path, "val_loss")
+    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp,
+                        restore_best=False)
+    fts.setup()
+    _train_epoch(fts, model)
+    fts.epoch_end({"val_loss": 1.0})
+    previous = cp.best_path
+    saved_l2 = load_payload(previous)["model"]["l2.weight"]
+
+    def disk_full(payload, path):
+        raise OSError("disk full")
+
+    _train_epoch(fts, model, seed=1)
+    with monkeypatch.context() as m:
+        m.setattr(controller_module, "save_payload", disk_full)
+        with pytest.raises(OSError, match="disk full"):
+            fts.epoch_end({"val_loss": 0.5})
+    assert cp.best_path == previous and float(cp.best_score) == 1.0
+    assert not torch.equal(model.l2.weight, saved_l2)  # training moved the parameters past the best
+    assert fts.restore_best() and torch.equal(model.l2.weight, saved_l2)

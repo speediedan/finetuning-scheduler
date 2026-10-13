@@ -42,6 +42,9 @@ def extend_warns(base_warns, additional_warns):
 BASE_EXPECTED_WARNS = create_base_warns()
 
 EXPECTED_DIRPATH_WARN = "is not empty."
+# a resumed fit that checkpoints into a directory an earlier resume also wrote to (the resume tests share a
+# module-scoped checkpoint set) finds top-k entries that run evicted
+EXPECTED_DROPPED_TOPK_WARN = r"top-k checkpoint\(s\) that no longer exist"
 EXPECTED_TRAINCHK_WARN = "could not find the monitored key in the returned"
 EXPECTED_CKPT_WARNS = ["Be aware that when using `ckpt_path`, callbacks"]
 OPTIMIZER_INIT_WARNS = ["currently depends upon", "No monitor metric specified"]

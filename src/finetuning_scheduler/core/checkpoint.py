@@ -109,8 +109,9 @@ class CheckpointPolicy(Protocol):
 
     - ``prune(remove: bool)``, after each checkpoint write and boundary pin, to remove the checkpoints the policy no
       longer needs (``remove`` is ``True`` on the one rank that removes files);
-    - ``mark_resume_point(remove: bool)``, after :meth:`~finetuning_scheduler.core.controller.FTSController.save` and
-      after a saved state is loaded, to keep the checkpoints that state refers to;
+    - ``mark_resume_point(remove: bool, keep_previous: bool = False)``, after
+      :meth:`~finetuning_scheduler.core.controller.FTSController.save`, and after a saved state is loaded (with
+      ``keep_previous=True``), to keep the checkpoints that state refers to;
     - ``verify_resume()``, when a saved state is loaded, to raise ``FileNotFoundError`` if a checkpoint the state
       needs no longer exists.
     """
@@ -177,7 +178,8 @@ class BestCheckpoint:
     while its checkpoints remain: if its best or its rollback point has been removed,
     :meth:`~finetuning_scheduler.core.controller.FTSController.load` raises ``FileNotFoundError``, and any other kept
     checkpoint that has been removed is dropped with a warning. Checkpoints that an interrupted run wrote after the
-    save being resumed are left in place.
+    save being resumed are left in place, and so are the checkpoints of a state resumed from another directory: only
+    checkpoints under ``dirpath`` are ever removed.
 
     Args:
         dirpath: Where checkpoints are written.
@@ -296,18 +298,31 @@ class BestCheckpoint:
     def _referenced(self) -> set[str]:
         return {path for path, _, _ in self._entries} | {path for path, _ in self._boundaries.values() if path}
 
+    def _in_dirpath(self, path: str) -> bool:
+        root = os.path.abspath(self.dirpath)
+        return os.path.commonpath([root, os.path.abspath(path)]) == root
+
     def prune(self, remove: bool = True) -> None:
-        """Forget, and with ``remove`` delete, the checkpoints this policy wrote or referred to that are no longer
-        kept, pinned or needed by the latest resume point."""
+        """Forget the checkpoints this policy wrote or referred to that are no longer kept, pinned or needed by the
+        latest resume point, and with ``remove`` delete them (with anything an interrupted write left beside them).
+
+        Only checkpoints under :attr:`dirpath` are deleted: those of a state resumed from another directory are
+        forgotten and left in place, since that run's own saves may still need them.
+        """
         for path in sorted(self._known - self._referenced() - self._protected):
-            if remove:
-                remove_checkpoint(path)
+            if remove and self._in_dirpath(path):
+                for leftover in (path, f"{path}.tmp", f"{path}.old"):
+                    remove_checkpoint(leftover)
             self._known.discard(path)
 
-    def mark_resume_point(self, remove: bool = True) -> None:
+    def mark_resume_point(self, remove: bool = True, keep_previous: bool = False) -> None:
         """Keep the checkpoints the current state refers to until the next resume point (a later
-        :meth:`~finetuning_scheduler.core.controller.FTSController.save`), then :meth:`prune`."""
-        self._protected = self._referenced()
+        :meth:`~finetuning_scheduler.core.controller.FTSController.save`), then :meth:`prune`.
+
+        With ``keep_previous`` (when a saved state is loaded rather than written), the checkpoints the previous resume
+        point refers to stay kept as well: loading a state does not supersede the latest save on disk.
+        """
+        self._protected = self._referenced() | (self._protected if keep_previous else set())
         self.prune(remove)
 
     def verify_resume(self) -> None:

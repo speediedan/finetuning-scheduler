@@ -45,7 +45,8 @@ from finetuning_scheduler.strategy_adapters import StrategyAdapter
 from tests.helpers import BoringModel
 from tests.helpers.boring_models import (CustomLRScheduler, LinearWarmupLR, RandomDataset)
 from tests.helpers.expected_warns import (BASE_EXPECTED_WARNS, BASE_DYNAMO_EXPECTED_WARNS, EXPECTED_CKPT_WARNS,
-                                          EXPECTED_DIRPATH_WARN, EXPECTED_TRAINCHK_WARN, OPTIMIZER_INIT_WARNS)
+                                          EXPECTED_DIRPATH_WARN, EXPECTED_DROPPED_TOPK_WARN, EXPECTED_TRAINCHK_WARN,
+                                          OPTIMIZER_INIT_WARNS)
 from tests.helpers.runif import RunIf
 from tests.helpers.common import get_fts, unexpected_warns, unmatched_warns
 
@@ -1407,7 +1408,7 @@ def test_fts_callback_resume_last(tmpdir, ckpt_set_last, recwarn, diff_dirpath: 
                                           max_depth=1, tmpdir=tmpdir)
     assert fts_callback.curr_depth == fts_callback.max_depth
     if not diff_dirpath:
-        resume_warns.append(EXPECTED_DIRPATH_WARN)
+        resume_warns.extend([EXPECTED_DIRPATH_WARN, EXPECTED_DROPPED_TOPK_WARN])
     # ensure no unexpected warnings detected
     unexpected = unexpected_warns(rec_warns=recwarn.list, expected_warns=resume_warns)
     assert not unexpected, tuple(w.message.args[0] + ":" + w.filename + ":" + str(w.lineno) for w in unexpected)
@@ -1439,7 +1440,7 @@ def test_fts_callback_resume(tmpdir, ckpt_set, recwarn, diff_dirpath: bool, trai
     assert fts_callback.curr_depth == expected_state[2]
     assert fts_callback.curr_depth == fts_callback.max_depth
     if not diff_dirpath:
-        resume_warns.append(EXPECTED_DIRPATH_WARN)
+        resume_warns.extend([EXPECTED_DIRPATH_WARN, EXPECTED_DROPPED_TOPK_WARN])
     if train_chk_mode:
         resume_warns.append(EXPECTED_TRAINCHK_WARN)
     # ensure no unexpected warnings detected
