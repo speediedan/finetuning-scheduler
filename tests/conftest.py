@@ -208,3 +208,7 @@ def pytest_collection_modifyitems(items):
             for item in items
             if (_marked(item, "min_cuda_gpus") or _marked(item, "bf16_cuda")) and not _marked(item, "standalone")
         ]
+    if os.getenv("FTS_REVERSE_ORDER", "0") == "1":
+        # the scheduled GPU run's reverse-order leg: each module's tests stay together, so every module-scoped
+        # distributed pool serves its cases in the opposite order and a case that leaves state for the next one fails
+        items.reverse()
