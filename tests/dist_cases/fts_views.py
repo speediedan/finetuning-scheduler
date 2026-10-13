@@ -111,3 +111,31 @@ def save_sharded(ctx, ckpt_dir: str, epochs: int = 5, steps: int = 2, batch: int
     shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
     _train(fts, model, x, y, shard, ctx.device, epochs)
     return {"saved": fts.save(os.path.join(ckpt_dir, "resume")), "params": _params(model)}
+
+
+def _exported(fts, roles=("adapter", "fitted")) -> dict | None:
+    from finetuning_scheduler.core.checkpoint import load_payload
+
+    path = fts.export_best(roles=roles)
+    if not fts._host.is_global_zero:
+        return None
+    return {n: t.flatten().tolist() for n, t in load_payload(path)["tensors"].items()}
+
+
+def export_sharded(ctx, ckpt_dir: str, epochs: int = 5, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
+    """Train the roles view on FSDP2 and export the best checkpoint's adapter and fitted tensors (rank zero reads
+    their full values from the DCP directory)."""
+    model = _sharded(ctx, seed)
+    fts = _controller(model, ckpt_dir)
+    x, y = _data(epochs, steps, batch, seed)
+    shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
+    _train(fts, model, x, y, shard, ctx.device, epochs)
+    return {"exported": _exported(fts), "rank": ctx.rank}
+
+
+def export_reference(ckpt_dir: str, epochs: int = 5, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
+    model = _model(seed)
+    fts = _controller(model, ckpt_dir)
+    x, y = _data(epochs, steps, batch, seed)
+    _train(fts, model, x, y, slice(None), torch.device("cpu"), epochs)
+    return {"exported": _exported(fts)}

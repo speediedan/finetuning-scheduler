@@ -117,3 +117,15 @@ def test_a_sharded_checkpoint_loads_into_an_unsharded_model(gloo_pool, tmp_path)
     instrument = {"0.weight", "0.bias"}  # never saved: they keep the fresh model's values
     assert _close({k: v for k, v in loaded.items() if k not in instrument},
                   {k: v for k, v in results[0]["params"].items() if k not in instrument}, tol=0.0)
+
+
+@GLOO
+def test_export_best_from_a_sharded_checkpoint(gloo_pool, tmp_path):
+    """Rank zero exports the best checkpoint's adapter and fitted tensors in full from the DCP directory, as a
+    single-process run exports them."""
+    results = gloo_pool.run(fts_views.export_sharded, ckpt_dir=str(tmp_path / "sharded"))
+    ref = fts_views.export_reference(ckpt_dir=str(tmp_path / "ref"))
+    exported = next(r["exported"] for r in results if r["rank"] == 0)
+    assert sorted(exported) == ["2.bias", "4.bias", "4.weight"]
+    assert all(r["exported"] is None for r in results if r["rank"] != 0)
+    assert _close(exported, ref["exported"])

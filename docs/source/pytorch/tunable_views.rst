@@ -120,6 +120,21 @@ phase) puts the promoted tensors back to their values at promotion; those values
 :meth:`~finetuning_scheduler.core.controller.FTSController.save`. Promotion is not supported on a sharded model, and a
 view that overrides its checkpoint state must define ``promote``.
 
+Exporting by Role
+*****************
+:meth:`~finetuning_scheduler.core.controller.FTSController.export_best` writes the best checkpoint's tensors whose role
+matches, for example only the adapters, so a large frozen base and the optimizer state need not be kept:
+
+.. code-block:: python
+
+    fts.export_best(roles=("adapter",))  # best_export.pt beside the checkpoints: tensors, roles and metadata
+    fts.export_best(write_peft, roles=("role:adapter:char",))  # write_peft(tensors, metadata, path) writes another format
+
+The tensors come from the best checkpoint, not the live model; a sharded model's are read in full on global rank zero.
+``instrument`` tensors are never checkpointed, so they cannot be exported. The external artifacts a run depends on can be
+recorded with ``FTSController(artifacts={"lens": {"path": ..., "sha256": ..., "revision": ...}})``; they appear in
+every checkpoint's and export's metadata.
+
 Views With the Lightning Callback
 *********************************
 Attach the view to the ``LightningModule`` as ``fts_tunable_view``, rooted at the module itself:

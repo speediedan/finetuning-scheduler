@@ -21,6 +21,7 @@ controller is driven by explicit calls, in the spirit of ``torch.optim.lr_schedu
     Experimental: the PyTorch API may change in minor releases until it stabilizes.
 
 """
+import itertools
 import os
 import sys
 from collections import OrderedDict
@@ -47,7 +48,8 @@ from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.fingerprint import batch_fingerprint
 from finetuning_scheduler.core.host import LRStepConfig, TorchHost, TrainingHost
 from finetuning_scheduler.core.rng import capture_rng_state, fork_rngs, restore_rng_state
-from finetuning_scheduler.core.roles import is_frozen_role
+from finetuning_scheduler.core.roles import (is_frozen_role, is_role_selector, role_kind, SELECTOR_PREFIX,
+                                             selector_matches)
 from finetuning_scheduler.strategies.base import DistributedAdapter, select_distributed_adapter
 from finetuning_scheduler.strategies.dtensor import DTensorAdapter
 from finetuning_scheduler.core.views import BoundView, CanonicalView, instrument_state_keys, resolve_view
@@ -58,6 +60,31 @@ STATE_VERSION = 1
 # the non-tensor state of a sharded (DCP) checkpoint directory
 META_FILE = "fts_meta.pt"
 
+
+
+def _validate_artifacts(artifacts: Mapping[str, Mapping[str, str]] | None) -> dict[str, dict[str, str]]:
+    """Check the ``artifacts`` mapping: each named artifact has a ``path`` and a 64-hex-digit ``sha256``, and
+    optionally a ``revision``; nothing else."""
+    if artifacts is None:
+        return {}
+    if not isinstance(artifacts, Mapping):
+        raise FTSConfigurationError(f"`artifacts` must map names to records, got {type(artifacts).__name__}.")
+    checked: dict[str, dict[str, str]] = {}
+    for name, record in artifacts.items():
+        if not isinstance(record, Mapping):
+            raise FTSConfigurationError(f"Artifact {name!r} must be a mapping, got {type(record).__name__}.")
+        unknown = sorted(set(record) - {"path", "sha256", "revision"})
+        if unknown:
+            raise FTSConfigurationError(f"Artifact {name!r} has unknown keys {unknown} (path, sha256, revision).")
+        sha = record.get("sha256")
+        if not isinstance(record.get("path"), str) or not record["path"]:
+            raise FTSConfigurationError(f"Artifact {name!r} needs a `path`.")
+        if not isinstance(sha, str) or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha.lower()):
+            raise FTSConfigurationError(f"Artifact {name!r} needs a `sha256` of 64 hexadecimal digits, got {sha!r}.")
+        if "revision" in record and not isinstance(record["revision"], str):
+            raise FTSConfigurationError(f"Artifact {name!r}'s `revision` must be a string.")
+        checked[str(name)] = dict(record)
+    return checked
 
 @dataclass(frozen=True)
 class PhaseEvent:
@@ -155,6 +182,9 @@ class FTSController:
         distributed: The :class:`~finetuning_scheduler.strategies.base.DistributedAdapter` for the model's layout
             (experimental). By default, the first of FSDP2, DTensor (tensor parallelism) and unsharded that recognizes
             the model.
+        artifacts: External artifacts the run depends on (published, re-loadable tensors such as a lens or a
+            transcoder), as ``{name: {"path": ..., "sha256": ..., "revision": ...}}`` (``revision`` optional). Recorded
+            in every checkpoint's and export's metadata, not in the configuration hash.
     """
 
     def __init__(
@@ -188,8 +218,10 @@ class FTSController:
         allow_meta_frozen: bool = False,
         view: Any | None = None,
         distributed: DistributedAdapter | None = None,
+        artifacts: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:
         self.model = model
+        self._artifacts = _validate_artifacts(artifacts)
         self._schedule_src = schedule
         self._optimizer_src = optimizer
         self._lr_scheduler_src = lr_scheduler
@@ -1070,6 +1102,7 @@ class FTSController:
             "config_hash": self.config_hash,
             "versions": self.versions(),
             "metadata": {**self._metadata, **getattr(self._checkpoint, "metadata", {}),
+                         "artifacts": deepcopy(self._artifacts),
                          "phase_config": self._schedule[self._depth].get("phase_config"),
                          "gate_records": list(self._gate_records), "fingerprints": deepcopy(self._fingerprints),
                          "promotions": deepcopy(self._promotions)},
@@ -1227,6 +1260,86 @@ class FTSController:
         self._host.barrier("fts_restore_best")
         self._restore_checkpoint(cp.best_path, restore_optimizer=False)
         return True
+
+    def export_best(self, fn: Callable[[dict[str, Tensor], dict[str, Any], str | None], Any] | None = None, *,
+                    roles: Sequence[str] = ("adapter",), path: str | os.PathLike | None = None) -> Any:
+        """Export the best checkpoint's tensors whose role matches ``roles`` (for example only the adapters, so a
+        large base and the optimizer state need not be kept).
+
+        The tensors come from the best checkpoint, not the live model; for a sharded model, global rank zero reads
+        their full values from the checkpoint directory. Global rank zero then writes
+        ``{"tensors", "roles", "metadata"}`` to ``path`` with ``torch.save`` or, given ``fn``, calls
+        ``fn(tensors, metadata, path)`` instead (to write another format, for example).
+
+        Args:
+            fn: Writes the export itself; its return value is returned on global rank zero.
+            roles: Role kinds (``"adapter"``) or selectors (``"role:adapter:char"``) to export.
+            path: Where to write; by default ``best_export.pt`` beside the checkpoints.
+
+        Returns:
+            On global rank zero, ``fn``'s result or the path written; on other ranks, ``None`` with ``fn``, else the
+            path.
+
+        Raises:
+            FTSConfigurationError: If there is no best checkpoint yet, no tensor matches ``roles``, a matched tensor is
+                never checkpointed (``instrument``), or the view translates checkpoint keys.
+        """
+        self._require_setup()
+        cp = self._checkpoint
+        if cp is None or cp.best_path is None:
+            raise FTSConfigurationError("There is no best checkpoint to export yet.")
+        assert self._view is not None
+        if self._view.overrides("checkpoint_state_dict"):
+            raise FTSConfigurationError(
+                f"{type(self._view.view).__name__} translates checkpoint keys, which `export_best` does not support"
+                " yet.")
+        selectors = [r if is_role_selector(r) else f"{SELECTOR_PREFIX}{r}" for r in roles]
+        effective = self.roles
+        names = [n for n in itertools.chain((n for n, _ in self.model.named_parameters()),
+                                            (n for n, _ in self.model.named_buffers()))
+                 if any(selector_matches(sel, effective.get(n, "base")) for sel in selectors)]
+        if not names:
+            raise FTSConfigurationError(f"No tensor's role matches {list(roles)}.")
+        never_saved = sorted(n for n in names if role_kind(effective.get(n, "base")) == "instrument")
+        if never_saved:
+            raise FTSConfigurationError(f"`instrument` tensors are never checkpointed, so they cannot be exported: "
+                                        f"{never_saved}.")
+        dest = os.fspath(path) if path is not None else os.path.join(getattr(cp, "dirpath", "."), "best_export.pt")
+        result: Any = None if fn is not None else dest
+        self._host.barrier("fts_export_best")
+        if self._host.is_global_zero:
+            tensors = self._read_checkpoint_tensors(cp.best_path, names)
+            metadata = {**self._metadata, "artifacts": deepcopy(self._artifacts), "source": cp.best_path,
+                        "best_depth": cp.best_depth,
+                        "best_score": float(cp.best_score) if cp.best_score is not None else None,
+                        "config_hash": self.config_hash, "versions": self.versions()}
+            export_roles = {n: effective.get(n, "base") for n in names}
+            if fn is not None:
+                result = fn(tensors, {**metadata, "roles": export_roles}, os.fspath(path) if path is not None else None)
+            else:
+                save_payload({"tensors": tensors, "roles": export_roles, "metadata": metadata}, dest)
+        self._host.barrier("fts_export_best_written")
+        return result
+
+    def _read_checkpoint_tensors(self, path: str, names: Sequence[str]) -> dict[str, Tensor]:
+        """The full values of ``names`` in the checkpoint at ``path`` (on this process alone, so call it on one
+        rank), without touching the live model."""
+        meta = self._read_meta(path)
+        if not meta.get("sharded"):
+            missing = [n for n in names if n not in meta["model"]]
+            if missing:  # left out of a scheduled-only checkpoint (`include="scheduled"`)
+                raise FTSConfigurationError(f"The best checkpoint does not hold {missing}.")
+            return {n: meta["model"][n] for n in names}
+        import torch.distributed.checkpoint as dcp
+
+        saved = dcp.FileSystemReader(path).read_metadata().state_dict_metadata
+        missing = [n for n in names if f"model.{n}" not in saved]
+        if missing:
+            raise FTSConfigurationError(f"The best checkpoint does not hold {missing}.")
+        model_state = {n: torch.empty(saved[f"model.{n}"].size, dtype=saved[f"model.{n}"].properties.dtype)
+                       for n in names}
+        dcp.load({"model": model_state}, checkpoint_id=path, no_dist=True)
+        return model_state
 
     def save(self, path: str | os.PathLike) -> str:
         """Save everything needed to resume exactly: the controller's state, the model, optimizer, lr schedulers,
