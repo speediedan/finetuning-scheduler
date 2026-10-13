@@ -127,10 +127,10 @@ matches, for example only the adapters, so a large frozen base and the optimizer
 
 .. code-block:: python
 
-    fts.export_best(roles=("adapter",))  # best_export.pt beside the checkpoints: tensors, roles and metadata
+    fts.export_best(roles=("adapter",))  # best_export.pt beside the best checkpoint
     fts.export_best(write_peft, roles=("role:adapter:char",))  # write_peft(tensors, metadata, path) writes another format
 
-The tensors come from the best checkpoint, not the live model; a sharded model's are read in full on global rank zero.
+The tensors come from the best checkpoint, not the live model, keyed by the names the checkpoint uses (without wrapper segments such as ``_orig_mod.``); a sharded model's are read in full on global rank zero. ``fn`` receives ``path=None`` when no path is given.
 ``instrument`` tensors are never checkpointed, so they cannot be exported. The external artifacts a run depends on can be
 recorded with ``FTSController(artifacts={"lens": {"path": ..., "sha256": ..., "revision": ...}})``; they appear in
 every checkpoint's and export's metadata.

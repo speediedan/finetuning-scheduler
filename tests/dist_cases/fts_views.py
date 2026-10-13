@@ -122,7 +122,7 @@ def _exported(fts, roles=("adapter", "fitted")) -> dict | None:
     return {n: t.flatten().tolist() for n, t in load_payload(path)["tensors"].items()}
 
 
-def export_sharded(ctx, ckpt_dir: str, epochs: int = 5, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
+def export_sharded(ctx, ckpt_dir: str, epochs: int = 4, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
     """Train the roles view on FSDP2 and export the best checkpoint's adapter and fitted tensors (rank zero reads
     their full values from the DCP directory)."""
     model = _sharded(ctx, seed)
@@ -133,9 +133,31 @@ def export_sharded(ctx, ckpt_dir: str, epochs: int = 5, steps: int = 2, batch: i
     return {"exported": _exported(fts), "rank": ctx.rank}
 
 
-def export_reference(ckpt_dir: str, epochs: int = 5, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
+def export_reference(ckpt_dir: str, epochs: int = 4, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
     model = _model(seed)
     fts = _controller(model, ckpt_dir)
     x, y = _data(epochs, steps, batch, seed)
     _train(fts, model, x, y, slice(None), torch.device("cpu"), epochs)
-    return {"exported": _exported(fts)}
+    return {"exported": _exported(fts), "live": _params(model), "best_depth": fts._checkpoint.best_depth}
+
+
+def export_failure(ctx, ckpt_dir: str, epochs: int = 4, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
+    """A writer that fails on global rank zero makes ``export_best`` raise on every rank, promptly, rather than
+    leaving the other ranks waiting at a barrier."""
+    import time
+
+    model = _sharded(ctx, seed)
+    fts = _controller(model, ckpt_dir)
+    x, y = _data(epochs, steps, batch, seed)
+    shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
+    _train(fts, model, x, y, shard, ctx.device, epochs)
+
+    def disk_full(tensors, metadata, path):
+        raise OSError("disk full")
+
+    start = time.monotonic()
+    try:
+        fts.export_best(disk_full)
+    except Exception as err:
+        return {"raised": type(err).__name__, "message": str(err), "seconds": time.monotonic() - start}
+    return {"raised": None}

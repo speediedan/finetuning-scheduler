@@ -52,7 +52,8 @@ from finetuning_scheduler.core.roles import (is_frozen_role, is_role_selector, r
                                              selector_matches)
 from finetuning_scheduler.strategies.base import DistributedAdapter, select_distributed_adapter
 from finetuning_scheduler.strategies.dtensor import DTensorAdapter
-from finetuning_scheduler.core.views import BoundView, CanonicalView, instrument_state_keys, resolve_view
+from finetuning_scheduler.core.views import (BoundView, canonical_fqn, CanonicalView, instrument_state_keys,
+                                             resolve_view)
 from finetuning_scheduler.core.transitions import (AnyOf, as_decision, Decision, epoch_transition_due, GateEvent,
                                                    GateResult, TransitionContext, TransitionPolicy)
 
@@ -71,19 +72,21 @@ def _validate_artifacts(artifacts: Mapping[str, Mapping[str, str]] | None) -> di
         raise FTSConfigurationError(f"`artifacts` must map names to records, got {type(artifacts).__name__}.")
     checked: dict[str, dict[str, str]] = {}
     for name, record in artifacts.items():
+        if not isinstance(name, str) or not name:
+            raise FTSConfigurationError(f"Artifact names must be non-empty strings, got {name!r}.")
         if not isinstance(record, Mapping):
             raise FTSConfigurationError(f"Artifact {name!r} must be a mapping, got {type(record).__name__}.")
         unknown = sorted(set(record) - {"path", "sha256", "revision"})
         if unknown:
             raise FTSConfigurationError(f"Artifact {name!r} has unknown keys {unknown} (path, sha256, revision).")
         sha = record.get("sha256")
-        if not isinstance(record.get("path"), str) or not record["path"]:
-            raise FTSConfigurationError(f"Artifact {name!r} needs a `path`.")
+        if not isinstance(record.get("path"), str | os.PathLike) or not os.fspath(record["path"]):
+            raise FTSConfigurationError(f"Artifact {name!r} needs a `path` (a string or path).")
         if not isinstance(sha, str) or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha.lower()):
             raise FTSConfigurationError(f"Artifact {name!r} needs a `sha256` of 64 hexadecimal digits, got {sha!r}.")
         if "revision" in record and not isinstance(record["revision"], str):
             raise FTSConfigurationError(f"Artifact {name!r}'s `revision` must be a string.")
-        checked[str(name)] = dict(record)
+        checked[name] = {**record, "path": os.fspath(record["path"]), "sha256": sha.lower()}
     return checked
 
 @dataclass(frozen=True)
@@ -1266,15 +1269,18 @@ class FTSController:
         """Export the best checkpoint's tensors whose role matches ``roles`` (for example only the adapters, so a
         large base and the optimizer state need not be kept).
 
-        The tensors come from the best checkpoint, not the live model; for a sharded model, global rank zero reads
-        their full values from the checkpoint directory. Global rank zero then writes
-        ``{"tensors", "roles", "metadata"}`` to ``path`` with ``torch.save`` or, given ``fn``, calls
-        ``fn(tensors, metadata, path)`` instead (to write another format, for example).
+        The tensors come from the best checkpoint, not the live model, keyed by their wrapper-free names (as the
+        checkpoint keys them); for a sharded model, global rank zero reads their full values from the checkpoint
+        directory. A tensor promoted after the best was saved takes its value at promotion, as when the best is
+        restored. Global rank zero then writes ``{"tensors", "roles", "metadata"}`` to ``path`` with ``torch.save`` or,
+        given ``fn``, calls ``fn(tensors, metadata, path)`` instead (``path`` is ``None`` when not given), to write
+        another format, for example. The metadata is the best checkpoint's own, with the export's source, depth and
+        score.
 
         Args:
             fn: Writes the export itself; its return value is returned on global rank zero.
             roles: Role kinds (``"adapter"``) or selectors (``"role:adapter:char"``) to export.
-            path: Where to write; by default ``best_export.pt`` beside the checkpoints.
+            path: Where to write; by default ``best_export.pt`` beside the best checkpoint.
 
         Returns:
             On global rank zero, ``fn``'s result or the path written; on other ranks, ``None`` with ``fn``, else the
@@ -1282,7 +1288,8 @@ class FTSController:
 
         Raises:
             FTSConfigurationError: If there is no best checkpoint yet, no tensor matches ``roles``, a matched tensor is
-                never checkpointed (``instrument``), or the view translates checkpoint keys.
+                never checkpointed (``instrument``) or absent from the best checkpoint, or the view translates
+                checkpoint keys. Every rank raises whatever fails on global rank zero.
         """
         self._require_setup()
         cp = self._checkpoint
@@ -1304,40 +1311,61 @@ class FTSController:
         if never_saved:
             raise FTSConfigurationError(f"`instrument` tensors are never checkpointed, so they cannot be exported: "
                                         f"{never_saved}.")
-        dest = os.fspath(path) if path is not None else os.path.join(getattr(cp, "dirpath", "."), "best_export.pt")
+        # checkpoints key tensors without wrapper segments (torch.compile's, activation checkpointing's)
+        export_roles = {canonical_fqn(n): effective.get(n, "base") for n in names}
+        best = cp.best_path
+        dest = os.fspath(path) if path is not None else os.path.join(os.path.dirname(os.path.normpath(best)),
+                                                                     "best_export.pt")
         result: Any = None if fn is not None else dest
+        failure: tuple[str, str] | None = None
+        raised: BaseException | None = None
         self._host.barrier("fts_export_best")
         if self._host.is_global_zero:
-            tensors = self._read_checkpoint_tensors(cp.best_path, names)
-            metadata = {**self._metadata, "artifacts": deepcopy(self._artifacts), "source": cp.best_path,
-                        "best_depth": cp.best_depth,
-                        "best_score": float(cp.best_score) if cp.best_score is not None else None,
-                        "config_hash": self.config_hash, "versions": self.versions()}
-            export_roles = {n: effective.get(n, "base") for n in names}
-            if fn is not None:
-                result = fn(tensors, {**metadata, "roles": export_roles}, os.fspath(path) if path is not None else None)
-            else:
-                save_payload({"tensors": tensors, "roles": export_roles, "metadata": metadata}, dest)
-        self._host.barrier("fts_export_best_written")
+            try:
+                meta = self._read_meta(best)
+                tensors = self._read_checkpoint_tensors(best, meta, list(export_roles))
+                metadata = {**meta.get("metadata", {}), "source": best, "best_depth": cp.best_depth,
+                            "best_score": float(cp.best_score) if cp.best_score is not None else None,
+                            "config_hash": meta.get("config_hash"), "versions": meta.get("versions")}
+                if fn is not None:
+                    result = fn(tensors, {**metadata, "roles": export_roles},
+                                os.fspath(path) if path is not None else None)
+                else:
+                    save_payload({"tensors": tensors, "roles": export_roles, "metadata": metadata}, dest)
+            except Exception as err:  # every rank raises it, rather than waiting for rank zero at a barrier
+                raised, failure = err, (type(err).__name__, str(err))
+        failure = self._host.broadcast_object(failure)
+        if failure is not None:
+            if raised is not None:
+                raise raised
+            kind, message = failure
+            if kind == FTSConfigurationError.__name__:
+                raise FTSConfigurationError(message)
+            raise RuntimeError(f"`export_best` failed on global rank zero: {kind}: {message}")
         return result
 
-    def _read_checkpoint_tensors(self, path: str, names: Sequence[str]) -> dict[str, Tensor]:
-        """The full values of ``names`` in the checkpoint at ``path`` (on this process alone, so call it on one
-        rank), without touching the live model."""
-        meta = self._read_meta(path)
+    def _read_checkpoint_tensors(self, path: str, meta: Mapping[str, Any], keys: Sequence[str]) -> dict[str, Tensor]:
+        """The full values of the model state ``keys`` in the checkpoint at ``path`` (whose metadata is ``meta``),
+        on this process alone (call it on one rank), without touching the live model.
+
+        A tensor promoted after the checkpoint was saved takes its value at promotion.
+        """
         if not meta.get("sharded"):
-            missing = [n for n in names if n not in meta["model"]]
-            if missing:  # left out of a scheduled-only checkpoint (`include="scheduled"`)
-                raise FTSConfigurationError(f"The best checkpoint does not hold {missing}.")
-            return {n: meta["model"][n] for n in names}
+            state = self._with_promoted_values(meta["model"])
+            missing = [k for k in keys if k not in state]
+            if missing:
+                raise FTSConfigurationError(
+                    f"The best checkpoint does not hold {missing} (left out of a scheduled-only checkpoint, or not"
+                    " persistent).")
+            return {k: state[k] for k in keys}
         import torch.distributed.checkpoint as dcp
 
         saved = dcp.FileSystemReader(path).read_metadata().state_dict_metadata
-        missing = [n for n in names if f"model.{n}" not in saved]
+        missing = [k for k in keys if f"model.{k}" not in saved]
         if missing:
             raise FTSConfigurationError(f"The best checkpoint does not hold {missing}.")
-        model_state = {n: torch.empty(saved[f"model.{n}"].size, dtype=saved[f"model.{n}"].properties.dtype)
-                       for n in names}
+        model_state = {k: torch.empty(saved[f"model.{k}"].size, dtype=saved[f"model.{k}"].properties.dtype)
+                       for k in keys}
         dcp.load({"model": model_state}, checkpoint_id=path, no_dist=True)
         return model_state
 

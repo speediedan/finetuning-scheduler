@@ -107,3 +107,70 @@ def test_export_best_needs_a_best_checkpoint(tmp_path):
 def test_artifacts_are_validated(artifacts, match):
     with pytest.raises(FTSConfigurationError, match=match):
         FTSController(InterventionModel(), SCHEDULE, optimizer=SGD, artifacts=artifacts)
+
+
+def _step(fts, epoch, metrics):
+    for p in fts.model.parameters():
+        if p.requires_grad:
+            p.grad = torch.full_like(p, epoch + 1.0)
+    fts.optimizer.step()
+    fts.optimizer.zero_grad()
+    fts.epoch_end(metrics)
+
+
+def test_export_best_keys_wrapped_tensors_by_their_checkpoint_names(tmp_path):
+    """An activation-checkpointed layer's tensors are exported under the wrapper-free names the checkpoint uses."""
+    from torch import nn
+    from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
+
+    torch.manual_seed(0)
+    model = nn.Sequential(nn.Linear(4, 4), nn.ReLU(), nn.Linear(4, 4))
+    model[2] = checkpoint_wrapper(model[2])
+    roles = {n: "adapter:head" for n, _ in model.named_parameters() if n.startswith("2.")}
+    sched = {0: {"params": ["role:adapter"], "max_transition_epoch": 1}, 1: {"params": ["0.weight", "0.bias"]}}
+    fts = FTSController(model, sched, optimizer=SGD, view=CanonicalView(model, roles=roles),
+                        checkpoint=BestCheckpoint(tmp_path, "loss"), restore_best=False)
+    fts.setup()
+    for epoch, loss in zip(fts.epochs(2), (0.1, 1.0)):
+        _step(fts, epoch, {"loss": loss})
+    export = load_payload(fts.export_best())
+    assert sorted(export["tensors"]) == ["2.bias", "2.weight"] and export["roles"]["2.weight"] == "adapter:head"
+
+
+def test_export_best_takes_a_tensor_promoted_after_the_best_at_its_promotion_value(tmp_path):
+    """A latent tensor promoted after the best checkpoint is exported with its value at promotion, as restoring the
+    best does."""
+    promote = {0: {"params": ["role:latent"], "max_transition_epoch": 1},
+               1: {"params": ["role:latent:lens"], "promote": {"role:instrument": "latent:lens"}}}
+    torch.manual_seed(0)
+    model = InterventionModel()
+    lens = model.lens.weight.detach().clone()
+    fts = FTSController(model, promote, optimizer=SGD, view=CanonicalView(model, roles=ROLES),
+                        checkpoint=BestCheckpoint(tmp_path, "loss"), restore_best=False)
+    fts.setup()
+    for epoch, loss in zip(fts.epochs(3), (0.1, 1.0, 1.0)):
+        _step(fts, epoch, {"loss": loss})
+    assert fts._checkpoint.best_depth == 0 and not torch.equal(model.lens.weight, lens)  # trained since promotion
+    export = load_payload(fts.export_best(roles=("latent:lens",)))
+    assert torch.equal(export["tensors"]["lens.weight"], lens)
+
+
+def test_export_best_defaults_beside_the_best_and_records_its_metadata(tmp_path):
+    _, fts, _ = _run(tmp_path / "ckpts", artifacts=ARTIFACTS)
+    path = fts.export_best()
+    assert path == str(tmp_path / "ckpts" / "best_export.pt")
+    meta = load_payload(path)["metadata"]
+    assert meta["config_hash"] == fts.config_hash and meta["source"] == fts._checkpoint.best_path
+    assert "gate_records" in meta  # the best checkpoint's own metadata
+
+
+def test_artifacts_are_normalized():
+    upper = {"lens": {"path": "x", "sha256": "AB" * 32}}
+    fts = FTSController(InterventionModel(), SCHEDULE, optimizer=SGD, artifacts=upper)
+    assert fts._artifacts["lens"]["sha256"] == "ab" * 32
+    from pathlib import Path
+
+    assert FTSController(InterventionModel(), SCHEDULE, optimizer=SGD,
+                         artifacts={"lens": {"path": Path("x"), "sha256": "ab" * 32}})._artifacts["lens"]["path"] == "x"
+    with pytest.raises(FTSConfigurationError, match="non-empty strings"):
+        FTSController(InterventionModel(), SCHEDULE, optimizer=SGD, artifacts={1: {"path": "x", "sha256": "ab" * 32}})

@@ -129,6 +129,16 @@ def test_export_best_from_a_sharded_checkpoint(gloo_pool, tmp_path):
     assert sorted(exported) == ["2.bias", "4.bias", "4.weight"]
     assert all(r["exported"] is None for r in results if r["rank"] != 0)
     assert _close(exported, ref["exported"])
+    # the run trained past its best, so an export of the live model would differ
+    assert not _close({k: ref["live"][k] for k in exported}, ref["exported"], tol=0.0)
+
+
+@GLOO
+def test_export_best_failure_on_rank_zero_raises_everywhere(gloo_pool, tmp_path):
+    results = gloo_pool.run(fts_views.export_failure, ckpt_dir=str(tmp_path / "failure"))
+    by_rank = {i: r for i, r in enumerate(results)}
+    assert by_rank[0]["raised"] == "OSError" and by_rank[1]["raised"] == "RuntimeError"
+    assert "disk full" in by_rank[1]["message"] and all(r["seconds"] < 30 for r in results)
 
 
 def test_validate_reports_mixed_and_unresolved_phases(single_process_pg):
