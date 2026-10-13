@@ -147,7 +147,14 @@ class RteBoolqDataModule(pl.LightningDataModule):
         self.dataset = datasets.load_dataset("aps/super_glue", self.hparams.task_name)
         for split in self.dataset.keys():
             self.dataset[split] = self.dataset[split].map(
-                self._convert_to_features, batched=True, remove_columns=["label"]
+                convert_to_features,
+                batched=True,
+                remove_columns=["label"],
+                fn_kwargs={
+                    "tokenizer": self.tokenizer,
+                    "text_fields": self.text_fields,
+                    "max_seq_length": self.hparams.max_seq_length,
+                },
             )
             self.columns = [c for c in self.dataset[split].column_names if c in self.LOADER_COLUMNS]
             self.dataset[split].set_format(type="torch", columns=self.columns)
@@ -160,25 +167,32 @@ class RteBoolqDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.dataset["validation"], batch_size=self.hparams.eval_batch_size, **self.dataloader_kwargs)
 
-    def _convert_to_features(self, example_batch: LazyDict) -> BatchEncoding:
-        """Convert raw text examples to a :class:`~transformers.tokenization_utils_base.BatchEncoding` container
-        (derived from python dict) of features that includes helpful methods for translating between word/character
-        space and token space.
 
-        Args:
-            example_batch ([type]): The set of examples to convert to token space.
+def convert_to_features(
+    example_batch: LazyDict, tokenizer: Any, text_fields: tuple[str, str], max_seq_length: int
+) -> BatchEncoding:
+    """Convert raw text examples to a :class:`~transformers.tokenization_utils_base.BatchEncoding` container
+    (derived from python dict) of features that includes helpful methods for translating between word/character
+    space and token space.
 
-        Returns:
-            ``BatchEncoding``: A batch of encoded examples (note default tokenizer batch_size=1000)
-        """
-        text_pairs = list(zip(example_batch[self.text_fields[0]], example_batch[self.text_fields[1]]))
-        # Tokenize the text/text pairs
-        features = self.tokenizer(
-            text_pairs, max_length=self.hparams.max_seq_length, padding="longest", truncation=True
-        )
-        # Rename label to labels to make it easier to pass to model forward
-        features["labels"] = example_batch["label"]
-        return features
+    A module-level function with explicit arguments rather than a ``LightningDataModule`` method, so ``datasets``
+    fingerprints the transform from these arguments alone and its cache is reused across runs.
+
+    Args:
+        example_batch: The set of examples to convert to token space.
+        tokenizer: The tokenizer to apply.
+        text_fields: The names of the two text fields to pair.
+        max_seq_length: Length to which sequences are truncated.
+
+    Returns:
+        ``BatchEncoding``: A batch of encoded examples (note default tokenizer batch_size=1000)
+    """
+    text_pairs = list(zip(example_batch[text_fields[0]], example_batch[text_fields[1]]))
+    # Tokenize the text/text pairs
+    features = tokenizer(text_pairs, max_length=max_seq_length, padding="longest", truncation=True)
+    # Rename label to labels to make it easier to pass to model forward
+    features["labels"] = example_batch["label"]
+    return features
 
 
 class RteBoolqModule(pl.LightningModule):

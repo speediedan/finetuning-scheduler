@@ -68,6 +68,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- The SuperGLUE example and its tutorial notebook tokenize through a module-level `convert_to_features` function with explicit arguments, in place of a `LightningDataModule` method. `datasets` now fingerprints the transform from those arguments alone, so its cache is reused across runs [#105](https://github.com/speediedan/finetuning-scheduler/issues/105).
+
 - A reinitialization `class_path` may now be the bare name of a `torch.optim` optimizer or lr scheduler (for example `SGD` or `StepLR`); other classes still need a fully qualified path [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).
 
 - The Lightning callback now refuses the schedule keys only the PyTorch API interprets (`max_transition_step`, `phase_config`, `pg_overrides`) instead of silently ignoring them [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).
