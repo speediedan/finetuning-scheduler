@@ -26,6 +26,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Fixed every rank of a distributed `FTSController` run acting as rank zero (each warning, logging and writing the saved schedule) once the Lightning integration had been imported, under a launcher that passes ranks to `init_process_group` directly and sets no rank environment variable. The core now takes the rank from the process group whenever one is initialized [#97](https://github.com/speediedan/finetuning-scheduler/issues/97).
+
 - Fixed the callback thawing unsharded copies of the root FSDP2 module's parameters after a validation pass, so they never trained, when `restore_best` is off and no checkpoint is written at that validation. The callback now reshards every FSDP2 module before it restores and thaws parameters at a phase transition [#92](https://github.com/speediedan/finetuning-scheduler/issues/92).
 
 - Fixed `FTSController` thawing FSDP2's unsharded parameters, which then never trained: FSDP2 can leave a module's unsharded parameters registered between steps (a root module's after a forward-only evaluation pass, or after a training forward when all of its parameters were frozen). The controller now reshards every FSDP2 module before it freezes or thaws parameters, restores a checkpoint or writes one [#90](https://github.com/speediedan/finetuning-scheduler/issues/90).

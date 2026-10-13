@@ -105,6 +105,19 @@ def test_lightning_backend_warn_rank_and_attribution(rank, expected):
         assert record[0].filename == THIS_FILE
 
 
+def test_lightning_backend_follows_the_process_group():
+    """With a process group initialized, its rank decides, not the rank Lightning read from the environment at
+    import, which a launcher passing ranks to ``init_process_group`` never sets (#97)."""
+    from tests.dist_cases._fake_pg import run_fake
+
+    def case(ctx):
+        record = _caller_warns("process group decides")
+        return core_dist.global_rank(), [r.filename for r in record], core_dist.rank_zero_only(lambda: True)()
+
+    rank_zero_only.rank = 0  # what Lightning reads on every rank of such a launch
+    assert run_fake(case) == [(0, [THIS_FILE], True), (1, [], None)]
+
+
 def test_lightning_backend_info_uses_lightning_logger():
     rz_logger = logging.getLogger("lightning.pytorch.utilities.rank_zero")
     records: list[logging.LogRecord] = []
