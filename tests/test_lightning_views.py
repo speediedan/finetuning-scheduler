@@ -11,6 +11,7 @@
 # limitations under the License.
 """The Lightning callback scheduling a module through an attached tunable view (``fts_tunable_view``), and its
 precedence rules against a legacy parameter-naming strategy adapter (#53, #54)."""
+import re
 import warnings
 from types import SimpleNamespace
 
@@ -25,6 +26,7 @@ from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.strategy_adapters import FSDPStrategyAdapter, StrategyAdapter
 from finetuning_scheduler.strategy_adapters import base as adapter_base
 from finetuning_scheduler.strategy_adapters.base import NAMING_METHODS
+from tests.helpers.expected_warns import NAMING_OVERRIDES_DEPRECATION_WARN
 from tests.helpers.legacy_naming_adapter import LegacyNamingAdapter, LogicalNamesBoringModel
 from tests.test_legacy_adapter_contract import (_fts, _trainer, EquivalentView, EXPECTED_PATH, LOGICAL_SCHEDULE,
                                                 PathRecorder)
@@ -143,3 +145,23 @@ def test_the_promote_key_is_refused_under_lightning(tmp_path):
     fts = FinetuningScheduler(ft_schedule=schedule, epoch_transitions_only=True)
     with pytest.raises(FTSConfigurationError, match="phase 1: promote"):
         _trainer(tmp_path, [fts]).fit(_viewed_model())
+
+
+def test_naming_overrides_are_deprecated_once_per_class(tmp_path, monkeypatch):
+    """An adapter class overriding the naming methods hears it is deprecated once, at resolution; built-in adapters
+    never do."""
+    monkeypatch.setattr(adapter_base, "_DEPRECATION_NOTICED", set())
+    with warnings.catch_warnings(record=True) as first:
+        warnings.simplefilter("always")
+        _trainer(tmp_path, [_fts(ft_schedule=LOGICAL_SCHEDULE, epoch_transitions_only=True)]).fit(
+            LogicalNamesBoringModel())
+        _trainer(tmp_path / "again", [_fts(ft_schedule=LOGICAL_SCHEDULE, epoch_transitions_only=True)]).fit(
+            LogicalNamesBoringModel())
+    notices = [w for w in first if re.search(NAMING_OVERRIDES_DEPRECATION_WARN, str(w.message))]
+    assert len(notices) == 1 and notices[0].category is FutureWarning
+    assert "`LegacyNamingAdapter`" in str(notices[0].message)
+    for builtin in (StrategyAdapter, FSDPStrategyAdapter):
+        with warnings.catch_warnings(record=True) as quiet:
+            warnings.simplefilter("always")
+            builtin.notice_naming_overrides()
+        assert not quiet

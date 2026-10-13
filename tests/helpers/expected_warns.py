@@ -42,6 +42,11 @@ def extend_warns(base_warns, additional_warns):
 BASE_EXPECTED_WARNS = create_base_warns()
 
 EXPECTED_DIRPATH_WARN = "is not empty."
+# a strategy adapter overriding the parameter-naming methods (once per class), and its precedence over an attached view
+NAMING_OVERRIDES_DEPRECATION_WARN = (
+    "overrides StrategyAdapter's parameter-naming methods .* Overriding them is deprecated"
+)
+NAMING_OVERRIDES_PRECEDENCE_WARN = "overrides StrategyAdapter's parameter-naming methods .* is not used"
 EXPECTED_TRAINCHK_WARN = "could not find the monitored key in the returned"
 EXPECTED_CKPT_WARNS = ["Be aware that when using `ckpt_path`, callbacks"]
 OPTIMIZER_INIT_WARNS = ["currently depends upon", "No monitor metric specified"]

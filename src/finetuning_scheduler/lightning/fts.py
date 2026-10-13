@@ -707,6 +707,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             strategy_cls = STRATEGY_ADAPTERS.get(strategy_flag, StrategyAdapter)
         self.strategy_adapter = strategy_cls(**self.strategy_adapter_cfg)
         self.strategy_adapter.connect(self)
+        strategy_cls.notice_naming_overrides()
 
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
         """Validate a compatible :py:class:`~lightning.pytorch.strategies.Strategy` strategy is being used and

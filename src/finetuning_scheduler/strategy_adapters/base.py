@@ -44,6 +44,8 @@ NAMING_METHODS = ("fts_optim_transform", "logical_param_translation", "get_named
                   "validate_ft_sched", "gen_ft_schedule")
 # adapter classes already told that their naming overrides take precedence over an attached view
 _PRECEDENCE_NOTICED: set[type] = set()
+# adapter classes already told that overriding the naming methods is deprecated
+_DEPRECATION_NOTICED: set[type] = set()
 
 
 class StrategyAdapter:
@@ -120,6 +122,23 @@ class StrategyAdapter:
         if builtin is cls:
             return frozenset(vars(cls)["_fts_naming_overrides"])
         return frozenset(m for m in NAMING_METHODS if getattr(cls, m) is not getattr(builtin, m))
+
+    @classmethod
+    def notice_naming_overrides(cls) -> None:
+        """Warn, once per adapter class, that overriding the parameter-naming methods is deprecated in favor of a
+        :class:`~finetuning_scheduler.core.views.TunableView`."""
+        overrides = cls.naming_overrides()
+        if not overrides or cls in _DEPRECATION_NOTICED:
+            return
+        _DEPRECATION_NOTICED.add(cls)
+        rank_zero_warn(
+            f"`{cls.__qualname__}` overrides StrategyAdapter's parameter-naming methods"
+            f" ({', '.join(sorted(overrides))}). Overriding them is deprecated since finetuning-scheduler 2.15 and"
+            " will be unsupported no earlier than 2.17: implement a `TunableView` (`finetuning_scheduler.core.views`)"
+            " and attach it to your module as `fts_tunable_view` instead. Sharding customization through"
+            " `StrategyAdapter` subclasses is unaffected.",
+            category=FutureWarning,
+        )
 
     @property
     def tunable_view(self) -> BoundView | None:

@@ -96,6 +96,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Deprecated
 
+- Overriding `StrategyAdapter`'s parameter-naming methods (`fts_optim_transform`, `logical_param_translation`, `get_named_params_for_schedule_validation`, `validate_ft_sched`, `gen_ft_schedule`) is deprecated in favor of a `TunableView` attached to the module as `fts_tunable_view`, and will be unsupported no earlier than 2.17. An adapter class that overrides them issues a one-time `FutureWarning` when it is resolved. Overrides are measured against the nearest built-in adapter, so FSDP's flat-parameter transform is not one, and sharding customization through `StrategyAdapter` subclasses is unaffected [#54](https://github.com/speediedan/finetuning-scheduler/issues/54).
+
 - Lightning will become an optional dependency, no earlier than 2.17. The first `FinetuningScheduler` constructed in a process issues a one-time `FutureWarning` naming the `finetuning-scheduler[lightning]` extra; the versioning policy now states when moving a dependency behind an extra is a packaging change rather than an API change [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).
 
 ## [2.14.1] - 2026-10-09
