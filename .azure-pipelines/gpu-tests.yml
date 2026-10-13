@@ -37,6 +37,17 @@ pr:
       - "requirements/**"
       - ".azure-pipelines/**"
   drafts: false  # Only run for PRs that are "ready for review"
+# The nightly full run (#57's T3): every standalone test and the examples (a scheduled build's standalone scope is
+# `full`), plus the distributed pool in reverse order. Only when main has changed since the last scheduled run, and
+# at 06:00 UTC, clear of interpretune's 10:00 UTC nightly on the same agent. Like every build on this pool it waits
+# for its gate to be approved.
+schedules:
+  - cron: "0 6 * * *"
+    displayName: "Nightly full GPU suite (when main changed)"
+    branches:
+      include:
+        - main
+    always: false
 
 jobs:
   - job: pytest
@@ -116,10 +127,10 @@ jobs:
     # Serialize the GPU phases against local GPU work on the self-hosted host: the whole server, then host memory
     # (`cpu-heavy`). The agent already runs one Azure job at a time, so this exists to avoid colliding with interactive
     # or agent sessions, a collision that surfaces as OOM or flaky timing rather than a clear error. Taken after the
-    # install, which needs neither. Through the host's lease tool when it is mounted (fair order, and cpu-heavy waited
-    # for before the GPUs), else through the plain locks (scripts/gpu_lease_wrap.sh, ci_host_lease_hold). Fails open
-    # only when the lease directory is not mounted; any other acquire failure fails the step, and the cleanup step
-    # releases whatever is held.
+    # install, which needs neither. Through the host's lease tool when it is mounted (one fair queue for the GPUs
+    # and cpu-heavy, taken together), else through the plain locks (scripts/gpu_lease_wrap.sh, ci_host_lease_hold).
+    # Fails open only when the lease directory is not mounted; any other acquire failure fails the step, and the
+    # cleanup step releases whatever is held.
     - bash: |
         set -e
         source scripts/gpu_lease_wrap.sh
@@ -135,6 +146,20 @@ jobs:
       env:
         FTS_CUDA_TESTS_ONLY: "1"
       displayName: 'Testing: CUDA'
+
+    # The nightly run only (#57's T3): the modules served by the persistent distributed pool, gloo and NCCL cases
+    # alike, in reverse order (FTS_REVERSE_ORDER, tests/conftest.py), so a case that leaves state for the next one in
+    # its pool fails. The forward order runs on every build.
+    - bash: |
+        set -e
+        source /tmp/venvs/fts_dev/bin/activate
+        modules=$(grep -l dist_pool_fixture tests/test_*.py)
+        echo "pool modules: ${modules}"
+        python -m pytest ${modules} -v --durations=20
+      env:
+        FTS_REVERSE_ORDER: "1"
+      condition: and(succeeded(), eq(variables['Build.Reason'], 'Schedule'))
+      displayName: 'Testing: distributed pool in reverse order'
 
     # The standalone tests under tests/: on a pull request into main, the smoke set unless the pull request carries the
     # `full-gpu-suite` label, and otherwise all of them (.azure-pipelines/scripts/standalone_scope.sh). The marker alone
