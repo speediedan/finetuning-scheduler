@@ -23,7 +23,7 @@ import os
 import pathlib
 import re
 from collections import Counter
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from typing import Any
 
 import yaml
@@ -275,7 +275,7 @@ def parse_phase_lr(schedule: dict, depth: int, base_max_lr: float) -> None:
 
 
 def resolve_param_entries(entries: Iterable[str], depth: int, named_params: Collection[str],
-                          shared_params: tuple) -> list[str]:
+                          shared_params: tuple, passthrough: Callable[[str], bool] | None = None) -> list[str]:
     """Resolve a phase's parameter names and regexes to fully qualified parameter names, without modifying the
     schedule.
 
@@ -289,6 +289,7 @@ def resolve_param_entries(entries: Iterable[str], depth: int, named_params: Coll
         named_params: The names entries resolve against.
         shared_params: The model's shared parameter names, as a tuple of (a list of per-tensor name lists, a set of
             all shared names).
+        passthrough: Entries for which this returns ``True`` (``role:`` selectors, for example) are kept as they are.
 
     Returns:
         The resolved names, in entry order.
@@ -298,6 +299,9 @@ def resolve_param_entries(entries: Iterable[str], depth: int, named_params: Coll
     """
     resolved_params = []
     for p in entries:
+        if passthrough is not None and passthrough(p):
+            resolved_params.append(p)
+            continue
         regex_params = []
         explicit_params = False
         if p in named_params:
@@ -324,7 +328,8 @@ def resolve_param_entries(entries: Iterable[str], depth: int, named_params: Coll
     return resolved_params
 
 
-def resolve_phase_params(schedule: dict, depth: int, named_params: Collection[str], shared_params: tuple) -> None:
+def resolve_phase_params(schedule: dict, depth: int, named_params: Collection[str], shared_params: tuple,
+                         passthrough: Callable[[str], bool] | None = None) -> None:
     """Expand the parameter names and regexes of phase ``depth`` in place to fully qualified parameter names (see
     :func:`resolve_param_entries`).
 
@@ -334,12 +339,13 @@ def resolve_phase_params(schedule: dict, depth: int, named_params: Collection[st
         named_params: The names of the model's parameters.
         shared_params: The model's shared parameter names, as a tuple of (a list of per-tensor name lists, a set of
             all shared names).
+        passthrough: Entries for which this returns ``True`` are kept as they are.
 
     Raises:
         FTSConfigurationError: If a specified parameter or regex matches no parameter.
     """
     schedule[depth]["params"] = resolve_param_entries(schedule[depth].get("params", []), depth, named_params,
-                                                      shared_params)
+                                                      shared_params, passthrough)
 
 
 def shared_params_ref(module: nn.Module) -> tuple:

@@ -43,6 +43,7 @@ from torch import Tensor
 from torch.distributed import all_gather_object
 from torch.optim import Optimizer
 
+from finetuning_scheduler.core.views import CanonicalView, VIEW_ATTR
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
 # Type checking imports - always available for static analysis
@@ -119,6 +120,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
     _use_orig_params: bool
     _allow_mixed_req_grad: bool
     _rank_zero_logger: logging.Logger = logging.getLogger("lightning.pytorch.utilities.rank_zero")
+    # its `fts_optim_transform` maps names to flattened parameters after the wrap: a sharding transform, not naming
+    _fts_naming_overrides: frozenset[str] = frozenset()
 
     def __init__(self, awp_overrides: list | None = None, *args: Any, **kwargs: Any) -> None:
         """The only user-facing configuration for
@@ -155,6 +158,17 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         return False
 
+    def _refuse_attached_view(self) -> None:
+        """FSDP1 schedules through the module's own parameter names (its flat-parameter transform runs only after
+        the wrap), so a view attached to the module is refused, by name."""
+        attached = getattr(self.pl_module, VIEW_ATTR, None)
+        if attached is not None and not (type(attached) is CanonicalView and not attached.roles()):
+            raise MisconfigurationException(
+                f"{type(self.pl_module).__name__} carries a `fts_tunable_view` ({type(attached).__qualname__}), which"
+                " the FSDP (FSDP1) strategy does not support: it schedules through the module's own parameter names."
+                " Use `ModelParallelStrategy` (FSDP2) to fine-tune through a view, or remove the attribute."
+            )
+
     def on_before_init_fts(self) -> None:
         """In this hook executed immediately before
         :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.init_fts`, to accommodate FSDP we:
@@ -166,6 +180,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
            to either use the provided ``LightningModule.configure_model`` method (if present) or a provided
            ``auto_wrap_policy``.
         """
+        self._refuse_attached_view()
         # hack to avoid subclassing FSDP strategy for this adapter
         setattr(Strategy, "lightning_restore_optimizer", self.lightning_restore_optimizer)
         setattr(self.pls_handle, "optimizer_state", self.optimizer_state)
@@ -308,6 +323,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
             List: A transformed parameter name list that matches the current optimizer's view of them after FSDP's
                 transformation of the original parameter names.
         """
+        if self.compiled_schedule is not None:  # `role:` selectors expand to parameter names first
+            orig_pl = self._compiled_physical(orig_pl)
         return self.fsdp_param_transform(orig_pl, inspect_only)
 
     def fsdp_param_transform(self, orig_thaw_pl: list, inspect_only: bool) -> list:
