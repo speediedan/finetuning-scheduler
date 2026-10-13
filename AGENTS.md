@@ -316,8 +316,10 @@ the `fts-development-branch-version-upgrade` skill.
     label (see "Checks required before a change is done").
   - **Nightly** (`schedules:`, 06:00 UTC, only when `main` changed since the last scheduled run): the full standalone
     suite and examples, plus the persistent distributed pool's modules in reverse order (`FTS_REVERSE_ORDER=1`,
-    `tests/conftest.py`), which catches a pool case that leaves state for the next. Like every build on the shared
-    agent it waits for its gate to be approved.
+    `tests/conftest.py`), which catches a pool case that leaves state for the next. Path filters do not apply to a
+    schedule, so any change to `main` counts. Like every build on the shared agent it waits for its gate to be
+    approved, and only a successful scheduled run resets "changed": a nightly left unapproved is followed by another
+    the next night, so reject the stale one.
 
 ## Known stale references
 
