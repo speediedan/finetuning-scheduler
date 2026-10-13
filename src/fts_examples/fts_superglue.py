@@ -300,7 +300,7 @@ class RteBoolqModule(pl.LightningModule):
         self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
-        # With FTS >= 2.0, ``FinetuningScheduler`` simplifies initial optimizer configuration by ensuring the optimizer
+        # ``FinetuningScheduler`` simplifies initial optimizer configuration by ensuring the optimizer
         # configured here will optimize the parameters (and only those parameters) scheduled to be optimized in phase 0
         # of the current fine-tuning schedule. This auto-configuration can be disabled if desired by setting
         # ``enforce_phase0_params`` to ``False``.

@@ -100,6 +100,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - The GPU pipeline now runs only the CUDA tests that are not standalone, in place of the whole suite, which the hosted CPU matrix already runs on CPU. Single-GPU cases of the phase-transition, optimizer reinitialization and resumption tests join that phase, so those paths still run on a GPU. A pull request into `main` runs a smoke set of six standalone tests (`tests/.standalone_smoke`), one per strategy family. Release branches and tags, builds of `main`, manual runs, and a pull request labeled `full-gpu-suite` run every standalone test, now including those in modules not matching `test_f`, which had left out a two-GPU DDP test. The pipeline also takes the host's `gpu` and `cpu-heavy` (host memory) leases after installing rather than before [#57](https://github.com/speediedan/finetuning-scheduler/issues/57).
 
+- The documentation now uses [pydata-sphinx-theme](https://pydata-sphinx-theme.readthedocs.io/) in place of a fork of the Lightning Sphinx theme, with a light and dark mode. The docs build moves to Sphinx `8.2`, which the theme requires, and no longer caps `jinja2` below `3.1` [#101](https://github.com/speediedan/finetuning-scheduler/issues/101).
+
 ### Deprecated
 
 - Lightning will become an optional dependency, no earlier than 2.17. The first `FinetuningScheduler` constructed in a process issues a one-time `FutureWarning` naming the `finetuning-scheduler[lightning]` extra; the versioning policy now states when moving a dependency behind an extra is a packaging change rather than an API change [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).
