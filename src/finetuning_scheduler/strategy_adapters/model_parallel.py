@@ -21,12 +21,9 @@ from typing import Any  # Dict used for runtime isinstance() checks
 from collections.abc import Callable, Sequence
 from functools import wraps
 import re
-import os
-from pprint import pformat
 from dataclasses import dataclass, field
 
 import torch
-from torch.distributed.tensor import DTensor
 from torch.distributed._composable import checkpoint
 from torch.distributed._composable.fsdp import CPUOffloadPolicy, FSDPModule, fully_shard
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (checkpoint_wrapper, offload_wrapper,
@@ -37,6 +34,7 @@ from lightning.pytorch.utilities.model_helpers import is_overridden
 from lightning.fabric.utilities import rank_zero_warn, rank_zero_info
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 
+from finetuning_scheduler.strategies.base import DistributedAdapter, select_distributed_adapter
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 from finetuning_scheduler.strategy_adapters._wrap_utils import _compose_ncac
 
@@ -184,50 +182,20 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         else:
             setattr(self.pl_module, "configure_model", self._fts_auto_configure_model)
 
-    def _validate_fsdp_fts_config(self) -> tuple | None:
-        mixed_param_pgs: dict = {}
-        inspection_map = {d: {"params": self.scheduled_physical(d)} for d in self.fts_handle.ft_schedule}
-        all_params = dict(self.pl_module.named_parameters())
-        has_mixed_pgs = False
-        for d, pl in inspection_map.items():
-            mixed_param_pgs[d] = {}
-            non_dtensor_params, dtensor_params = [], []
-            for lp in pl["params"]:
-                param = all_params[lp]
-                if isinstance(param, DTensor):
-                    dtensor_params.append(lp)
-                else:
-                    non_dtensor_params.append(lp)
-            if non_dtensor_params and dtensor_params:
-                has_mixed_pgs = True
-                for lp in non_dtensor_params:
-                    p = all_params[lp]
-                    mixed_param_pgs[d][lp] = type(p.data) if isinstance(p, torch.nn.Parameter) else type(p)
+    @property
+    def distributed_adapter(self) -> DistributedAdapter:
+        """The torch-native :class:`~finetuning_scheduler.strategies.base.DistributedAdapter` for the composed
+        module's layout (FSDP2, tensor parallelism or unsharded), selected after ``configure_model``."""
+        return select_distributed_adapter(self.pl_module)
 
-        if has_mixed_pgs:
-            ModelParallelStrategyAdapter._provide_mixed_pg_feedback(mixed_param_pgs)
-
-    @staticmethod
-    def _provide_mixed_pg_feedback(mixed_param_pgs: dict) -> None:
-        phasewise_feedback = ""
-        for d, mixed_params in mixed_param_pgs.items():
-            if mixed_params:
-                phasewise_feedback += (
-                    f"  Phase {d}:  {os.linesep}    {pformat(mixed_params, indent=4)}{os.linesep}"
-                )
-        if phasewise_feedback:
-            summary_msg_base = (
-                "\nThe current fine-tuning schedule and FSDP plan produce mixed DTensor/Non-DTensor parameter group(s)"
-                " in at least one phase.\n"
-                "Be aware some optimizer operations may require you to either:\n"
-                "  1. allow implicit replication (experimental)\n"
-                "  2. add modules with optimized non-DTensor (usually ``torch.Tensor``) parameters to the FSDP plan.\n"
-                "     (HINT: adding your root model to the FSDP plan usually addresses this concern for all phases if"
-                " needed).\n\n"
-                "Found Non-DTensor parameters in mixed parameter groups: \n"
-            )
-            summary_msg = summary_msg_base + phasewise_feedback
-            rank_zero_info(summary_msg)
+    def _validate_fsdp_fts_config(self) -> None:
+        """Check each phase's physical parameters (compiled through an attached view, if any) against the composed
+        module's layout, through its distributed adapter."""
+        phases = {d: self.scheduled_physical(d) for d in self.fts_handle.ft_schedule}
+        for feedback in self.distributed_adapter.validate(self.pl_module, phases):
+            if feedback.level == "error":
+                raise MisconfigurationException(feedback.message)
+            (rank_zero_warn if feedback.level == "warning" else rank_zero_info)(feedback.message)
 
     def on_before_fts_fit_start(self) -> None:
         """In this hook executed immediately before the :class:`~finetuning_scheduler.fts.FinetuningScheduler`

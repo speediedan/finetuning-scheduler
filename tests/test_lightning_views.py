@@ -28,6 +28,7 @@ from finetuning_scheduler.strategy_adapters import base as adapter_base
 from finetuning_scheduler.strategy_adapters.base import NAMING_METHODS
 from tests.helpers.expected_warns import NAMING_OVERRIDES_DEPRECATION_WARN, NAMING_OVERRIDES_PRECEDENCE_WARN
 from tests.helpers.legacy_naming_adapter import LegacyNamingAdapter, LogicalNamesBoringModel
+from tests.helpers.runif import RunIf
 from tests.test_legacy_adapter_contract import (_fts, _trainer, EquivalentView, EXPECTED_PATH, LOGICAL_SCHEDULE,
                                                 PathRecorder)
 from tests.test_phase_characterization import _rank_zero_debug_records
@@ -195,3 +196,38 @@ def test_naming_overrides_are_deprecated_once_per_class(tmp_path, monkeypatch):
             warnings.simplefilter("always")
             builtin.notice_naming_overrides()
         assert not quiet
+
+
+class ShardedLogicalModel(LogicalNamesBoringModel):
+    """The logical-names model, each layer and then the model sharded with FSDP2 over the data-parallel mesh."""
+
+    def configure_model(self):
+        from torch.distributed.fsdp import fully_shard
+
+        dp_mesh = self.device_mesh["data_parallel"]
+        for layer in self.model:
+            fully_shard(layer, mesh=dp_mesh)
+        fully_shard(self.model, mesh=dp_mesh)
+
+
+@RunIf(min_cuda_gpus=2, standalone=True)
+def test_attached_view_under_model_parallel_strategy(tmp_path):
+    """Under ``ModelParallelStrategy`` (FSDP2 on two GPUs), an attached view schedules the module as the legacy
+    adapter's pinned path does, validated through the FSDP2 distributed adapter, and every thawed tensor trains."""
+    from lightning.pytorch import Trainer
+    from lightning.pytorch.strategies import ModelParallelStrategy
+
+    seed_everything(42)
+    module = _viewed_model(ShardedLogicalModel)
+    initial = _initial(module)
+    fts, recorder = FinetuningScheduler(ft_schedule=LOGICAL_SCHEDULE, epoch_transitions_only=True), PathRecorder()
+    trainer = Trainer(default_root_dir=tmp_path, callbacks=[fts, recorder], max_epochs=4, accelerator="gpu", devices=2,
+                      strategy=ModelParallelStrategy(data_parallel_size=2, tensor_parallel_size=1),
+                      limit_train_batches=2, limit_val_batches=2, enable_progress_bar=False,
+                      enable_model_summary=False, logger=False)
+    trainer.fit(module)
+    assert fts.strategy_adapter.distributed_adapter.name == "fsdp2"
+    assert recorder.rows == EXPECTED_PATH
+    assert fts.ft_schedule[1]["params"] == ["blocks.1.W"]
+    trained = {n: p.full_tensor().detach().cpu() for n, p in module.named_parameters() if p.requires_grad}
+    assert trained and all(not torch.equal(initial[n], t) for n, t in trained.items())

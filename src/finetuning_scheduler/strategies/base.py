@@ -20,7 +20,9 @@ against it, and reads and writes the training state's tensors in the form that l
 
 .. warning:: This is an experimental API and may change in a future release.
 """
+import os
 from collections.abc import Callable, Mapping, Sequence
+from pprint import pformat
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -124,9 +126,14 @@ def mixed_dtensor_feedback(model: nn.Module, phases: Mapping[int, Sequence[str]]
             mixed[depth] = {n: type(all_params[n].data).__name__ for n in plain}
     if not mixed:
         return []
-    detail = "; ".join(f"phase {d}: {sorted(names)}" for d, names in mixed.items())
-    return [Feedback("info", "The schedule and sharding plan produce parameter groups that mix DTensor and"
-                             " non-DTensor parameters, which some optimizer operations do not accept: either allow"
-                             " implicit replication (experimental) or shard the modules owning the non-DTensor"
-                             " parameters (sharding the root module covers every phase). Non-DTensor parameters in"
-                             f" mixed groups: {detail}.")]
+    detail = "".join(f"  Phase {d}:{os.linesep}    {pformat(names, indent=4)}{os.linesep}"
+                     for d, names in mixed.items())
+    return [Feedback("info", "\nThe current fine-tuning schedule and sharding plan produce mixed DTensor/Non-DTensor"
+                             " parameter group(s) in at least one phase.\n"
+                             "Be aware some optimizer operations may require you to either:\n"
+                             "  1. allow implicit replication (experimental)\n"
+                             "  2. shard the modules owning the optimized non-DTensor (usually ``torch.Tensor``)"
+                             " parameters.\n"
+                             "     (HINT: sharding your root model usually addresses this concern for all phases if"
+                             " needed).\n\n"
+                             f"Found Non-DTensor parameters in mixed parameter groups: \n{detail}")]
