@@ -1,3 +1,110 @@
 col {
     width: 50% !important;
 }
+
+/* Full-width layout: pydata-sphinx-theme centres an 88rem page and caps the article at 60em, which leaves most of a
+   wide window empty. Pin both sidebars to the window edges at fixed widths and let the article take the rest. */
+.bd-page-width {
+    max-width: none;
+}
+
+.bd-main .bd-content .bd-article-container {
+    max-width: none;
+}
+
+/* the logo is navy line art: lighten it under dark mode while keeping its hue */
+html[data-theme="dark"] .navbar-brand img {
+    filter: invert(1) hue-rotate(180deg) brightness(1.3);
+}
+
+/* the wide wordmark would push the header's search button off a phone screen */
+@media (max-width: 540px) {
+    .bd-header .navbar-brand {
+        max-width: 60vw;
+    }
+
+    .bd-header .navbar-brand img {
+        height: auto;
+        max-width: 100%;
+    }
+}
+
+/* with no header links (``navbar_center: []``), push search, the theme switcher and the icons to the right edge */
+.bd-header .navbar-header-items__end {
+    margin-left: auto;
+}
+
+@media (min-width: 960px) {
+    .bd-sidebar-primary {
+        flex: 0 0 20rem;
+        width: 20rem;
+        max-width: 20rem;
+    }
+}
+
+@media (min-width: 1200px) {
+    .bd-sidebar-secondary {
+        flex: 0 0 17rem;
+        width: 17rem;
+        max-width: 17rem;
+    }
+}
+
+/* Side-by-side code blocks (``.. container:: sbs-code``): two captioned columns, each block filling its row */
+.sbs-code {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-column-gap: 10px;
+    grid-template-rows: auto;
+    grid-template-areas:
+        "sbs-hdr1 sbs-hdr2"
+        "sbs-blk1 sbs-blk2";
+    margin-bottom: 1.5rem;
+}
+
+@media (max-width: 720px) {
+    .sbs-code {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas: "sbs-hdr1" "sbs-blk1" "sbs-hdr2" "sbs-blk2";
+        grid-row-gap: 0.5rem;
+    }
+}
+
+.sbs-code > p {
+    font-style: italic;
+    color: var(--pst-color-primary);
+    margin-bottom: 0.25rem;
+}
+
+.sbs-hdr1 {
+    grid-area: sbs-hdr1;
+}
+
+.sbs-hdr2 {
+    grid-area: sbs-hdr2;
+}
+
+.sbs-blk1 {
+    grid-area: sbs-blk1;
+}
+
+.sbs-blk2 {
+    grid-area: sbs-blk2;
+}
+
+.sbs-code > div[class*="highlight"] {
+    margin: 0;
+}
+
+.sbs-code > div[class*="highlight"] > .highlight,
+.sbs-code > div[class*="highlight"] pre {
+    height: 100%;
+    margin-bottom: 0;
+}
+
+/* keep a floated figure inside the admonition that holds it */
+.admonition::after {
+    content: "";
+    display: table;
+    clear: both;
+}

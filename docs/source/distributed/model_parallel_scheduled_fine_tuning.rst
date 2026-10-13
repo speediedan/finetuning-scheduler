@@ -78,17 +78,12 @@ The currently supported AC APIs are listed below. (non-composable API :sup:`*`)
   This is similar to FSDP2's approach to `compositional enrichment <https://bit.ly/fsdp2_dynamic_subclass>`_
   (via dynamic subclassing).
 
-  .. raw:: html
+  .. figure:: ../_static/images/fts/ncac_wrapped_first_tblock.png
+     :alt: FSDP2 and FTS dynamic subclasses, NCAC adapted user module
+     :figwidth: 45%
+     :align: right
 
-    <figure class="align-right" id="id3" style="position: relative; left: 55%;">
-      <img alt="FSDP2 and FTS dynamic subclasses, NCAC adapted user module"
-           src="../_static/images/fts/ncac_wrapped_first_tblock.png" style="width: 40%;">
-      <figcaption>
-        <p>
-          <div class="caption-text" style="width: 40%;">FSDP2 and FTS dynamic subclasses, NCAC adapted user module</div>
-        </p>
-      </figcaption>
-    </figure>
+     FSDP2 and FTS dynamic subclasses, NCAC adapted user module
 
 .. warning::
 

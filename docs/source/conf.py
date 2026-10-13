@@ -172,7 +172,6 @@ html_theme = "pydata_sphinx_theme"
 html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", about.__docs_url__)
 
 html_theme_options = {
-    "logo": {"text": project},
     "github_url": "https://github.com/speediedan/finetuning-scheduler",
     # every page is a direct child of ``index``, so the header carries no section links; the full captioned toctree
     # is rendered in the primary sidebar instead (``_templates/sidebar-nav-full.html``)

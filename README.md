@@ -41,7 +41,7 @@ ______________________________________________________________________
 
 ### Step 0: Install from PyPI
 
-Starting with version 2.10, [uv](https://docs.astral.sh/uv/) is the preferred installation approach for Fine-Tuning Scheduler.
+[uv](https://docs.astral.sh/uv/) is the preferred installation approach for Fine-Tuning Scheduler.
 
 ```bash
 # Install uv if you haven't already (one-time setup)
@@ -178,7 +178,7 @@ uv pip install finetuning-scheduler-${FTS_VERSION}.tar.gz
 
 ### Dynamic Versioning
 
-FTS (as of version `2.6.0`) now enables dynamic versioning both at installation time and via CLI post-installation. Initially, the dynamic versioning system allows toggling between Lightning unified and standalone imports. The two conversion operations are individually idempotent and mutually reversible.
+FTS enables dynamic versioning both at installation time and via CLI post-installation. Initially, the dynamic versioning system allows toggling between Lightning unified and standalone imports. The two conversion operations are individually idempotent and mutually reversible.
 
 #### Toggling Between Unified and Standalone Lightning Imports
 
