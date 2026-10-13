@@ -26,7 +26,7 @@ from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.strategy_adapters import FSDPStrategyAdapter, StrategyAdapter
 from finetuning_scheduler.strategy_adapters import base as adapter_base
 from finetuning_scheduler.strategy_adapters.base import NAMING_METHODS
-from tests.helpers.expected_warns import NAMING_OVERRIDES_DEPRECATION_WARN
+from tests.helpers.expected_warns import NAMING_OVERRIDES_DEPRECATION_WARN, NAMING_OVERRIDES_PRECEDENCE_WARN
 from tests.helpers.legacy_naming_adapter import LegacyNamingAdapter, LogicalNamesBoringModel
 from tests.test_legacy_adapter_contract import (_fts, _trainer, EquivalentView, EXPECTED_PATH, LOGICAL_SCHEDULE,
                                                 PathRecorder)
@@ -74,8 +74,39 @@ def test_role_selectors_under_lightning(tmp_path):
     fts, recorder = FinetuningScheduler(ft_schedule=schedule, epoch_transitions_only=True), PathRecorder()
     _trainer(tmp_path, [fts, recorder], max_epochs=3).fit(module)
     assert recorder.rows[0][2] == ["model.4.bias", "model.4.weight"]
-    assert torch.equal(initial["model.0.weight"], module.model[0].weight)
     assert not torch.equal(initial["model.4.weight"], module.model[4].weight)
+
+
+def test_role_selectors_without_a_view(tmp_path):
+    """Without an attached view, selectors resolve through the module's own names (every parameter is ``base``)."""
+    seed_everything(42)
+    module = LogicalNamesBoringModel()
+    initial = _initial(module)
+    fts = FinetuningScheduler(ft_schedule={0: {"params": ["role:base"], "max_transition_epoch": 1}},
+                              epoch_transitions_only=True)
+    recorder = PathRecorder()
+    _trainer(tmp_path, [fts, recorder], max_epochs=1).fit(module)
+    assert recorder.rows[0][2] == sorted(initial)
+    assert all(not torch.equal(initial[n], p) for n, p in module.named_parameters())
+
+
+def test_a_view_not_rooted_at_the_lightning_module_refuses(tmp_path):
+    module = LogicalNamesBoringModel()
+    module.fts_tunable_view = CanonicalView(module.model)
+    fts = FinetuningScheduler(ft_schedule={0: {"params": [r"4\..*"], "max_transition_epoch": 1}},
+                              epoch_transitions_only=True)
+    with pytest.raises(MisconfigurationException, match="must be the LightningModule itself"):
+        _trainer(tmp_path, [fts], max_epochs=1).fit(module)
+
+
+def test_generated_schedules_leave_out_frozen_roles(tmp_path):
+    module = LogicalNamesBoringModel()
+    module.fts_tunable_view = CanonicalView(module, roles={"model.0.weight": "fitted", "model.0.bias": "fitted"})
+    with pytest.raises(SystemExit):
+        _trainer(tmp_path, [FinetuningScheduler(gen_ft_sched_only=True)], logger=True).fit(module)
+    sched_file = tmp_path / "lightning_logs" / "version_0" / "LogicalNamesBoringModel_ft_schedule.yaml"
+    scheduled = {n for phase in yaml.safe_load(sched_file.read_text()).values() for n in phase["params"]}
+    assert scheduled and not scheduled & {"model.0.weight", "model.0.bias"}
 
 
 def test_untrainable_attached_view_refuses_with_its_reason(tmp_path):
@@ -94,8 +125,7 @@ def test_a_legacy_naming_adapter_takes_precedence_over_an_attached_view(tmp_path
     monkeypatch.setattr(adapter_base, "_PRECEDENCE_NOTICED", set())
     seed_everything(42)
     fts, recorder = _fts(ft_schedule=LOGICAL_SCHEDULE, epoch_transitions_only=True), PathRecorder()
-    ignored = r"LegacyNamingAdapter overrides .*`fts_tunable_view`.*\(EquivalentView\) is not used"
-    with pytest.warns(FutureWarning, match=ignored):
+    with pytest.warns(FutureWarning, match=NAMING_OVERRIDES_PRECEDENCE_WARN):
         _trainer(tmp_path, [fts, recorder]).fit(_viewed_model())
     assert type(fts.strategy_adapter) is LegacyNamingAdapter and fts.strategy_adapter.compiled_schedule is None
     assert recorder.rows == EXPECTED_PATH

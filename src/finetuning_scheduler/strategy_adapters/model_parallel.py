@@ -20,7 +20,6 @@ for PyTorch's distributed composable and Tensor Parallel APIs.
 from typing import Any  # Dict used for runtime isinstance() checks
 from collections.abc import Callable, Sequence
 from functools import wraps
-from copy import deepcopy
 import re
 import os
 from pprint import pformat
@@ -187,7 +186,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
 
     def _validate_fsdp_fts_config(self) -> tuple | None:
         mixed_param_pgs: dict = {}
-        inspection_map = deepcopy(self.fts_handle.ft_schedule)
+        inspection_map = {d: {"params": self.scheduled_physical(d)} for d in self.fts_handle.ft_schedule}
         all_params = dict(self.pl_module.named_parameters())
         has_mixed_pgs = False
         for d, pl in inspection_map.items():

@@ -24,7 +24,6 @@ import re
 import warnings
 from collections import Counter
 from contextlib import AbstractContextManager, contextmanager
-from copy import deepcopy
 from functools import partial, partialmethod, wraps
 from pprint import pformat
 from typing import TYPE_CHECKING, Any, cast  # Dict used for isinstance() checks
@@ -583,7 +582,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         # function configuration to inspect at a module level:
         mod_cfg = (self._ft_schedule_module_map[0], FSDPStrategyAdapter._module_has_fp, self.pl_module.get_submodule)
         # function configuration to inspect at a parameter level:
-        param_cfg = (self.fts_handle.ft_schedule[0]["params"], _is_fsdp_flattened, self.pl_module.get_parameter)
+        param_cfg = (self.scheduled_physical(0), _is_fsdp_flattened, self.pl_module.get_parameter)
 
         def inspect_flattened(iter_inspect: Iterable, inspect_func: Callable, inspect_prepare: Callable) -> bool:
             return any(inspect_func(inspect_prepare(i)) for i in iter_inspect)
@@ -612,7 +611,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             Set: The set of module parameters in more than one fine-tuning phase.
         """
         fsdp_param_sets: dict = {}
-        inspection_map = deepcopy(self.fts_handle.ft_schedule)
+        inspection_map = {d: {"params": self.scheduled_physical(d)} for d in self.fts_handle.ft_schedule}
         if check_unsched:
             inspection_map[-1] = {"params": self._unscheduled_params}
         for d, pl in inspection_map.items():

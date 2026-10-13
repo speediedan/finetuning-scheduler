@@ -46,6 +46,7 @@ from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import schedule as core_schedule
 from finetuning_scheduler.core import transitions as core_transitions
 from finetuning_scheduler.core.compile import compile_schedule
+from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.roles import is_role_selector
 from finetuning_scheduler.core.state import FTSState
 from finetuning_scheduler.strategy_adapters import StrategyAdapter, FSDPStrategyAdapter, ModelParallelStrategyAdapter
@@ -544,7 +545,7 @@ class ScheduleParsingMixin(ABC):
         msp_ref = core_schedule.shared_params_ref(self.pl_module)
         for depth in self.ft_schedule.keys():  # type: ignore[union-attr]
             max_phase = max(max_phase, depth)
-            self._parse_phase(depth, named_params, msp_ref, passthrough=is_role_selector if compiling else None)
+            self._parse_phase(depth, named_params, msp_ref, passthrough=self._compiled_entry if compiling else None)
             if depth > 0:
                 assert isinstance(self.ft_schedule, dict)
                 max_epoch_wm = core_schedule.update_epoch_watermark(
@@ -805,6 +806,20 @@ class ScheduleParsingMixin(ABC):
         """
         assert isinstance(self.ft_schedule, dict)
         core_schedule.parse_phase_lr(self.ft_schedule, depth, self.base_max_lr)  # type: ignore[attr-defined]
+
+    def _compiled_entry(self, entry: str) -> bool:
+        """Whether a schedule entry is left for the compiled schedule to resolve: a ``role:`` selector, or a name
+        the view resolves without listing it (a parametrized tensor's unparametrized name, for example)."""
+        if is_role_selector(entry):
+            return True
+        view = self.strategy_adapter.tunable_view
+        assert view is not None
+        physical = {n for n, _ in self.pl_module.named_parameters()}
+        try:
+            mapped = view.to_physical([entry]).get(entry)
+        except FTSConfigurationError:
+            return False
+        return bool(mapped) and all(p in physical for p in mapped)
 
     def _parse_phase(self, depth: int, named_params: KeysView, shared_params: tuple,
                      passthrough: Callable[[str], bool] | None = None) -> None:

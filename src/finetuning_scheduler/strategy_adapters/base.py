@@ -29,12 +29,14 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.callbacks import BaseFinetuning
 from lightning.pytorch.strategies.strategy import Strategy
+from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 
 import finetuning_scheduler.lightning  # noqa: F401  (registers the Lightning backends the core logs through)
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import phase as core_phase
 from finetuning_scheduler.core.compile import CompiledSchedule
+from finetuning_scheduler.core.roles import is_frozen_role
 from finetuning_scheduler.core.views import BoundView, resolve_view, VIEW_ATTR
 
 log = logging.getLogger(__name__)
@@ -150,7 +152,14 @@ class StrategyAdapter:
             return None
         module = self.pl_module
         if self._bound_view is None or self._bound_view[0] != id(module):
-            self._bound_view = (id(module), resolve_view(module))
+            view = resolve_view(module)
+            if view.root is not module:
+                raise MisconfigurationException(
+                    f"The `fts_tunable_view` attached to {type(module).__name__} is rooted at"
+                    f" {type(view.root).__name__}; its `root` must be the LightningModule itself, whose parameters the"
+                    " optimizer and checkpoints see."
+                )
+            self._bound_view = (id(module), view)
         return self._bound_view[1]
 
     @property
@@ -171,6 +180,13 @@ class StrategyAdapter:
             f" ({type(attached).__qualname__}) is not used.",
             category=FutureWarning,
         )
+
+    def scheduled_physical(self, depth: int) -> list:
+        """The physical parameters phase ``depth`` thaws: its compiled parameters (coupled ones included) under an
+        attached view or ``role:`` selectors, else the schedule's own names."""
+        if self.compiled_schedule is not None:
+            return list(self.compiled_schedule.physical_for(depth))
+        return list(self.fts_handle.ft_schedule[depth]["params"])  # type: ignore[index]
 
     def _compiled_physical(self, names: list) -> list:
         """The physical parameters a phase's ``params`` (or other compiled names) stand for, coupled ones included
@@ -587,8 +603,9 @@ class StrategyAdapter:
             f"[base StrategyAdapter.gen_ft_schedule] Generating schedule for {self.pl_module.__class__.__name__}"
         )
         view = self.tunable_view if self.attached_view else None
-        if view is not None and view.support().naming_scheme != "physical":
-            # a view with logical names generates its schedule over them
+        if view is not None and (view.support().naming_scheme != "physical"
+                                 or any(is_frozen_role(r) for r in view.roles().values())):
+            # a view with logical names generates its schedule over them, and one with frozen roles leaves them out
             from finetuning_scheduler.core.compile import view_default_schedule
 
             return ScheduleImplMixin.save_schedule(f"{self.pl_module.__class__.__name__}_ft_schedule.yaml",
