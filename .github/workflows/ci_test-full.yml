@@ -144,4 +144,5 @@ jobs:
         PY
 
     - name: Tests
-      run: python -m pytest --noconftest tests/test_core_import_isolation.py tests/test_controller.py -v
+      # the fake-process-group tests also prove the base dependencies suffice for a distributed controller (#96)
+      run: python -m pytest --noconftest tests/test_core_import_isolation.py tests/test_controller.py tests/test_controller_fake_pg.py -v

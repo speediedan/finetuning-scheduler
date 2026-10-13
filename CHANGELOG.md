@@ -26,6 +26,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Fixed every rank of a distributed `FTSController` run acting as rank zero (each warning, logging and writing the saved schedule) once the Lightning integration had been imported, under a launcher that passes ranks to `init_process_group` directly and sets no rank environment variable. The Lightning integration's rank-zero backend now takes the rank from the process group whenever one is initialized, as the core's default backend already did [#97](https://github.com/speediedan/finetuning-scheduler/issues/97).
+
 - Fixed the callback thawing unsharded copies of the root FSDP2 module's parameters after a validation pass, so they never trained, when `restore_best` is off and no checkpoint is written at that validation. The callback now reshards every FSDP2 module before it restores and thaws parameters at a phase transition [#92](https://github.com/speediedan/finetuning-scheduler/issues/92).
 
 - Fixed `FTSController` thawing FSDP2's unsharded parameters, which then never trained: FSDP2 can leave a module's unsharded parameters registered between steps (a root module's after a forward-only evaluation pass, or after a training forward when all of its parameters were frozen). The controller now reshards every FSDP2 module before it freezes or thaws parameters, restores a checkpoint or writes one [#90](https://github.com/speediedan/finetuning-scheduler/issues/90).
@@ -79,6 +81,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Declared `PyYAML>=6.0.2` as a base dependency. FTS imports `yaml` directly but previously received it only through Lightning. The floor is the first release with wheels for every supported Python version [#64](https://github.com/speediedan/finetuning-scheduler/issues/64).
 
 - Declared `fsspec>=2023.5.0` as a base dependency. The scheduling core reads and writes schedules through it directly; it previously arrived only through Lightning [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
+
+- Declared `numpy>=1.23.2` as a base dependency. A distributed `FTSController` uses PyTorch's object collectives, which need NumPy although PyTorch does not declare it, so without NumPy `setup()` failed with "Numpy is not available"; it previously arrived only through Lightning. The floor is the first release with Python `3.11` wheels [#96](https://github.com/speediedan/finetuning-scheduler/issues/96).
 
 - Importing `finetuning_scheduler` no longer imports Lightning. The Lightning integration (`FinetuningScheduler`, `FTSCheckpoint`, `FTSEarlyStopping`, the scheduling mixins, the `fts`, `fts_supporters` and `strategy_adapters` modules, and `types.BaseCallbackDepType`) loads on first access, and raises an `ImportError` naming the missing package when Lightning is not installed. Lightning remains a base dependency [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
 
