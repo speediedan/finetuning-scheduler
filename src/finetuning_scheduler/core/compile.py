@@ -250,11 +250,12 @@ def _compile_promotions(depth: int, promote: Mapping[str, str], bound: BoundView
     for source, target in promote.items():
         ((is_sel, names),) = _expand([source], depth, bound, logical_names, all_physical, roles, shared)
         physical = list(dict.fromkeys(names if is_sel else (q for qs in bound.to_physical(names).values() for q in qs)))
-        not_instrument = sorted(p for p in physical if role_kind(roles.get(p, "base")) != "instrument")
+        not_instrument = {p: roles.get(p, "base") for p in physical if role_kind(roles.get(p, "base")) != "instrument"}
         if not_instrument:
             raise FTSConfigurationError(
-                f"Phase {depth} promotes tensors that are not `instrument` tensors: {not_instrument}. Only `instrument`"
-                " tensors can be promoted (to a `latent:<name>` role).")
+                f"Phase {depth} promotes tensors whose role is not `instrument` (an earlier phase may already have"
+                f" promoted them): {dict(sorted(not_instrument.items()))}. Only `instrument` tensors can be promoted,"
+                " to a `latent:<name>` role.")
         twice = sorted(p for p in physical if p in promoted)
         if twice:
             raise FTSConfigurationError(f"Phase {depth}'s `promote` names these tensors more than once: {twice}.")

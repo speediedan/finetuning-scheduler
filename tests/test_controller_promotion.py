@@ -13,6 +13,7 @@
 
 These need only PyTorch and the scheduling core (the ``core-no-lightning`` job runs them with ``--noconftest``).
 """
+import warnings
 from functools import partial
 
 import pytest
@@ -143,7 +144,7 @@ def test_promoting_a_tied_instrument_gives_it_its_own_storage():
 
 
 @pytest.mark.parametrize("promote, match", [
-    ({"role:latent:transcoder": "latent:lens"}, "not `instrument` tensors"),
+    ({"role:latent:transcoder": "latent:lens"}, "whose role is not `instrument`"),
     ({"role:instrument": "adapter:lens"}, "only to a `latent:<name>` role"),
     ({"role:instrument": "latent"}, "needs a name"),
     ({}, "non-empty mapping"),
@@ -184,3 +185,91 @@ def test_promotions_change_the_compiled_digest():
     a, b = compile_schedule(plain, view), compile_schedule(promoting, view)
     assert a.digest != b.digest and b.promotions == {1: dict.fromkeys(LENS, "latent:lens")}
     assert b.roles_at(0)["lens.weight"] == "instrument" and b.roles_at(1)["lens.weight"] == "latent:lens"
+
+
+def _tied_model():
+    model, view = _model()
+    model.lens_tied = torch.nn.Linear(model.lens.in_features, model.lens.out_features)
+    model.lens_tied.weight = model.lens.weight
+    return model, view
+
+
+class OwnRolesView(CanonicalView):
+    """Owns promotion (tracking roles itself) and overrides the checkpoint state, as a key-translating view
+    does."""
+
+    def promote(self, physical, role):
+        out = super().promote(physical, role)
+        self._roles.update(dict.fromkeys(physical, role))
+        return out
+
+    def checkpoint_state_dict(self):
+        return dict(super().checkpoint_state_dict())
+
+
+class CheckpointsWithoutPromote(CanonicalView):
+    def checkpoint_state_dict(self):
+        return dict(super().checkpoint_state_dict())
+
+
+@pytest.mark.parametrize("make", ["tied", "own_roles"])
+def test_rolling_back_before_a_promotion_restores_aliases_and_translated_views(tmp_path, make):
+    """The rollback puts every tensor the promotion added to the checkpoint state back, including an alias the
+    materialization untied, and works for a view that owns promotion and overrides its checkpoint state."""
+    if make == "tied":
+        model, view = _tied_model()
+    else:
+        torch.manual_seed(0)
+        model = InterventionModel()
+        view = OwnRolesView(model, roles=dict(ROLES))
+    initial = {k: v.detach().clone() for k, v in model.state_dict().items() if k.startswith("lens")}
+    fts = _controller(model, view, checkpoint=BestCheckpoint(tmp_path, "loss"))
+    fts.add_gate(lambda e: GateResult(accept=e.depth != 1, reason="the lens phase hurt"))
+    for epoch in fts.epochs(4):
+        _epoch(fts, epoch, {"loss": 1.0 - 0.1 * epoch})
+    assert fts.stop_reason.startswith("veto: phase 1")
+    state = model.state_dict()
+    assert all(torch.equal(state[k], v) for k, v in initial.items())
+
+
+def test_a_view_translating_checkpoints_without_promote_refuses():
+    torch.manual_seed(0)
+    model = InterventionModel()
+    with pytest.raises(FTSConfigurationError, match="must define `promote`"):
+        _controller(model, CheckpointsWithoutPromote(model, roles=dict(ROLES)))
+
+
+def test_resume_after_a_promotion_keeps_the_configuration_hash_and_the_values_at_promotion(tmp_path):
+    """A resume after a promotion sees the same configuration hash, and a later veto rolls back to the values the
+    tensors had when promoted (after the phase's start hooks), not to the freshly built model's."""
+
+    def prepare(event):
+        if event.depth == 1:
+            with torch.no_grad():
+                model.lens.weight.fill_(5.0)
+
+    def run(load_from=None, save_to=None):
+        nonlocal model
+        model, view = _model()
+        fts = _controller(model, view, checkpoint=BestCheckpoint(tmp_path / "c", "loss"))
+        fts.add_phase_hook(prepare)
+        fts.add_gate(lambda e: GateResult(accept=e.depth != 1, reason="the lens phase hurt"))
+        if load_from is not None:
+            fts.load(load_from)
+        for epoch in fts.epochs(4):
+            _epoch(fts, epoch, {"loss": 1.0 - 0.1 * epoch})
+            if save_to is not None and epoch == 1:
+                fts.save(save_to)
+                return fts
+        return fts
+
+    model = None
+    ref = run()
+    assert ref.stop_reason.startswith("veto: phase 1") and torch.equal(model.lens.weight, torch.full_like(
+        model.lens.weight, 5.0))
+    first = run(save_to=tmp_path / "s.pt")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # no "different controller configuration" warning
+        resumed = run(load_from=tmp_path / "s.pt")
+    assert resumed.config_hash == first.config_hash and resumed.stop_reason.startswith("veto: phase 1")
+    assert torch.equal(model.lens.weight, torch.full_like(model.lens.weight, 5.0))

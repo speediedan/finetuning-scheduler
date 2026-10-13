@@ -264,10 +264,8 @@ class FTSController:
         self._schedule = self._load_schedule()
         self._validate_schedule()
         assert self._compiled is not None
-        if self._compiled.promotions and self._sharded:
-            raise FTSConfigurationError(
-                f"Phases {sorted(self._compiled.promotions)} `promote` tensors of a sharded model, which this release"
-                " does not support.")
+        if self._compiled.promotions:
+            self._refuse_unsupported_promotion()
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
         self._refuse_unschedulable_params()
         core_phase.reshard_fsdp_modules(self.model)
@@ -760,14 +758,19 @@ class FTSController:
             by_role.setdefault(role, []).append(name)
         for role, names in by_role.items():
             before = dict(self.model.named_parameters(remove_duplicate=False))
-            renamed = {old: new for old, new in self._view.promote(names, role).items() if old != new}
-            if renamed:
-                raise FTSConfigurationError(
-                    f"{type(self._view.view).__name__}.promote renamed the tensors it promoted ({renamed}); a promotion"
-                    " must keep each tensor's name in this release.")
+            unsaved = set(self._view.checkpoint_state_dict())
+            self._view.promote(names, role)
             after = dict(self.model.named_parameters(remove_duplicate=False))
-            for name in names:
-                self._promoted_values[name] = after[name].detach().to("cpu", copy=True)
+            # every checkpoint key the promotion adds (the promoted tensors, and aliases a materialization untied),
+            # by its value now: a checkpoint saved before the promotion lacks it
+            state = self._view.checkpoint_state_dict()
+            added = [k for k in state if k not in unsaved]
+            if not added:
+                raise FTSConfigurationError(
+                    f"After promoting {sorted(names)}, {type(self._view.view).__name__}'s checkpoint state still leaves"
+                    " them out, so they would never be checkpointed.")
+            for k in added:
+                self._promoted_values[k] = state[k].detach().to("cpu", copy=True)
             self._promotions.append({"depth": depth, "names": sorted(names), "from": "instrument", "to": role,
                                      "materialized": sorted(n for n in names if after[n] is not before[n])})
             rank_zero_info(f"Phase {depth} promoted {sorted(names)} from `instrument` to `{role}`.")
@@ -775,11 +778,23 @@ class FTSController:
     def _with_promoted_values(self, model_state: Mapping[str, Any]) -> Mapping[str, Any]:
         """``model_state`` (a checkpoint's), completed with the value at promotion of each tensor promoted since
         the checkpoint was saved: an ``instrument`` tensor then, it was not checkpointed."""
-        assert self._view is not None
-        missing = [n for n in self._promoted_values if n not in model_state]
-        if not missing or self._view.overrides("checkpoint_state_dict"):
-            return model_state
-        return {**model_state, **{n: self._promoted_values[n] for n in missing}}
+        missing = [k for k in self._promoted_values if k not in model_state]
+        return {**model_state, **{k: self._promoted_values[k] for k in missing}} if missing else model_state
+
+    def _refuse_unsupported_promotion(self) -> None:
+        """Promotion needs an unsharded model, and a view that translates checkpoint keys must own promotion, since
+        only it can report the promoted tensors in its checkpoint state."""
+        assert self._compiled is not None and self._view is not None
+        phases = sorted(self._compiled.promotions)
+        if self._sharded:
+            raise FTSConfigurationError(
+                f"Phases {phases} `promote` tensors of a sharded model, which this release does not support.")
+        translating = [m for m in ("checkpoint_state_dict", "load_checkpoint_state_dict") if self._view.overrides(m)]
+        if translating and not self._view.overrides("promote"):
+            raise FTSConfigurationError(
+                f"Phases {phases} `promote` tensors, but {type(self._view.view).__name__} overrides {translating} and"
+                " not `promote`: a view that translates checkpoint keys must define `promote`, so its checkpoint state"
+                " includes the tensors it promotes.")
 
     def _configure_phase(self, depth: int, restored_depth: int, depth_sync: bool,
                          pre_state: tuple[dict, list] | None) -> None:
@@ -1330,6 +1345,8 @@ class FTSController:
             "config_hash": self.config_hash,
             "gate_records": list(self._gate_records),
             "promotions": deepcopy(self._promotions),
+            # the promoted tensors' values at promotion, which a resume cannot recompute (start hooks are not replayed)
+            "promoted_values": dict(self._promoted_values),
             "ended_depths": sorted(self._ended_depths),
             "checkpoint": self._checkpoint.state_dict() if self._checkpoint is not None else None,
             "last_metrics": dict(self._last_metrics),
@@ -1358,6 +1375,7 @@ class FTSController:
             self._depth = depth
             self._apply_promotions(depth)  # before the state loads: promoted tensors are checkpointed only from then
             self._configure_phase(depth, depth - 1, depth_sync=False, pre_state=None)
+        self._promoted_values.update(state_dict.get("promoted_values", {}))
         self._depth = state_dict["depth"]
         self._host.load_counters(state_dict["epoch"], state_dict["global_step"])  # type: ignore[attr-defined]
         self._phase_start_epoch, self._phase_start_step = state_dict["phase_start_epoch"], state_dict[
@@ -1413,7 +1431,7 @@ class FTSController:
                 bound = resolve_view(self.model, self._view_src)
             except FTSConfigurationError:  # an invalid view is refused at setup
                 return {"view": {"class_path": describe_callable(type(self._view_src))}}
-        roles = bound.roles()
+        roles = bound.view_roles()  # without promotions, so the hash is the same before and after one
         if type(bound.view) is CanonicalView and not roles:
             return {}
         support = bound.support()

@@ -344,7 +344,11 @@ class BoundView:
 
     def roles(self) -> Mapping[str, str]:
         """The view's roles, with the roles of tensors promoted since (see :meth:`promote`)."""
-        return {**self._member("roles")(), **self._promoted}
+        return {**self.view_roles(), **self._promoted}
+
+    def view_roles(self) -> dict[str, str]:
+        """The roles the view itself reports, without promotions."""
+        return dict(self._member("roles")())
 
     @property
     def promoted(self) -> dict[str, str]:
@@ -358,9 +362,18 @@ class BoundView:
         self._member("load_checkpoint_state_dict")(state_dict, strict=strict)
 
     def promote(self, physical: Sequence[str], role: str) -> Mapping[str, str]:
-        """Promote ``physical`` to ``role`` through the view (or the default), and record the new role."""
+        """Promote ``physical`` to ``role`` through the view (or the default), and record the new role.
+
+        Raises:
+            FTSConfigurationError: If the view renamed a promoted tensor (a promotion keeps names in this release).
+        """
         mapping = dict(self._member("promote")(physical, role))
-        self._promoted.update({mapping.get(n, n): role for n in physical})
+        renamed = {old: new for old, new in mapping.items() if old != new}
+        if renamed:
+            raise FTSConfigurationError(
+                f"{type(self.view).__name__}.promote renamed the tensors it promoted ({renamed}); a promotion must keep"
+                " each tensor's name in this release.")
+        self._promoted.update(dict.fromkeys(physical, role))
         return mapping
 
     def defines(self, member: str) -> bool:
