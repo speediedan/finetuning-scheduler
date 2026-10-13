@@ -746,10 +746,26 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             trainer.early_stopping_callback.final_phase = False
             trainer.early_stopping_callback.es_phase_complete = False
         self._fts_state._ft_sync_objects = self.trainer.fit_loop, self._fts_state
-        if trainer.ckpt_path:
-            self._fts_state._resume_fit_from_ckpt = True
         self.freeze_before_training(self.pl_module)
         self.init_fts()
+
+    def on_load_checkpoint(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule",
+                           checkpoint: dict[str, Any]) -> None:
+        """Mark a fit as resuming from a checkpoint when Lightning restores the callbacks from one.
+
+        Lightning calls this before any callback's ``load_state_dict``, and only once it is restoring a checkpoint, so a
+        resume is detected however its path was given (``trainer.fit(model, ckpt_path=...)`` or ``trainer.ckpt_path``):
+        ``setup`` runs too early to see a path passed to ``fit``.
+
+        Args:
+            trainer (:py:class:`~lightning.pytorch.trainer.trainer.Trainer`): The
+                :py:class:`~lightning.pytorch.trainer.trainer.Trainer` object
+            pl_module (:py:class:`~lightning.pytorch.core.module.LightningModule`): The
+                :py:class:`~lightning.pytorch.core.module.LightningModule` object
+            checkpoint: The checkpoint being restored.
+        """
+        if trainer.state.fn == TrainerFn.FITTING:
+            self._fts_state._resume_fit_from_ckpt = True
 
     def on_fit_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
         """Before beginning training, ensure an optimizer configuration supported by

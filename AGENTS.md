@@ -71,7 +71,9 @@ leased; a terminal-summary line counts the CUDA tests skipped for want of it.
 Distributed cases that need no Lightning run in a persistent worker pool (`tests/helpers/dist_pool.py`, cases in
 `tests/dist_cases/`): one process group per test module rather than one process per test. Its tests run in the
 ordinary suite (gloo on Linux, NCCL with `PL_RUN_CUDA_TESTS=1`), not through `special_tests.sh`, whose one process
-per node id would discard the saving.
+per node id would discard the saving. Under `coverage run`, the pool measures its workers with the same settings and
+merges their data into the run's own when it closes, so no `coverage combine` step is needed (under `parallel = true`
+it leaves their files beside the run's own, for the `coverage combine` that mode needs anyway).
 
 When torch or Lightning leaks a new env var, add it to the allowlist in the `restore_env_variables`
 autouse fixture in `tests/conftest.py` rather than working around the failure.
@@ -301,7 +303,9 @@ the `fts-development-branch-version-upgrade` skill.
 - `.azure-pipelines/gpu-tests.yml`: self-hosted, asserts `>= 2` CUDA GPUs. Runs the non-standalone CUDA tests
   only (`FTS_CUDA_TESTS_ONLY=1`; the hosted matrix runs every other test in that collection, on CPU), then the
   standalone tests under `tests/`, examples, and multi-GPU examples as separate steps. It takes the host's `gpu` and
-  `cpu-heavy` leases after installing.
+  `cpu-heavy` leases after installing, through `ci_host_lease_hold` in `scripts/gpu_lease_wrap.sh`: by the host's
+  lease tool when an operator has installed it at the mounted path, else by the plain locks (the `gpu-lease` skill's
+  "CI jobs in a container" section).
   - **Standalone scope** (`.azure-pipelines/scripts/standalone_scope.sh`): a pull request into `main` runs the smoke
     set in `tests/.standalone_smoke`, one test per strategy family. Every other build runs every standalone test:
     release branches and tags, builds of `main`, manual runs (one queued on a pull request's merge ref included), and a

@@ -182,6 +182,8 @@ def test_get_base_dependencies():
     deps = get_base_dependencies()
     assert isinstance(deps, list)
     assert any(d.startswith("torch>=") for d in deps)
+    # torch's object collectives need NumPy, which torch does not declare (#96)
+    assert any(d.startswith("numpy>=") for d in deps)
     # Ensure it returns a copy, not the original
     deps.append("test-package")
     assert "test-package" not in BASE_DEPENDENCIES

@@ -282,7 +282,7 @@ class FTSController:
         self._fingerprints.setdefault(0, [])
         self._is_setup = True
         if self._checkpoint is not None and getattr(self._checkpoint, "save_initial", False):
-            initial = self._write_checkpoint(self._checkpoint.path_for("initial"))
+            initial = self._write_checkpoint(self._host.broadcast_object(self._checkpoint.path_for("initial")))
             self._pin_boundary(0, initial_path=initial)
         self._run_hooks("start", 0)
         rank_zero_info(f"Fine-tuning schedule set up with {len(self._schedule)} phases (max_depth {self._max_depth}).")
@@ -606,9 +606,16 @@ class FTSController:
         self._last_metrics = dict(metrics or {})
         decision, reason = self._evaluate("epoch", metrics, completed_epochs=self._host.current_epoch + 1)
         # with several ranks, every rank joins the agreement, even one that reported no metrics this epoch
-        if self._checkpoint is not None and (metrics is not None or self._host.world_size > 1) and \
-                self._observe_best(metrics):
-            self._write_checkpoint(self._checkpoint.path_for("best"))
+        if self._checkpoint is not None and (metrics is not None or self._host.world_size > 1):
+            before = self._checkpoint.state_dict()
+            if self._observe_best(metrics):
+                try:
+                    self._write_checkpoint(self._checkpoint.path_for("best"))
+                except BaseException:
+                    # a failed write keeps the previous best (and whatever it would have replaced)
+                    self._checkpoint.load_state_dict(before)
+                    raise
+                self._checkpoint_hook("prune")
         self._host.advance_epoch()
         if decision >= Decision.STOP:
             self._stop(reason or decision.name.lower())
@@ -834,6 +841,33 @@ class FTSController:
         assert self._checkpoint is not None
         self._checkpoint.pin_boundary(depth, initial_path=initial_path, copy=self._host.is_global_zero)
         self._host.barrier("fts_boundary_pinned")
+        self._checkpoint_hook("prune")
+
+    def _checkpoint_hook(self, name: Literal["prune", "mark_resume_point"], **kwargs: Any) -> None:
+        """Call the checkpoint policy's optional ``name`` hook, if it has one; only global rank zero removes
+        files."""
+        hook = getattr(self._checkpoint, name, None)
+        if hook is not None:
+            hook(remove=self._host.is_global_zero, **kwargs)
+
+    def _verify_checkpoint_resume(self) -> None:
+        """Have the checkpoint policy check, on global rank zero, that the checkpoints a loaded state refers to
+        still exist, then share the outcome (and the policy's state, which a check may trim) with every rank."""
+        cp = self._checkpoint
+        verify = getattr(cp, "verify_resume", None)
+        if cp is None or verify is None:
+            return
+        error = None
+        if self._host.is_global_zero:
+            try:
+                verify()
+            except FileNotFoundError as err:
+                error = str(err)
+        if self._host.world_size > 1:
+            error, state = self._host.broadcast_object((error, cp.state_dict()))
+            cp.load_state_dict(state)
+        if error is not None:
+            raise FileNotFoundError(error)
 
     def _end_phase(self, depth: int) -> None:
         if depth not in self._ended_depths:
@@ -1044,7 +1078,7 @@ class FTSController:
             from torch.distributed.checkpoint.state_dict import get_model_state_dict, get_state_dict
 
             # written beside `path` and moved over it once complete, so an interrupted save keeps the old one
-            # (a fixed name, so a later save clears what an interrupted one left behind)
+            # (a fixed name, so a later save to the same path clears what an interrupted one left behind)
             tmp = self._host.broadcast_object(f"{path}.tmp")
             if self._host.is_global_zero:
                 remove_checkpoint(tmp)
@@ -1222,7 +1256,9 @@ class FTSController:
         """
         self._require_setup()
         rng_state = capture_rng_state(self._host.rng_devices()) if self.capture_rng else None
-        return self._write_checkpoint(os.fspath(path), extra={"controller": self.state_dict()}, rng_state=rng_state)
+        path = self._write_checkpoint(os.fspath(path), extra={"controller": self.state_dict()}, rng_state=rng_state)
+        self._checkpoint_hook("mark_resume_point")  # keep the checkpoints this save refers to until the next one
+        return path
 
     def load(self, path: str | os.PathLike) -> None:
         """Resume from :meth:`save`: rebuild the optimizer and lr schedulers phase by phase up to the saved depth
@@ -1360,6 +1396,7 @@ class FTSController:
 
         Raises:
             FTSConfigurationError: If the saved state belongs to a different fine-tuning schedule.
+            FileNotFoundError: If the checkpoint policy's best checkpoint or rollback point no longer exists.
         """
         self._require_setup()
         if state_dict["schedule_hash"] != config_hash({"schedule": self._schedule}):
@@ -1371,6 +1408,11 @@ class FTSController:
                 " would thaw different parameters on resume.")
         if state_dict["config_hash"] != self.config_hash:
             rank_zero_warn("The saved state was produced with a different controller configuration.")
+        if self._checkpoint is not None and state_dict.get("checkpoint") is not None:
+            self._checkpoint.load_state_dict(state_dict["checkpoint"])
+            self._verify_checkpoint_resume()
+            # keep what this state refers to until the next save, beside what the latest save refers to
+            self._checkpoint_hook("mark_resume_point", keep_previous=True)
         for depth in range(1, state_dict["depth"] + 1):
             self._depth = depth
             self._apply_promotions(depth)  # before the state loads: promoted tensors are checkpointed only from then
@@ -1390,8 +1432,6 @@ class FTSController:
             # saved after `train_end`: resuming reopens the run, so the phase's end hooks run again at its real end
             self._ended_depths.discard(self._depth)
         self._last_metrics = dict(state_dict.get("last_metrics", {}))
-        if self._checkpoint is not None and state_dict.get("checkpoint") is not None:
-            self._checkpoint.load_state_dict(state_dict["checkpoint"])
 
     def config_dict(self) -> dict[str, Any]:
         """The configuration the hash covers (paths and package versions excluded)."""

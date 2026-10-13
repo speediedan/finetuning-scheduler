@@ -85,7 +85,7 @@ def phases(ctx, ckpt_dir: str, restore_best: bool = True, epochs: int = 7, steps
     shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
     path = _train(fts, model, x, y, shard, ctx.device, epochs)
     return {"path": path, "params": _params(model), "restored": fts.restored_count, "stop": fts.stop_reason,
-            "sharded_best": os.path.isdir(os.path.join(ckpt_dir, "best.pt"))}
+            "sharded_best": os.path.isdir(fts._checkpoint.best_path)}
 
 
 def reference(ckpt_dir: str, restore_best: bool = True, epochs: int = 7, steps: int = 2, batch: int = 8,

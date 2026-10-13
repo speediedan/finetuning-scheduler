@@ -14,4 +14,5 @@
 Everything in this package runs inside pool workers, which import torch and nothing from Lightning or
 ``tests.helpers`` (whose package import pulls Lightning in). A case is a module-level function
 ``case(ctx, **kwargs)`` that returns plain, picklable data; the test's assertions run in the main process.
+``_fake_pg`` also runs cases in the main process itself, once per simulated rank on the fake process group.
 """
