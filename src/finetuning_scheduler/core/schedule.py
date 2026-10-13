@@ -24,6 +24,7 @@ import pathlib
 import re
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping
+from typing import Any
 
 import yaml
 from torch import nn
@@ -31,6 +32,7 @@ from torch import nn
 from finetuning_scheduler.core._io import get_filesystem
 from finetuning_scheduler.core.dist import rank_zero_info, rank_zero_only, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
+from finetuning_scheduler.core.roles import parse_role
 
 NON_CONTIGUOUS_KEYS_MSG = "The supplied schedule was found to have non-contiguous or non-zero-indexed keys "
 
@@ -498,7 +500,7 @@ def final_phase_max_epochs(schedule: dict, max_phase: int, max_epoch_wm: int, ma
 
 
 # phase keys only the PyTorch API interprets in this release
-DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides")
+DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides", "promote")
 
 
 def parse_phase_extensions(schedule: dict) -> None:
@@ -508,11 +510,14 @@ def parse_phase_extensions(schedule: dict) -> None:
     - ``phase_config``: an opaque mapping handed to phase hooks and gates.
     - ``pg_overrides``: optimizer options (other than ``params`` and ``lr``, which have their own keys) applied to the
       parameter group the phase adds.
+    - ``promote``: tensors to promote from the ``instrument`` role to a ``latent:<name>`` role when the phase starts,
+      as ``{selector_or_name: "latent:<name>"}`` (not in phase 0).
 
     Raises:
         FTSConfigurationError: If a key has the wrong type.
     """
     for depth, phase in schedule.items():
+        _parse_promote(depth, phase.get("promote"))
         mts = phase.setdefault("max_transition_step", -1)
         if isinstance(mts, bool) or not isinstance(mts, int) or mts < -1:
             raise FTSConfigurationError(
@@ -535,6 +540,24 @@ def parse_phase_extensions(schedule: dict) -> None:
                     f"Phase {depth}'s `pg_overrides` may not set {reserved}: set the phase's parameters with `params` "
                     "and its learning rate with `lr`."
                 )
+
+
+def _parse_promote(depth: int, promote: Any) -> None:
+    if promote is None:
+        return
+    if not isinstance(promote, Mapping) or not promote:
+        raise FTSConfigurationError(
+            f"Phase {depth}'s `promote` must be a non-empty mapping of selectors or names to `latent:<name>` roles, got"
+            f" {promote!r}.")
+    if depth == 0:
+        raise FTSConfigurationError("Phase 0 may not `promote` tensors: a promotion happens when a later phase starts.")
+    for source, target in promote.items():
+        if not isinstance(source, str) or not source:
+            raise FTSConfigurationError(f"Phase {depth}'s `promote` keys must be selectors or names, got {source!r}.")
+        if not isinstance(target, str) or parse_role(target)[0] != "latent":
+            raise FTSConfigurationError(
+                f"Phase {depth} promotes {source!r} to {target!r}: tensors can be promoted only to a `latent:<name>`"
+                " role.")
 
 
 def refuse_direct_api_keys(schedule: dict) -> None:

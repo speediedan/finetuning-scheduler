@@ -43,7 +43,7 @@ from torch.nn.utils import parametrize
 from finetuning_scheduler.core.compile import compile_schedule, view_default_schedule
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.phase import thaw_params
-from finetuning_scheduler.core.roles import declared_kinds, is_frozen_role, validate_roles
+from finetuning_scheduler.core.roles import declared_kinds, is_frozen_role, role_kind, validate_roles
 from finetuning_scheduler.core.views import as_view, BoundView, instrument_state_keys, TunableSupport
 
 NO_SUCH_NAME = "__fts_conformance_no_such_name__"
@@ -60,7 +60,7 @@ class ConformanceCase:
     Attributes:
         name: The case's name.
         kind: The property family it checks (``mapping``, ``storage``, ``thaw``, ``step``, ``checkpoint``,
-            ``refusal``, ``roles`` or ``parametrization``).
+            ``refusal``, ``roles``, ``promotion`` or ``parametrization``).
         applies: Whether the case applies to a view, given its support record and the view itself.
         run: Runs the case, raising :class:`ConformanceError` on failure.
     """
@@ -102,6 +102,11 @@ def _freeze(root: torch.nn.Module) -> None:
 
 def _trainable(root: torch.nn.Module) -> set[str]:
     return {n for n, p in root.named_parameters() if p.requires_grad}
+
+
+def _instrument_parameters(view: BoundView) -> list[str]:
+    params = {n for n, _ in view.root.named_parameters()}
+    return sorted(n for n, r in view.roles().items() if n in params and role_kind(r) == "instrument")
 
 
 def _has_frozen_parameter(view: BoundView) -> bool:
@@ -153,6 +158,8 @@ class TunableViewConformance:
                             self._roles_valid),
             ConformanceCase("frozen_roles_refuse", "roles", lambda s, v: s.trainable and _has_frozen_parameter(v),
                             self._frozen_roles_refuse),
+            ConformanceCase("promotion", "promotion", lambda s, v: s.trainable and bool(_instrument_parameters(v)),
+                            self._promotion),
             ConformanceCase("parametrization_mapping", "parametrization",
                             lambda s, v: s.trainable and any(parametrize.is_parametrized(m) for m in v.root.modules()),
                             self._parametrization_mapping),
@@ -323,6 +330,29 @@ class TunableViewConformance:
             except FTSConfigurationError:
                 continue
             raise ConformanceError(f"Scheduling '{p}' (role {fresh.roles()[p]!r}) through {logical} was not refused.")
+
+    def _promotion(self) -> None:
+        """Promoting the ``instrument`` parameters to a ``latent`` role keeps their names, reports the new role,
+        leaves each with storage no other tensor shares, and checkpoints them from then on."""
+        view = self._fresh()
+        names = _instrument_parameters(view)
+        role = "latent:conformance"
+        renamed = {old: new for old, new in view.promote(names, role).items() if old != new}
+        _check(not renamed, f"Promotion renamed tensors: {renamed}.")
+        roles = view.roles()
+        unreported = sorted(n for n in names if roles.get(n) != role)
+        _check(not unreported, f"After promotion, these tensors do not report the role {role!r}: {unreported}.")
+        named = list(view.root.named_parameters(remove_duplicate=False)) + list(
+            view.root.named_buffers(remove_duplicate=False))
+        promoted = dict(view.root.named_parameters(remove_duplicate=False))
+        shared = sorted(n for n in names if promoted[n].device.type != "meta" and any(
+            other != n and t.device.type != "meta"
+            and t.untyped_storage().data_ptr() == promoted[n].untyped_storage().data_ptr() for other, t in named))
+        _check(not shared, f"Promoted tensors still share storage with other tensors: {shared}.")
+        state = view.checkpoint_state_dict()
+        own = view.root.state_dict(keep_vars=True)
+        unsaved = sorted(k for k in own if k not in state and k in names)
+        _check(not unsaved, f"Promoted tensors are left out of the checkpoint state: {unsaved}.")
 
     def _parametrization_mapping(self) -> None:
         """Each parametrized tensor resolves by its unparametrized name to its underlying tensors."""

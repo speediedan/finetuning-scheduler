@@ -268,7 +268,23 @@ class ViewDefaults:
         self.root.load_state_dict(state_dict, strict=False)
 
     def promote(self, physical: Sequence[str], role: str) -> Mapping[str, str]:
-        """Keep every name: only the role changes."""
+        """Keep every name.
+
+        A promoted parameter that shares its storage with another tensor (a tied weight, for example) is replaced by a
+        frozen copy of itself, so training it leaves the other tensor unchanged; otherwise only the role changes.
+        """
+        named = list(itertools.chain(self.root.named_parameters(remove_duplicate=False),
+                                     self.root.named_buffers(remove_duplicate=False)))
+        holders: dict[int, set[str]] = {}
+        for name, t in named:
+            if t.device.type != "meta":
+                holders.setdefault(t.untyped_storage().data_ptr(), set()).add(name)
+        params = dict(self.root.named_parameters(remove_duplicate=False))
+        for name in physical:
+            t = params[name]
+            if t.device.type != "meta" and holders.get(t.untyped_storage().data_ptr(), set()) - {name}:
+                owner, _, attr = name.rpartition(".")
+                setattr(self.root.get_submodule(owner), attr, nn.Parameter(t.detach().clone(), requires_grad=False))
         return {n: n for n in physical}
 
 
@@ -288,6 +304,7 @@ class BoundView:
             )
         self.view = view
         self._support: TunableSupport | None = None
+        self._promoted: dict[str, str] = {}
 
     @property
     def root(self) -> nn.Module:
@@ -309,8 +326,12 @@ class BoundView:
         return self.view.to_logical(physical)
 
     def _member(self, name: str) -> Any:
+        # the view's own member, or else the default bound to this view, so the defaults see the promoted roles
         fn = getattr(self.view, name, None)
-        return fn if callable(fn) else getattr(ViewDefaults, name).__get__(self)
+        default = getattr(ViewDefaults, name)
+        if callable(fn) and getattr(fn, "__func__", None) is not default:
+            return fn
+        return default.__get__(self)
 
     def logical_named_parameters(self) -> Iterator[tuple[str, Tensor]]:
         return self._member("logical_named_parameters")()
@@ -322,7 +343,13 @@ class BoundView:
         return [list(g) for g in self._member("depth_groups")()]
 
     def roles(self) -> Mapping[str, str]:
-        return dict(self._member("roles")())
+        """The view's roles, with the roles of tensors promoted since (see :meth:`promote`)."""
+        return {**self._member("roles")(), **self._promoted}
+
+    @property
+    def promoted(self) -> dict[str, str]:
+        """The tensors promoted through :meth:`promote`, mapped to their new roles."""
+        return dict(self._promoted)
 
     def checkpoint_state_dict(self) -> dict[str, Any]:
         return self._member("checkpoint_state_dict")()
@@ -331,7 +358,10 @@ class BoundView:
         self._member("load_checkpoint_state_dict")(state_dict, strict=strict)
 
     def promote(self, physical: Sequence[str], role: str) -> Mapping[str, str]:
-        return dict(self._member("promote")(physical, role))
+        """Promote ``physical`` to ``role`` through the view (or the default), and record the new role."""
+        mapping = dict(self._member("promote")(physical, role))
+        self._promoted.update({mapping.get(n, n): role for n in physical})
+        return mapping
 
     def defines(self, member: str) -> bool:
         """Whether the bound view has ``member`` (its own or inherited from :class:`ViewDefaults`)."""

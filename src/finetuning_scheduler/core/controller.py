@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import torch
-from torch import nn
+from torch import nn, Tensor
 from torch.optim import Optimizer
 from torch.utils.hooks import RemovableHandle
 
@@ -216,6 +216,9 @@ class FTSController:
         self._view: BoundView | None = None
         self._compiled: CompiledSchedule | None = None
         self._logical_params: dict[int, tuple[str, ...]] = {}
+        # promotions applied so far, and each promoted tensor's value when it was promoted (on the CPU)
+        self._promotions: list[dict[str, Any]] = []
+        self._promoted_values: dict[str, Tensor] = {}
 
         self._schedule: dict = {}
         self._phase_configs: dict[int, Any] = {}
@@ -260,6 +263,11 @@ class FTSController:
             self._refuse_sharded_key_translation()
         self._schedule = self._load_schedule()
         self._validate_schedule()
+        assert self._compiled is not None
+        if self._compiled.promotions and self._sharded:
+            raise FTSConfigurationError(
+                f"Phases {sorted(self._compiled.promotions)} `promote` tensors of a sharded model, which this release"
+                " does not support.")
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
         self._refuse_unschedulable_params()
         core_phase.reshard_fsdp_modules(self.model)
@@ -728,6 +736,7 @@ class FTSController:
         if self._checkpoint is not None:
             self._pin_boundary(self._depth)
         self._run_hooks("start", self._depth)
+        self._apply_promotions(self._depth)
         if restored_depth is not None:
             self._configure_phase(self._depth, restored_depth, depth_sync=True, pre_state=pre_state)
         else:
@@ -737,6 +746,40 @@ class FTSController:
         self._policy.reset(self._depth)
         rank_zero_info(f"Fine-tuning advanced from phase {prev} to phase {self._depth}"
                        f"{f' ({reason})' if reason else ''}.")
+
+    def _apply_promotions(self, depth: int) -> None:
+        """Promote the tensors phase ``depth`` names in its ``promote`` key (when the phase starts, after its start
+        hooks and before its thaw), through the view's ``promote`` or the default materialization, and record each
+        promoted tensor's value, which restoring a checkpoint saved before the promotion puts back."""
+        assert self._compiled is not None and self._view is not None
+        promoted = self._compiled.promotions.get(depth)
+        if not promoted or any(r["depth"] == depth for r in self._promotions):  # none, or applied before a reload
+            return
+        by_role: dict[str, list[str]] = {}
+        for name, role in promoted.items():
+            by_role.setdefault(role, []).append(name)
+        for role, names in by_role.items():
+            before = dict(self.model.named_parameters(remove_duplicate=False))
+            renamed = {old: new for old, new in self._view.promote(names, role).items() if old != new}
+            if renamed:
+                raise FTSConfigurationError(
+                    f"{type(self._view.view).__name__}.promote renamed the tensors it promoted ({renamed}); a promotion"
+                    " must keep each tensor's name in this release.")
+            after = dict(self.model.named_parameters(remove_duplicate=False))
+            for name in names:
+                self._promoted_values[name] = after[name].detach().to("cpu", copy=True)
+            self._promotions.append({"depth": depth, "names": sorted(names), "from": "instrument", "to": role,
+                                     "materialized": sorted(n for n in names if after[n] is not before[n])})
+            rank_zero_info(f"Phase {depth} promoted {sorted(names)} from `instrument` to `{role}`.")
+
+    def _with_promoted_values(self, model_state: Mapping[str, Any]) -> Mapping[str, Any]:
+        """``model_state`` (a checkpoint's), completed with the value at promotion of each tensor promoted since
+        the checkpoint was saved: an ``instrument`` tensor then, it was not checkpointed."""
+        assert self._view is not None
+        missing = [n for n in self._promoted_values if n not in model_state]
+        if not missing or self._view.overrides("checkpoint_state_dict"):
+            return model_state
+        return {**model_state, **{n: self._promoted_values[n] for n in missing}}
 
     def _configure_phase(self, depth: int, restored_depth: int, depth_sync: bool,
                          pre_state: tuple[dict, list] | None) -> None:
@@ -955,7 +998,8 @@ class FTSController:
             "versions": self.versions(),
             "metadata": {**self._metadata, **getattr(self._checkpoint, "metadata", {}),
                          "phase_config": self._schedule[self._depth].get("phase_config"),
-                         "gate_records": list(self._gate_records), "fingerprints": deepcopy(self._fingerprints)},
+                         "gate_records": list(self._gate_records), "fingerprints": deepcopy(self._fingerprints),
+                         "promotions": deepcopy(self._promotions)},
         }
         if with_tensors:
             assert self._view is not None
@@ -1091,7 +1135,8 @@ class FTSController:
             if with_optimizer:
                 optimizer.load_state_dict(meta["optimizer"])
             assert self._view is not None
-            self._view.load_checkpoint_state_dict(meta["model"], strict=meta["include"] == "all")
+            self._view.load_checkpoint_state_dict(self._with_promoted_values(meta["model"]),
+                                                  strict=meta["include"] == "all")
         if with_optimizer:
             for sched, state_ in zip(self.lr_schedulers, meta["lr_schedulers"]):
                 sched.load_state_dict(state_)
@@ -1284,6 +1329,7 @@ class FTSController:
             "view_digest": self._compiled.digest if self._compiled is not None else None,
             "config_hash": self.config_hash,
             "gate_records": list(self._gate_records),
+            "promotions": deepcopy(self._promotions),
             "ended_depths": sorted(self._ended_depths),
             "checkpoint": self._checkpoint.state_dict() if self._checkpoint is not None else None,
             "last_metrics": dict(self._last_metrics),
@@ -1310,6 +1356,7 @@ class FTSController:
             rank_zero_warn("The saved state was produced with a different controller configuration.")
         for depth in range(1, state_dict["depth"] + 1):
             self._depth = depth
+            self._apply_promotions(depth)  # before the state loads: promoted tensors are checkpointed only from then
             self._configure_phase(depth, depth - 1, depth_sync=False, pre_state=None)
         self._depth = state_dict["depth"]
         self._host.load_counters(state_dict["epoch"], state_dict["global_step"])  # type: ignore[attr-defined]
@@ -1432,7 +1479,8 @@ class FTSController:
     def roles(self) -> dict[str, str]:
         """Physical parameter and buffer names mapped to roles (anything unlisted is ``base``)."""
         if self._compiled is not None:
-            return dict(self._compiled.roles)
+            assert self._view is not None
+            return {**self._compiled.roles, **self._view.promoted}
         return dict(self._view.roles()) if self._view is not None else {}
 
     @property

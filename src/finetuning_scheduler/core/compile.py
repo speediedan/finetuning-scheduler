@@ -35,7 +35,7 @@ from torch import Tensor
 
 from finetuning_scheduler.core.dist import rank_zero_debug, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.core.roles import is_frozen_role, is_role_selector, select
+from finetuning_scheduler.core.roles import is_frozen_role, is_role_selector, role_kind, select
 from finetuning_scheduler.core.schedule import resolve_param_entries, shared_params_ref
 from finetuning_scheduler.core.views import as_view, BoundView, Unresolvable
 
@@ -74,6 +74,7 @@ class CompiledSchedule:
             independently of how it names it.
         overlaps: Pairs of physical names within one phase that share storage (reported, not refused).
         logical_to_physical: Each compiled logical name mapped to its physical parameters.
+        promotions: Per phase, the physical tensors it promotes when it starts, mapped to their new roles.
     """
 
     phases: tuple[CompiledPhase, ...]
@@ -82,6 +83,16 @@ class CompiledSchedule:
     digest: str
     overlaps: tuple[tuple[str, str], ...] = ()
     logical_to_physical: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    promotions: Mapping[int, Mapping[str, str]] = field(default_factory=dict)
+
+    def roles_at(self, depth: int) -> dict[str, str]:
+        """The roles in effect once phase ``depth`` has started: the view's roles, then every promotion through
+        ``depth``."""
+        roles = dict(self.roles)
+        for d in sorted(self.promotions):
+            if d <= depth:
+                roles.update(self.promotions[d])
+        return roles
 
     def physical_for(self, depth: int) -> tuple[str, ...]:
         """The physical parameters phase ``depth`` thaws (its own, then its coupled ones)."""
@@ -222,23 +233,47 @@ def _check_disjoint_names(within: Sequence[Sequence[str]], across: Sequence[Sequ
         rank_zero_warn(msg)
 
 
-def _digest(phases: Sequence[CompiledPhase], roles: Mapping[str, str]) -> str:
-    payload = {"phases": [[cp.depth, list(cp.physical), list(cp.coupled)] for cp in phases],
-               "roles": sorted(roles.items())}
+def _digest(phases: Sequence[CompiledPhase], roles: Mapping[str, str],
+            promotions: Mapping[int, Mapping[str, str]]) -> str:
+    payload: dict[str, Any] = {"phases": [[cp.depth, list(cp.physical), list(cp.coupled)] for cp in phases],
+                               "roles": sorted(roles.items())}
+    if promotions:  # only when present, so a schedule without promotions keeps its digest
+        payload["promotions"] = [[d, sorted(p.items())] for d, p in sorted(promotions.items())]
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _compile_promotions(depth: int, promote: Mapping[str, str], bound: BoundView, logical_names: Sequence[str],
+                        all_physical: Sequence[str], roles: Mapping[str, str], shared: tuple) -> dict[str, str]:
+    """Resolve phase ``depth``'s ``promote`` mapping to physical tensors and their new roles, checking each is an
+    ``instrument`` tensor promoted once."""
+    promoted: dict[str, str] = {}
+    for source, target in promote.items():
+        ((is_sel, names),) = _expand([source], depth, bound, logical_names, all_physical, roles, shared)
+        physical = list(dict.fromkeys(names if is_sel else (q for qs in bound.to_physical(names).values() for q in qs)))
+        not_instrument = sorted(p for p in physical if role_kind(roles.get(p, "base")) != "instrument")
+        if not_instrument:
+            raise FTSConfigurationError(
+                f"Phase {depth} promotes tensors that are not `instrument` tensors: {not_instrument}. Only `instrument`"
+                " tensors can be promoted (to a `latent:<name>` role).")
+        twice = sorted(p for p in physical if p in promoted)
+        if twice:
+            raise FTSConfigurationError(f"Phase {depth}'s `promote` names these tensors more than once: {twice}.")
+        promoted.update(dict.fromkeys(physical, target))
+    return promoted
 
 
 def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, legacy: bool = False) -> CompiledSchedule:
     """Compile ``schedule`` through ``view`` into the physical parameters each phase thaws.
 
-    Per phase, in depth order: ``role:`` selectors expand through the view's roles; names and regexes resolve against
-    the view's logical names (shared-parameter copies are pruned, as for the Lightning callback) and map to physical
-    names through one ``to_physical`` call; the view's coupled tensors join the phase unless an earlier phase claimed
-    them (first come, first served, as the runtime thaw behaves). A physical name an earlier phase claimed only as a
-    coupled tensor is likewise dropped from a later phase (with a debug message).
+    Per phase, in depth order: the phase's ``promote`` mapping changes the roles of the ``instrument`` tensors it names
+    (to ``latent:<name>`` roles, from then on); ``role:`` selectors expand through the roles in effect; names and
+    regexes resolve against the view's logical names (shared-parameter copies are pruned, as for the Lightning
+    callback) and map to physical names through one ``to_physical`` call; the view's coupled tensors join the phase
+    unless an earlier phase claimed them (first come, first served, as the runtime thaw behaves). A physical name an
+    earlier phase claimed only as a coupled tensor is likewise dropped from a later phase (with a debug message).
 
     Args:
-        schedule: The schedule (phase depth mapped to its configuration; only ``params`` is read).
+        schedule: The schedule (phase depth mapped to its configuration; only ``params`` and ``promote`` are read).
         view: A tunable view (bound or not).
         legacy: Warn instead of refusing where the legacy adapter path tolerated it: storage shared across phases, and
             coupled tensors whose role is never thawed.
@@ -248,8 +283,8 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
 
     Raises:
         FTSConfigurationError: If an entry resolves to nothing; phases share storage (unless ``legacy``); a phase
-            schedules a ``fitted`` or ``instrument`` tensor; or a phase schedules quantized or packed tensors through
-            logical names that are views of them.
+            schedules a ``fitted`` or ``instrument`` tensor; a phase promotes a tensor that is not an ``instrument``
+            one; or a phase schedules quantized or packed tensors through logical names that are views of them.
     """
     bound: BoundView = as_view(view)
     support = bound.support()
@@ -267,8 +302,14 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     logical_to_physical: dict[str, tuple[str, ...]] = {}
     phases: list[CompiledPhase] = []
     overlaps: list[tuple[str, str]] = []
+    roles_now = dict(roles)  # the view's roles plus the promotions so far
+    promotions: dict[int, dict[str, str]] = {}
     for depth in sorted(schedule):
-        resolved = _expand(schedule[depth].get("params", []), depth, bound, logical_names, list(tensors), roles,
+        if schedule[depth].get("promote"):
+            promotions[depth] = _compile_promotions(depth, schedule[depth]["promote"], bound, logical_names,
+                                                    list(tensors), roles_now, shared)
+            roles_now.update(promotions[depth])
+        resolved = _expand(schedule[depth].get("params", []), depth, bound, logical_names, list(tensors), roles_now,
                            shared)
         logical = list(dict.fromkeys(n for is_sel, names in resolved if not is_sel for n in names))
         try:
@@ -296,7 +337,7 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
             raise FTSConfigurationError(
                 f"The view's coupled tensors for phase {depth} are not parameters of its root module: {unknown}.")
         cp = CompiledPhase(depth, tuple(logical), tuple(primary), tuple(coupled))
-        _check_phase_tensors(cp, roles, tensors, support.logical_names_are_views, legacy)
+        _check_phase_tensors(cp, roles_now, tensors, support.logical_names_are_views, legacy)
         tagged = list(claimed_primary.items()) + [(p, depth) for p in primary if p not in claimed_primary]
         for (a, da), (b, db) in _overlapping(tagged, tensors):
             if da == db == depth:
@@ -314,8 +355,8 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     if overlaps:
         rank_zero_debug(f"Tensors sharing storage within a phase: {overlaps}")
     return CompiledSchedule(phases=tuple(phases), roles=dict(roles), naming_scheme=support.naming_scheme,
-                            digest=_digest(phases, roles), overlaps=tuple(overlaps),
-                            logical_to_physical=logical_to_physical)
+                            digest=_digest(phases, roles, promotions), overlaps=tuple(overlaps),
+                            logical_to_physical=logical_to_physical, promotions=promotions)
 
 
 def view_default_schedule(view: Any, order: Literal["output_first", "input_first"] = "output_first") -> dict:

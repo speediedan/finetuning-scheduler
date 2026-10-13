@@ -28,8 +28,8 @@ from finetuning_scheduler import CanonicalView, TunableSupport
 from finetuning_scheduler.core.views import Unresolvable
 from finetuning_scheduler.testing import ConformanceError, pytest_params, TunableViewConformance
 from finetuning_scheduler.testing.conformance import NO_SUCH_NAME
-from finetuning_scheduler.testing.fixtures import (ALL_FIXTURES, InterventionModel, one_to_many_view, OneToManyView,
-                                                   parametrized_view, ROLES, TinyTransformer)
+from finetuning_scheduler.testing.fixtures import (ALL_FIXTURES, D, InterventionModel, one_to_many_view, OneToManyView,
+                                                   parametrized_view, ROLES, TinyTransformer, V)
 
 EXPECTED_CASES = {
     "identity": {"mapping_completeness", "default_schedule_compiles", "thaw_is_exact_and_deterministic",
@@ -39,7 +39,7 @@ EXPECTED_CASES = {
                     "unmatched_rule_refuses"},
     "roles": {"mapping_completeness", "default_schedule_compiles", "thaw_is_exact_and_deterministic",
               "step_changes_only_thawed", "checkpoint_round_trip", "unmatched_rule_refuses", "roles_valid",
-              "frozen_roles_refuse"},
+              "frozen_roles_refuse", "promotion"},
     "parametrized": {"mapping_completeness", "default_schedule_compiles", "thaw_is_exact_and_deterministic",
                      "step_changes_only_thawed", "checkpoint_round_trip", "unmatched_rule_refuses",
                      "parametrization_mapping"},
@@ -154,6 +154,20 @@ class LaundersAFrozenTensor(CanonicalView):
         return ["model.0.weight" if p == "procrustes" else p for p in physical]
 
 
+class KeepsTiedStorage(CanonicalView):
+    """Promotes without materializing, so a promoted tensor tied to another keeps sharing its storage."""
+
+    def promote(self, physical, role):
+        return {n: n for n in physical}
+
+
+def _tied_lens_model():
+    model = InterventionModel()
+    model.lens_alias = nn.Linear(D, V)
+    model.lens_alias.weight = model.lens.weight
+    return model
+
+
 class _ParamNet(nn.Sequential):
     def __init__(self):
         from torch.nn.utils import parametrize
@@ -189,6 +203,7 @@ MUTANTS = {
     "untrainable_refuses": lambda: FlipFlopsSupport(nn.Linear(2, 2)),
     "roles_valid": lambda: UndeclaredRoles(InterventionModel(), roles=ROLES),
     "frozen_roles_refuse": lambda: LaundersAFrozenTensor(InterventionModel(), roles=ROLES),
+    "promotion": lambda: KeepsTiedStorage(_tied_lens_model(), roles=ROLES),
     "parametrization_mapping": lambda: PhysicalOnlyView(_ParamNet()),
 }
 
