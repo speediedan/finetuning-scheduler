@@ -183,7 +183,7 @@ def fsdp(ctx, epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, ch
     return {"path": path, "layout": _fsdp_layout(model, planned, ctx.world_size), "params": _params(model),
             "unmoved": _unmoved(model, initial),
             "restored": fts.restored_count, "unsharded_dtypes": sorted(unsharded_dtypes),
-            "sharded_best": bool(ckpt_dir) and os.path.isdir(os.path.join(ckpt_dir, "best.pt"))}
+            "sharded_best": bool(ckpt_dir) and os.path.isdir(fts._checkpoint.best_path)}
 
 
 def reference(epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, ckpt_dir: str | None = None,
