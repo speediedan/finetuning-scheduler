@@ -48,6 +48,7 @@ from finetuning_scheduler.core.fingerprint import batch_fingerprint
 from finetuning_scheduler.core.host import LRStepConfig, TorchHost, TrainingHost
 from finetuning_scheduler.core.rng import capture_rng_state, fork_rngs, restore_rng_state
 from finetuning_scheduler.core.roles import is_frozen_role
+from finetuning_scheduler.strategies.base import DistributedAdapter, select_distributed_adapter
 from finetuning_scheduler.core.views import BoundView, CanonicalView, instrument_state_keys, resolve_view
 from finetuning_scheduler.core.transitions import (AnyOf, as_decision, Decision, epoch_transition_due, GateEvent,
                                                    GateResult, TransitionContext, TransitionPolicy)
@@ -150,6 +151,9 @@ class FTSController:
         view: The :class:`~finetuning_scheduler.core.views.TunableView` through which the schedule names the model's
             parameters (experimental). By default, a view attached to the model as ``fts_tunable_view``, else the
             identity :class:`~finetuning_scheduler.core.views.CanonicalView`. Its ``root`` must be ``model``.
+        distributed: The :class:`~finetuning_scheduler.strategies.base.DistributedAdapter` for the model's layout
+            (experimental). By default, the first of FSDP2, DTensor (tensor parallelism) and unsharded that recognizes
+            the model.
     """
 
     def __init__(
@@ -182,6 +186,7 @@ class FTSController:
         compile_reset: bool | None = None,
         allow_meta_frozen: bool = False,
         view: Any | None = None,
+        distributed: DistributedAdapter | None = None,
     ) -> None:
         self.model = model
         self._schedule_src = schedule
@@ -214,6 +219,8 @@ class FTSController:
         self.allow_meta_frozen = allow_meta_frozen
         self._view_src = view
         self._view: BoundView | None = None
+        self._distributed_src = distributed
+        self._distributed: DistributedAdapter | None = None
         self._compiled: CompiledSchedule | None = None
         self._logical_params: dict[int, tuple[str, ...]] = {}
         # promotions applied so far, and each promoted tensor's value when it was promoted (on the CPU)
@@ -259,11 +266,14 @@ class FTSController:
             raise FTSConfigurationError("`restore_best=True` needs a `checkpoint` policy to restore from.")
         self._refuse_unsupported_model()
         self._view = self._resolve_view()
+        self._distributed = select_distributed_adapter(self.model, self._distributed_src)
         if self._sharded:
             self._refuse_sharded_key_translation()
         self._schedule = self._load_schedule()
         self._validate_schedule()
-        assert self._compiled is not None
+        assert self._compiled is not None and self._distributed is not None
+        for feedback in self._distributed.validate(self.model, {cp.depth: cp.thawed for cp in self._compiled.phases}):
+            (rank_zero_warn if feedback.level != "info" else rank_zero_info)(feedback.message)
         if self._compiled.promotions:
             self._refuse_unsupported_promotion()
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
@@ -1027,7 +1037,12 @@ class FTSController:
 
     @property
     def _sharded(self) -> bool:
+        if self._distributed is not None:
+            return self._distributed.sharded
         return any(type(p).__name__ == "DTensor" for p in self.model.parameters())
+
+    def _instrument_keys(self, keys: Any) -> set[str]:
+        return instrument_state_keys(self.model, self.roles, keys)
 
     def _training_payload(self, with_tensors: bool) -> dict[str, Any]:
         named = dict(self.model.named_parameters())
@@ -1074,26 +1089,17 @@ class FTSController:
         per_rank = (self._host.all_gather_object({"statefuls": statefuls, "rng": rng_state})
                     if self._host.world_size > 1 else None)
         if self._sharded:
-            import torch.distributed.checkpoint as dcp
-            from torch.distributed.checkpoint.state_dict import get_model_state_dict, get_state_dict
-
+            assert self._distributed is not None
             # written beside `path` and moved over it once complete, so an interrupted save keeps the old one
             # (a fixed name, so a later save to the same path clears what an interrupted one left behind)
             tmp = self._host.broadcast_object(f"{path}.tmp")
             if self._host.is_global_zero:
                 remove_checkpoint(tmp)
             self._host.barrier("fts_checkpoint_tmp")
-            optimizer = self.optimizer
-            # DSD initializes an optimizer with no state by stepping it, which would change the live training state
-            optim_saved = bool(optimizer.state)
-            with self._suspend_step_counting():
-                if optim_saved:
-                    model_sd, optim_sd = get_state_dict(self.model, optimizer)
-                else:
-                    model_sd, optim_sd = get_model_state_dict(self.model), None
-            instrument = instrument_state_keys(self.model, self.roles, model_sd.keys())
-            model_sd = {k: v for k, v in model_sd.items() if k not in instrument}
-            dcp.save({"model": model_sd, **({"optim": optim_sd} if optim_sd is not None else {})}, checkpoint_id=tmp)
+            model_sd, optim_sd = self._distributed.state_dict(self.model, self.optimizer, exclude=self._instrument_keys,
+                                                              quiesce=self._suspend_step_counting)
+            optim_saved = optim_sd is not None
+            self._distributed.save({"model": model_sd, "optim": optim_sd}, tmp)
             if self._host.is_global_zero:
                 save_payload({**self._training_payload(with_tensors=False), "optim_saved": optim_saved,
                               "per_rank": per_rank, **(extra or {})}, os.path.join(tmp, META_FILE))
@@ -1142,44 +1148,13 @@ class FTSController:
             optimizer.param_groups = core_phase.map_param_groups(meta["param_groups"],
                                                                  dict(self.model.named_parameters()))
         if meta.get("sharded"):
-            import torch.distributed.checkpoint as dcp
-            from torch.distributed.checkpoint.state_dict import (get_model_state_dict, get_state_dict,
-                                                                 set_model_state_dict, set_state_dict,
-                                                                 StateDictOptions)
-
-            load_optimizer = with_optimizer and meta.get("optim_saved", True)
+            assert self._distributed is not None
             if with_optimizer:
                 optimizer.state.clear()  # a checkpoint saved before any step restores an optimizer with no state
-            if load_optimizer:
-                # DSD initializes the optimizer's state only when no parameter has a gradient
-                for p in self.model.parameters():
-                    p.grad = None
-            unsaved: list[str] = []
-            with self._suspend_step_counting():
-                if load_optimizer:
-                    model_sd, optim_sd = get_state_dict(self.model, optimizer)
-                    # parameters with no state in the checkpoint (never stepped) must get none, not DSD's zeros
-                    saved = set(dcp.FileSystemReader(path).read_metadata().state_dict_metadata)
-                    optim_state: dict = optim_sd["state"]  # type: ignore[assignment]
-                    unsaved = [fqn for fqn in optim_state
-                               if not any(k.startswith(f"optim.state.{fqn}.") for k in saved)]
-                    for fqn in unsaved:
-                        del optim_state[fqn]
-                    state = {"model": model_sd, "optim": optim_sd}
-                else:
-                    state = {"model": get_model_state_dict(self.model)}
-                # instrument tensors are never saved, so they are the only model keys a load may miss
-                instrument = instrument_state_keys(self.model, self.roles, state["model"].keys())
-                state["model"] = {k: v for k, v in state["model"].items() if k not in instrument}
-                dcp.load(state, checkpoint_id=path)
-                if load_optimizer:
-                    # `dcp.load` has already required every saved key; relax the per-parameter checks only for what
-                    # is legitimately absent (instrument tensors, and optimizer state of never-stepped parameters)
-                    options = StateDictOptions(strict=not (unsaved or instrument))
-                    set_state_dict(self.model, optimizer, model_state_dict=state["model"],
-                                   optim_state_dict=state["optim"], options=options)  # type: ignore[arg-type]
-                else:
-                    set_model_state_dict(self.model, state["model"], options=StateDictOptions(strict=not instrument))
+            # instrument tensors are never saved, so they are the only model keys a load may miss
+            self._distributed.load_state(path, self.model, optimizer,
+                                         load_optimizer=with_optimizer and meta.get("optim_saved", True),
+                                         exclude=self._instrument_keys, quiesce=self._suspend_step_counting)
         else:
             if with_optimizer:
                 optimizer.load_state_dict(meta["optimizer"])
