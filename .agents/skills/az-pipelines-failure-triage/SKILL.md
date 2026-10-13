@@ -83,14 +83,14 @@ step. The steps, in order:
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Install dependencies`            | `uv pip install -e . -r requirements/ci/requirements.txt --excludes /tmp/venvs/fts_dev/torch-excludes.txt`                                                                      |
 | `Env details`                     | `collect_env_details.py`, the `>= 2` GPU assertion and the `PL_RUN_CUDA_TESTS=1` assertion                                                                                      |
-| `Acquire host GPU leases`         | `ci_gpu_lease_acquire` from `scripts/gpu_lease_wrap.sh`: `gpu`, then `cpu-heavy`, as plain locks on the mounted lease directory                                                  |
+| `Acquire host GPU leases`         | `ci_host_lease_hold ... --gpus all --cpu-heavy` from `scripts/gpu_lease_wrap.sh`: through the mounted host lease tool, else the plain locks                                     |
 | `Testing: CUDA`                   | `coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v` with `FTS_CUDA_TESTS_ONLY=1`                                                       |
 | `Testing: standalone multi-gpu`   | `special_tests.sh --mark_type=standalone`, plus `--select_file=tests/.standalone_smoke` when `standalone_scope.sh` picks the smoke set (see below)                              |
 | `Testing: Experimental Multi-GPU` | **currently commented out** (`--mark_type=exp_patch --experiment_patch_mask="1 0 0 1"`)                                                                                         |
 | `Statistics`                      | codecov CLI upload, flags `gpu,pytest`                                                                                                                                          |
 | `Testing: Examples`               | `python -m pytest src/fts_examples -v --maxfail=1 --durations=0`                                                                                                                |
 | `Testing: Multi-GPU Examples`     | `special_tests.sh --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'`, with `PYTORCH_KERNEL_CACHE_PATH=/__w/_temp/kernel_cache` |
-| `Cleaning up agent workspace`     | `sudo chmod -R 775 /__w/1/s`, `ci_gpu_lease_release` for both leases, `condition: always()`                                                                                     |
+| `Cleaning up agent workspace`     | `sudo chmod -R 775 /__w/1/s`, `ci_host_lease_release`, `condition: always()`                                                                                                    |
 
 `timeoutInMinutes: 120`. Marks are `standalone` and `exp_patch` only: there is no `profile_ci` mark, and
 no `--reruns` flags, so a flaky test fails the build on first occurrence.
@@ -103,11 +103,14 @@ build of `main` or a release branch may come from a pull request whose gate ran 
 
 ## GPU lease
 
-This pipeline participates in the host GPU lease: it bind-mounts the lease directory into the job container,
-takes the `gpu` and then the `cpu-heavy` lease in `Acquire host GPU leases` after the install, holds them for the
-rest of the job and releases them in `Cleaning up agent workspace`. It fails open only when the directory is absent.
-The mechanics are commented inline in `.azure-pipelines/gpu-tests.yml` and `scripts/gpu_lease_wrap.sh`, and
-AGENTS.md carries the repo-level summary and the CI lease tag shape.
+This pipeline participates in the host GPU lease: it bind-mounts the lease directory and, read-only, the host's
+lease tool into the job container, takes the `gpu` and `cpu-heavy` leases in `Acquire host GPU leases` after the
+install, holds them for the rest of the job and releases them in `Cleaning up agent workspace`. The tool queues the
+job in fair order and waits for `cpu-heavy` before taking the GPUs; without it the step takes the plain locks, with a
+warning, and it fails open only when the lease directory is absent. A step that waits for a long time is queued
+behind a local GPU job, which is the lease working. The mechanics are commented inline in
+`.azure-pipelines/gpu-tests.yml` and `scripts/gpu_lease_wrap.sh`, and AGENTS.md carries the repo-level summary and
+the CI lease tag shape.
 
 **For everything else about the lease, including the hard rule that a CI-held lease is never
 force-reset, use the `gpu-lease` skill.**

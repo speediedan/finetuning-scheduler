@@ -303,7 +303,9 @@ the `fts-development-branch-version-upgrade` skill.
 - `.azure-pipelines/gpu-tests.yml`: self-hosted, asserts `>= 2` CUDA GPUs. Runs the non-standalone CUDA tests
   only (`FTS_CUDA_TESTS_ONLY=1`; the hosted matrix runs every other test in that collection, on CPU), then the
   standalone tests under `tests/`, examples, and multi-GPU examples as separate steps. It takes the host's `gpu` and
-  `cpu-heavy` leases after installing.
+  `cpu-heavy` leases after installing, through `ci_host_lease_hold` in `scripts/gpu_lease_wrap.sh`: by the host's
+  lease tool when an operator has installed it at the mounted path, else by the plain locks (the `gpu-lease` skill's
+  "CI jobs in a container" section).
   - **Standalone scope** (`.azure-pipelines/scripts/standalone_scope.sh`): a pull request into `main` runs the smoke
     set in `tests/.standalone_smoke`, one test per strategy family. Every other build runs every standalone test:
     release branches and tags, builds of `main`, manual runs (one queued on a pull request's merge ref included), and a

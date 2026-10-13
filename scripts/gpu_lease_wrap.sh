@@ -90,10 +90,13 @@ gpu_lease_reexec() {
 # step and still hold it in the next -- each step is a separate shell. These helpers park a detached
 # holder process for the life of the job.
 #
-# Deliberately implemented with plain `flock` against a shared directory rather than by calling the
-# host's lease tool: this repo is public and must not depend on operator-private paths, and the job runs
-# inside a container where that tool is not present. The CONTRACT is the lock file, not the code --
-# `flock` works on the inode, so a bind-mounted lock file interlocks between container and host.
+# Two routes, behind one pair of functions (ci_host_lease_hold / ci_host_lease_release, below):
+#   - the host's lease tool, when an operator has installed it and the job mounts it read-only. That gives the
+#     job the same fair queue, device placement and cpu-heavy handling as every local caller. This repo is
+#     public, so it never depends on the tool: the path is a mount point the pipeline names, nothing more.
+#   - plain `flock` against the shared lease directory (ci_gpu_lease_acquire / ci_gpu_lease_release), when the
+#     tool is absent. The CONTRACT is the lock file, not the code -- `flock` works on the inode, so a
+#     bind-mounted lock file interlocks between container and host, and the tool honors the same locks.
 #
 # Fail-open by design: if the lease directory is not mounted, CI proceeds unserialized rather than
 # failing. A missing convenience must never break the build.
@@ -198,4 +201,78 @@ _ci_write_holder() {
     else
         cat > "$path" 2>/dev/null || true
     fi
+}
+
+
+# ---------------------------------------------------------------------------------------------------
+# One CI hold, through the host's lease tool when it is mounted, else through the plain locks
+# ---------------------------------------------------------------------------------------------------
+#   ci_host_lease_hold <lease_dir> <tool> <pidfile> <timeout_secs> <label> [request...]
+#   ci_host_lease_release <lease_dir> <tool> <pidfile>
+#
+# [request] is the lease tool's own request options: `--gpus all` (the default) or `--gpus 1 --min-vram <GB>`,
+# and `--cpu-heavy` to take host memory too. The grant, "all" or a device UUID, is written to <pidfile>.device.
+#
+# With the tool (a regular, executable file at <tool>: a bind mount whose source is missing appears as a
+# directory), the hold is the tool's `--hold`, which queues in fair order, places a device request on the
+# smallest device that fits, and waits for cpu-heavy before taking the GPUs. Without it, the plain locks take the
+# whole server (a device request cannot be placed, so it is granted "all"), plus cpu-heavy when requested, after
+# the same wait for cpu-heavy; every wait shares <timeout_secs>. Exit status: 0 when held, or when <lease_dir> is
+# absent (this host uses no leases; the grant reads "all"); 75 on a timeout, holding nothing; anything else is a
+# misconfiguration, never a silent pass.
+ci_host_lease_hold() {
+    local dir="${1:?lease dir}" tool="${2:?tool path}" pidfile="${3:?pidfile}" timeout="${4:?timeout}"
+    local label="${5:?label}" rc
+    shift 5
+    rm -f "${pidfile}.mode" "${pidfile}.device"
+    if [[ ! -d "$dir" ]]; then
+        echo "ci_host_lease: '${dir}' not mounted; this host does not use GPU leases. Proceeding." >&2
+        echo all > "${pidfile}.device"
+        return 0
+    fi
+    if [[ -f "$tool" && -x "$tool" ]]; then
+        GPU_LEASE_DIR="$dir" "$tool" --hold --pidfile "$pidfile" --timeout "$timeout" --project "$label" "$@"
+        rc=$?
+        (( rc == 0 )) && echo tool > "${pidfile}.mode"
+        return $rc
+    fi
+    # on stdout, where the pipeline agent reads its logging commands
+    echo "##vso[task.logissue type=warning]ci_host_lease: the host lease tool is not mounted at ${tool}; taking" \
+        "the plain locks for the whole server, without fair order or device placement."
+    local cpu_heavy=0 arg deadline wait_s fd
+    for arg in "$@"; do [[ "$arg" == --cpu-heavy ]] && cpu_heavy=1; done
+    deadline=$(( SECONDS + timeout ))
+    if (( cpu_heavy )) && [[ -r "${dir}/cpu-heavy.lock" ]]; then
+        # wait, holding nothing, for cpu-heavy to be free before taking the GPUs (racy: costs only that wait again)
+        exec {fd}<"${dir}/cpu-heavy.lock"
+        if ! flock -x -w "$timeout" "$fd"; then
+            exec {fd}<&-
+            echo "ci_host_lease: timed out after ${timeout}s waiting for the cpu-heavy lease." >&2
+            return 75
+        fi
+        exec {fd}<&-
+    fi
+    wait_s=$(( deadline - SECONDS > 0 ? deadline - SECONDS : 1 ))
+    ci_gpu_lease_acquire "$dir" "$pidfile" "$wait_s" "$label" gpu || return $?
+    echo plain > "${pidfile}.mode"
+    echo all > "${pidfile}.device"
+    if (( cpu_heavy )); then
+        wait_s=$(( deadline - SECONDS > 0 ? deadline - SECONDS : 1 ))
+        ci_gpu_lease_acquire "$dir" "${pidfile}.cpu" "$wait_s" "$label" cpu-heavy || {
+            rc=$?; ci_host_lease_release "$dir" "$tool" "$pidfile"; return $rc; }
+    fi
+    return 0
+}
+
+ci_host_lease_release() {
+    local dir="${1:?lease dir}" tool="${2:?tool path}" pidfile="${3:?pidfile}"
+    case "$(cat "${pidfile}.mode" 2>/dev/null)" in
+        tool) GPU_LEASE_DIR="$dir" "$tool" --release --pidfile "$pidfile" ;;
+        plain)
+            ci_gpu_lease_release "$dir" "${pidfile}.cpu" cpu-heavy
+            ci_gpu_lease_release "$dir" "$pidfile" gpu
+            ;;
+        *) echo "ci_host_lease: nothing to release for ${pidfile}." >&2 ;;
+    esac
+    rm -f "${pidfile}.mode" "${pidfile}.device"
 }
