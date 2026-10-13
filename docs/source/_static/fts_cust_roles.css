@@ -12,3 +12,9 @@
     background-color: #82a883;
     opacity: 0.7;
 }
+
+/* the highlight backgrounds are light, so keep their text dark under the theme's dark mode */
+html[data-theme="dark"] .yellow-highlight,
+html[data-theme="dark"] .green-highlight {
+    color: #1a1a1a;
+}

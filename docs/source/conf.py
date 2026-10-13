@@ -18,7 +18,6 @@ import sys
 from importlib.util import module_from_spec, spec_from_file_location
 
 import lightning.pytorch  # noqa: F401 workaround for TypeError on sphinx import
-import pt_lightning_sphinx_theme
 
 PATH_HERE = os.path.abspath(os.path.dirname(__file__))
 PATH_ROOT = os.path.join(PATH_HERE, "..", "..")
@@ -160,36 +159,35 @@ exclude_patterns = [
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = None
 
-# Provide a safe default for theme templates that expect `style` (do not override custom theme styles)
-html_context = globals().get('html_context', {})
-html_context.setdefault('style', "")
-
 rst_prolog = """
 .. include:: /_static/fts_cust_roles.rst
 """
 
 # -- Options for HTML output -------------------------------------------------
 
-# The theme to use for HTML and HTML Help pages.  See the documentation for
-# a list of builtin themes.
-# http://www.sphinx-doc.org/en/master/usage/theming.html#builtin-themes
-# html_theme = 'bizstyle'
-# https://sphinx-themes.org
-html_theme = "pt_lightning_sphinx_theme"
-html_theme_path = [pt_lightning_sphinx_theme.get_html_theme_path()]  # comment to test local theme
-# html_theme_path = ["../../../lightning_sphinx_theme"]  # uncomment to test local theme
+# https://pydata-sphinx-theme.readthedocs.io/en/stable/user_guide/index.html
+html_theme = "pydata_sphinx_theme"
 
-# Theme options are theme-specific and customize the look and feel of a theme
-# further.  For a list of options available for each theme, see the
-# documentation.
+# Read the Docs supplies the canonical URL of the version being built; local builds fall back to ``latest``.
+html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", about.__docs_url__)
 
 html_theme_options = {
-    "pytorch_project": "https://finetuning-scheduler.readthedocs.io",
-    "canonical_url": about.__docs_url__,
+    "logo": {"text": project},
+    "github_url": "https://github.com/speediedan/finetuning-scheduler",
+    # every page is a direct child of ``index``, so the header carries no section links; the full captioned toctree
+    # is rendered in the primary sidebar instead (``_templates/sidebar-nav-full.html``)
+    "navbar_center": [],
+    "navbar_end": ["theme-switcher", "navbar-icon-links"],
+    "show_nav_level": 1,
+    "navigation_depth": 2,
     "collapse_navigation": False,
-    "display_version": True,
-    "logo_only": False,
+    "show_toc_level": 2,
+    "secondary_sidebar_items": ["page-toc", "sourcelink"],
+    "footer_start": ["copyright"],
+    "footer_end": ["sphinx-version", "theme-version"],
 }
+
+html_sidebars = {"**": ["sidebar-nav-full"]}
 
 html_logo = "_static/images/logos/logo_fts.svg"
 
@@ -198,17 +196,12 @@ html_favicon = "_static/images/logos/icon_fts.svg"
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ["_templates", "_static"]
+html_static_path = ["_static"]
 
-# Custom sidebar templates, must be a dictionary that maps document names
-# to template names.
-#
-# The default sidebars (for documents that don't match any pattern) are
-# defined by theme itself.  Builtin themes are using these templates by
-# default: ``['localtoc.html', 'relations.html', 'sourcelink.html',
-# 'searchbox.html']``.
-#
-# html_sidebars = {}
+# sphinx-copybutton: copy the code, not the ``>>>``/``...`` prompts or doctest output
+copybutton_prompt_text = r">>> |\.\.\. |\$ "
+copybutton_prompt_is_regexp = True
+copybutton_only_copy_prompt_lines = True
 
 # -- Options for HTMLHelp output ---------------------------------------------
 
@@ -311,9 +304,6 @@ todo_include_todos = True
 
 
 def setup(app):
-    # this is for hiding doctest decoration,
-    # see: http://z4r.github.io/python/2011/12/02/hides-the-prompts-and-output/
-    app.add_js_file("copybutton.js")
     app.add_css_file("main.css")
     app.add_css_file("fts_cust_roles.css")
 

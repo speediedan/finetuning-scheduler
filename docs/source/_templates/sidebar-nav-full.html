@@ -1,0 +1,19 @@
+{#- The theme's ``sidebar-nav-bs.html`` starts at the second toctree level, showing only the pages under the current
+    top-level section. Every page here is a direct child of ``index``, so start at the root instead and render the whole
+    captioned toctree on every page. -#}
+{% set show_nav_level = meta['html_theme.show_nav_level'] if (meta is defined and meta is not none and 'html_theme.show_nav_level' in meta) else theme_show_nav_level %}
+<nav class="bd-docs-nav bd-links"
+     aria-label="{{ _('Site Navigation') }}">
+  <div class="bd-toc-item navbar-nav">
+    {{- generate_toctree_html(
+      "sidebar",
+      startdepth=0,
+      show_nav_level=show_nav_level | int,
+      maxdepth=theme_navigation_depth | int,
+      collapse=theme_collapse_navigation | tobool,
+      includehidden=True,
+      titles_only=True
+      )
+    -}}
+  </div>
+</nav>
