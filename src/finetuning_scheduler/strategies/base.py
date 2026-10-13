@@ -28,6 +28,8 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from torch import nn
 from torch.optim import Optimizer
 
+from finetuning_scheduler.core.exceptions import FTSConfigurationError
+
 # a context the adapter enters around state-dict utilities that may step the optimizer to initialize its state
 Quiesce = Callable[[], AbstractContextManager]
 
@@ -89,8 +91,18 @@ class DistributedAdapter(Protocol):
 
 def select_distributed_adapter(model: nn.Module, explicit: DistributedAdapter | None = None) -> DistributedAdapter:
     """The adapter for ``model``: ``explicit`` when given, else the first of FSDP2, DTensor (tensor parallelism)
-    and unsharded whose :meth:`~DistributedAdapter.detect` recognizes it."""
+    and unsharded whose :meth:`~DistributedAdapter.detect` recognizes it.
+
+    Raises:
+        FTSConfigurationError: If ``explicit`` is an unsharded adapter that does not recognize ``model`` (a sharded
+            model saved to one file would keep only one rank's shards). A sharded adapter reads and writes any layout.
+    """
     if explicit is not None:
+        if not explicit.sharded and not explicit.detect(model):
+            raise FTSConfigurationError(
+                f"The distributed adapter {type(explicit).__name__} ({explicit.name!r}) does not recognize this model's"
+                " layout: its parameters are sharded, and an unsharded checkpoint would keep one rank's shards only."
+                " Pass a sharded adapter (FSDP2Adapter or DTensorAdapter), or none to detect it.")
         return explicit
     from finetuning_scheduler.strategies.dtensor import DTensorAdapter
     from finetuning_scheduler.strategies.fsdp2 import FSDP2Adapter

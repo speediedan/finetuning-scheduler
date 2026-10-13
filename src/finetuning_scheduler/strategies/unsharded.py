@@ -30,13 +30,17 @@ from finetuning_scheduler.strategies.base import Feedback, Quiesce
 
 
 class UnshardedAdapter:
-    """Plain parameters, saved to one file (by global rank zero, under the controller)."""
+    """Plain parameters, saved to one ``torch.save`` file (the caller decides which rank writes it)."""
 
     name = "unsharded"
     sharded = False
 
     def detect(self, model: nn.Module) -> bool:
-        return not any(type(p).__name__ == "DTensor" for p in model.parameters())
+        from torch.distributed.fsdp import FSDPModule
+
+        # an FSDP2 module can hold unsharded parameters between a forward-only pass and its reshard
+        return not any(type(p).__name__ == "DTensor" for p in model.parameters()) and not any(
+            isinstance(m, FSDPModule) for m in model.modules())
 
     def validate(self, model: nn.Module, phases: Mapping[int, Sequence[str]]) -> list[Feedback]:
         return []
@@ -46,7 +50,7 @@ class UnshardedAdapter:
         model_sd = model.state_dict()
         excluded = exclude(model_sd.keys())
         return ({k: v for k, v in model_sd.items() if k not in excluded},
-                optimizer.state_dict() if optimizer is not None else None)
+                optimizer.state_dict() if optimizer is not None and optimizer.state else None)
 
     def save(self, state: Mapping[str, Any], path: str) -> None:
         save_payload(state, path)

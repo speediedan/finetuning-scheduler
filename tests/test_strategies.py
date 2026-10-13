@@ -97,3 +97,23 @@ def test_roles_view_on_fsdp2_matches_single_process_nccl(nccl_pool, tmp_path):
     ref = fts_views.reference(ckpt_dir=str(tmp_path / "ref"))
     assert agreed["path"] == ref["path"] and agreed["frozen_unchanged"]
     assert _close(results[0]["params"], ref["params"], tol=1e-4)
+
+
+@GLOO
+def test_an_explicit_unsharded_adapter_on_fsdp2_is_refused(gloo_pool, tmp_path):
+    results = gloo_pool.run(fts_views.explicit_unsharded_refused, ckpt_dir=str(tmp_path / "explicit"))
+    assert all(r["refused"] for r in results)
+
+
+@GLOO
+def test_a_sharded_checkpoint_loads_into_an_unsharded_model(gloo_pool, tmp_path):
+    """A DCP checkpoint written by FSDP2 ranks loads into a single-process model, as before the adapter split."""
+    results = gloo_pool.run(fts_views.save_sharded, ckpt_dir=str(tmp_path / "sharded"))
+    model = fts_views._model(107)  # different initial weights: the load must overwrite them
+    fts = fts_views._controller(model, str(tmp_path / "plain"))
+    assert fts._distributed.name == "unsharded"
+    fts.load(results[0]["saved"])
+    loaded = fts_views._params(model)
+    instrument = {"0.weight", "0.bias"}  # never saved: they keep the fresh model's values
+    assert _close({k: v for k, v in loaded.items() if k not in instrument},
+                  {k: v for k, v in results[0]["params"].items() if k not in instrument}, tol=0.0)

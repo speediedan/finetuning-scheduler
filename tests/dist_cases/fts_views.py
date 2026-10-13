@@ -89,3 +89,25 @@ def promotion_refused(ctx, ckpt_dir: str, seed: int = 7) -> dict:
     except FTSConfigurationError as err:
         return {"refused": "sharded model" in str(err)}
     return {"refused": False}
+
+
+def explicit_unsharded_refused(ctx, ckpt_dir: str, seed: int = 7) -> dict:
+    """An explicit unsharded adapter on an FSDP2 model is refused: one file would keep one rank's shards only."""
+    from finetuning_scheduler.strategies import UnshardedAdapter
+
+    model = _sharded(ctx, seed)
+    try:
+        _controller(model, os.path.join(ckpt_dir, str(ctx.rank)), distributed=UnshardedAdapter())
+    except FTSConfigurationError as err:
+        return {"refused": "does not recognize" in str(err)}
+    return {"refused": False}
+
+
+def save_sharded(ctx, ckpt_dir: str, epochs: int = 5, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
+    """Train the roles view on FSDP2 and save the state (a DCP directory); return the full parameters."""
+    model = _sharded(ctx, seed)
+    fts = _controller(model, os.path.join(ckpt_dir, "best"))
+    x, y = _data(epochs, steps, batch, seed)
+    shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
+    _train(fts, model, x, y, shard, ctx.device, epochs)
+    return {"saved": fts.save(os.path.join(ckpt_dir, "resume")), "params": _params(model)}

@@ -49,6 +49,7 @@ from finetuning_scheduler.core.host import LRStepConfig, TorchHost, TrainingHost
 from finetuning_scheduler.core.rng import capture_rng_state, fork_rngs, restore_rng_state
 from finetuning_scheduler.core.roles import is_frozen_role
 from finetuning_scheduler.strategies.base import DistributedAdapter, select_distributed_adapter
+from finetuning_scheduler.strategies.dtensor import DTensorAdapter
 from finetuning_scheduler.core.views import BoundView, CanonicalView, instrument_state_keys, resolve_view
 from finetuning_scheduler.core.transitions import (AnyOf, as_decision, Decision, epoch_transition_due, GateEvent,
                                                    GateResult, TransitionContext, TransitionPolicy)
@@ -271,14 +272,13 @@ class FTSController:
             self._refuse_sharded_key_translation()
         self._schedule = self._load_schedule()
         self._validate_schedule()
-        assert self._compiled is not None and self._distributed is not None
-        for feedback in self._distributed.validate(self.model, {cp.depth: cp.thawed for cp in self._compiled.phases}):
-            (rank_zero_warn if feedback.level != "info" else rank_zero_info)(feedback.message)
+        assert self._compiled is not None
         if self._compiled.promotions:
             self._refuse_unsupported_promotion()
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
         self._refuse_unschedulable_params()
         core_phase.reshard_fsdp_modules(self.model)
+        self._validate_layout()
         self._warn_unsynchronized_params()
         core_phase.freeze_module_tree(self.model, train_bn=False,
                                       bn_track_running_stats=self.frozen_bn_track_running_stats)
@@ -1041,6 +1041,15 @@ class FTSController:
             return self._distributed.sharded
         return any(type(p).__name__ == "DTensor" for p in self.model.parameters())
 
+    def _validate_layout(self) -> None:
+        """Report the distributed adapter's findings on the compiled schedule (after resharding, so a forward-only
+        pass before setup cannot show a layout the run never has); an ``error`` refuses."""
+        assert self._compiled is not None and self._distributed is not None
+        for feedback in self._distributed.validate(self.model, {cp.depth: cp.thawed for cp in self._compiled.phases}):
+            if feedback.level == "error":
+                raise FTSConfigurationError(feedback.message)
+            (rank_zero_warn if feedback.level == "warning" else rank_zero_info)(feedback.message)
+
     def _instrument_keys(self, keys: Any) -> set[str]:
         return instrument_state_keys(self.model, self.roles, keys)
 
@@ -1151,8 +1160,10 @@ class FTSController:
             assert self._distributed is not None
             if with_optimizer:
                 optimizer.state.clear()  # a checkpoint saved before any step restores an optimizer with no state
+            # a sharded checkpoint loads through DCP whatever this model's layout (an unsharded model included), and
             # instrument tensors are never saved, so they are the only model keys a load may miss
-            self._distributed.load_state(path, self.model, optimizer,
+            reader = self._distributed if self._distributed.sharded else DTensorAdapter()
+            reader.load_state(path, self.model, optimizer,
                                          load_optimizer=with_optimizer and meta.get("optim_saved", True),
                                          exclude=self._instrument_keys, quiesce=self._suspend_step_counting)
         else:
