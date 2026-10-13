@@ -32,7 +32,10 @@ Usage::
 import atexit
 import multiprocessing
 import queue
+import sqlite3
+import sys
 import time
+import warnings
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
@@ -43,6 +46,10 @@ from tests.dist_cases._worker import worker_main
 
 _CASE_PACKAGE = "tests.dist_cases"
 _FAILED = ("error", "violation", "init_error", "died", "timeout")
+_RESPONSIVE = {"ok", "skip", "error", "violation"}  # replies from workers still serving requests
+# Collection imports this module before any test runs, so this is the directory the run started in, whatever a test
+# later does with ``os.chdir``. Relative coverage paths are resolved against it.
+_INVOCATION_DIR = Path.cwd()
 
 
 def case_ref(case: Callable | str) -> str:
@@ -67,6 +74,7 @@ class DistPool:
         grace: float = 5.0,
     ) -> None:
         self.world_size, self.backend, self.tmp_dir = world_size, backend, Path(tmp_dir)
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)  # the rendezvous file goes here; a missing dir hangs the init
         self.case_timeout, self.start_timeout = case_timeout, start_timeout
         self.pg_timeout, self.grace = pg_timeout, grace
         self.spawn_s: list[float] = []  # wall time of each (re)spawn
@@ -74,6 +82,7 @@ class DistPool:
         self._procs: list = []
         self._requests: list = []
         self._responses: Any = None
+        self._coverage, self._coverage_spec = _parent_coverage(self.tmp_dir / "coverage")
         atexit.register(self.kill)  # runs before multiprocessing's own exit hook, which would join live workers
 
     def _start(self) -> None:
@@ -85,7 +94,7 @@ class DistPool:
         self._procs = [
             ctx.Process(
                 target=worker_main,
-                args=(rank, *args, self._requests[rank], self._responses, self.pg_timeout),
+                args=(rank, *args, self._requests[rank], self._responses, self.pg_timeout, self._coverage_spec),
                 name=f"dist_pool_{self.backend}_rank{rank}",
             )
             for rank in range(self.world_size)
@@ -132,7 +141,9 @@ class DistPool:
         self.stats.append({"case": ref, "wall_s": time.perf_counter() - start, "ranks": ranks})
         kinds = {kind for kind, *_ in replies.values()}
         if kinds & set(_FAILED):
-            self.kill()  # the next case gets fresh workers
+            # The next case gets fresh workers. Workers that all replied are still serving, so they are stopped
+            # cleanly and keep the coverage they recorded for earlier cases; a hung or dead rank means killing them.
+            self._stop(timeout=self.grace) if kinds <= _RESPONSIVE else self.kill()
             pytest.fail(f"{ref} failed:\n{_report(replies)}", pytrace=False)
         if kinds == {"skip"}:
             pytest.skip(replies[0][1])
@@ -144,6 +155,12 @@ class DistPool:
         return [proc.pid for proc in self._procs]
 
     def close(self, timeout: float = 30.0) -> None:
+        """Stop the workers, merge the coverage they saved, and release the pool for good."""
+        self._stop(timeout)
+        atexit.unregister(self.kill)
+        self._merge_coverage()
+
+    def _stop(self, timeout: float) -> None:
         """Stop the workers cleanly (so they can destroy the group and save coverage), killing any that hang."""
         if self._procs:
             for requests in self._requests:
@@ -152,7 +169,35 @@ class DistPool:
             for proc in self._procs:
                 proc.join(max(0.0, deadline - time.monotonic()))
         self.kill()
-        atexit.unregister(self.kill)
+
+    def _merge_coverage(self) -> None:
+        """Merge the data the workers saved at exit into this process's coverage, which saves it with its own.
+
+        The workers measure the same absolute paths as this process, so their data is added as it is: ``combine()``
+        would remap it through any ``[paths]`` aliases, which it never applies to this process's own data. Under
+        ``parallel = true`` the workers' files sit beside this run's own instead, for its ``coverage combine``.
+        """
+        if self._coverage is None or self._coverage.get_option("run:parallel"):
+            return
+        from coverage import CoverageData
+        from coverage.exceptions import CoverageException, CoverageWarning
+
+        data_dir = Path(self._coverage_spec["data_file"]).parent
+        files = sorted(f for f in data_dir.glob(".coverage.*") if not f.name.endswith(("-journal", "-wal", "-shm")))
+        if not files:
+            return
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", CoverageWarning)  # "No data was collected": this process may have none yet
+            data = self._coverage.get_data()
+        for f in files:
+            try:
+                worker_data = CoverageData(basename=str(f))
+                worker_data.read()
+                data.update(worker_data)
+            except (CoverageException, sqlite3.Error) as err:  # a worker killed mid-save; the other files still merge
+                warnings.warn(f"could not merge the pool worker's coverage data {f}: {err}")
+                continue
+            f.unlink()
 
     def kill(self) -> None:
         for proc in self._procs:
@@ -167,6 +212,31 @@ class DistPool:
             q.close()
             q.cancel_join_thread()
         self._procs, self._requests, self._responses = [], [], None
+
+
+def _parent_coverage(data_dir: Path) -> tuple[Any, dict | None]:
+    """This process's running coverage, if any, and the settings that measure the workers the same way.
+
+    Without this, code that runs only in the workers (every case) would be missing from a plain ``coverage run`` of the
+    suite, since nothing measures a spawned process by default.
+    """
+    coverage = sys.modules.get("coverage")
+    cov = coverage.Coverage.current() if coverage is not None else None
+    if cov is None:
+        return None, None
+    spec = {opt: cov.get_option(f"run:{opt}") for opt in ("branch", "source", "source_pkgs", "include", "omit")}
+    # a worker resolves relative paths against its own working directory, which is this process's at spawn time
+    source = [str(_INVOCATION_DIR / s) if (_INVOCATION_DIR / s).is_dir() else s for s in spec["source"] or []]
+    spec["source"] = source or None  # a source that is not a directory here names a package
+    for opt in ("include", "omit"):
+        spec[opt] = [p if p.startswith("*") else str(_INVOCATION_DIR / p) for p in spec[opt] or []] or None
+    if cov.get_option("run:parallel"):  # beside this run's own data, for its ``coverage combine``
+        spec["data_file"] = str(_INVOCATION_DIR / cov.get_option("run:data_file"))
+    else:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        spec["data_file"] = str(data_dir / ".coverage")
+    spec["config_file"] = cov.config.config_file or False
+    return cov, spec
 
 
 def _report(replies: dict[int, tuple]) -> str:

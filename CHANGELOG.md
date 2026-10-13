@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Added `scripts/rocm_smoke.py`, a self-contained distributed smoke check (PyTorch only) for vetting a multi-GPU host, ROCm in particular, before relying on it: checked collectives and bandwidth, a collective soak, a two-phase FSDP2 schedule against a single-process run, bf16 mixed precision, a distributed-checkpoint restore and compilation at a phase transition, each run as configured and with `NCCL_PROTO=Simple` [#74](https://github.com/speediedan/finetuning-scheduler/issues/74).
 
-- Added a persistent distributed test pool (`tests/helpers/dist_pool.py`) that serves many distributed test cases from one process group per test module instead of launching processes per test. Validity rules enforced around every case keep cases from inheriting each other's state, a failure on any rank fails the case, and an error, timeout or violation respawns the pool [#56](https://github.com/speediedan/finetuning-scheduler/issues/56).
+- Added a persistent distributed test pool (`tests/helpers/dist_pool.py`) that serves many distributed test cases from one process group per test module instead of launching processes per test. Validity rules enforced around every case keep cases from inheriting each other's state, a failure on any rank fails the case, and an error, timeout or violation respawns the pool [#56](https://github.com/speediedan/finetuning-scheduler/issues/56). Under `coverage run`, the pool measures its workers with the same settings and merges their data when it closes, so code that only distributed cases exercise counts toward coverage [#57](https://github.com/speediedan/finetuning-scheduler/issues/57).
 
 ### Fixed
 
