@@ -218,7 +218,8 @@ def test_attached_view_under_model_parallel_strategy(tmp_path):
     from lightning.pytorch.strategies import ModelParallelStrategy
 
     seed_everything(42)
-    module = _viewed_model(ShardedLogicalModel)
+    module = ShardedLogicalModel()
+    module.fts_tunable_view = EquivalentView(module)
     initial = _initial(module)
     fts, recorder = FinetuningScheduler(ft_schedule=LOGICAL_SCHEDULE, epoch_transitions_only=True), PathRecorder()
     trainer = Trainer(default_root_dir=tmp_path, callbacks=[fts, recorder], max_epochs=4, accelerator="gpu", devices=2,
