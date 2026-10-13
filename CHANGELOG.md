@@ -80,6 +80,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Declared `fsspec>=2023.5.0` as a base dependency. The scheduling core reads and writes schedules through it directly; it previously arrived only through Lightning [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
 
+- Declared `numpy>=1.23.2` as a base dependency. A distributed `FTSController` uses PyTorch's object collectives, which need NumPy although PyTorch does not declare it, so without NumPy `setup()` failed with "Numpy is not available"; it previously arrived only through Lightning. The floor is the first release with Python `3.11` wheels [#96](https://github.com/speediedan/finetuning-scheduler/issues/96).
+
 - Importing `finetuning_scheduler` no longer imports Lightning. The Lightning integration (`FinetuningScheduler`, `FTSCheckpoint`, `FTSEarlyStopping`, the scheduling mixins, the `fts`, `fts_supporters` and `strategy_adapters` modules, and `types.BaseCallbackDepType`) loads on first access, and raises an `ImportError` naming the missing package when Lightning is not installed. Lightning remains a base dependency [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
 
 - Moved the Lightning integration modules to `finetuning_scheduler.lightning.fts` and `finetuning_scheduler.lightning.fts_supporters`. `finetuning_scheduler.fts` and `finetuning_scheduler.fts_supporters` remain importable and keep their API documentation pages and anchors. The classes' `__module__` (and so their `repr`) now names the new modules; logger names are unchanged [#50](https://github.com/speediedan/finetuning-scheduler/issues/50).
