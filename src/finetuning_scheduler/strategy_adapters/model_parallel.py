@@ -182,11 +182,14 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         else:
             setattr(self.pl_module, "configure_model", self._fts_auto_configure_model)
 
+    _distributed_adapter: DistributedAdapter | None = None
+
     @property
     def distributed_adapter(self) -> DistributedAdapter:
         """The torch-native :class:`~finetuning_scheduler.strategies.base.DistributedAdapter` for the composed
-        module's layout (FSDP2, tensor parallelism or unsharded), selected after ``configure_model``."""
-        return select_distributed_adapter(self.pl_module)
+        module's layout (FSDP2, tensor parallelism or unsharded), selected when the fit starts, after
+        ``configure_model`` (until then, it reflects the module's current layout)."""
+        return self._distributed_adapter or select_distributed_adapter(self.pl_module)
 
     def _validate_fsdp_fts_config(self) -> None:
         """Check each phase's physical parameters (compiled through an attached view, if any) against the composed
@@ -206,6 +209,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         If the fine-tuning schedule and composed modules yield parameter group configurations that may not be supported
         by some optimizer group operations, detailed feedback on potential remediation is provided to the user.
         """
+        self._distributed_adapter = select_distributed_adapter(self.pl_module)
         self._validate_fsdp_fts_config()
 
     def _maybe_update_fsdp_plan(self, resolved_modules: dict, kwargs: dict, name: str) -> bool:

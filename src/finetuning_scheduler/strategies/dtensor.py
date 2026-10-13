@@ -26,7 +26,7 @@ from typing import Any
 from torch import nn
 from torch.optim import Optimizer
 
-from finetuning_scheduler.strategies.base import Feedback, mixed_dtensor_feedback, Quiesce
+from finetuning_scheduler.strategies.base import Feedback, mixed_dtensor_feedback, Quiesce, unresolved_feedback
 
 
 class DTensorAdapter:
@@ -39,7 +39,7 @@ class DTensorAdapter:
         return any(type(p).__name__ == "DTensor" for p in model.parameters())
 
     def validate(self, model: nn.Module, phases: Mapping[int, Sequence[str]]) -> list[Feedback]:
-        return mixed_dtensor_feedback(model, phases)
+        return unresolved_feedback(model, phases) or mixed_dtensor_feedback(model, phases)
 
     def state_dict(self, model: nn.Module, optimizer: Optimizer | None, *, exclude: Callable[[Any], set[str]],
                    quiesce: Quiesce = nullcontext) -> tuple[dict[str, Any], dict[str, Any] | None]:

@@ -26,7 +26,7 @@ from torch import nn
 from torch.optim import Optimizer
 
 from finetuning_scheduler.core.checkpoint import load_payload, save_payload
-from finetuning_scheduler.strategies.base import Feedback, Quiesce
+from finetuning_scheduler.strategies.base import Feedback, Quiesce, unresolved_feedback
 
 
 class UnshardedAdapter:
@@ -43,7 +43,7 @@ class UnshardedAdapter:
             isinstance(m, FSDPModule) for m in model.modules())
 
     def validate(self, model: nn.Module, phases: Mapping[int, Sequence[str]]) -> list[Feedback]:
-        return []
+        return unresolved_feedback(model, phases)
 
     def state_dict(self, model: nn.Module, optimizer: Optimizer | None, *, exclude: Callable[[Any], set[str]],
                    quiesce: Quiesce = nullcontext) -> tuple[dict[str, Any], dict[str, Any] | None]:

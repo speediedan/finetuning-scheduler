@@ -116,6 +116,20 @@ def select_distributed_adapter(model: nn.Module, explicit: DistributedAdapter | 
     return UnshardedAdapter()
 
 
+def unresolved_feedback(model: nn.Module, phases: Mapping[int, Sequence[str]]) -> list[Feedback]:
+    """An error naming each phase's parameters the model no longer has (for example names a wrapper renamed after
+    the schedule was validated, such as ``torch.compile``'s ``_orig_mod.``), which would otherwise thaw nothing."""
+    names = {n for n, _ in model.named_parameters()}
+    missing = {d: [n for n in phase if n not in names] for d, phase in phases.items()}
+    missing = {d: ns for d, ns in missing.items() if ns}
+    if not missing:
+        return []
+    detail = "; ".join(f"phase {d}: {ns}" for d, ns in missing.items())
+    return [Feedback("error", f"The schedule names parameters the model does not have ({detail}). A wrapper applied"
+                              " after the schedule was validated (in `configure_model`, for example) may have renamed"
+                              " them.")]
+
+
 def mixed_dtensor_feedback(model: nn.Module, phases: Mapping[int, Sequence[str]]) -> list[Feedback]:
     """Phases whose parameters mix ``DTensor`` and plain tensors, which some optimizer operations do not accept."""
     all_params = dict(model.named_parameters())

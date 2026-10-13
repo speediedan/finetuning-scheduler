@@ -129,3 +129,24 @@ def test_export_best_from_a_sharded_checkpoint(gloo_pool, tmp_path):
     assert sorted(exported) == ["2.bias", "4.bias", "4.weight"]
     assert all(r["exported"] is None for r in results if r["rank"] != 0)
     assert _close(exported, ref["exported"])
+
+
+def test_validate_reports_mixed_and_unresolved_phases(single_process_pg):
+    """On FSDP2 (one process), a phase mixing DTensor and plain parameters is reported, and a phase naming
+    parameters the model no longer has (renamed by a wrapper) is an error rather than a phase that thaws
+    nothing."""
+    from torch.distributed.device_mesh import init_device_mesh
+    from torch.distributed.fsdp import fully_shard
+
+    model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4), nn.Linear(4, 2))
+    mesh = init_device_mesh("cpu", (1,))
+    fully_shard(model[0], mesh=mesh)
+    fully_shard(model[1], mesh=mesh)  # the head stays plain: the root is not sharded
+    adapter = select_distributed_adapter(model)
+    assert adapter.name == "fsdp2"
+    mixed = adapter.validate(model, {0: ["2.weight", "2.bias"], 1: ["1.weight", "1.bias", "2.weight"]})
+    assert [f.level for f in mixed] == ["info"] and "Phase 1" in mixed[0].message and "2.weight" in mixed[0].message
+    assert "Phase 0" not in mixed[0].message
+    stale = adapter.validate(model, {0: ["2.weight"], 1: ["1._orig_mod.weight"]})
+    assert [f.level for f in stale] == ["error"] and "1._orig_mod.weight" in stale[0].message
+    assert UnshardedAdapter().validate(nn.Linear(2, 2), {0: ["nope"]})[0].level == "error"

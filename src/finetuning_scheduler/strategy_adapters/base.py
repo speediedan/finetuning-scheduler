@@ -183,10 +183,14 @@ class StrategyAdapter:
 
     def scheduled_physical(self, depth: int) -> list:
         """The physical parameters phase ``depth`` thaws: its compiled parameters (coupled ones included) under an
-        attached view or ``role:`` selectors, else the schedule's own names."""
+        attached view or ``role:`` selectors, the adapter's own translation when it overrides the naming methods,
+        else the schedule's own names."""
         if self.compiled_schedule is not None:
             return list(self.compiled_schedule.physical_for(depth))
-        return list(self.fts_handle.ft_schedule[depth]["params"])  # type: ignore[index]
+        names = list(self.fts_handle.ft_schedule[depth]["params"])  # type: ignore[index]
+        if self.naming_overrides():
+            return list(self.fts_optim_transform(names, inspect_only=True))
+        return names
 
     def _compiled_physical(self, names: list) -> list:
         """The physical parameters a phase's ``params`` (or other compiled names) stand for, coupled ones included

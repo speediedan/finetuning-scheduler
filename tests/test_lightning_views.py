@@ -232,3 +232,17 @@ def test_attached_view_under_model_parallel_strategy(tmp_path):
     assert fts.ft_schedule[1]["params"] == ["blocks.1.W"]
     trained = {n: p.full_tensor().detach().cpu() for n, p in module.named_parameters() if p.requires_grad}
     assert trained and all(not torch.equal(initial[n], t) for n, t in trained.items())
+
+
+def test_scheduled_physical_translates_through_naming_overrides():
+    """An adapter with naming overrides (and no compiled schedule) reports a phase's physical parameters through
+    its own transform, so layout validation sees the real tensors."""
+    adapter = LegacyNamingAdapter()
+    module = LogicalNamesBoringModel()
+    adapter.fts_handle = SimpleNamespace(pl_module=module, trainer=None, ft_schedule=LOGICAL_SCHEDULE)
+    adapter.on_before_init_fts()
+    assert adapter.compiled_schedule is None
+    assert adapter.scheduled_physical(1) == ["model.2.weight", "model.2.bias", "model.3.weight", "model.3.bias"]
+    plain = StrategyAdapter()
+    plain.fts_handle = SimpleNamespace(pl_module=module, trainer=None, ft_schedule={0: {"params": ["model.4.weight"]}})
+    assert plain.scheduled_physical(0) == ["model.4.weight"]
