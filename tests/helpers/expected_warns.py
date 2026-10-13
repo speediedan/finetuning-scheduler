@@ -44,7 +44,7 @@ BASE_EXPECTED_WARNS = create_base_warns()
 EXPECTED_DIRPATH_WARN = "is not empty."
 # a strategy adapter overriding the parameter-naming methods (once per class), and its precedence over an attached view
 NAMING_OVERRIDES_DEPRECATION_WARN = (
-    "overrides StrategyAdapter's parameter-naming methods .* Overriding them is deprecated"
+    "overrides StrategyAdapter's parameter-naming methods .* Overriding them to name parameters is deprecated"
 )
 NAMING_OVERRIDES_PRECEDENCE_WARN = "overrides StrategyAdapter's parameter-naming methods .* is not used"
 

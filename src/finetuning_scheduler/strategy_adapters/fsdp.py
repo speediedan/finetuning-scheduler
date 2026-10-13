@@ -168,6 +168,14 @@ class FSDPStrategyAdapter(StrategyAdapter):
                 " Use `ModelParallelStrategy` (FSDP2) to fine-tune through a view, or remove the attribute."
             )
 
+    def scheduled_physical(self, depth: int) -> list:
+        """The parameters phase ``depth`` thaws, in the module's own namespace: its compiled parameters under
+        ``role:`` selectors, else the schedule's own names (never translated through ``fts_optim_transform``, which
+        maps them to flattened parameters)."""
+        if self.compiled_schedule is not None:
+            return list(self.compiled_schedule.physical_for(depth))
+        return list(self.fts_handle.ft_schedule[depth]["params"])  # type: ignore[index]
+
     def on_before_init_fts(self) -> None:
         """In this hook executed immediately before
         :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.init_fts`, to accommodate FSDP we:

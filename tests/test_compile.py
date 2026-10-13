@@ -234,3 +234,63 @@ def test_parametrized_tensors_are_schedulable_by_unparametrized_name():
     compiled = compile_schedule({0: {"params": ["weight"]}, 1: {"params": ["bias"]}}, CanonicalView(root))
     assert compiled.phases[0].physical == ("parametrizations.weight.original",)
     assert compiled.module_map() == {0: {""}, 1: {""}}
+
+
+def test_a_coupled_tensor_joins_only_the_first_phase_coupling_it():
+    """A norm coupled to two phases' tensors is thawed once, with the first of them (first come, first served)."""
+    net = _net()
+    view = CanonicalView(net)
+    view.coupled = lambda physical: ["1.weight"] if {"0.weight", "2.weight"} & set(physical) else []  # type: ignore
+    compiled = compile_schedule({0: {"params": ["2.weight"]}, 1: {"params": ["0.weight"]}}, view)
+    assert compiled.phases[0].coupled == ("1.weight",) and compiled.phases[1].coupled == ()
+
+
+def test_adjacent_slices_of_one_storage_do_not_overlap():
+    """Byte ranges that only touch do not overlap, and offsets count bytes: adjacent rows of one fused storage (a
+    ``c_attn``-style weight) may be thawed by different phases."""
+    net = nn.Module()
+    fused = torch.zeros(2, 4)
+    net.q, net.k = nn.Parameter(fused[0]), nn.Parameter(fused[1])
+    compiled = compile_schedule({0: {"params": ["q"]}, 1: {"params": ["k"]}}, CanonicalView(net))
+    assert compiled.physical_for(1) == ("k",) and compiled.overlaps == ()
+
+
+def test_physical_for_takes_a_phase_depth():
+    net = _net()
+    compiled = compile_schedule({0: {"params": ["4.weight"]}, 2: {"params": ["2.weight"]}}, CanonicalView(net))
+    assert compiled.physical_for(2) == ("2.weight",)
+    with pytest.raises(KeyError, match="no phase 1"):
+        compiled.physical_for(1)
+
+
+@pytest.mark.parametrize("target", ["adapter", "bogus-role", "latent"])
+def test_compiling_refuses_an_invalid_promotion_target(target):
+    net = _net()
+    view = CanonicalView(net, roles={"0.weight": "instrument"})
+    with pytest.raises(FTSConfigurationError):
+        compile_schedule({0: {"params": ["4.weight"]}, 1: {"params": ["2.weight"], "promote": {"0.weight": target}}},
+                         view)
+
+
+def test_a_regex_through_a_view_that_indexes_a_mapping_refuses_by_name():
+    """A view's ``to_physical`` need not expect regexes: one that raises ``KeyError`` for them still compiles a
+    matching regex and refuses an unmatched one, naming it."""
+
+    class Indexing(BlockView):
+        def to_physical(self, logical):
+            return {n: self.BLOCKS[n] for n in logical}
+
+    net = _net()
+    compiled = compile_schedule({0: {"params": ["head"]}, 1: {"params": ["block.*"]}}, Indexing(net))
+    assert compiled.phases[1].logical == ("block0", "block2")
+    with pytest.raises(FTSConfigurationError, match=r"'blk\.\*' specified in phase 1"):
+        compile_schedule({0: {"params": ["head"]}, 1: {"params": ["blk.*"]}}, Indexing(net))
+
+
+def test_view_default_schedule_leaves_out_a_name_standing_for_frozen_and_trainable_tensors():
+    net = _net()
+    view = BlockView(net, roles={"0.bias": "fitted"})  # block0 stands for 0.weight (base) and 0.bias (fitted)
+    with pytest.warns(UserWarning, match=r"leaves out \['block0'\]"):
+        schedule = view_default_schedule(view)
+    assert schedule == {0: {"params": ["head", "block2"]}}
+    compile_schedule(schedule, view)  # and the generated schedule compiles

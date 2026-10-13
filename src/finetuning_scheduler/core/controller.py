@@ -121,6 +121,18 @@ def _is_compiled(module: nn.Module) -> bool:
                for m in module.modules())
 
 
+def _checkpoint_keys(names: Iterable[str], saved: Iterable[str]) -> tuple[dict[str, str], list[str]]:
+    """Each live state name mapped to the key a checkpoint holds it under, and the names it does not hold.
+
+    The key is the name itself when present, else the one with the same wrapper-free name: an unsharded compiled
+    model's state keeps ``_orig_mod.``, while a sharded one's checkpoint does not.
+    """
+    saved = set(saved)
+    by_canonical = {canonical_fqn(k): k for k in saved}
+    keys = {n: n if n in saved else by_canonical.get(canonical_fqn(n)) for n in names}
+    return {n: k for n, k in keys.items() if k is not None}, [n for n, k in keys.items() if k is None]
+
+
 class FTSController:
     """Schedule multi-phase fine-tuning in a plain PyTorch training loop.
 
@@ -255,6 +267,8 @@ class FTSController:
         self.allow_meta_frozen = allow_meta_frozen
         self._view_src = view
         self._view: BoundView | None = None
+        # the view's own roles at setup, before any promotion (hashed, so the hash is stable across promotions)
+        self._view_roles_at_setup: dict[str, str] | None = None
         self._distributed_src = distributed
         self._distributed: DistributedAdapter | None = None
         self._compiled: CompiledSchedule | None = None
@@ -302,7 +316,8 @@ class FTSController:
             raise FTSConfigurationError("`restore_best=True` needs a `checkpoint` policy to restore from.")
         self._refuse_unsupported_model()
         self._view = self._resolve_view()
-        self._distributed = select_distributed_adapter(self.model, self._distributed_src)
+        self._view_roles_at_setup = self._view.view_roles()
+        self._distributed =select_distributed_adapter(self.model, self._distributed_src)
         if self._sharded:
             self._refuse_sharded_key_translation()
         self._schedule = self._load_schedule()
@@ -578,11 +593,14 @@ class FTSController:
         raise FTSConfigurationError("`lr_scheduler` must be an lr scheduler, a factory taking the optimizer, or None.")
 
     def _check_schedule_agreement(self) -> None:
-        digests = self._host.all_gather_object(config_hash({"schedule": self._schedule}))
+        assert self._compiled is not None
+        # the compiled digest covers the physical parameters each phase thaws and the view's roles
+        digests = self._host.all_gather_object(config_hash({"schedule": self._schedule,
+                                                            "compiled": self._compiled.digest}))
         if len(set(digests)) > 1:
             raise FTSConfigurationError(
-                "Ranks resolved different schedules (their models' parameter names differ). Every rank must schedule"
-                " the same parameters."
+                "Ranks resolved different schedules or roles (their models' parameter names, or their views' roles,"
+                " differ). Every rank must schedule the same parameters, with the same roles."
             )
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -1200,8 +1218,8 @@ class FTSController:
             # instrument tensors are never saved, so they are the only model keys a load may miss
             reader = self._distributed if self._distributed.sharded else DTensorAdapter()
             reader.load_state(path, self.model, optimizer,
-                                         load_optimizer=with_optimizer and meta.get("optim_saved", True),
-                                         exclude=self._instrument_keys, quiesce=self._suspend_step_counting)
+                              load_optimizer=with_optimizer and meta.get("optim_saved", True),
+                              exclude=self._instrument_keys, quiesce=self._suspend_step_counting)
         else:
             if with_optimizer:
                 optimizer.load_state_dict(meta["optimizer"])
@@ -1311,7 +1329,7 @@ class FTSController:
         if never_saved:
             raise FTSConfigurationError(f"`instrument` tensors are never checkpointed, so they cannot be exported: "
                                         f"{never_saved}.")
-        # checkpoints key tensors without wrapper segments (torch.compile's, activation checkpointing's)
+        # exported under wrapper-free names (without torch.compile's or activation checkpointing's segments)
         export_roles = {canonical_fqn(n): effective.get(n, "base") for n in names}
         best = cp.best_path
         dest = os.fspath(path) if path is not None else os.path.join(os.path.dirname(os.path.normpath(best)),
@@ -1323,7 +1341,7 @@ class FTSController:
         if self._host.is_global_zero:
             try:
                 meta = self._read_meta(best)
-                tensors = self._read_checkpoint_tensors(best, meta, list(export_roles))
+                tensors = self._read_checkpoint_tensors(best, meta, names)
                 metadata = {**meta.get("metadata", {}), "source": best, "best_depth": cp.best_depth,
                             "best_score": float(cp.best_score) if cp.best_score is not None else None,
                             "config_hash": meta.get("config_hash"), "versions": meta.get("versions")}
@@ -1332,7 +1350,7 @@ class FTSController:
                                 os.fspath(path) if path is not None else None)
                 else:
                     save_payload({"tensors": tensors, "roles": export_roles, "metadata": metadata}, dest)
-            except Exception as err:  # every rank raises it, rather than waiting for rank zero at a barrier
+            except BaseException as err:  # every rank raises it, rather than waiting for rank zero at a barrier
                 raised, failure = err, (type(err).__name__, str(err))
         failure = self._host.broadcast_object(failure)
         if failure is not None:
@@ -1344,30 +1362,31 @@ class FTSController:
             raise RuntimeError(f"`export_best` failed on global rank zero: {kind}: {message}")
         return result
 
-    def _read_checkpoint_tensors(self, path: str, meta: Mapping[str, Any], keys: Sequence[str]) -> dict[str, Tensor]:
-        """The full values of the model state ``keys`` in the checkpoint at ``path`` (whose metadata is ``meta``),
-        on this process alone (call it on one rank), without touching the live model.
+    def _read_checkpoint_tensors(self, path: str, meta: Mapping[str, Any], names: Sequence[str]) -> dict[str, Tensor]:
+        """The full values of the model state ``names`` in the checkpoint at ``path`` (whose metadata is ``meta``),
+        keyed by their wrapper-free names and read on this process alone (call it on one rank), without touching
+        the live model.
 
         A tensor promoted after the checkpoint was saved takes its value at promotion.
         """
         if not meta.get("sharded"):
             state = self._with_promoted_values(meta["model"])
-            missing = [k for k in keys if k not in state]
+            keys, missing = _checkpoint_keys(names, state)
             if missing:
                 raise FTSConfigurationError(
                     f"The best checkpoint does not hold {missing} (left out of a scheduled-only checkpoint, or not"
                     " persistent).")
-            return {k: state[k] for k in keys}
+            return {canonical_fqn(n): state[k] for n, k in keys.items()}
         import torch.distributed.checkpoint as dcp
 
         saved = dcp.FileSystemReader(path).read_metadata().state_dict_metadata
-        missing = [k for k in keys if f"model.{k}" not in saved]
+        keys, missing = _checkpoint_keys(names, [k[len("model."):] for k in saved if k.startswith("model.")])
         if missing:
             raise FTSConfigurationError(f"The best checkpoint does not hold {missing}.")
         model_state = {k: torch.empty(saved[f"model.{k}"].size, dtype=saved[f"model.{k}"].properties.dtype)
-                       for k in keys}
+                       for k in keys.values()}
         dcp.load({"model": model_state}, checkpoint_id=path, no_dist=True)
-        return model_state
+        return {canonical_fqn(n): model_state[k] for n, k in keys.items()}
 
     def save(self, path: str | os.PathLike) -> str:
         """Save everything needed to resume exactly: the controller's state, the model, optimizer, lr schedulers,
@@ -1598,7 +1617,9 @@ class FTSController:
                 bound = resolve_view(self.model, self._view_src)
             except FTSConfigurationError:  # an invalid view is refused at setup
                 return {"view": {"class_path": describe_callable(type(self._view_src))}}
-        roles = bound.view_roles()  # without promotions, so the hash is the same before and after one
+        # without promotions, so the hash is the same before and after one (a view that owns promotion may report
+        # its promoted roles itself, so the roles it reported at setup are used once set up)
+        roles = self._view_roles_at_setup if self._view_roles_at_setup is not None else bound.view_roles()
         if type(bound.view) is CanonicalView and not roles:
             return {}
         support = bound.support()
@@ -1615,7 +1636,8 @@ class FTSController:
         """The package versions in use (recorded with checkpoints, not hashed)."""
         from finetuning_scheduler.__about__ import __version__
 
-        return {"finetuning_scheduler": __version__, "torch": torch.__version__,
+        # str(): torch's ``TorchVersion`` would make a checkpoint unreadable by a plain (weights-only) ``torch.load``
+        return {"finetuning_scheduler": __version__, "torch": str(torch.__version__),
                 "python": ".".join(map(str, sys.version_info[:3]))}
 
     # ------------------------------------------------------------------------------------------------------------------

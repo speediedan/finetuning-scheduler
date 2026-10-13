@@ -154,11 +154,29 @@ def test_naming_overrides_classification():
         def logical_param_translation(self, param_names):
             return param_names
 
+    class ShardingOnly(StrategyAdapter):
+        def fts_optim_transform(self, orig_pl, inspect_only=False):
+            return super().fts_optim_transform(orig_pl, inspect_only)
+
+    class ChecksOnly(StrategyAdapter):
+        def validate_ft_sched(self):
+            return super().validate_ft_sched()
+
+    class FSDPShardingOnly(FSDPStrategyAdapter):
+        def fts_optim_transform(self, orig_pl, inspect_only=False):
+            return super().fts_optim_transform(orig_pl, inspect_only)
+
     assert StrategyAdapter.naming_overrides() == frozenset()
     assert FSDPStrategyAdapter.naming_overrides() == frozenset()
     assert SubclassesFSDP.naming_overrides() == {"logical_param_translation"}
     assert LegacyNamingAdapter.naming_overrides() <= set(NAMING_METHODS)
     assert {"fts_optim_transform", "logical_param_translation"} <= LegacyNamingAdapter.naming_overrides()
+    # overriding only the sharding transform, or only adding checks, does not name parameters
+    for cls in (ShardingOnly, ChecksOnly, FSDPShardingOnly):
+        assert cls.naming_overrides() == frozenset()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            cls.notice_naming_overrides()
 
 
 def test_fsdp1_refuses_an_attached_view():
@@ -191,6 +209,8 @@ def test_naming_overrides_are_deprecated_once_per_class(tmp_path, monkeypatch):
     notices = [w for w in first if re.search(NAMING_OVERRIDES_DEPRECATION_WARN, str(w.message))]
     assert len(notices) == 1 and notices[0].category is FutureWarning
     assert "`LegacyNamingAdapter`" in str(notices[0].message)
+    # attributed to the adapter's own definition, the code to change
+    assert notices[0].filename.endswith("legacy_naming_adapter.py")
     for builtin in (StrategyAdapter, FSDPStrategyAdapter):
         with warnings.catch_warnings(record=True) as quiet:
             warnings.simplefilter("always")
@@ -246,3 +266,43 @@ def test_scheduled_physical_translates_through_naming_overrides():
     plain = StrategyAdapter()
     plain.fts_handle = SimpleNamespace(pl_module=module, trainer=None, ft_schedule={0: {"params": ["model.4.weight"]}})
     assert plain.scheduled_physical(0) == ["model.4.weight"]
+
+
+def test_fsdp1_validates_the_schedules_own_names_under_naming_overrides():
+    """FSDP1's ``fts_optim_transform`` maps names to flattened parameters, so a subclass with naming overrides is
+    validated against the schedule's own names, as before views, rather than through that transform."""
+
+    class RenamingFSDP(FSDPStrategyAdapter):
+        def logical_param_translation(self, param_names):
+            return param_names
+
+        def fts_optim_transform(self, orig_pl, inspect_only=False):
+            return [f"_fsdp_wrapped_module._flat_param.{n}" for n in orig_pl]
+
+    adapter = RenamingFSDP()
+    adapter.fts_handle = SimpleNamespace(pl_module=LogicalNamesBoringModel(), trainer=None,
+                                         ft_schedule={0: {"params": ["model.4.weight"]}})
+    assert RenamingFSDP.naming_overrides() and adapter.scheduled_physical(0) == ["model.4.weight"]
+
+
+def test_role_selectors_under_a_naming_override_adapter_refuse_by_name(tmp_path):
+    schedule = {0: {"params": ["role:base"], "max_transition_epoch": 1}}
+    with pytest.raises(MisconfigurationException, match="selectors are not supported under LegacyNamingAdapter"):
+        _trainer(tmp_path, [_fts(ft_schedule=schedule, epoch_transitions_only=True)]).fit(LogicalNamesBoringModel())
+
+
+def test_unresolvable_names_are_lightning_configuration_errors(tmp_path):
+    """A view listing a name its ``to_physical`` cannot map raises ``Unresolvable``, which under Lightning is also
+    a ``MisconfigurationException``."""
+    from finetuning_scheduler.core.views import Unresolvable
+
+    class ListsMore(EquivalentView):
+        def logical_named_parameters(self):
+            yield from super().logical_named_parameters()
+            yield "blocks.9.W", self.root.model[0].weight
+
+    schedule = {**LOGICAL_SCHEDULE, 1: {**LOGICAL_SCHEDULE[1], "params": ["blocks.9.W"]}}
+    fts = FinetuningScheduler(ft_schedule=schedule, epoch_transitions_only=True)
+    with pytest.raises(MisconfigurationException) as err:
+        _trainer(tmp_path, [fts]).fit(_viewed_model(ListsMore))
+    assert isinstance(err.value, Unresolvable)

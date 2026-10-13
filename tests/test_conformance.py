@@ -53,6 +53,42 @@ def test_fixture_views_conform(fixture):
     assert report.ok
 
 
+class DocsBlockView:
+    """The ``BlockView`` example of the tunable views guide, verbatim: its ``to_physical`` indexes a mapping, so it
+    raises ``KeyError`` (not ``Unresolvable``) for a name it does not know."""
+
+    BLOCKS = {"block0": ("0.weight", "0.bias"), "head": ("2.weight", "2.bias")}
+    NORMS = {"0.weight": ["1.weight", "1.bias"]}
+
+    def __init__(self, root):
+        self.root = root
+
+    def support(self):
+        return TunableSupport(trainable=True, naming_scheme="blocks")
+
+    def to_physical(self, logical):
+        return {n: self.BLOCKS[n] for n in logical}
+
+    def to_logical(self, physical):
+        rev = {p: n for n, ps in self.BLOCKS.items() for p in ps}
+        return list(dict.fromkeys(rev.get(p, p) for p in physical))
+
+    def logical_named_parameters(self):
+        for n, ps in self.BLOCKS.items():
+            yield n, self.root.get_parameter(ps[0])
+
+    def coupled(self, physical):
+        return [c for p in physical for c in self.NORMS.get(p, [])]
+
+
+def test_the_guides_example_view_conforms():
+    torch.manual_seed(0)
+    report = TunableViewConformance(
+        lambda: DocsBlockView(nn.Sequential(nn.Linear(4, 4), nn.LayerNorm(4), nn.Linear(4, 2)))
+    ).run(raise_on_failure=True)
+    assert report.ok and "unmatched_rule_refuses" in report.ran
+
+
 @pytest.mark.parametrize("case", pytest_params(one_to_many_view), ids=lambda case: case.__name__)
 def test_pytest_params(case):
     case()

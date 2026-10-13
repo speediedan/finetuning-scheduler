@@ -96,6 +96,9 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
     with any provided ``Dict`` of policy kwargs.
     """
 
+    # a built-in adapter: its own overrides are never naming overrides (see `StrategyAdapter.naming_overrides`)
+    _fts_naming_overrides: frozenset[str] = frozenset()
+
     def __init__(self, fsdp_default_kwargs: dict | None = None, fsdp_plan: dict | None = None, *args: Any,
                  **kwargs: Any) -> None:
         """The only user-facing configuration for

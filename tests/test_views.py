@@ -276,3 +276,29 @@ def test_instrument_keys_cover_aliases_and_wrapper_prefixes():
     roles = {"_orig_mod.weight": "instrument"}
     assert instrument_state_keys(wrapped, roles, ["weight", "bias"]) == {"weight"}  # a DSD-style unprefixed key
     assert canonical_fqn("_orig_mod.weight") == "weight"
+
+
+def test_a_member_set_to_a_value_is_refused():
+    """``roles = {...}`` rather than a method would otherwise be silently replaced by the default (``{}``),
+    compiling an ``instrument`` tensor into a phase."""
+    view = CanonicalView(_net())
+    view.roles = {"0.weight": "instrument"}  # type: ignore[assignment]
+    with pytest.raises(FTSConfigurationError, match="`roles` must be methods"):
+        BoundView(view)
+
+
+def test_a_member_set_on_the_instance_is_used_and_counts_as_an_override():
+    """``overrides`` agrees with the member actually called, so the guards keyed on it see an instance's own."""
+    view = CanonicalView(_net())
+    bound = BoundView(view)
+    assert not bound.overrides("checkpoint_state_dict")
+    view.checkpoint_state_dict = lambda: {"own": torch.zeros(1)}  # type: ignore[method-assign]
+    assert bound.overrides("checkpoint_state_dict") and list(bound.checkpoint_state_dict()) == ["own"]
+
+
+@pytest.mark.parametrize("role", ["adapter", "bogus-role", "latent", "instrument"])
+def test_promote_refuses_a_target_that_is_not_a_named_latent_role(role):
+    bound = BoundView(CanonicalView(_net(), roles={"0.weight": "instrument"}))
+    with pytest.raises(FTSConfigurationError):
+        bound.promote(["0.weight"], role)
+    assert bound.promoted == {}

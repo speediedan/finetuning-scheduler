@@ -22,6 +22,7 @@ import torch
 from finetuning_scheduler import CanonicalView, FTSController
 from finetuning_scheduler.core.checkpoint import BestCheckpoint, load_payload
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
+from finetuning_scheduler.core.views import canonical_fqn
 from finetuning_scheduler.testing.fixtures import InterventionModel, ROLES
 
 SGD = partial(torch.optim.SGD, lr=0.1)
@@ -118,16 +119,23 @@ def _step(fts, epoch, metrics):
     fts.epoch_end(metrics)
 
 
-def test_export_best_keys_wrapped_tensors_by_their_checkpoint_names(tmp_path):
-    """An activation-checkpointed layer's tensors are exported under the wrapper-free names the checkpoint uses."""
+@pytest.mark.parametrize("wrap", ["checkpoint_wrapper", "torch.compile"])
+def test_export_best_keys_wrapped_tensors_by_their_wrapper_free_names(tmp_path, wrap):
+    """Wrapped tensors are exported under wrapper-free names, whichever key the checkpoint holds them under (an
+    activation-checkpointed layer's checkpoint drops the wrapper segment; an unsharded compiled model's keeps
+    ``_orig_mod.``)."""
     from torch import nn
     from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
 
     torch.manual_seed(0)
     model = nn.Sequential(nn.Linear(4, 4), nn.ReLU(), nn.Linear(4, 4))
-    model[2] = checkpoint_wrapper(model[2])
-    roles = {n: "adapter:head" for n, _ in model.named_parameters() if n.startswith("2.")}
-    sched = {0: {"params": ["role:adapter"], "max_transition_epoch": 1}, 1: {"params": ["0.weight", "0.bias"]}}
+    if wrap == "checkpoint_wrapper":
+        model[2] = checkpoint_wrapper(model[2])
+    else:
+        model = torch.compile(model)
+    roles = {n: "adapter:head" for n, _ in model.named_parameters() if canonical_fqn(n).startswith("2.")}
+    first = [n for n, _ in model.named_parameters() if canonical_fqn(n).startswith("0.")]
+    sched = {0: {"params": ["role:adapter"], "max_transition_epoch": 1}, 1: {"params": first}}
     fts = FTSController(model, sched, optimizer=SGD, view=CanonicalView(model, roles=roles),
                         checkpoint=BestCheckpoint(tmp_path, "loss"), restore_best=False)
     fts.setup()
@@ -162,6 +170,8 @@ def test_export_best_defaults_beside_the_best_and_records_its_metadata(tmp_path)
     meta = load_payload(path)["metadata"]
     assert meta["config_hash"] == fts.config_hash and meta["source"] == fts._checkpoint.best_path
     assert "gate_records" in meta  # the best checkpoint's own metadata
+    # readable by a plain (weights-only) torch.load: the recorded versions are strings
+    assert torch.load(path)["metadata"]["versions"]["torch"] == str(torch.__version__)
 
 
 def test_artifacts_are_normalized():

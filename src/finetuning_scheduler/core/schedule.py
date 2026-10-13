@@ -523,7 +523,7 @@ def parse_phase_extensions(schedule: dict) -> None:
         FTSConfigurationError: If a key has the wrong type.
     """
     for depth, phase in schedule.items():
-        _parse_promote(depth, phase.get("promote"))
+        parse_promote(depth, phase.get("promote"))
         mts = phase.setdefault("max_transition_step", -1)
         if isinstance(mts, bool) or not isinstance(mts, int) or mts < -1:
             raise FTSConfigurationError(
@@ -548,7 +548,13 @@ def parse_phase_extensions(schedule: dict) -> None:
                 )
 
 
-def _parse_promote(depth: int, promote: Any) -> None:
+def parse_promote(depth: int, promote: Any) -> None:
+    """Validate phase ``depth``'s ``promote`` mapping (``None`` when the phase has none).
+
+    Raises:
+        FTSConfigurationError: If it is not a non-empty mapping from names or selectors to ``latent:<name>`` roles, or
+            phase 0 has one.
+    """
     if promote is None:
         return
     if not isinstance(promote, Mapping) or not promote:

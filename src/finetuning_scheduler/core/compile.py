@@ -36,7 +36,7 @@ from torch import Tensor
 from finetuning_scheduler.core.dist import rank_zero_debug, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.roles import is_frozen_role, is_role_selector, role_kind, select
-from finetuning_scheduler.core.schedule import resolve_param_entries, shared_params_ref
+from finetuning_scheduler.core.schedule import parse_promote, resolve_param_entries, shared_params_ref
 from finetuning_scheduler.core.views import as_view, BoundView, Unresolvable
 
 
@@ -96,7 +96,10 @@ class CompiledSchedule:
 
     def physical_for(self, depth: int) -> tuple[str, ...]:
         """The physical parameters phase ``depth`` thaws (its own, then its coupled ones)."""
-        return self.phases[depth].thawed
+        for cp in self.phases:
+            if cp.depth == depth:
+                return cp.thawed
+        raise KeyError(f"The compiled schedule has no phase {depth}.")
 
     def physical_of(self, logical: Sequence[str]) -> list[str]:
         """The physical parameters compiled logical names stand for, in order and without duplicates."""
@@ -158,14 +161,29 @@ def _overlapping(entries: Sequence[tuple[str, int]],
     return pairs
 
 
-def _resolves_exactly(bound: BoundView, entry: str, physical: Collection[str]) -> bool:
+def resolves_exactly(bound: BoundView, entry: str, physical: Collection[str]) -> bool:
     """Whether the view resolves ``entry``, a name it does not list, to parameters of its root (for example a
-    parametrized tensor's unparametrized name)."""
+    parametrized tensor's unparametrized name).
+
+    ``entry`` may be a regex, which a view need not expect: any failure to map it (a ``KeyError`` from a view that
+    indexes a mapping, for example) means it does not resolve exactly, and it is matched as a regex instead.
+    """
     try:
         mapped = bound.to_physical([entry]).get(entry)
-    except FTSConfigurationError:
+    except Exception:
         return False
     return bool(mapped) and all(p in physical for p in mapped)
+
+
+def _unmapped(bound: BoundView, logical: Sequence[str]) -> list[str]:
+    """The names ``to_physical`` fails on one at a time (all of ``logical`` when none fails alone)."""
+    failed = []
+    for name in logical:
+        try:
+            bound.to_physical([name])
+        except Exception:
+            failed.append(name)
+    return failed or list(logical)
 
 
 def _expand(entries: Sequence[str], depth: int, bound: BoundView, logical_names: Sequence[str],
@@ -184,7 +202,7 @@ def _expand(entries: Sequence[str], depth: int, bound: BoundView, logical_names:
             if not matched:
                 raise FTSConfigurationError(f"The role selector '{entry}' in phase {depth} matched no parameter.")
             resolved.append((True, matched))
-        elif entry not in listed and _resolves_exactly(bound, entry, all_physical):
+        elif entry not in listed and resolves_exactly(bound, entry, all_physical):
             resolved.append((False, [entry]))
         else:
             resolved.append((False, resolve_param_entries([entry], depth, logical_names, shared)))
@@ -246,6 +264,7 @@ def _compile_promotions(depth: int, promote: Mapping[str, str], bound: BoundView
                         all_physical: Sequence[str], roles: Mapping[str, str], shared: tuple) -> dict[str, str]:
     """Resolve phase ``depth``'s ``promote`` mapping to physical tensors and their new roles, checking each is an
     ``instrument`` tensor promoted once."""
+    parse_promote(depth, promote)
     promoted: dict[str, str] = {}
     for source, target in promote.items():
         ((is_sel, names),) = _expand([source], depth, bound, logical_names, all_physical, roles, shared)
@@ -317,6 +336,10 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
             mapped = dict(bound.to_physical(logical)) if logical else {}
         except Unresolvable as err:
             raise Unresolvable(err.names, f"(phase {depth})") from err
+        except Exception as err:  # a view that does not raise `Unresolvable` itself: name what it failed on
+            raise Unresolvable(_unmapped(bound, logical),
+                               f"(phase {depth}; {type(bound.view).__name__}.to_physical raised"
+                               f" {type(err).__name__}: {err})") from err
         logical_to_physical.update({k: tuple(v) for k, v in mapped.items()})
         primary = list(dict.fromkeys(p for is_sel, names in resolved
                                      for p in (names if is_sel else (q for n in names for q in mapped[n]))))
@@ -363,8 +386,8 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
 def view_default_schedule(view: Any, order: Literal["output_first", "input_first"] = "output_first") -> dict:
     """Generate a default schedule over a view's logical names.
 
-    Logical names whose physical tensors all have a role that is never thawed (``fitted`` or ``instrument``) are left
-    out, and groups left empty are dropped.
+    Logical names standing for a tensor whose role is never thawed (``fitted`` or ``instrument``) are left out (with a
+    warning when they also stand for trainable tensors), and groups left empty are dropped.
 
     Args:
         view: A tunable view (bound or not).
@@ -382,7 +405,12 @@ def view_default_schedule(view: Any, order: Literal["output_first", "input_first
     if any(is_frozen_role(r) for r in roles.values()):
         names = list(dict.fromkeys(n for g in groups for n in g))
         mapped = bound.to_physical(names)
-        frozen = {n for n in names if mapped[n] and all(is_frozen_role(roles.get(p, "base")) for p in mapped[n])}
+        frozen = {n for n in names if any(is_frozen_role(roles.get(p, "base")) for p in mapped[n])}
+        # a name standing for frozen and trainable tensors alike cannot be scheduled (compilation refuses it)
+        mixed = sorted(n for n in frozen if not all(is_frozen_role(roles.get(p, "base")) for p in mapped[n]))
+        if mixed:
+            rank_zero_warn(f"The generated schedule leaves out {mixed}: each stands for tensors whose role is never"
+                           " thawed (`fitted` or `instrument`) as well as trainable ones, so it cannot be scheduled.")
         groups = [kept for g in groups if (kept := [n for n in g if n not in frozen])]
     if order == "input_first":
         groups = [list(reversed(g)) for g in reversed(groups)]

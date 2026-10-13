@@ -45,9 +45,9 @@ from lightning.pytorch.utilities.types import LRSchedulerConfig
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import schedule as core_schedule
 from finetuning_scheduler.core import transitions as core_transitions
-from finetuning_scheduler.core.compile import compile_schedule
-from finetuning_scheduler.core.exceptions import FTSConfigurationError
+from finetuning_scheduler.core.compile import compile_schedule, resolves_exactly
 from finetuning_scheduler.core.roles import is_role_selector
+from finetuning_scheduler.core.views import BoundView
 from finetuning_scheduler.core.state import FTSState
 from finetuning_scheduler.strategy_adapters import StrategyAdapter, FSDPStrategyAdapter, ModelParallelStrategyAdapter
 from finetuning_scheduler.lightning.types import BaseCallbackDepType
@@ -573,13 +573,19 @@ class ScheduleParsingMixin(ABC):
         view = adapter.tunable_view
         assert isinstance(self.ft_schedule, dict)
         selectors = any(is_role_selector(p) for phase in self.ft_schedule.values() for p in phase.get("params", []))
+        if selectors and view is None:
+            raise MisconfigurationException(
+                f"`role:` selectors are not supported under {type(adapter).__qualname__}, which overrides"
+                f" StrategyAdapter's parameter-naming methods ({', '.join(sorted(adapter.naming_overrides()))}) and so"
+                " names parameters itself. List the parameters by name, or attach a `TunableView` instead.")
         compiling = view is not None and (adapter.attached_view or selectors)
+        passthrough = self._compiled_entries(view) if compiling and view is not None else None
         # Use strategy adapter to get named params (allows TL-style or other custom naming)
         named_params = adapter.get_named_params_for_schedule_validation().keys()
         msp_ref = core_schedule.shared_params_ref(self.pl_module)
         for depth in self.ft_schedule.keys():  # type: ignore[union-attr]
             max_phase = max(max_phase, depth)
-            self._parse_phase(depth, named_params, msp_ref, passthrough=self._compiled_entry if compiling else None)
+            self._parse_phase(depth, named_params, msp_ref, passthrough=passthrough)
             if depth > 0:
                 assert isinstance(self.ft_schedule, dict)
                 max_epoch_wm = core_schedule.update_epoch_watermark(
@@ -841,19 +847,11 @@ class ScheduleParsingMixin(ABC):
         assert isinstance(self.ft_schedule, dict)
         core_schedule.parse_phase_lr(self.ft_schedule, depth, self.base_max_lr)  # type: ignore[attr-defined]
 
-    def _compiled_entry(self, entry: str) -> bool:
+    def _compiled_entries(self, view: BoundView) -> Callable[[str], bool]:
         """Whether a schedule entry is left for the compiled schedule to resolve: a ``role:`` selector, or a name
         the view resolves without listing it (a parametrized tensor's unparametrized name, for example)."""
-        if is_role_selector(entry):
-            return True
-        view = self.strategy_adapter.tunable_view
-        assert view is not None
         physical = {n for n, _ in self.pl_module.named_parameters()}
-        try:
-            mapped = view.to_physical([entry]).get(entry)
-        except FTSConfigurationError:
-            return False
-        return bool(mapped) and all(p in physical for p in mapped)
+        return lambda entry: is_role_selector(entry) or resolves_exactly(view, entry, physical)
 
     def _parse_phase(self, depth: int, named_params: KeysView, shared_params: tuple,
                      passthrough: Callable[[str], bool] | None = None) -> None:

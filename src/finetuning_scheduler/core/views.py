@@ -35,7 +35,8 @@ from typing import Any, Protocol, runtime_checkable
 from torch import nn, Tensor
 
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.core.roles import declared_kinds, role_kind, UNCHECKPOINTED_ROLE_KINDS, validate_roles
+from finetuning_scheduler.core.roles import (declared_kinds, parse_role, role_kind, UNCHECKPOINTED_ROLE_KINDS,
+                                             validate_roles)
 
 # the module attribute a view is attached under for discovery
 VIEW_ATTR = "fts_tunable_view"
@@ -302,6 +303,13 @@ class BoundView:
             raise FTSConfigurationError(
                 f"{type(view).__name__} is not a tunable view: it lacks {', '.join(f'`{m}`' for m in missing)}."
             )
+        # a member set to a value (`roles = {...}`) would otherwise be silently replaced by its default
+        not_callable = [m for m in (*REQUIRED_MEMBERS[1:], *OPTIONAL_MEMBERS)
+                        if getattr(view, m, None) is not None and not callable(getattr(view, m))]
+        if not_callable:
+            raise FTSConfigurationError(
+                f"{type(view).__name__}'s {', '.join(f'`{m}`' for m in not_callable)} must be methods (or callables),"
+                " not values.")
         self.view = view
         self._support: TunableSupport | None = None
         self._promoted: dict[str, str] = {}
@@ -327,11 +335,9 @@ class BoundView:
 
     def _member(self, name: str) -> Any:
         # the view's own member, or else the default bound to this view, so the defaults see the promoted roles
-        fn = getattr(self.view, name, None)
-        default = getattr(ViewDefaults, name)
-        if callable(fn) and getattr(fn, "__func__", None) is not default:
-            return fn
-        return default.__get__(self)
+        if self.overrides(name):
+            return getattr(self.view, name)
+        return getattr(ViewDefaults, name).__get__(self)
 
     def logical_named_parameters(self) -> Iterator[tuple[str, Tensor]]:
         return self._member("logical_named_parameters")()
@@ -365,8 +371,11 @@ class BoundView:
         """Promote ``physical`` to ``role`` through the view (or the default), and record the new role.
 
         Raises:
-            FTSConfigurationError: If the view renamed a promoted tensor (a promotion keeps names in this release).
+            FTSConfigurationError: If ``role`` is not a ``latent:<name>`` role, or the view renamed a promoted tensor (a
+                promotion keeps names in this release).
         """
+        if not isinstance(role, str) or parse_role(role)[0] != "latent":
+            raise FTSConfigurationError(f"Tensors can be promoted only to a `latent:<name>` role, got {role!r}.")
         mapping = dict(self._member("promote")(physical, role))
         renamed = {old: new for old, new in mapping.items() if old != new}
         if renamed:
@@ -381,9 +390,10 @@ class BoundView:
         return callable(getattr(self.view, member, None))
 
     def overrides(self, member: str) -> bool:
-        """Whether the bound view implements ``member`` differently from Fine-Tuning Scheduler's default."""
-        impl = getattr(type(self.view), member, None)
-        return callable(impl) and impl is not getattr(ViewDefaults, member)
+        """Whether the bound view implements ``member`` differently from Fine-Tuning Scheduler's default (on its
+        class or on the instance), so that its own implementation is the one used."""
+        fn = getattr(self.view, member, None)
+        return callable(fn) and getattr(fn, "__func__", None) is not getattr(ViewDefaults, member)
 
 
 def as_view(view: Any) -> BoundView:
@@ -465,3 +475,23 @@ class CanonicalView(ViewDefaults):
 
     def roles(self) -> Mapping[str, str]:
         return dict(self._roles)
+
+
+__all__ = [
+    "as_view",
+    "BoundView",
+    "canonical_fqn",
+    "CanonicalView",
+    "instrument_state_keys",
+    "OPTIONAL_MEMBERS",
+    "pair_groups",
+    "REQUIRED_MEMBERS",
+    "resolve_view",
+    "TunableSupport",
+    "TunableView",
+    "TunableViewExtras",
+    "uncheckpointed_keys",
+    "Unresolvable",
+    "VIEW_ATTR",
+    "ViewDefaults",
+]

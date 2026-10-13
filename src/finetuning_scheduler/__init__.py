@@ -73,6 +73,7 @@ def __dir__() -> list[str]:
 __all__ = [
     "AnyOf",
     "CallableTransition",
+    "CanonicalView",
     "Decision",
     "EpochTransition",
     "FTSController",
@@ -86,7 +87,6 @@ __all__ = [
     "TrainingHost",
     "TransitionContext",
     "TransitionPolicy",
-    "CanonicalView",
     "TunableSupport",
     "TunableView",
     "TunableViewExtras",

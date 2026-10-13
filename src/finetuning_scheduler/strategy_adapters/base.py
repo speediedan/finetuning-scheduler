@@ -19,8 +19,10 @@ Base adapter class to extend Fine-Tuning Scheduler support of complex or custom 
 from functools import partialmethod
 from typing import Any  # Dict used for runtime isinstance() checks
 from collections.abc import Callable, Iterable
+import inspect
 import logging
 import os
+import warnings
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
@@ -30,7 +32,7 @@ from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.callbacks import BaseFinetuning
 from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
-from lightning.pytorch.utilities.rank_zero import rank_zero_debug
+from lightning.pytorch.utilities.rank_zero import rank_zero_debug, rank_zero_only
 
 import finetuning_scheduler.lightning  # noqa: F401  (registers the Lightning backends the core logs through)
 from finetuning_scheduler.core import optim as core_optim
@@ -44,10 +46,24 @@ log = logging.getLogger(__name__)
 # the parameter-naming methods a third-party adapter may override, which a `TunableView` replaces
 NAMING_METHODS = ("fts_optim_transform", "logical_param_translation", "get_named_params_for_schedule_validation",
                   "validate_ft_sched", "gen_ft_schedule")
+# the methods whose override always renames parameters: an adapter overriding only `fts_optim_transform` (a sharding
+# transform, for example) or `validate_ft_sched` (to add checks) does not name parameters itself
+RENAMING_METHODS = ("logical_param_translation", "get_named_params_for_schedule_validation", "gen_ft_schedule")
 # adapter classes already told that their naming overrides take precedence over an attached view
 _PRECEDENCE_NOTICED: set[type] = set()
 # adapter classes already told that overriding the naming methods is deprecated
 _DEPRECATION_NOTICED: set[type] = set()
+
+
+@rank_zero_only
+def _warn_from_adapter_class(cls: type, message: str) -> None:
+    """Issue a ``FutureWarning`` attributed to the definition of adapter class ``cls``, the code a user would
+    change, rather than to Fine-Tuning Scheduler's own call site."""
+    try:
+        filename, lineno = inspect.getsourcefile(cls) or "<unknown>", inspect.getsourcelines(cls)[1]
+    except (OSError, TypeError):
+        filename, lineno = "<unknown>", 0
+    warnings.warn_explicit(message, FutureWarning, filename, lineno, module=cls.__module__)
 
 
 class StrategyAdapter:
@@ -115,15 +131,17 @@ class StrategyAdapter:
     @classmethod
     def naming_overrides(cls) -> frozenset[str]:
         """The parameter-naming methods (:data:`NAMING_METHODS`) this adapter class overrides relative to its
-        nearest built-in adapter (built-ins declare ``_fts_naming_overrides``).
+        nearest built-in adapter (built-ins declare ``_fts_naming_overrides``), when it names parameters itself.
 
-        A sharding transform in a built-in adapter, such
-        as FSDP's ``fts_optim_transform``, is not a naming override.
+        An adapter names parameters itself when it overrides one of the methods that only rename
+        (:data:`RENAMING_METHODS`). Overriding ``fts_optim_transform`` alone (a sharding transform, such as FSDP's) or
+        ``validate_ft_sched`` alone (to add checks) is not a naming override.
         """
         builtin = next(k for k in cls.__mro__ if "_fts_naming_overrides" in vars(k))
         if builtin is cls:
             return frozenset(vars(cls)["_fts_naming_overrides"])
-        return frozenset(m for m in NAMING_METHODS if getattr(cls, m) is not getattr(builtin, m))
+        overridden = frozenset(m for m in NAMING_METHODS if getattr(cls, m) is not getattr(builtin, m))
+        return overridden if overridden.intersection(RENAMING_METHODS) else frozenset()
 
     @classmethod
     def notice_naming_overrides(cls) -> None:
@@ -133,13 +151,14 @@ class StrategyAdapter:
         if not overrides or cls in _DEPRECATION_NOTICED:
             return
         _DEPRECATION_NOTICED.add(cls)
-        rank_zero_warn(
+        _warn_from_adapter_class(
+            cls,
             f"`{cls.__qualname__}` overrides StrategyAdapter's parameter-naming methods"
-            f" ({', '.join(sorted(overrides))}). Overriding them is deprecated since finetuning-scheduler 2.15 and"
-            " will be unsupported no earlier than 2.17: implement a `TunableView` (`finetuning_scheduler.core.views`)"
-            " and attach it to your module as `fts_tunable_view` instead. Sharding customization through"
-            " `StrategyAdapter` subclasses is unaffected.",
-            category=FutureWarning,
+            f" ({', '.join(sorted(overrides))}). Overriding them to name parameters is deprecated since"
+            " finetuning-scheduler 2.15 and will be unsupported no earlier than 2.17: implement a `TunableView`"
+            " (`finetuning_scheduler.core.views`) and attach it to your module as `fts_tunable_view` instead. Sharding"
+            " customization through `StrategyAdapter` subclasses (including a sharding `fts_optim_transform`) is"
+            " unaffected.",
         )
 
     @property
@@ -173,12 +192,12 @@ class StrategyAdapter:
         if attached is None or cls in _PRECEDENCE_NOTICED:
             return
         _PRECEDENCE_NOTICED.add(cls)
-        rank_zero_warn(
+        _warn_from_adapter_class(
+            cls,
             f"{cls.__qualname__} overrides StrategyAdapter's parameter-naming methods"
             f" ({', '.join(sorted(self.naming_overrides()))}), so it names the parameters of"
             f" {type(self.pl_module).__name__} and the `fts_tunable_view` attached to it"
             f" ({type(attached).__qualname__}) is not used.",
-            category=FutureWarning,
         )
 
     def scheduled_physical(self, depth: int) -> list:
@@ -297,6 +316,13 @@ class StrategyAdapter:
         a :py:class:`~lightning.pytorch.strategies.Strategy` performs parameter transformations that cause
         the current optimizer's view of parameter names to diverge from the original parameter names. By default,
         no transformation of schedule parameter names is required for optimizer operations.
+
+        .. note::
+            Overriding this method for a sharding transform is supported: call ``super().fts_optim_transform(orig_pl,
+            inspect_only)`` first, which resolves the names of a view attached to the module, and transform its
+            result. Overriding it to rename parameters (together with
+            :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.logical_param_translation`) is deprecated
+            since 2.15 in favor of a :class:`~finetuning_scheduler.core.views.TunableView`.
 
         Args:
             orig_pl (List): The original parameter name list before a given
@@ -569,6 +595,12 @@ class StrategyAdapter:
 
             Choose the approach that best suits your use case. Most adapters only need to override
             :meth:`get_named_params_for_schedule_validation` to provide custom parameter names.
+
+        .. deprecated:: 2.15
+            Customizing parameter naming through either level is deprecated in favor of a
+            :class:`~finetuning_scheduler.core.views.TunableView` attached to the module, and will be unsupported no
+            earlier than 2.17. Overriding this method to add strategy-specific checks (calling ``super()``) is
+            unaffected.
 
         Returns:
             tuple[int, int]: A tuple of ints specifying:

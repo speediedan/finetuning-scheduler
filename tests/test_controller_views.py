@@ -235,3 +235,23 @@ def test_canonical_strict_load_mismatch_raises_runtime_error(tmp_path):
     fts2.setup()
     with pytest.raises(RuntimeError, match="Missing key"):
         fts2._view.load_checkpoint_state_dict(torch.load(tmp_path / "last.pt", weights_only=False)["model"])
+
+
+def test_the_setup_rank_agreement_check_covers_roles():
+    """Ranks whose views give a tensor different roles are refused at setup, naming roles, rather than failing at
+    the first sharded save."""
+    schedule = {0: {"params": ["role:adapter"], "max_transition_epoch": 1}, 1: {"params": ["role:latent"]}}
+    gathered = []
+
+    def controller(roles, other_rank=None):
+        model = InterventionModel()
+        fts = FTSController(model, {k: dict(v) for k, v in schedule.items()}, optimizer=SGD,
+                            view=CanonicalView(model, roles=roles))
+        fts._host.all_gather_object = lambda obj: gathered.append(obj) or [obj, other_rank or obj]
+        return fts
+
+    controller(ROLES).setup()
+    controller({**ROLES, "procrustes": "instrument"}).setup()
+    assert gathered[0] != gathered[1]  # the same physical schedule, different roles
+    with pytest.raises(FTSConfigurationError, match="different schedules or roles"):
+        controller(ROLES, other_rank=gathered[1]).setup()

@@ -273,3 +273,27 @@ def test_resume_after_a_promotion_keeps_the_configuration_hash_and_the_values_at
         resumed = run(load_from=tmp_path / "s.pt")
     assert resumed.config_hash == first.config_hash and resumed.stop_reason.startswith("veto: phase 1")
     assert torch.equal(model.lens.weight, torch.full_like(model.lens.weight, 5.0))
+
+
+def test_the_configuration_hash_survives_a_promotion_the_view_tracks_itself(tmp_path):
+    """A view that owns promotion reports its promoted roles itself; the hash still uses the roles it reported at
+    setup, so it is the same before and after the promotion (and a resume does not warn)."""
+    torch.manual_seed(0)
+    model = InterventionModel()
+    fts = _controller(model, OwnRolesView(model, roles=dict(ROLES)))
+    before = fts.config_hash
+    for epoch in fts.epochs(3):
+        _epoch(fts, epoch)
+    assert fts.roles["lens.weight"] == "latent:lens" and fts.config_hash == before
+
+
+def test_a_frozen_role_tensor_made_trainable_by_hand_is_refused_at_the_next_thaw():
+    """The runtime guard: compilation keeps frozen roles out of every phase, and a tensor thawed outside the
+    schedule is refused when the next phase thaws."""
+    model, view = _model()
+    fts = _controller(model, view, schedule={0: {"params": ["role:adapter"], "max_transition_epoch": 1},
+                                             1: {"params": ["role:latent"]}})
+    model.lens.weight.requires_grad_(True)  # an `instrument` tensor, never promoted here
+    with pytest.raises(FTSConfigurationError, match=r"never thawed .* require grad: \['lens.weight'\]"):
+        for epoch in fts.epochs(3):
+            _epoch(fts, epoch)
