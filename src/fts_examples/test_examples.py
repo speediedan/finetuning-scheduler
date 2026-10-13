@@ -190,3 +190,22 @@ def test_fts_superglue_nb(nb_name):
     for f in [example_ipynb, generated_schedule]:
         os.remove(f)
         assert not os.path.exists(f)
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+@RunIf(min_cuda_gpus=1, skip_windows=True)
+def test_fts_superglue_pytorch_nb(tmpdir):
+    # the PyTorch API notebook, shortened through its papermill parameters cell
+    source = os.path.join(os.path.dirname(__file__), "ipynb_src", "fts_superglue_pytorch_nb.py")
+    with open(source) as f:
+        text = f.read()
+    for name, value in {"MAX_EPOCHS": "4", "TRAIN_SUBSET": "32", "VAL_SUBSET": "16"}.items():
+        text, n = re.subn(rf"^{name} = .*$", f"{name} = {value}", text, count=1, flags=re.M)
+        assert n == 1, f"parameter {name} not found in the notebook's parameters cell"
+    script = os.path.join(tmpdir, "fts_superglue_pytorch_nb.py")
+    with open(script, "w") as f:
+        f.write(text)
+    cp = subprocess.run([sys.executable, script], cwd=tmpdir, capture_output=True, text=True)
+    assert cp.returncode == 0, cp.stderr[-4000:]
+    for scenario in ("fts_explicit", "fts_implicit", "nofts_baseline"):
+        assert re.search(rf"^{scenario}: finished at phase \d+ after \d+ epochs", cp.stdout, flags=re.M), cp.stdout

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Added a PyTorch API version of the SuperGLUE tutorial notebook (`src/fts_examples/ipynb_src/fts_superglue_pytorch_nb.py`): the Lightning tutorial's explicit, implicit and baseline scenarios in a plain training loop driven by `FTSController`, with a papermill parameters cell for shortened runs [#105](https://github.com/speediedan/finetuning-scheduler/issues/105).
+
 - Added top-k checkpointing to the experimental PyTorch API: `BestCheckpoint(save_top_k=...)` keeps the `save_top_k` best checkpoints (`-1` keeps every one) with Lightning's `ModelCheckpoint` admission and eviction rules, and lists them in `best_k_models`. The default, `save_top_k=1`, keeps today's behavior. Every checkpoint now gets a unique name and is never rewritten, and a phase's rollback point is pinned by reference rather than copied [#52](https://github.com/speediedan/finetuning-scheduler/issues/52).
 
 - Added a warning when an FSDP2 data-parallel run under `FTSController` leaves scheduled parameters outside every FSDP2 module (a plan that does not shard the root module), including tensor-parallel `DTensor` parameters, since nothing synchronizes their gradients across data-parallel ranks [#87](https://github.com/speediedan/finetuning-scheduler/issues/87).
