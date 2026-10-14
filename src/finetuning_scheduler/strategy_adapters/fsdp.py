@@ -24,7 +24,6 @@ import re
 import warnings
 from collections import Counter
 from contextlib import AbstractContextManager, contextmanager
-from copy import deepcopy
 from functools import partial, partialmethod, wraps
 from pprint import pformat
 from typing import TYPE_CHECKING, Any, cast  # Dict used for isinstance() checks
@@ -43,6 +42,7 @@ from torch import Tensor
 from torch.distributed import all_gather_object
 from torch.optim import Optimizer
 
+from finetuning_scheduler.core.views import CanonicalView, VIEW_ATTR
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
 # Type checking imports - always available for static analysis
@@ -119,6 +119,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
     _use_orig_params: bool
     _allow_mixed_req_grad: bool
     _rank_zero_logger: logging.Logger = logging.getLogger("lightning.pytorch.utilities.rank_zero")
+    # its `fts_optim_transform` maps names to flattened parameters after the wrap: a sharding transform, not naming
+    _fts_naming_overrides: frozenset[str] = frozenset()
 
     def __init__(self, awp_overrides: list | None = None, *args: Any, **kwargs: Any) -> None:
         """The only user-facing configuration for
@@ -155,6 +157,25 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         return False
 
+    def _refuse_attached_view(self) -> None:
+        """FSDP1 schedules through the module's own parameter names (its flat-parameter transform runs only after
+        the wrap), so a view attached to the module is refused, by name."""
+        attached = getattr(self.pl_module, VIEW_ATTR, None)
+        if attached is not None and not (type(attached) is CanonicalView and not attached.roles()):
+            raise MisconfigurationException(
+                f"{type(self.pl_module).__name__} carries a `fts_tunable_view` ({type(attached).__qualname__}), which"
+                " the FSDP (FSDP1) strategy does not support: it schedules through the module's own parameter names."
+                " Use `ModelParallelStrategy` (FSDP2) to fine-tune through a view, or remove the attribute."
+            )
+
+    def scheduled_physical(self, depth: int) -> list:
+        """The parameters phase ``depth`` thaws, in the module's own namespace: its compiled parameters under
+        ``role:`` selectors, else the schedule's own names (never translated through ``fts_optim_transform``, which
+        maps them to flattened parameters)."""
+        if self.compiled_schedule is not None:
+            return list(self.compiled_schedule.physical_for(depth))
+        return list(self.fts_handle.ft_schedule[depth]["params"])  # type: ignore[index]
+
     def on_before_init_fts(self) -> None:
         """In this hook executed immediately before
         :meth:`~finetuning_scheduler.fts_supporters.ScheduleImplMixin.init_fts`, to accommodate FSDP we:
@@ -166,6 +187,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
            to either use the provided ``LightningModule.configure_model`` method (if present) or a provided
            ``auto_wrap_policy``.
         """
+        self._refuse_attached_view()
         # hack to avoid subclassing FSDP strategy for this adapter
         setattr(Strategy, "lightning_restore_optimizer", self.lightning_restore_optimizer)
         setattr(self.pls_handle, "optimizer_state", self.optimizer_state)
@@ -308,6 +330,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
             List: A transformed parameter name list that matches the current optimizer's view of them after FSDP's
                 transformation of the original parameter names.
         """
+        if self.compiled_schedule is not None:  # `role:` selectors expand to parameter names first
+            orig_pl = self._compiled_physical(orig_pl)
         return self.fsdp_param_transform(orig_pl, inspect_only)
 
     def fsdp_param_transform(self, orig_thaw_pl: list, inspect_only: bool) -> list:
@@ -566,7 +590,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         # function configuration to inspect at a module level:
         mod_cfg = (self._ft_schedule_module_map[0], FSDPStrategyAdapter._module_has_fp, self.pl_module.get_submodule)
         # function configuration to inspect at a parameter level:
-        param_cfg = (self.fts_handle.ft_schedule[0]["params"], _is_fsdp_flattened, self.pl_module.get_parameter)
+        param_cfg = (self.scheduled_physical(0), _is_fsdp_flattened, self.pl_module.get_parameter)
 
         def inspect_flattened(iter_inspect: Iterable, inspect_func: Callable, inspect_prepare: Callable) -> bool:
             return any(inspect_func(inspect_prepare(i)) for i in iter_inspect)
@@ -595,7 +619,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             Set: The set of module parameters in more than one fine-tuning phase.
         """
         fsdp_param_sets: dict = {}
-        inspection_map = deepcopy(self.fts_handle.ft_schedule)
+        inspection_map = {d: {"params": self.scheduled_physical(d)} for d in self.fts_handle.ft_schedule}
         if check_unsched:
             inspection_map[-1] = {"params": self._unscheduled_params}
         for d, pl in inspection_map.items():

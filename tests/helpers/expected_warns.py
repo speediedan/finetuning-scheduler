@@ -42,6 +42,12 @@ def extend_warns(base_warns, additional_warns):
 BASE_EXPECTED_WARNS = create_base_warns()
 
 EXPECTED_DIRPATH_WARN = "is not empty."
+# a strategy adapter overriding the parameter-naming methods (once per class), and its precedence over an attached view
+NAMING_OVERRIDES_DEPRECATION_WARN = (
+    "overrides StrategyAdapter's parameter-naming methods .* Overriding them to name parameters is deprecated"
+)
+NAMING_OVERRIDES_PRECEDENCE_WARN = "overrides StrategyAdapter's parameter-naming methods .* is not used"
+
 # a resumed fit that checkpoints into a directory an earlier resume also wrote to (the resume tests share a
 # module-scoped checkpoint set) finds top-k entries that run evicted
 EXPECTED_DROPPED_TOPK_WARN = r"top-k checkpoint\(s\) that no longer exist"

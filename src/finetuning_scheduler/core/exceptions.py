@@ -25,15 +25,32 @@ class FTSConfigurationError(ValueError):
     A training host may register a subclass with :func:`register_configuration_error`. Once registered, raising
     ``FTSConfigurationError`` produces an instance of that subclass, so core code raises one type while each host
     receives the exception type its users already catch. The Lightning integration registers a subclass that is also a
-    ``MisconfigurationException``.
+    ``MisconfigurationException``. Raising a more specific subclass (such as
+    :class:`~finetuning_scheduler.core.views.Unresolvable`) produces an instance of both it and the registered subclass.
     """
 
     def __new__(cls, *args: Any, **kwargs: Any) -> "FTSConfigurationError":
-        target = _HOST_ERROR_CLS if cls is FTSConfigurationError and _HOST_ERROR_CLS is not None else cls
+        host = _HOST_ERROR_CLS
+        if host is None or issubclass(cls, host):
+            target: type = cls
+        elif cls is FTSConfigurationError:
+            target = host
+        else:
+            target = _with_host(cls, host)
         return ValueError.__new__(target, *args)
 
 
 _HOST_ERROR_CLS: type[FTSConfigurationError] | None = None
+# a specific error class combined with the registered host class, created once per pair
+_WITH_HOST: dict[tuple[type, type], type] = {}
+
+
+def _with_host(cls: type, host: type) -> type:
+    """``cls`` combined with the registered host error class, named as ``cls`` is."""
+    if (cls, host) not in _WITH_HOST:
+        combined = type(cls.__name__, (cls, host), {"__module__": cls.__module__, "__qualname__": cls.__qualname__})
+        _WITH_HOST[(cls, host)] = combined
+    return _WITH_HOST[(cls, host)]
 
 
 def register_configuration_error(error_cls: type[FTSConfigurationError]) -> None:

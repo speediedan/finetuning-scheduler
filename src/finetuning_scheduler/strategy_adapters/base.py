@@ -19,8 +19,10 @@ Base adapter class to extend Fine-Tuning Scheduler support of complex or custom 
 from functools import partialmethod
 from typing import Any  # Dict used for runtime isinstance() checks
 from collections.abc import Callable, Iterable
+import inspect
 import logging
 import os
+import warnings
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
@@ -29,13 +31,39 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.callbacks import BaseFinetuning
 from lightning.pytorch.strategies.strategy import Strategy
-from lightning.pytorch.utilities.rank_zero import rank_zero_debug
+from lightning.pytorch.utilities.exceptions import MisconfigurationException
+from lightning.pytorch.utilities.rank_zero import rank_zero_debug, rank_zero_only
 
 import finetuning_scheduler.lightning  # noqa: F401  (registers the Lightning backends the core logs through)
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import phase as core_phase
+from finetuning_scheduler.core.compile import CompiledSchedule
+from finetuning_scheduler.core.roles import is_frozen_role
+from finetuning_scheduler.core.views import BoundView, resolve_view, VIEW_ATTR
 
 log = logging.getLogger(__name__)
+
+# the parameter-naming methods a third-party adapter may override, which a `TunableView` replaces
+NAMING_METHODS = ("fts_optim_transform", "logical_param_translation", "get_named_params_for_schedule_validation",
+                  "validate_ft_sched", "gen_ft_schedule")
+# the methods whose override always renames parameters: an adapter overriding only `fts_optim_transform` (a sharding
+# transform, for example) or `validate_ft_sched` (to add checks) does not name parameters itself
+RENAMING_METHODS = ("logical_param_translation", "get_named_params_for_schedule_validation", "gen_ft_schedule")
+# adapter classes already told that their naming overrides take precedence over an attached view
+_PRECEDENCE_NOTICED: set[type] = set()
+# adapter classes already told that overriding the naming methods is deprecated
+_DEPRECATION_NOTICED: set[type] = set()
+
+
+@rank_zero_only
+def _warn_from_adapter_class(cls: type, message: str) -> None:
+    """Issue a ``FutureWarning`` attributed to the definition of adapter class ``cls``, the code a user would
+    change, rather than to Fine-Tuning Scheduler's own call site."""
+    try:
+        filename, lineno = inspect.getsourcefile(cls) or "<unknown>", inspect.getsourcelines(cls)[1]
+    except (OSError, TypeError):
+        filename, lineno = "<unknown>", 0
+    warnings.warn_explicit(message, FutureWarning, filename, lineno, module=cls.__module__)
 
 
 class StrategyAdapter:
@@ -58,6 +86,11 @@ class StrategyAdapter:
     _unscheduled_params: list
     # the trainable parameters the DistributedDataParallel reducer covers (class default: subclasses need not call init)
     _ddp_reducer_params: frozenset | None = None
+    # built-in adapters declare the naming methods they override as naming overrides: none (see `naming_overrides`)
+    _fts_naming_overrides: frozenset[str] = frozenset()
+    # the schedule compiled through an attached view (or for `role:` selectors), set by schedule validation
+    compiled_schedule: CompiledSchedule | None = None
+    _bound_view: tuple[int, BoundView] | None = None
 
     def __init__(self) -> None:
         """The default fine-tuning phase execution function is set on
@@ -94,6 +127,98 @@ class StrategyAdapter:
             Trainer: The :py:class:`~lightning.pytorch.trainer.trainer.Trainer` instance
         """
         return self.fts_handle.trainer
+
+    @classmethod
+    def naming_overrides(cls) -> frozenset[str]:
+        """The parameter-naming methods (:data:`NAMING_METHODS`) this adapter class overrides relative to its
+        nearest built-in adapter (built-ins declare ``_fts_naming_overrides``), when it names parameters itself.
+
+        An adapter names parameters itself when it overrides one of the methods that only rename
+        (:data:`RENAMING_METHODS`). Overriding ``fts_optim_transform`` alone (a sharding transform, such as FSDP's) or
+        ``validate_ft_sched`` alone (to add checks) is not a naming override.
+        """
+        builtin = next(k for k in cls.__mro__ if "_fts_naming_overrides" in vars(k))
+        if builtin is cls:
+            return frozenset(vars(cls)["_fts_naming_overrides"])
+        overridden = frozenset(m for m in NAMING_METHODS if getattr(cls, m) is not getattr(builtin, m))
+        return overridden if overridden.intersection(RENAMING_METHODS) else frozenset()
+
+    @classmethod
+    def notice_naming_overrides(cls) -> None:
+        """Warn, once per adapter class, that overriding the parameter-naming methods is deprecated in favor of a
+        :class:`~finetuning_scheduler.core.views.TunableView`."""
+        overrides = cls.naming_overrides()
+        if not overrides or cls in _DEPRECATION_NOTICED:
+            return
+        _DEPRECATION_NOTICED.add(cls)
+        _warn_from_adapter_class(
+            cls,
+            f"`{cls.__qualname__}` overrides StrategyAdapter's parameter-naming methods"
+            f" ({', '.join(sorted(overrides))}). Overriding them to name parameters is deprecated since"
+            " finetuning-scheduler 2.15 and will be unsupported no earlier than 2.17: implement a `TunableView`"
+            " (`finetuning_scheduler.core.views`) and attach it to your module as `fts_tunable_view` instead. Sharding"
+            " customization through `StrategyAdapter` subclasses (including a sharding `fts_optim_transform`) is"
+            " unaffected.",
+        )
+
+    @property
+    def tunable_view(self) -> BoundView | None:
+        """The view schedules are resolved through: the view attached to the module as ``fts_tunable_view``, or the
+        canonical view. ``None`` for an adapter with parameter-naming overrides, whose overrides name parameters
+        instead; an attached view is then ignored, with a notice. Resolved lazily, on first use."""
+        if self.naming_overrides():
+            self._notice_ignored_view()
+            return None
+        module = self.pl_module
+        if self._bound_view is None or self._bound_view[0] != id(module):
+            view = resolve_view(module)
+            if view.root is not module:
+                raise MisconfigurationException(
+                    f"The `fts_tunable_view` attached to {type(module).__name__} is rooted at"
+                    f" {type(view.root).__name__}; its `root` must be the LightningModule itself, whose parameters the"
+                    " optimizer and checkpoints see."
+                )
+            self._bound_view = (id(module), view)
+        return self._bound_view[1]
+
+    @property
+    def attached_view(self) -> bool:
+        """Whether the module carries a view (``fts_tunable_view``) that this adapter schedules through."""
+        return getattr(self.pl_module, VIEW_ATTR, None) is not None and self.tunable_view is not None
+
+    def _notice_ignored_view(self) -> None:
+        cls = type(self)
+        attached = getattr(self.pl_module, VIEW_ATTR, None)
+        if attached is None or cls in _PRECEDENCE_NOTICED:
+            return
+        _PRECEDENCE_NOTICED.add(cls)
+        _warn_from_adapter_class(
+            cls,
+            f"{cls.__qualname__} overrides StrategyAdapter's parameter-naming methods"
+            f" ({', '.join(sorted(self.naming_overrides()))}), so it names the parameters of"
+            f" {type(self.pl_module).__name__} and the `fts_tunable_view` attached to it"
+            f" ({type(attached).__qualname__}) is not used.",
+        )
+
+    def scheduled_physical(self, depth: int) -> list:
+        """The physical parameters phase ``depth`` thaws: its compiled parameters (coupled ones included) under an
+        attached view or ``role:`` selectors, the adapter's own translation when it overrides the naming methods,
+        else the schedule's own names."""
+        if self.compiled_schedule is not None:
+            return list(self.compiled_schedule.physical_for(depth))
+        names = list(self.fts_handle.ft_schedule[depth]["params"])  # type: ignore[index]
+        if self.naming_overrides():
+            return list(self.fts_optim_transform(names, inspect_only=True))
+        return names
+
+    def _compiled_physical(self, names: list) -> list:
+        """The physical parameters a phase's ``params`` (or other compiled names) stand for, coupled ones included
+        for a whole phase."""
+        assert self.compiled_schedule is not None
+        for depth, phase in self.fts_handle.ft_schedule.items():  # type: ignore[union-attr]
+            if list(phase.get("params", [])) == list(names):
+                return list(self.compiled_schedule.physical_for(depth))
+        return self.compiled_schedule.physical_of(names)
 
     @property
     def pls_handle(self) -> Strategy:
@@ -192,6 +317,13 @@ class StrategyAdapter:
         the current optimizer's view of parameter names to diverge from the original parameter names. By default,
         no transformation of schedule parameter names is required for optimizer operations.
 
+        .. note::
+            Overriding this method for a sharding transform is supported: call ``super().fts_optim_transform(orig_pl,
+            inspect_only)`` first, which resolves the names of a view attached to the module, and transform its
+            result. Overriding it to rename parameters (together with
+            :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.logical_param_translation`) is deprecated
+            since 2.15 in favor of a :class:`~finetuning_scheduler.core.views.TunableView`.
+
         Args:
             orig_pl (List): The original parameter name list before a given
                 :py:class:`~lightning.pytorch.strategies.Strategy`'s transformation of them.
@@ -202,9 +334,10 @@ class StrategyAdapter:
         Returns:
             List: A transformed parameter name list that matches the current optimizer's view of them after a given
                 :py:class:`~lightning.pytorch.strategies.Strategy`'s transformation of the original parameter
-                names.
+                names. Under an attached view (or a schedule with ``role:`` selectors), the physical parameters the
+                schedule compiled to.
         """
-        return orig_pl
+        return orig_pl if self.compiled_schedule is None else self._compiled_physical(orig_pl)
 
     def before_restore_model(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
         """Adapter hook executed before model restore.
@@ -235,8 +368,12 @@ class StrategyAdapter:
 
         Returns:
             List: The original parameter name list before a given
-                :py:class:`~lightning.pytorch.strategies.Strategy`'s transformation.
+                :py:class:`~lightning.pytorch.strategies.Strategy`'s transformation. Under an attached view with
+                logical names, the view's logical names.
         """
+        if self.compiled_schedule is not None and self.compiled_schedule.naming_scheme != "physical":
+            assert self.tunable_view is not None
+            return self.tunable_view.to_logical(param_names)
         return param_names
 
     def _gen_ft_sched_module_map(self) -> None:
@@ -245,11 +382,14 @@ class StrategyAdapter:
         relevant disjointness check."""
         assert isinstance(self.fts_handle.ft_schedule, dict)
         module_map: dict = {}
-        for depth in self.fts_handle.ft_schedule.keys():  # type: ignore[union-attr]
-            phase_params = self.fts_handle.ft_schedule[depth].get("params", [])  # type: ignore[union-attr]
-            module_map[depth] = set()
-            for p in phase_params:
-                module_map[depth].add(p.rpartition(".")[0])
+        if self.compiled_schedule is not None:  # the modules owning each phase's physical parameters
+            module_map = self.compiled_schedule.module_map()
+        else:
+            for depth in self.fts_handle.ft_schedule.keys():  # type: ignore[union-attr]
+                phase_params = self.fts_handle.ft_schedule[depth].get("params", [])  # type: ignore[union-attr]
+                module_map[depth] = set()
+                for p in phase_params:
+                    module_map[depth].add(p.rpartition(".")[0])
         self._ft_schedule_module_map = module_map
         scheduled_mods = list(set().union(*module_map.values()))
         unscheduled_mods = tuple(
@@ -426,8 +566,13 @@ class StrategyAdapter:
 
         Returns:
             dict[str, torch.nn.Parameter]: A dictionary mapping parameter names to parameter tensors.
-                By default, returns the standard ``named_parameters()`` dict.
+                By default, returns the standard ``named_parameters()`` dict, or the logical names of a view attached
+                to the module.
         """
+        if self.attached_view:
+            assert self.tunable_view is not None
+            # a view's logical names map to tensors (parameters, or views of them)
+            return dict(self.tunable_view.logical_named_parameters())  # type: ignore[arg-type]
         return dict(self.pl_module.named_parameters())
 
     def validate_ft_sched(self) -> tuple[int, int]:
@@ -450,6 +595,12 @@ class StrategyAdapter:
 
             Choose the approach that best suits your use case. Most adapters only need to override
             :meth:`get_named_params_for_schedule_validation` to provide custom parameter names.
+
+        .. deprecated:: 2.15
+            Customizing parameter naming through either level is deprecated in favor of a
+            :class:`~finetuning_scheduler.core.views.TunableView` attached to the module, and will be unsupported no
+            earlier than 2.17. Overriding this method to add strategy-specific checks (calling ``super()``) is
+            unaffected.
 
         Returns:
             tuple[int, int]: A tuple of ints specifying:
@@ -488,4 +639,12 @@ class StrategyAdapter:
         rank_zero_debug(
             f"[base StrategyAdapter.gen_ft_schedule] Generating schedule for {self.pl_module.__class__.__name__}"
         )
+        view = self.tunable_view if self.attached_view else None
+        if view is not None and (view.support().naming_scheme != "physical"
+                                 or any(is_frozen_role(r) for r in view.roles().values())):
+            # a view with logical names generates its schedule over them, and one with frozen roles leaves them out
+            from finetuning_scheduler.core.compile import view_default_schedule
+
+            return ScheduleImplMixin.save_schedule(f"{self.pl_module.__class__.__name__}_ft_schedule.yaml",
+                                                   view_default_schedule(view), dump_loc)
         return ScheduleImplMixin._gen_ft_schedule_impl(self.pl_module, dump_loc)

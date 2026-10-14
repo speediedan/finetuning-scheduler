@@ -15,6 +15,15 @@ are not documented as public API.
     core.transitions
     core.host
     core.checkpoint
+    core.views
+    core.roles
+    core.compile
+    strategies.base
+    strategies.unsharded
+    strategies.dtensor
+    strategies.fsdp2
+    testing.conformance
+    testing.fixtures
     core.schedule
     core.state
     core.rng

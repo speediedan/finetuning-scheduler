@@ -23,7 +23,8 @@ import os
 import pathlib
 import re
 from collections import Counter
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
+from typing import Any
 
 import yaml
 from torch import nn
@@ -31,6 +32,7 @@ from torch import nn
 from finetuning_scheduler.core._io import get_filesystem
 from finetuning_scheduler.core.dist import rank_zero_info, rank_zero_only, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
+from finetuning_scheduler.core.roles import parse_role
 
 NON_CONTIGUOUS_KEYS_MSG = "The supplied schedule was found to have non-contiguous or non-zero-indexed keys "
 
@@ -272,25 +274,34 @@ def parse_phase_lr(schedule: dict, depth: int, base_max_lr: float) -> None:
             del schedule[depth]["lr"]
 
 
-def resolve_phase_params(schedule: dict, depth: int, named_params: Collection[str], shared_params: tuple) -> None:
-    """Expand the parameter names and regexes of phase ``depth`` in place to fully qualified parameter names.
+def resolve_param_entries(entries: Iterable[str], depth: int, named_params: Collection[str],
+                          shared_params: tuple, passthrough: Callable[[str], bool] | None = None) -> list[str]:
+    """Resolve a phase's parameter names and regexes to fully qualified parameter names, without modifying the
+    schedule.
 
-    Explicitly specified copies of shared parameters are pruned with a warning, since they are thawed with their
-    registered source parameter.
+    A name present in ``named_params`` resolves to itself; any other entry is a regex matched (``re.match``) against
+    every name. Explicitly specified copies of shared parameters are pruned with a warning, since they are thawed with
+    their registered source parameter.
 
     Args:
-        schedule: The fine-tuning schedule.
-        depth: The phase to resolve.
-        named_params: The names of the model's parameters.
+        entries: The phase's ``params`` entries.
+        depth: The phase, for messages.
+        named_params: The names entries resolve against.
         shared_params: The model's shared parameter names, as a tuple of (a list of per-tensor name lists, a set of
             all shared names).
+        passthrough: Entries for which this returns ``True`` (``role:`` selectors, for example) are kept as they are.
+
+    Returns:
+        The resolved names, in entry order.
 
     Raises:
         FTSConfigurationError: If a specified parameter or regex matches no parameter.
     """
-    orig_params = schedule[depth].get("params", [])
     resolved_params = []
-    for p in orig_params:
+    for p in entries:
+        if passthrough is not None and passthrough(p):
+            resolved_params.append(p)
+            continue
         regex_params = []
         explicit_params = False
         if p in named_params:
@@ -314,7 +325,27 @@ def resolve_phase_params(schedule: dict, depth: int, named_params: Collection[st
                     "provided explicit schedule did not match any named parameter in the "
                     "model."
                 )
-    schedule[depth]["params"] = resolved_params
+    return resolved_params
+
+
+def resolve_phase_params(schedule: dict, depth: int, named_params: Collection[str], shared_params: tuple,
+                         passthrough: Callable[[str], bool] | None = None) -> None:
+    """Expand the parameter names and regexes of phase ``depth`` in place to fully qualified parameter names (see
+    :func:`resolve_param_entries`).
+
+    Args:
+        schedule: The fine-tuning schedule.
+        depth: The phase to resolve.
+        named_params: The names of the model's parameters.
+        shared_params: The model's shared parameter names, as a tuple of (a list of per-tensor name lists, a set of
+            all shared names).
+        passthrough: Entries for which this returns ``True`` are kept as they are.
+
+    Raises:
+        FTSConfigurationError: If a specified parameter or regex matches no parameter.
+    """
+    schedule[depth]["params"] = resolve_param_entries(schedule[depth].get("params", []), depth, named_params,
+                                                      shared_params, passthrough)
 
 
 def shared_params_ref(module: nn.Module) -> tuple:
@@ -475,7 +506,7 @@ def final_phase_max_epochs(schedule: dict, max_phase: int, max_epoch_wm: int, ma
 
 
 # phase keys only the PyTorch API interprets in this release
-DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides")
+DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides", "promote")
 
 
 def parse_phase_extensions(schedule: dict) -> None:
@@ -485,11 +516,14 @@ def parse_phase_extensions(schedule: dict) -> None:
     - ``phase_config``: an opaque mapping handed to phase hooks and gates.
     - ``pg_overrides``: optimizer options (other than ``params`` and ``lr``, which have their own keys) applied to the
       parameter group the phase adds.
+    - ``promote``: tensors to promote from the ``instrument`` role to a ``latent:<name>`` role when the phase starts,
+      as ``{selector_or_name: "latent:<name>"}`` (not in phase 0).
 
     Raises:
         FTSConfigurationError: If a key has the wrong type.
     """
     for depth, phase in schedule.items():
+        parse_promote(depth, phase.get("promote"))
         mts = phase.setdefault("max_transition_step", -1)
         if isinstance(mts, bool) or not isinstance(mts, int) or mts < -1:
             raise FTSConfigurationError(
@@ -512,6 +546,30 @@ def parse_phase_extensions(schedule: dict) -> None:
                     f"Phase {depth}'s `pg_overrides` may not set {reserved}: set the phase's parameters with `params` "
                     "and its learning rate with `lr`."
                 )
+
+
+def parse_promote(depth: int, promote: Any) -> None:
+    """Validate phase ``depth``'s ``promote`` mapping (``None`` when the phase has none).
+
+    Raises:
+        FTSConfigurationError: If it is not a non-empty mapping from names or selectors to ``latent:<name>`` roles, or
+            phase 0 has one.
+    """
+    if promote is None:
+        return
+    if not isinstance(promote, Mapping) or not promote:
+        raise FTSConfigurationError(
+            f"Phase {depth}'s `promote` must be a non-empty mapping of selectors or names to `latent:<name>` roles, got"
+            f" {promote!r}.")
+    if depth == 0:
+        raise FTSConfigurationError("Phase 0 may not `promote` tensors: a promotion happens when a later phase starts.")
+    for source, target in promote.items():
+        if not isinstance(source, str) or not source:
+            raise FTSConfigurationError(f"Phase {depth}'s `promote` keys must be selectors or names, got {source!r}.")
+        if not isinstance(target, str) or parse_role(target)[0] != "latent":
+            raise FTSConfigurationError(
+                f"Phase {depth} promotes {source!r} to {target!r}: tensors can be promoted only to a `latent:<name>`"
+                " role.")
 
 
 def refuse_direct_api_keys(schedule: dict) -> None:
