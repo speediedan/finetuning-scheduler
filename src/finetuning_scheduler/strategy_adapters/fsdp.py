@@ -33,7 +33,6 @@ from typing_extensions import override
 import torch
 from lightning.fabric.strategies.fsdp import _get_full_state_dict_context, _setup_activation_checkpointing
 from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
-from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.trainer.connectors.checkpoint_connector import _CheckpointConnector
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.model_helpers import is_overridden
@@ -59,6 +58,8 @@ if TYPE_CHECKING or torch.distributed.is_available():
 
     from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
 
+# marks a strategy class that did not define `lightning_restore_optimizer` itself before the adapter patched it
+_UNSET = object()
 
 
 class FSDPStrategyAdapter(StrategyAdapter):
@@ -158,6 +159,28 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         return False
 
+    def _disable_lightning_optimizer_restore(self, strategy_cls: type) -> None:
+        """Disable Lightning's optimizer restoration on the running strategy's own class (a property, so not
+        settable on the instance) until the fit ends (see :meth:`on_fts_teardown`)."""
+        original = vars(strategy_cls).get("lightning_restore_optimizer", _UNSET)
+        if original is False:  # this patch, left by an earlier fit whose teardown did not run: not the original
+            original = _UNSET
+        self._restore_optimizer_patch = (strategy_cls, original)
+        setattr(strategy_cls, "lightning_restore_optimizer", self.lightning_restore_optimizer)
+
+    def on_fts_teardown(self) -> None:
+        """Undo the patch that disabled Lightning's optimizer restoration for this fit, so later fits in the
+        process, with any strategy, restore optimizers as Lightning does."""
+        patch = getattr(self, "_restore_optimizer_patch", None)
+        if patch is None:
+            return
+        strategy_cls, original = patch
+        if original is _UNSET:
+            delattr(strategy_cls, "lightning_restore_optimizer")
+        else:
+            setattr(strategy_cls, "lightning_restore_optimizer", original)
+        self._restore_optimizer_patch = None
+
     def _refuse_attached_view(self) -> None:
         """FSDP1 schedules through the module's own parameter names (its flat-parameter transform runs only after
         the wrap), so a view attached to the module must name parameters as the module does (naming scheme
@@ -199,7 +222,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         self._refuse_attached_view()
         # hack to avoid subclassing FSDP strategy for this adapter
-        setattr(Strategy, "lightning_restore_optimizer", self.lightning_restore_optimizer)
+        self._disable_lightning_optimizer_restore(type(self.pls_handle))
         setattr(self.pls_handle, "optimizer_state", self.optimizer_state)
         self._use_orig_params = self.pls_handle.kwargs.get("use_orig_params", False)
         # w/ `use_orig_params`, schedule/wrapping alignment constraints can be relaxed

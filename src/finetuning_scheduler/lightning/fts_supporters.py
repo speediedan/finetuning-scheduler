@@ -465,7 +465,8 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
                     " Only `last_model_path`, `best_model_path` and `current_ckpt_depth` will be reloaded."
                 )
                 self.current_ckpt_depth = state_dict["current_ckpt_depth"]
-                self.best_ckpt_depth = self.current_ckpt_depth
+                # `best_model_path` is reloaded below, so its depth is the depth it was saved at
+                self.best_ckpt_depth = state_dict["best_ckpt_depth"]
             self.last_model_path = state_dict.get("last_model_path", self.last_model_path)
             self.best_model_path = state_dict["best_model_path"]
             self._verify_resumed_checkpoints(self.finetuningscheduler_callback.pl_module.trainer)
@@ -822,6 +823,12 @@ class ScheduleParsingMixin(ABC):
         if not core_schedule.ensure_contiguous_phase_keys(self.ft_schedule):
             self._rewrite_schedule(err_msg=core_schedule.NON_CONTIGUOUS_KEYS_MSG)
         core_schedule.refuse_direct_api_keys(self.ft_schedule)
+        core_schedule.validate_phase_options(self.ft_schedule)
+        if self.ft_schedule.get(0, {}).get("pg_overrides"):
+            raise MisconfigurationException(
+                "Phase 0's `pg_overrides` is not supported by the Lightning callback: phase 0's parameter groups are"
+                " built by `configure_optimizers`, so set their options there."
+            )
 
     def _validate_epoch_transitions(self) -> None:
         """If not composing :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` and epoch-driven
@@ -1331,6 +1338,7 @@ class ScheduleImplMixin(ABC):
         no_decay: list | None = None,
         lr: float | None = None,
         apply_lambdas: bool = False,
+        pg_overrides: dict | None = None,
     ) -> None:
         """Add optimizer parameter groups associated with the next scheduled fine-tuning depth/level and extend the
         relevent :paramref:`~pytorch_lighting.trainer.trainer.Trainer.lr_scheduler_configs`.
@@ -1346,6 +1354,8 @@ class ScheduleImplMixin(ABC):
             lr: The initial learning rate for the new parameter group(s). If not specified,
                 the ``lr`` of the first scheduled fine-tuning depth will be used. Defaults to ``None``.
             apply_lambdas: Whether to apply lr lambdas to newly added groups. Defaults to False.
+            pg_overrides: Optimizer options (a phase's ``pg_overrides``) applied to each new group. Defaults to
+                ``None``.
 
         .. note::
 
@@ -1363,6 +1373,7 @@ class ScheduleImplMixin(ABC):
             schedulers=lambda: [
                 c.scheduler for c in module.trainer.lr_scheduler_configs or []  # type: ignore[union-attr]
             ],
+            pg_overrides=pg_overrides,
         )
 
     @staticmethod

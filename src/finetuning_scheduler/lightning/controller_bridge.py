@@ -24,10 +24,11 @@ carries out phases through the callback's own ``step_pg``, ``thaw_to_depth`` and
 
 .. warning:: This is an experimental API and may change in a future release.
 """
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from finetuning_scheduler.core.controller import FTSController
+from finetuning_scheduler.core.views import CanonicalView
 from finetuning_scheduler.lightning.host import LightningHost
 
 if TYPE_CHECKING:
@@ -123,17 +124,29 @@ class FTSCheckpointPolicy:
         return {"monitor": self.monitor}
 
 
-def attach_controller(fts: "FinetuningScheduler") -> FTSController:
+def attach_controller(fts: "FinetuningScheduler", phase_hooks: Sequence[tuple] = (), *,
+                      run_start_hooks: bool = True) -> FTSController:
     """A host-driven controller for the callback's fit, over its validated schedule (the callback's own optimizer,
-    lr schedulers and phase-0 thaw are adopted as they are)."""
+    lr schedulers and phase-0 thaw are adopted as they are).
+
+    Args:
+        fts: The callback.
+        phase_hooks: ``(fn, when, isolate_rng)`` phase hooks to register.
+        run_start_hooks: Run phase 0's start hooks (``False`` when the fit resumes a run).
+    """
     trainer, pl_module = fts.trainer, fts.pl_module
     assert isinstance(fts.ft_schedule, dict)
+    # the view the strategy adapter schedules through: an adapter that names parameters itself ignores an attached one
+    view = fts.strategy_adapter.tunable_view or CanonicalView(pl_module)
     controller = FTSController(
-        pl_module, optimizer=trainer.optimizers[0], host=LightningHost(trainer, pl_module),
+        pl_module, optimizer=trainer.optimizers[0], host=LightningHost(trainer, pl_module), view=view,
         checkpoint=FTSCheckpointPolicy(fts), restore_best=fts.restore_best, max_depth=fts.max_depth,
         reinit_optim_cfg=fts.reinit_optim_cfg, reinit_lr_cfg=fts.reinit_lr_cfg,
+        compile_reset=False,  # the callback resets a compiled module itself, once its transition is complete
     )
-    controller.attach(LightningPhaseExecutor(fts), fts.ft_schedule)
+    for fn, when, isolate_rng in phase_hooks:
+        controller.add_phase_hook(fn, when=when, isolate_rng=isolate_rng)
+    controller.attach(LightningPhaseExecutor(fts), fts.ft_schedule, run_start_hooks=run_start_hooks)
     return controller
 
 

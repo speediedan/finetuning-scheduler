@@ -46,10 +46,17 @@ def test_parse_phase_extensions_refuses(phase, match):
 
 
 def test_refuse_direct_api_keys():
+    """By default, the keys the Lightning callback does not interpret yet (``max_transition_step``, ``promote``);
+    ``phase_config`` and ``pg_overrides`` are accepted under Lightning too."""
+    from finetuning_scheduler.core.schedule import DIRECT_API_PHASE_KEYS
+
     refuse_direct_api_keys({0: {"params": ["a"], "max_transition_epoch": 2}})
+    mixed = {0: {"params": ["a"]}, 1: {"max_transition_step": 3, "phase_config": {}}, 2: {"pg_overrides": {}},
+             3: {"promote": {"role:instrument": "latent:x"}}}
+    with pytest.raises(FTSConfigurationError, match=r"\(phase 1: max_transition_step; phase 3: promote\)"):
+        refuse_direct_api_keys(mixed)
     with pytest.raises(FTSConfigurationError, match=r"phase 1: max_transition_step, phase_config; phase 2: pg_over"):
-        refuse_direct_api_keys({0: {"params": ["a"]}, 1: {"max_transition_step": 3, "phase_config": {}},
-                                2: {"pg_overrides": {}}})
+        refuse_direct_api_keys(mixed, keys=DIRECT_API_PHASE_KEYS)
 
 
 def test_lightning_refuses_direct_api_keys(tmpdir):
