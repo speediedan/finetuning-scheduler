@@ -951,8 +951,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         if self._fts_state._resume_fit_from_ckpt:  # if resuming training, on_fit_start will already be called
             # if resuming from a checkpoint, we need to update current fts depth from the used ckpt
             self._fts_state._curr_depth = self._fts_state._fts_ckpt_metadata["current_ckpt_depth"]
-            # if we're restoring from a non-best ckpt depth, ensure it is the new training incarnation's initial best
-            self._fts_state._best_ckpt_depth = self._fts_state._fts_ckpt_metadata["current_ckpt_depth"]
+            # the checkpoint callback reloads the run's best checkpoint, so the phases to replay onto its restored
+            # optimizer state at the next transition start after the depth it was saved at (`best_ckpt_pgs`' depth)
+            self._fts_state._best_ckpt_depth = self._fts_state._fts_ckpt_metadata["best_ckpt_depth"]
 
     def should_transition(self, trainer: "pl.Trainer") -> bool:
         """Phase transition logic is contingent on whether we are composing
@@ -1068,3 +1069,19 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
         if self._fts_controller is not None:
             self._fts_controller.train_end()  # the final phase's end hooks
+
+    def teardown(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
+        """Let the strategy adapter undo what it changed beyond this fit (see
+        :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.on_fts_teardown`)."""
+        super().teardown(trainer, pl_module, stage)
+        self._fts_adapter_teardown()
+
+    def on_exception(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", exception: BaseException) -> None:
+        """As :meth:`teardown`, for a fit that raised."""
+        super().on_exception(trainer, pl_module, exception)
+        self._fts_adapter_teardown()
+
+    def _fts_adapter_teardown(self) -> None:
+        adapter = getattr(self, "strategy_adapter", None)
+        if adapter is not None:
+            adapter.on_fts_teardown()

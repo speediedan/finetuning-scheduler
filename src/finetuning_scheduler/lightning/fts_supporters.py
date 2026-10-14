@@ -465,7 +465,8 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
                     " Only `last_model_path`, `best_model_path` and `current_ckpt_depth` will be reloaded."
                 )
                 self.current_ckpt_depth = state_dict["current_ckpt_depth"]
-                self.best_ckpt_depth = self.current_ckpt_depth
+                # `best_model_path` is reloaded below, so its depth is the depth it was saved at
+                self.best_ckpt_depth = state_dict["best_ckpt_depth"]
             self.last_model_path = state_dict.get("last_model_path", self.last_model_path)
             self.best_model_path = state_dict["best_model_path"]
             self._verify_resumed_checkpoints(self.finetuningscheduler_callback.pl_module.trainer)
