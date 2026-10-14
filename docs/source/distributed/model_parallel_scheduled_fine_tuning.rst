@@ -343,8 +343,8 @@ under ``ModelParallelStrategy`` with an ``fsdp_plan``, carrying over the model, 
 
 The resumed fit keeps the FSDP1 run's best checkpoint, which FTS restores at the next phase transition. When it is a
 sharded one, consolidate it too, with the utility's default output (``<best checkpoint directory>.consolidated``,
-beside it): FTS restores that file in its place, and refuses the resume up front, naming the command, when it is
-missing.
+beside it): FTS restores that file in its place. When it is missing, a resume that will restore the best checkpoint
+(with ``restore_best``, before the last phase) is refused up front, naming the command.
 
 The checkpoint's optimizer must have state: Lightning's ``ModelParallelStrategy`` cannot load a single-file checkpoint
 whose optimizer state is empty (plain ``SGD`` without momentum, for example).

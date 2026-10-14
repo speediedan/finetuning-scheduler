@@ -893,8 +893,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         """
         # if resuming from a ckpt, we need to sync fts_state
         if self._fts_state._resume_fit_from_ckpt:
-            # refuse a best checkpoint this strategy cannot restore now, rather than at the next phase transition
-            if best_model_path := getattr(trainer.checkpoint_callback, "best_model_path", ""):
+            # refuse a best checkpoint this strategy cannot restore now, rather than at the next phase transition (a
+            # fit that never restores it, without `restore_best` or resumed at its last phase, is left to proceed)
+            best_model_path = getattr(trainer.checkpoint_callback, "best_model_path", "")
+            if best_model_path and self.restore_best and self.depth_remaining > 0:
                 self.strategy_adapter.best_ckpt_path(best_model_path)
             self.step()
             self._fts_state._resume_fit_from_ckpt = False

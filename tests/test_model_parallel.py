@@ -1,5 +1,6 @@
 import os
 import subprocess
+from unittest.mock import patch
 import sys
 from typing import Any
 from collections.abc import Callable, KeysView
@@ -618,7 +619,18 @@ def test_fsdp1_checkpoint_resumes_under_fsdp2(tmpdir, model_parallel_ft_schedule
         with pytest.raises(MisconfigurationException, match="is an FSDP1 .* sharded checkpoint"):
             fit(ModelParallelStrategy(**dp2_tp1), plan_cfg, ckpt_path=ckpt_path)
         return
-    resumed = fit(ModelParallelStrategy(**dp2_tp1), plan_cfg, ckpt_path=ckpt_path)
+    from finetuning_scheduler.strategy_adapters import ModelParallelStrategyAdapter
+
+    restored, best_ckpt_path = [], ModelParallelStrategyAdapter.best_ckpt_path
+
+    def spy(adapter, path):
+        restored.append(best_ckpt_path(adapter, path))
+        return restored[-1]
+
+    with patch.object(ModelParallelStrategyAdapter, "best_ckpt_path", spy):
+        resumed = fit(ModelParallelStrategy(**dp2_tp1), plan_cfg, ckpt_path=ckpt_path)
+    if layout == "sharded":  # the FSDP1 run's best checkpoint was restored from its consolidation
+        assert any(p.endswith(".consolidated") for p in restored), restored
     fts = get_fts(resumed)
     assert saved_depth < fts.max_depth
     default_fts_sanity_chk(resumed)

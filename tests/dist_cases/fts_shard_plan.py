@@ -54,8 +54,7 @@ def example_plan(ctx, config: str) -> dict:
     """An example configuration's FSDP2 plan and schedule on the examples' model, built on the meta device: the
     layout and the FSDP2 adapter's findings, which the examples' warning checks would otherwise meet only on GPUs.
 
-    The
-    Lightning configurations (``fts_*``) hold the plan in the callback's ``strategy_adapter_cfg``; their
+    The Lightning configurations (``fts_*``) hold the plan in the callback's ``strategy_adapter_cfg``; their
     ``LightningModule`` holds the transformer as ``model``, as the plain PyTorch example's ``ModParallelModule`` does.
     """
     import argparse

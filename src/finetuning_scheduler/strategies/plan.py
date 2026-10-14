@@ -190,13 +190,14 @@ def _reshards_after_forward(unit: FSDPModule, is_outermost: bool) -> bool:
     """
     try:
         state = unit._get_fsdp_state()
-        group = state._fsdp_param_group
-        if group is None:
+        # a unit has one parameter group per mesh (several with per-parameter meshes)
+        groups = getattr(state, "_fsdp_param_groups", None)
+        if groups is None:
+            groups = [g] if (g := state._fsdp_param_group) is not None else []
+        if not groups or (is_outermost and getattr(state, "_auto_reshard_after_forward", False)):
             return False
-        if is_outermost and getattr(state, "_auto_reshard_after_forward", False):
-            return False
-        return group.post_forward_mesh_info is not None
-    except AttributeError:
+        return any(g.post_forward_mesh_info is not None for g in groups)
+    except (AttributeError, AssertionError):
         return True
 
 

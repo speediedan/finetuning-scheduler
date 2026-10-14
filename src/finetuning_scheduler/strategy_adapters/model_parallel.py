@@ -17,8 +17,8 @@ A :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that extends 
 for PyTorch's distributed composable and Tensor Parallel APIs.
 
 """
-from typing import Any  # Dict used for runtime isinstance() checks
 import os
+from typing import Any  # Dict used for runtime isinstance() checks
 from collections.abc import Callable, Mapping, Sequence
 from functools import wraps
 from dataclasses import dataclass, field

@@ -16,7 +16,8 @@ Fine-Tuning Scheduler FSDP2 Adapter
 The :class:`~finetuning_scheduler.strategies.base.DistributedAdapter` for a model with FSDP2 (``fully_shard``)
 modules, alone or with tensor parallelism: its state is read and written through ``torch.distributed.checkpoint`` by
 every rank, as for :class:`~finetuning_scheduler.strategies.dtensor.DTensorAdapter`. Its validation also reports the
-FSDP units whose parameters thaw in different phases (see :func:`~finetuning_scheduler.strategies.plan.phase_feedback`).
+FSDP units that reshard after forward and hold parameters thawing in different phases (see
+:func:`~finetuning_scheduler.strategies.plan.phase_feedback`).
 
 .. warning:: This is an experimental API and may change in a future release.
 """
