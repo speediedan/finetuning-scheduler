@@ -308,10 +308,11 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         return outcome.should_stop, outcome.reason
 
     def _improvement_message(self, current: Tensor) -> str:
-        """Override standard EarlyStopping._improvement_message to accommodate loss_parallel/Dtensor."""
+        """Override standard EarlyStopping._improvement_message to accommodate loss_parallel/Dtensor, and a
+        ``best_score`` restored from a checkpoint onto another rank's device (#112)."""
         if torch.isfinite(self.best_score):
             msg = (
-                f"Metric {self.monitor} improved by {abs(self.best_score - current).item():.3f} >="
+                f"Metric {self.monitor} improved by {abs(self.best_score.to(current.device) - current).item():.3f} >="
                 f" min_delta = {abs(self.min_delta)}. New best score: {current.item():.3f}"
             )
         else:
