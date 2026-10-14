@@ -23,7 +23,7 @@ import os
 import pathlib
 import re
 from collections import Counter
-from collections.abc import Callable, Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any
 
 import yaml
@@ -505,8 +505,10 @@ def final_phase_max_epochs(schedule: dict, max_phase: int, max_epoch_wm: int, ma
     return max(max_epoch_wm, max_epochs)
 
 
-# phase keys only the PyTorch API interprets in this release
+# phase keys the PyTorch API adds
 DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides", "promote")
+# those only the PyTorch API interprets in this release (the Lightning callback refuses them)
+LIGHTNING_UNSUPPORTED_PHASE_KEYS = ("max_transition_step", "promote")
 
 
 def parse_phase_extensions(schedule: dict) -> None:
@@ -529,6 +531,16 @@ def parse_phase_extensions(schedule: dict) -> None:
             raise FTSConfigurationError(
                 f"Phase {depth}'s `max_transition_step` must be an integer >= 0 (or -1, unset), got {mts!r}."
             )
+    validate_phase_options(schedule)
+
+
+def validate_phase_options(schedule: dict) -> None:
+    """Validate each phase's ``phase_config`` and ``pg_overrides`` (see :func:`parse_phase_extensions`).
+
+    Raises:
+        FTSConfigurationError: If either has the wrong type, or ``pg_overrides`` sets ``params`` or ``lr``.
+    """
+    for depth, phase in schedule.items():
         if "phase_config" in phase and not isinstance(phase["phase_config"], Mapping):
             raise FTSConfigurationError(
                 f"Phase {depth}'s `phase_config` must be a mapping, got {type(phase['phase_config']).__name__}."
@@ -572,13 +584,13 @@ def parse_promote(depth: int, promote: Any) -> None:
                 " role.")
 
 
-def refuse_direct_api_keys(schedule: dict) -> None:
-    """Refuse the phase keys only the PyTorch API interprets, naming each phase that uses one.
+def refuse_direct_api_keys(schedule: dict, keys: Sequence[str] = LIGHTNING_UNSUPPORTED_PHASE_KEYS) -> None:
+    """Refuse the phase keys only the PyTorch API interprets (``keys``), naming each phase that uses one.
 
     Raises:
         FTSConfigurationError: If any phase uses one.
     """
-    used = {depth: sorted(k for k in DIRECT_API_PHASE_KEYS if k in phase) for depth, phase in schedule.items()}
+    used = {depth: sorted(k for k in keys if k in phase) for depth, phase in schedule.items()}
     used = {depth: keys for depth, keys in used.items() if keys}
     if used:
         detail = "; ".join(f"phase {depth}: {', '.join(keys)}" for depth, keys in used.items())

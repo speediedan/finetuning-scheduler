@@ -18,7 +18,7 @@ import os
 from copy import deepcopy
 from pprint import pformat
 from typing import Any  # Dict is used for runtime isinstance() checks
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing_extensions import override
 
 import lightning.pytorch as pl
@@ -310,6 +310,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.reinit_lr_cfg = reinit_lr_cfg
         self.strategy_adapter_cfg = strategy_adapter_cfg or {}
         self.custom_strategy_adapters = custom_strategy_adapters
+        self._phase_hooks: list[tuple] = []  # (fn, when, isolate_rng), registered on each fit's controller
         self.allow_untested = allow_untested
         self.apply_lambdas_new_pgs = apply_lambdas_new_pgs
         self.enforce_phase0_params = enforce_phase0_params
@@ -550,6 +551,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             lr=next_tl.get("lr", optimizer.defaults["lr"]),
             no_decay=getattr(self.pl_module, "no_decay", None),
             apply_lambdas=self.apply_lambdas_new_pgs,
+            **({"pg_overrides": next_tl["pg_overrides"]} if next_tl.get("pg_overrides") else {}),
         )
         if new_scheduler_cfg:
             self.reinit_lr_scheduler(
@@ -881,6 +883,34 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             assert isinstance(self.ft_schedule, dict)
             self._validate_opt_init()
         super().on_fit_start(trainer, pl_module)
+        if self._use_fts_controller:
+            from finetuning_scheduler.lightning.controller_bridge import attach_controller
+
+            # phase 0's start hooks run now, unless the fit resumes a run (the controller resumes at its phase)
+            self._fts_controller = attach_controller(self, self._phase_hooks,
+                                                     run_start_hooks=not self._fts_state._resume_fit_from_ckpt)
+
+    def add_phase_hook(self, fn: Callable, when: str = "start", *, isolate_rng: bool | None = None) -> None:
+        """Call ``fn(event)`` whenever a phase starts (phase 0 at fit start) or ends (the final phase at train
+        end), as :meth:`~finetuning_scheduler.core.controller.FTSController.add_phase_hook` does: ``event`` is a
+        :class:`~finetuning_scheduler.core.controller.PhaseEvent`, whose ``phase_config`` is the phase's
+        ``phase_config`` schedule key. Hooks run in registration order, for every later fit with this callback
+        (experimental).
+
+        Args:
+            fn: The hook.
+            when: ``"start"`` or ``"end"``.
+            isolate_rng: Whether to isolate the training random streams while ``fn`` runs (the default is to).
+
+        Raises:
+            MisconfigurationException: If ``when`` is neither ``"start"`` nor ``"end"``, or the callback's own
+                transitions are in use (``_use_fts_controller``).
+        """
+        if when not in ("start", "end"):
+            raise MisconfigurationException(f"`when` must be 'start' or 'end', got {when!r}.")
+        if not self._use_fts_controller:
+            raise MisconfigurationException("Phase hooks need the callback's controller (`_use_fts_controller`).")
+        self._phase_hooks.append((fn, when, isolate_rng))
 
     def state_dict(self) -> dict[str, Any]:
         """Before saving a checkpoint, add the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback
@@ -1036,3 +1066,5 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         """
         assert self._fts_state._ft_sync_objects is not None
         self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
+        if self._fts_controller is not None:
+            self._fts_controller.train_end()  # the final phase's end hooks
