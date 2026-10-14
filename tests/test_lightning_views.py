@@ -179,13 +179,15 @@ def test_naming_overrides_classification():
             cls.notice_naming_overrides()
 
 
-def test_fsdp1_refuses_an_attached_view():
+def test_fsdp1_accepts_only_views_with_physical_names():
+    """FSDP1 accepts an attached view that names parameters as the module does (its roles and coupled tensors
+    apply), and refuses one with logical names."""
     adapter = FSDPStrategyAdapter()
-    module = _viewed_model()
+    module = _viewed_model()  # logical names
     adapter.fts_handle = SimpleNamespace(pl_module=module, trainer=None)
-    with pytest.raises(MisconfigurationException, match="FSDP1.*does not support"):
+    with pytest.raises(MisconfigurationException, match="naming scheme is 'logical-blocks'.*FSDP1.*does not support"):
         adapter._refuse_attached_view()
-    module.fts_tunable_view = CanonicalView(module)  # the identity view changes nothing, so it is accepted
+    module.fts_tunable_view = CanonicalView(module, roles={"model.0.weight": "fitted"})
     adapter._refuse_attached_view()
 
 
@@ -228,6 +230,84 @@ class ShardedLogicalModel(LogicalNamesBoringModel):
         for layer in self.model:
             fully_shard(layer, mesh=dp_mesh)
         fully_shard(self.model, mesh=dp_mesh)
+
+
+@pytest.mark.parametrize("use_orig_params", [False, True])
+def test_fsdp1_refuses_a_frozen_role_sharing_a_flat_parameter(use_orig_params):
+    """Without ``use_orig_params``, a ``fitted`` bias sharing its module's FSDP-flattened parameter with the
+    scheduled weight would be thawed with it, so the wrap validation counts it as unscheduled and finds the
+    overlap; with ``use_orig_params`` parameters thaw individually, and nothing is reported."""
+    from finetuning_scheduler.core.compile import compile_schedule
+
+    module = LogicalNamesBoringModel()
+    schedule = {0: {"params": ["model.4.weight", "model.4.bias"]}, 1: {"params": ["model.0.weight"]}}
+    adapter = FSDPStrategyAdapter()
+    adapter.fts_handle = SimpleNamespace(pl_module=module, trainer=None, ft_schedule=schedule)
+    adapter.compiled_schedule = compile_schedule(schedule, CanonicalView(module, roles={"model.0.bias": "fitted"}))
+    adapter._allow_mixed_req_grad = use_orig_params
+    adapter._gen_ft_sched_module_map()
+    # one flattened parameter per module, as wrapping each `Linear` and `LayerNorm` builds
+    adapter._fsdp_unflat_to_flat_mapping = {n: f"{n.rpartition('.')[0]}._flat_param" for n, _ in
+                                            module.named_parameters()}
+    adapter._fsdp_flat_to_unflat_mapping = {}
+    for name, flat in adapter._fsdp_unflat_to_flat_mapping.items():
+        adapter._fsdp_flat_to_unflat_mapping.setdefault(flat, []).append(name)
+    assert "model.0.bias" not in adapter._unscheduled_params  # per module, its module is scheduled
+    overlap = adapter._phase_unaligned_fsdp_params(check_unsched=True)
+    assert overlap == (set() if use_orig_params else {"model.0.weight", "model.0.bias"})
+
+
+class AdamLogicalNamesModel(LogicalNamesBoringModel):
+    """With a stateful optimizer: Lightning's FSDP (FSDP1) optimizer-state restore expects a non-empty state, which a
+    plain ``SGD`` lacks."""
+
+    def configure_optimizers(self):
+        return torch.optim.Adam([p for p in self.parameters() if p.requires_grad], lr=1e-3)
+
+
+class CoupledNormView(CanonicalView):
+    """Physical names, with roles, and each block's norm thawed with its linear layer."""
+
+    COUPLED = {"model.2.weight": ["model.3.weight", "model.3.bias"]}
+
+    def coupled(self, physical):
+        return [c for p in physical for c in self.COUPLED.get(p, [])]
+
+
+FSDP1_VIEW_ROLES = {"model.4.weight": "adapter:head", "model.4.bias": "adapter:head", "model.0.weight": "fitted",
+                    "model.0.bias": "fitted"}
+FSDP1_VIEW_SCHEDULE = {0: {"params": ["role:adapter"], "max_transition_epoch": 1},
+                       1: {"params": ["model.2.weight", "model.2.bias"], "lr": 0.05, "max_transition_epoch": 2},
+                       2: {"params": ["model.1.weight", "model.1.bias"], "lr": 0.05, "max_transition_epoch": 3}}
+
+
+@RunIf(min_cuda_gpus=2, standalone=True)
+@pytest.mark.parametrize("use_orig_params", [True, False], ids=["use_orig", "no_use_orig"])
+def test_attached_physical_view_under_fsdp1(tmp_path, use_orig_params):
+    """Under the FSDP (FSDP1) strategy on two GPUs, an attached view with physical names applies its roles (a role
+    selector schedules the head; the ``fitted`` layer is never thawed) and its coupled tensors (a block's norm is
+    thawed with it), with and without ``use_orig_params``."""
+    from lightning.pytorch import Trainer
+    from lightning.pytorch.strategies import FSDPStrategy
+    from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+
+    seed_everything(42)
+    module = AdamLogicalNamesModel()
+    module.fts_tunable_view = CoupledNormView(module, roles=FSDP1_VIEW_ROLES)
+    fts, recorder = FinetuningScheduler(ft_schedule=FSDP1_VIEW_SCHEDULE, epoch_transitions_only=True), PathRecorder()
+    strategy = FSDPStrategy(auto_wrap_policy=ModuleWrapPolicy({torch.nn.Linear, torch.nn.LayerNorm}),
+                            use_orig_params=use_orig_params)
+    trainer = Trainer(default_root_dir=tmp_path, callbacks=[fts, recorder], max_epochs=3, accelerator="gpu", devices=2,
+                      strategy=strategy, limit_train_batches=2, limit_val_batches=2, enable_progress_bar=False,
+                      enable_model_summary=False, logger=False)
+    trainer.fit(module)
+    assert fts.strategy_adapter.compiled_schedule is not None
+    # the modules owning a trainable parameter at each epoch's start (FSDP1 names wrapped or flattened parameters, so
+    # compare owners): the head, then block 2 with its coupled norm, then block 1; the `fitted` block 0 never trains
+    from finetuning_scheduler.core.views import canonical_fqn
+
+    trained = [{canonical_fqn(n).rsplit(".", 1)[0] for n in row[2]} for row in recorder.rows]
+    assert trained == [{"model.4"}, {"model.4", "model.2", "model.3"}, {"model.4", "model.2", "model.3", "model.1"}]
 
 
 @RunIf(min_cuda_gpus=2, standalone=True)
