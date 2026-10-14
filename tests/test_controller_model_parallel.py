@@ -165,22 +165,25 @@ def test_wrappers_that_miss_late_thaws_are_refused(gloo_pool):
 
 
 @RunIf(min_cuda_gpus=2)
-@pytest.mark.parametrize("case", ["fsdp", "fsdp_fp16", "tp"])
+@pytest.mark.parametrize("case", ["fsdp", "fsdp_fp16", "fsdp_offload", "tp"])
 def test_model_parallel_nccl(nccl_pool, tmp_path, case):
     """The FSDP2 (with an evaluation forward before each ``epoch_end``) and TP cases on NCCL, plus FSDP2 fp16 mixed
-    precision (one of the CI GPUs has no bf16)."""
+    precision (one of the CI GPUs has no bf16) and FSDP2 with a CPU offload policy (#55), whose shards stay on the
+    CPU while thawing, best-checkpoint restores and training follow the same path."""
     if case == "tp":
         results = nccl_pool.run(mp.tp, ckpt_dir=str(tmp_path / "tp"), val=VAL)
         expected, tol = path_tp, 1e-3
     else:
-        results = nccl_pool.run(mp.fsdp, fp16=case == "fsdp_fp16", ckpt_dir=str(tmp_path / "fsdp"), val=VAL,
-                                evaluate=True)
+        results = nccl_pool.run(mp.fsdp, fp16=case == "fsdp_fp16", offload=case == "fsdp_offload",
+                                ckpt_dir=str(tmp_path / "fsdp"), val=VAL, evaluate=True)
         expected, tol = path_fsdp_autocm, (2e-2 if case == "fsdp_fp16" else 1e-3)
     agreed = _agreed(results)
     assert _states(agreed["path"]) == _expected(expected)
     assert agreed["unmoved"] == []
     if case == "fsdp_fp16":
         assert agreed["unsharded_dtypes"] == ["torch.float16"]
+    if case.startswith("fsdp"):
+        assert agreed["shard_devices"] == (["cpu"] if case == "fsdp_offload" else ["cuda"])
     ref = mp.reference(ckpt_dir=str(tmp_path / "ref"), val=VAL)
     assert agreed["restored"] == ref["restored"] == 2
     assert _close(results[0]["params"], ref["params"], tol=tol)

@@ -42,7 +42,8 @@ The desired FSDP2 composition patterns are specified in an optional dictionary o
 - :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan` directives are applied in the
   order provided in the ``fsdp_plan`` dictionary.
 
-Additionally, ``fsdp_plan`` supports ``act_ckpt`` and ``cpu_offload_policy`` keyword args described below.
+Additionally, ``fsdp_plan`` supports ``act_ckpt`` and ``ignored_params`` keyword args described below, and a key may
+select modules by class rather than by name (``class:TransformerBlock``).
 
 .. note::
     It should be noted the 'auto' FSDP2 plan configuration provided by FTS refers to the generation and application of
@@ -55,10 +56,23 @@ FSDP2 Auto Plan Convenience Aliases
 ***********************************
 
 In addition to all valid ``fully_shard`` API keyword arguments, ``fsdp_plan`` (and ``fsdp_default_kwargs``) support
-``act_ckpt`` and ``cpu_offload_policy`` keyword arguments.
+``act_ckpt`` and a name-based ``ignored_params``, and ``fsdp_plan`` keys may select modules by class.
 
-**cpu_offload_policy**: This is a convenience alias that will apply ``CPUOffloadPolicy`` to the matching module(s) along
-with any provided ``Dict`` of policy keyword args.
+**class: keys**: ``class:TransformerBlock`` selects every module that is an instance of a class named
+``TransformerBlock`` (subclasses included), as ``ModuleWrapPolicy({TransformerBlock})`` would;
+``class:my_pkg.blocks.TransformerBlock`` names the class unambiguously.
+
+**ignored_params**: a parameter name or regex (matched from the start of each name, as fine-tuning schedule entries
+are), or a list of them, naming the parameters ``fully_shard`` should leave unsharded. They are resolved among the
+module's own parameters (those ``fully_shard`` can ignore) when the plan is applied. FSDP2 does not reduce the gradients
+of ignored parameters either, so a schedule that thaws one trains it independently on each rank unless something else
+synchronizes it.
+
+**CPU offload**: Lightning's ``ModelParallelStrategy`` moves the model to the GPU after ``configure_model``, which
+FSDP2's ``CPUOffloadPolicy`` (shards kept on the CPU) cannot follow, so a plan that asks for CPU offload
+(``cpu_offload_policy``, or an ``offload_policy`` that offloads to the CPU) is refused. CPU offload works with the
+PyTorch API (:class:`~finetuning_scheduler.FTSController`), where the training loop places the model itself:
+``fully_shard(module, offload_policy=CPUOffloadPolicy())``.
 
 **act_ckpt**: For specified module/patterns (or ``fsdp_default_kwargs``), ``act_ckpt`` allows one to pass a string alias
 specifying the use of the desired activation checkpointing (AC) API as well as an optional ``Dict`` of activation
@@ -202,18 +216,20 @@ For example, passing the below ``fsdp_plan`` to ``FinetuningScheduler`` via
 
 We can also use ``fsdp_default_kwargs`` to provide default keyword arguments to compose with all ``fsdp_plan``
 ``fully_shard`` directives. This example does so via the CLI and a yaml config and uses
-:ref:`FTS convenience aliases<model-parallel-fsdp2-auto-plan-aliases>` to enable cpu offloading and composable
-activation checkpointing for all specified FSDP2 instances like so:
+:ref:`FTS convenience aliases<model-parallel-fsdp2-auto-plan-aliases>` to enable composable activation checkpointing
+for all specified FSDP2 instances like so:
 
 .. code-block:: yaml
-  :emphasize-lines: 3-5
+  :emphasize-lines: 3-4
 
     strategy_adapter_cfg:
     fsdp_default_kwargs:
         reshard_after_forward: True  # default value of a normal ``fully_shard`` kwarg
         act_ckpt: ['composable']  # use composable AC with default kwargs
-        cpu_offload_policy: {}  # apply default cpu offload policy
-    fsdp_plan: {'model.output': {}, 'model.layers.\d*$': {}}
+    fsdp_plan: {'model.output': {}, 'model.layers.\d*$': {}, 'model': {}}
+
+The plan shards the transformer itself (``model``) last, so its embeddings are sharded too: a parameter that no FSDP
+module manages would remain a plain tensor beside the DTensors in the optimizer's parameter groups.
 
 That's it! We've configured composable/distributed/multi-phase/scheduled fine-tuning training and didn't even need to
 override ``LightningModule.configure_model``!
