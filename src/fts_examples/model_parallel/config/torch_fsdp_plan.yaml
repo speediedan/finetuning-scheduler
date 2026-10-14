@@ -1,5 +1,5 @@
-# FSDP2 on two data-parallel ranks: the plain PyTorch counterpart of `fts_fsdp_auto_plan.yaml`. The plan is the
-# Lightning configuration's `fsdp_plan`; `apply_fsdp_plan` shards the root module after the planned modules.
+# FSDP2 on two data-parallel ranks: the plain PyTorch counterpart of `fts_fsdp_auto_plan.yaml`. The plan has the
+# Lightning configuration's `fsdp_plan` format; `shard_model` shards the root module after the planned modules.
 run_name: torch_fsdp_plan
 mesh:
   data_parallel_size: 2
@@ -8,4 +8,6 @@ fsdp_default_kwargs:
   reshard_after_forward: True  # default value of a normal ``fully_shard`` kwarg
   act_ckpt: ['composable']  # use composable AC with default kwargs
   # cpu_offload_policy: {}  # apply default cpu offload policy
-fsdp_plan: {'model.output': {}, 'model.layers.\d*$': {}}
+# `model.norm` gets its own FSDP unit: left to the root's, it would thaw in phase 0 beside the embeddings (phase 2), and
+# the controller would warn that the root unit communicates the embeddings from phase 0 on
+fsdp_plan: {'model.output': {}, 'model.norm': {}, 'class:TransformerBlock': {}}

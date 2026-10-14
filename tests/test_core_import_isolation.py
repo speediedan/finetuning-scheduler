@@ -56,6 +56,7 @@ import finetuning_scheduler
 from finetuning_scheduler import FTSState
 from finetuning_scheduler.core import optim, schedule  # noqa: F401
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
+from finetuning_scheduler.strategies.plan import shard_model  # noqa: F401
 from finetuning_scheduler.types import FTSLRSchedulerTypeTuple, ParamGroupAddable  # noqa: F401
 
 assert finetuning_scheduler.__file__.startswith(PKG_DIR), finetuning_scheduler.__file__

@@ -71,8 +71,15 @@ synchronizes it.
 **CPU offload**: Lightning's ``ModelParallelStrategy`` moves the model to the GPU after ``configure_model``, which
 FSDP2's ``CPUOffloadPolicy`` (shards kept on the CPU) cannot follow, so a plan that asks for CPU offload
 (``cpu_offload_policy``, or an ``offload_policy`` that offloads to the CPU) is refused. CPU offload works with the
-PyTorch API (:class:`~finetuning_scheduler.FTSController`), where the training loop places the model itself:
-``fully_shard(module, offload_policy=CPUOffloadPolicy())``.
+PyTorch API (:class:`~finetuning_scheduler.FTSController`), where the training loop places the model itself: a plan
+applied with :func:`~finetuning_scheduler.strategies.plan.shard_model` (below) may ask for it.
+
+**The PyTorch API**: :func:`~finetuning_scheduler.strategies.plan.shard_model` applies a plan in this format (with the
+same ``fsdp_default_kwargs``, ``class:`` keys, ``ignored_params`` and the ``composable`` ``act_ckpt`` mode) to a plain
+PyTorch model, then shards the root module, so no parameter is left outside an FSDP unit. When
+:class:`~finetuning_scheduler.FTSController` validates the schedule against the sharded model, it warns about each FSDP
+unit whose parameters thaw in different phases: such a unit all-gathers and reduce-scatters all of them from the
+earliest of those phases on, so giving the earlier-thawing modules their own units saves that communication.
 
 **act_ckpt**: For specified module/patterns (or ``fsdp_default_kwargs``), ``act_ckpt`` allows one to pass a string alias
 specifying the use of the desired activation checkpointing (AC) API as well as an optional ``Dict`` of activation
