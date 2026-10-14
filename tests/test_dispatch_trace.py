@@ -115,6 +115,69 @@ def test_resume_at_a_later_depth(tmp_path):
     check_snapshot("resume", resumed.dispatch_trace)
 
 
+class ControllerStepFTS(TracingFinetuningScheduler):
+    """Shadows the callback's transition through a host-driven controller (``attach_controller``): ``step`` hands
+    the transition the callback decided on to ``request_advance`` (or a resume to ``resume_at``), then does what
+    the callback's ``step`` does after it."""
+
+    _controller = None
+
+    def step(self):
+        from finetuning_scheduler.lightning.controller_bridge import attach_controller
+        from tests.helpers.dispatch_trace import _record
+
+        _record(self, "callback", "step", (), {})
+        if self._controller is None:
+            self._controller = attach_controller(self)
+        if self._fts_state._resume_fit_from_ckpt:
+            self._controller.resume_at(self.curr_depth)
+        else:
+            self._controller._depth = self.curr_depth - 1  # the callback advanced its own depth first
+            self._controller.request_advance()
+        if self.depth_remaining == 0 and not self.epoch_transitions_only:
+            self.trainer.early_stopping_callback.final_phase = True
+        self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
+
+
+@pytest.mark.parametrize("scenario", ["epoch_driven", "reinitialization", "early_stopping_driven", "restore_best",
+                                      "legacy_naming_adapter", "resume"])
+def test_transitions_through_a_host_driven_controller_dispatch_as_the_callback_does(tmp_path, scenario):
+    """The controller bridges (#85): the same scenarios, their transitions sequenced by the controller and carried
+    out by ``LightningPhaseExecutor`` and ``FTSCheckpointPolicy``, dispatch exactly as the callback's own
+    ``step``."""
+    seed_everything(42)
+    if scenario == "resume":
+        losses, snapshot = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5], tmp_path / "snap.ckpt"
+        first = ControllerStepFTS(ft_schedule=THREE_PHASES, epoch_transitions_only=True, custom_strategy_adapters=BASE)
+        with pytest.raises(RuntimeError, match="interrupted"):
+            _fit(tmp_path, first, ScriptedLossModel(losses), 6,
+                 extra=[FTSCheckpoint(monitor="val_loss", dirpath=tmp_path / "a", save_top_k=1),
+                        SnapshotAndStop(snapshot=snapshot, snap_at=3, stop_after=3)])
+        seed_everything(42)
+        fts = ControllerStepFTS(ft_schedule=THREE_PHASES, epoch_transitions_only=True, custom_strategy_adapters=BASE)
+        _fit(tmp_path, fts, ScriptedLossModel(losses), 6,
+             extra=[FTSCheckpoint(monitor="val_loss", dirpath=tmp_path / "b", save_top_k=1)], ckpt_path=snapshot)
+    elif scenario == "legacy_naming_adapter":
+        fts = ControllerStepFTS(ft_schedule=LOGICAL_SCHEDULE, epoch_transitions_only=True,
+                                custom_strategy_adapters=LEGACY)
+        _fit(tmp_path, fts, LogicalNamesBoringModel(), 4)
+    elif scenario in ("epoch_driven", "reinitialization"):
+        schedule, model = (THREE_PHASES, ScriptedLossModel([1.0] * 6)) if scenario == "epoch_driven" else (
+            REINIT, ScheduledLossModel([1.0, 0.9, 0.8, 0.7, 0.6, 0.5]))
+        fts = ControllerStepFTS(ft_schedule=schedule, epoch_transitions_only=True, custom_strategy_adapters=BASE)
+        _fit(tmp_path, fts, model, 6)
+    else:
+        losses = {"early_stopping_driven": [1.0, 1.0, 0.5, 0.5, 0.25, 0.25, 0.25],
+                  "restore_best": [1.0, 2.0, 0.5, 3.0, 0.25, 0.3, 0.3]}[scenario]
+        schedule = {d: {k: v for k, v in p.items() if k != "max_transition_epoch"} for d, p in THREE_PHASES.items()}
+        fts = ControllerStepFTS(ft_schedule=schedule, custom_strategy_adapters=BASE)
+        extra = [FTSEarlyStopping(monitor="val_loss", patience=1, min_delta=0.0),
+                 FTSCheckpoint(monitor="val_loss", dirpath=tmp_path / "ckpts", save_top_k=1)]
+        _fit(tmp_path, fts, ScriptedLossModel(losses), len(losses), extra=extra)
+    assert fts._controller is not None and fts._controller.curr_depth == fts.curr_depth
+    check_snapshot(scenario, fts.dispatch_trace)
+
+
 def test_schedule_generation(tmp_path):
     fts = TracingFinetuningScheduler(gen_ft_sched_only=True, custom_strategy_adapters=BASE)
     with pytest.raises(SystemExit):
