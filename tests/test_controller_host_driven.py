@@ -74,15 +74,16 @@ def test_request_advance_sequences_the_transition_through_the_executor():
     assert executor.calls == [("configure_phase", 1, 0, False, True), ("after_transition", 1)]
 
 
-def test_a_host_restoring_policy_restores_after_the_depth_advances():
-    """As the host's own restore expects, the policy restores once the depth is the new phase's; the phase is then
-    configured from the restored depth."""
+def test_a_host_restoring_policy_restores_before_the_end_hooks():
+    """As for a controller-driven controller, the best state is restored before the ending phase's end hooks run,
+    so they see it under either host; the new phase is then configured from the restored depth."""
     seen = []
     policy = HostRestoringPolicy(best_depth=0, seen=seen)
     fts, executor = _attached(checkpoint=policy)
     policy.controller = fts
+    fts.add_phase_hook(lambda e: seen.append(("end", e.depth)), when="end")
     fts.request_advance()
-    assert seen == [("restore", 1)] and fts.restored_count == 1
+    assert seen == [("restore", 0), ("end", 0)] and fts.restored_count == 1
     assert executor.calls[0] == ("configure_phase", 1, 0, True, True)
 
 

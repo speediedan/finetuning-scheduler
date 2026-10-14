@@ -3194,3 +3194,33 @@ def test_best_checkpoint_before_an_optimizer_reinitialization(tmpdir, restore_be
     # the restore rebuilt the optimizer (its state counts phase 2's 4 steps only), rather than keep phase 1's (6)
     steps = int(optimizer.state[model.model[1].weight]["step"])
     assert steps == (4 if restore_best else 6)
+
+
+def test_the_fsdp_adapters_optimizer_restore_patch_ends_with_its_fit(tmpdir):
+    """The FSDP adapter disables Lightning's optimizer restoration for its own fit only: afterwards, every strategy
+    restores optimizers again (#111)."""
+    from lightning.pytorch.strategies.strategy import Strategy
+
+    original = vars(Strategy)["lightning_restore_optimizer"]
+    _, raise_cond = EXPECTED_MOCK_STRATEGY_RESULTS["cust_stgy_adapter_found"]
+    fts = TestFinetuningScheduler(mock_strategy="cust_stgy_adapter_found")
+    trainer = Trainer(default_root_dir=tmpdir, callbacks=[fts], accelerator="cpu", strategy="test_strategy", devices=1)
+    with pytest.raises(**raise_cond):  # the fit fails after the adapter patched the strategy's class
+        trainer.fit(FinetuningSchedulerBoringModel())
+    assert "lightning_restore_optimizer" not in vars(type(trainer.strategy))
+    assert trainer.strategy.lightning_restore_optimizer is True
+    assert vars(Strategy)["lightning_restore_optimizer"] is original
+
+
+def test_a_resumed_fit_replays_the_phases_after_its_best_checkpoint(tmpdir):
+    """Resumed at phase 1 with the best checkpoint from phase 0, the next transition restores that checkpoint and
+    replays phases 1 and 2 onto its optimizer state, so phase 1's parameters keep their optimizer group (#110)."""
+    seed_everything(42)
+    snapshot = Path(tmpdir) / "snap.ckpt"
+    losses = [1.0, 2.0, 2.0, 2.0]  # the phase-0 checkpoint stays the best
+    _scripted_fit(tmpdir, losses, (1, 2), 1, snapshot=snapshot, snap_at=1, stop_after=1)
+    model, trainer, _ = _scripted_fit(tmpdir, losses, (1, 2), 1, resume=snapshot, resume_via="arg")
+    groups = trainer.optimizers[0].param_groups
+    names = [{n for n, p in model.named_parameters() if any(p is q for q in g["params"])} for g in groups]
+    assert names == [{"model.2.weight", "model.2.bias"}, {"model.1.weight", "model.1.bias"},
+                     {"model.0.weight", "model.0.bias"}]
