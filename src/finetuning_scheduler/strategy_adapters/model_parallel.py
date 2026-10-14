@@ -18,7 +18,7 @@ for PyTorch's distributed composable and Tensor Parallel APIs.
 
 """
 from typing import Any  # Dict used for runtime isinstance() checks
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from functools import wraps
 import re
 from dataclasses import dataclass, field
@@ -305,7 +305,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                 )
 
     @staticmethod
-    def _plan_key_modules(plan_n: str, named_modules: dict[str, torch.nn.Module]) -> list[str]:
+    def _plan_key_modules(plan_n: str, named_modules: Mapping[str, torch.nn.Module]) -> list[str]:
         """The names of the modules an ``fsdp_plan`` key selects, in module order: a module name, a regex matched
         from the start of each module name, or ``class:<name>`` for every module that is an instance of a class
         with that name (``class:<module>.<qualname>`` to name it unambiguously), as ``ModuleWrapPolicy``
