@@ -351,7 +351,8 @@ class FTSController:
         self._run_hooks("start", 0)
         rank_zero_info(f"Fine-tuning schedule set up with {len(self._schedule)} phases (max_depth {self._max_depth}).")
 
-    def attach(self, executor: PhaseExecutor, schedule: Mapping[int, Mapping[str, Any]]) -> None:
+    def attach(self, executor: PhaseExecutor, schedule: Mapping[int, Mapping[str, Any]], *,
+               run_start_hooks: bool = True) -> None:
         """Set up for a training host that owns the loop, instead of :meth:`setup` (experimental).
 
         The host has already validated ``schedule``, thawed phase 0 and built the optimizer and lr schedulers, which
@@ -365,10 +366,13 @@ class FTSController:
 
         Args:
             executor: Carries out the phases the controller decides on.
-            schedule: The schedule, as the host validated it.
+            schedule: The schedule, as the host validated it. Each phase's ``phase_config`` is handed to phase hooks.
+            run_start_hooks: Run phase 0's start hooks now (``False`` when the host is resuming a run at a later
+                phase, which :meth:`resume_at` puts the controller at).
 
         Raises:
-            FTSConfigurationError: If the controller is already set up, or ``restore_best`` has no checkpoint policy.
+            FTSConfigurationError: If the controller is already set up, ``restore_best`` has no checkpoint policy, or
+                gates are registered.
         """
         if self._is_setup:
             raise FTSConfigurationError("`FTSController` is already set up.")
@@ -380,10 +384,12 @@ class FTSController:
         self._view = self._resolve_view()
         self._view_roles_at_setup = self._view.view_roles()
         self._schedule = {int(d): dict(p) for d, p in schedule.items()}
+        self._phase_configs = {d: p["phase_config"] for d, p in self._schedule.items() if "phase_config" in p}
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
         self._fingerprints.setdefault(0, [])
         self._is_setup = True
-        self._run_hooks("start", 0)
+        if run_start_hooks:
+            self._run_hooks("start", 0)
 
     def request_advance(self, reason: str | None = None) -> None:
         """Advance a host-driven controller (see :meth:`attach`) to the next phase, which the host decided on.
@@ -871,8 +877,8 @@ class FTSController:
         core_phase.reshard_fsdp_modules(self.model)
         schedulers = [s for s, _ in self._host.get_lr_schedulers()]
         pre_state = core_optim.capture_lr_state(schedulers[0] if schedulers else None, self.optimizer)
-        # a host-driven controller restores after the depth advances, as the host's own restore expects
-        restored_depth = self._restore_best_state() if self._restore_best and not self._host_driven else None
+        # restore before the end hooks, so they see the best state under either host
+        restored_depth = self._restore_best_state() if self._restore_best else None
         self._end_phase(prev)
         if not self._run_gates(prev, final=False):
             return
@@ -881,8 +887,6 @@ class FTSController:
         self._fingerprints.setdefault(self._depth, [])
         if self._checkpoint is not None and not self._host_driven:
             self._pin_boundary(self._depth)
-        if self._restore_best and self._host_driven:
-            restored_depth = self._restore_best_state()
         self._run_hooks("start", self._depth)
         self._apply_promotions(self._depth)
         if restored_depth is not None:
