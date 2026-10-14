@@ -134,7 +134,7 @@ jobs:
     - bash: |
         set -e
         source scripts/gpu_lease_wrap.sh
-        ci_host_lease_hold /gpu_leases /gpu_lease_tool /tmp/azp_host_lease.pid 2400 "azure-$(Build.BuildId)" \
+        ci_host_lease_hold /gpu_leases /gpu_lease_tool /tmp/azp_host_lease.pid 3600 "azure-$(Build.BuildId)" \
           --gpus all --cpu-heavy
         # for a step that runs after a failed one (succeededOrFailed): it may use the GPUs only if this step succeeded
         echo "##vso[task.setvariable variable=leaseHeld]true"

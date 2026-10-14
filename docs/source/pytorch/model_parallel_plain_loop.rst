@@ -49,8 +49,8 @@ Each piece of the Lightning example's configuration has a direct equivalent:
    * - ``apply_tp_plan`` in ``LightningModule.configure_model``
      - ``apply_tp_plan`` from ``fts_examples/model_parallel/parallel_plans.py``, applied before the FSDP2 plan
    * - ``strategy_adapter_cfg``'s ``fsdp_plan`` and ``fsdp_default_kwargs``
-     - ``apply_fsdp_plan(model, mesh["data_parallel"], fsdp_plan, fsdp_default_kwargs)``, which takes the same plan
-       and then shards the root module
+     - :func:`~finetuning_scheduler.strategies.plan.shard_model` (``shard_model(model, mesh["data_parallel"],
+       fsdp_plan, default_kwargs=fsdp_default_kwargs)``), which takes the same plan and then shards the root module
    * - Materialization by the strategy, then ``init_weights`` in ``on_train_start``
      - ``model.to_empty(device=...)``, then ``init_weights()``
    * - ``FinetuningScheduler(ft_schedule=..., max_depth=2)``
@@ -78,8 +78,9 @@ FSDP2 plan; only then are the sharded weights allocated and initialized:
 .. literalinclude:: ../../../src/fts_examples/model_parallel/torch_mp_example.py
    :pyobject: build_model
 
-``apply_fsdp_plan`` shards the modules the plan names (here every ``TransformerBlock`` and the output layer, with
-composable activation checkpointing), then the root module. Sharding the root matters in a plain loop:
+``shard_model`` shards the modules the plan selects (here the output layer, the final norm and every
+``TransformerBlock``, the last by a ``class:`` key, with composable activation checkpointing), then the root module.
+Sharding the root matters in a plain loop:
 
 - The controller refuses ``DistributedDataParallel`` (see :ref:`plain-pytorch-loop`), so ``fully_shard`` is what
   synchronizes gradients across data-parallel ranks. A parameter outside every ``fully_shard`` call, such as the
@@ -87,6 +88,12 @@ composable activation checkpointing), then the root module. Sharding the root ma
   would report the divergence.
 - With the root sharded, every parameter is a ``DTensor``, so no optimizer parameter group mixes ``DTensor`` and plain
   parameters, which some optimizer implementations do not support.
+
+The final norm gets its own unit for a different reason. The example reshards every unit after forward, the root
+included (``reshard_after_forward: True``). Left to the root's unit, the norm (phase 0) would sit beside the embeddings,
+which the schedule thaws two phases later, and from phase 0 on every backward pass would all-gather the frozen
+embeddings again. The controller warns about any FSDP unit that reshards after forward and holds parameters thawing in
+different phases when it validates the schedule against the sharded model.
 
 The Training Loop
 *****************

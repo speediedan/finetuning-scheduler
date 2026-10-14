@@ -23,6 +23,7 @@ are not documented as public API.
     strategies.unsharded
     strategies.dtensor
     strategies.fsdp2
+    strategies.plan
     testing.conformance
     testing.fixtures
     core.schedule

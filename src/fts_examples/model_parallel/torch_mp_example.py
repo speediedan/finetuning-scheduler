@@ -47,7 +47,8 @@ from torch.utils.data import DataLoader, DistributedSampler
 from finetuning_scheduler import FTSController, PlateauTransition
 from finetuning_scheduler.core.checkpoint import BestCheckpoint
 from finetuning_scheduler.core.optim import resolve_class_path
-from fts_examples.model_parallel.parallel_plans import apply_fsdp_plan, apply_tp_plan, RandomTokenDataset
+from finetuning_scheduler.strategies.plan import shard_model
+from fts_examples.model_parallel.parallel_plans import apply_tp_plan, RandomTokenDataset
 from fts_examples.model_parallel.torchtitan_llama import ModelCfg, Transformer
 
 EXAMPLE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -109,7 +110,7 @@ def build_model(cfg: dict, mesh: DeviceMesh, device: torch.device) -> nn.Module:
         apply_tp_plan(model.model, device_mesh=mesh, loss_parallel=cfg["loss_parallel"])
     if mesh["data_parallel"].size() > 1 or cfg["fsdp_plan"]:
         # the root is sharded last, so no parameter is left unsharded (and unsynchronized across data-parallel ranks)
-        apply_fsdp_plan(model, mesh["data_parallel"], cfg["fsdp_plan"], cfg["fsdp_default_kwargs"])
+        shard_model(model, mesh["data_parallel"], cfg["fsdp_plan"], default_kwargs=cfg["fsdp_default_kwargs"])
     model.to_empty(device=device)
     with torch.no_grad():
         model.model.init_weights()

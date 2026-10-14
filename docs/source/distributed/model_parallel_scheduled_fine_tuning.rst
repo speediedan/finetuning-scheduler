@@ -71,8 +71,19 @@ synchronizes it.
 **CPU offload**: Lightning's ``ModelParallelStrategy`` moves the model to the GPU after ``configure_model``, which
 FSDP2's ``CPUOffloadPolicy`` (shards kept on the CPU) cannot follow, so a plan that asks for CPU offload
 (``cpu_offload_policy``, or an ``offload_policy`` that offloads to the CPU) is refused. CPU offload works with the
-PyTorch API (:class:`~finetuning_scheduler.FTSController`), where the training loop places the model itself:
-``fully_shard(module, offload_policy=CPUOffloadPolicy())``.
+PyTorch API (:class:`~finetuning_scheduler.FTSController`), where the training loop places the model itself: a plan
+applied with :func:`~finetuning_scheduler.strategies.plan.shard_model` (below) may ask for it.
+
+**The PyTorch API**: :func:`~finetuning_scheduler.strategies.plan.shard_model` applies a plan in this format (with the
+same ``fsdp_default_kwargs``, ``class:`` keys, ``ignored_params`` and the ``composable`` ``act_ckpt`` mode) to a plain
+PyTorch model, then shards the root module, so no parameter is left outside an FSDP unit.
+
+**Units spanning phases**: when FTS validates the schedule against an FSDP2 model (under Lightning or
+:class:`~finetuning_scheduler.FTSController`), it warns about each FSDP unit that reshards after forward and holds
+parameters thawing in different phases. From the earliest of those phases on, such a unit's backward pass all-gathers
+all of its parameters again, those not yet trained included, so giving the earlier-thawing modules their own units (or
+not resharding the unit after forward) saves that communication. A unit kept unsharded after forward, the root by
+default, pays no such cost and is not reported.
 
 **act_ckpt**: For specified module/patterns (or ``fsdp_default_kwargs``), ``act_ckpt`` allows one to pass a string alias
 specifying the use of the desired activation checkpointing (AC) API as well as an optional ``Dict`` of activation
@@ -317,3 +328,23 @@ As you can observe in (``./mp_examples.py``) our TP plan in this example is appl
 
     cd ./fts_examples/model_parallel
     python mp_examples.py fit --config config/fts_tp_plan.yaml
+
+Resuming an FSDP1 Checkpoint under FSDP2
+****************************************
+A fine-tuning run checkpointed under FSDP1 (:py:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`) can resume
+under ``ModelParallelStrategy`` with an ``fsdp_plan``, carrying over the model, optimizer and fine-tuning schedule state:
+
+- A full checkpoint (``state_dict_type="full"``, FSDP1's default) resumes directly: pass its path as ``ckpt_path``.
+- A sharded checkpoint (``state_dict_type="sharded"``, a directory) resumes after consolidation into a full one:
+
+  .. code-block:: bash
+
+      python -m lightning.pytorch.utilities.consolidate_checkpoint <checkpoint directory> --output_file <file>
+
+The resumed fit keeps the FSDP1 run's best checkpoint, which FTS restores at the next phase transition. When it is a
+sharded one, consolidate it too, with the utility's default output (``<best checkpoint directory>.consolidated``,
+beside it): FTS restores that file in its place. When it is missing, a resume that will restore the best checkpoint
+(with ``restore_best``, before the last phase) is refused up front, naming the command.
+
+The checkpoint's optimizer must have state: Lightning's ``ModelParallelStrategy`` cannot load a single-file checkpoint
+whose optimizer state is empty (plain ``SGD`` without momentum, for example).

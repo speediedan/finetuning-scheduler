@@ -35,6 +35,7 @@ from lightning.pytorch.trainer.connectors.logger_connector.result import _Result
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import phase as core_phase
 from finetuning_scheduler.core import transitions as core_transitions
+from finetuning_scheduler.core.views import canonical_fqn
 from finetuning_scheduler.lightning.fts_supporters import (
     CallbackDepMixin,
     FTSEarlyStopping,
@@ -583,15 +584,20 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             )
         # if restarting across multiple depths, need to ensure we're restoring optimizer state appropriately
         # by resetting optimizer groups and allowing state dict to be reset commensurate w/ ckpt state
+        # the saved groups name parameters as the saving run's wrappers did (FSDP1's `_fsdp_wrapped_module.`, for a
+        # checkpoint resumed under FSDP2), so both sides are matched by wrapper-free name
+        named_params = {canonical_fqn(n): p for n, p in self.pl_module.named_parameters()}
         for opt_idx, optimizer in enumerate(self.trainer.optimizers if not stale else []):
-            optimizer.param_groups = BaseFinetuning._apply_mapping_to_param_groups(
-                self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"][opt_idx], dict(self.pl_module.named_parameters())
-            )
+            saved_pgs = [{**g, "params": [canonical_fqn(n) for n in g["params"]]}
+                         for g in self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"][opt_idx]]
+            optimizer.param_groups = BaseFinetuning._apply_mapping_to_param_groups(saved_pgs, named_params)
             if self.strategy_adapter.using_sharded_optimizer:
                 ScheduleImplMixin._repartition_sharded_optim(optimizer)  # type: ignore[arg-type]
         # we're restoring everything but callbacks and loops, otherwise, checkpoint_connector.restore() could be used
         assert self.trainer.checkpoint_callback is not None
         checkpoint_path = self.trainer.checkpoint_callback.best_model_path  # type: ignore[attr-defined]
+        if (adapter := getattr(self, "strategy_adapter", None)) is not None:
+            checkpoint_path = adapter.best_ckpt_path(checkpoint_path)
         try:
             self.trainer._checkpoint_connector.resume_start(checkpoint_path=checkpoint_path)
         except KeyError as ke:  # we may want to allow training to progress conditioned on context of restoration
@@ -1005,6 +1011,11 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         """
         # if resuming from a ckpt, we need to sync fts_state
         if self._fts_state._resume_fit_from_ckpt:
+            # refuse a best checkpoint this strategy cannot restore now, rather than at the next phase transition (a
+            # fit that never restores it, without `restore_best` or resumed at its last phase, is left to proceed)
+            best_model_path = getattr(trainer.checkpoint_callback, "best_model_path", "")
+            if best_model_path and self.restore_best and self.depth_remaining > 0:
+                self.strategy_adapter.best_ckpt_path(best_model_path)
             self.step()
             self._fts_state._resume_fit_from_ckpt = False
         # increment ft_epoch on each train epoch

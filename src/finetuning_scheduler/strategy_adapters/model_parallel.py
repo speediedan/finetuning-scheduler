@@ -17,10 +17,10 @@ A :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that extends 
 for PyTorch's distributed composable and Tensor Parallel APIs.
 
 """
+import os
 from typing import Any  # Dict used for runtime isinstance() checks
 from collections.abc import Callable, Mapping, Sequence
 from functools import wraps
-import re
 from dataclasses import dataclass, field
 
 import torch
@@ -35,11 +35,10 @@ from lightning.fabric.utilities import rank_zero_warn, rank_zero_info
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 
 from finetuning_scheduler.strategies.base import DistributedAdapter, select_distributed_adapter
+from finetuning_scheduler.strategies.plan import plan_key_modules, resolve_fsdp_plan, resolve_ignored_params
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 from finetuning_scheduler.strategy_adapters._wrap_utils import _compose_ncac
 
-# an `fsdp_plan` key with this prefix selects modules by class rather than by name
-CLASS_SELECTOR = "class:"
 
 
 class ActCkptEnum(LightningEnum):
@@ -66,6 +65,23 @@ class ActCkptCfg:
             self._func = offload_wrapper
         elif self.mode == ActCkptEnum.WRAPPED:
             self._func = checkpoint_wrapper
+
+
+def _is_fsdp1_sharded_checkpoint(path: str) -> bool:
+    """Whether ``path`` is a local checkpoint directory ``FSDPStrategy`` wrote with ``state_dict_type="sharded"``:
+
+    Lightning's metadata file beside distributed checkpoint shards keyed under ``model`` (``ModelParallelStrategy``
+    keys them under ``state_dict``).
+    """
+    if not (path and os.path.isdir(path) and os.path.isfile(os.path.join(path, "meta.pt"))):
+        return False
+    from torch.distributed.checkpoint import FileSystemReader
+
+    try:
+        keys = FileSystemReader(path).read_metadata().state_dict_metadata
+    except Exception:  # not a distributed checkpoint this reader understands; leave the load to report it
+        return False
+    return any(k.startswith("model.") for k in keys) and not any(k.startswith("state_dict.") for k in keys)
 
 
 class ModelParallelStrategyAdapter(StrategyAdapter):
@@ -226,21 +242,6 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         self._distributed_adapter = select_distributed_adapter(self.pl_module)
         self._validate_fsdp_fts_config()
 
-    def _maybe_update_fsdp_plan(self, resolved_modules: dict, kwargs: dict, name: str) -> bool:
-        # right now, the only explicitly disallowed types are the container types w/o a forward: `ModuleList``
-        #  and `ModuleDict``
-        # NB there are other ``fully_shard`` distributed API constraints that the user may need to validate, for
-        # instance, shared parameters must belong to the same ``fully_shard`` instance
-        # (https://bit.ly/fsdp_dapi_shared_constraint)
-        if isinstance(self.pl_module.get_submodule(name), (torch.nn.ModuleList, torch.nn.ModuleDict)):
-            rank_zero_warn(f"Provided FSDP module plan includes a directive to apply the FSDP API to ('{name}') which"
-                           f" has the unsupported type '{type(self.pl_module.get_submodule(name))}'. This"
-                           " directive will be pruned and ignored.")
-            return False
-        kwargs = ModelParallelStrategyAdapter._resolve_cfg_aliases(kwargs)  # default policy aliases already resolved
-        resolved_modules[name] = {**self.fsdp_default_kwargs, **kwargs}
-        return True
-
     @staticmethod
     def _resolve_cfg_aliases(config_dict: dict) -> dict:
         """Resolve any provided convenience FSDP default kwargs."""
@@ -264,19 +265,8 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         # TODO: renable coverage below when upstream cpu offload issue addressed
         if self.fsdp_default_kwargs:  # pragma: no cover
             self.fsdp_default_kwargs = ModelParallelStrategyAdapter._resolve_cfg_aliases(self.fsdp_default_kwargs)
-        named_modules = dict(self.pl_module.named_modules())
-        resolved_modules: dict[str, dict] = {}
-        for plan_n, kwargs in self.fsdp_plan.items():
-            matched = ModelParallelStrategyAdapter._plan_key_modules(plan_n, named_modules)
-            if not matched:
-                what = "class" if plan_n.startswith(CLASS_SELECTOR) else "module or regex"
-                raise MisconfigurationException(
-                    f"The {what} '{plan_n}' specified in `fsdp_plan` did not match any named modules "
-                    "in the provided model."
-                )
-            for n in matched:
-                self._maybe_update_fsdp_plan(resolved_modules, kwargs, n)  # skips (with a warning) unsupported types
-        self.fsdp_plan = resolved_modules
+        resolved = resolve_fsdp_plan(self.pl_module, self.fsdp_plan, self.fsdp_default_kwargs, warn=rank_zero_warn)
+        self.fsdp_plan = {n: ModelParallelStrategyAdapter._resolve_cfg_aliases(kw) for n, kw in resolved.items()}
 
     def _refuse_cpu_offload(self) -> None:
         """Refuse a CPU offload policy in the plan, which this strategy cannot run.
@@ -303,21 +293,9 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
 
     @staticmethod
     def _plan_key_modules(plan_n: str, named_modules: Mapping[str, torch.nn.Module]) -> list[str]:
-        """The names of the modules an ``fsdp_plan`` key selects, in module order: a module name, a regex matched
-        from the start of each module name, or ``class:<name>`` for every module that is an instance of a class
-        with that name (``class:<module>.<qualname>`` to name it unambiguously), as ``ModuleWrapPolicy``
-        selects."""
-        if plan_n.startswith(CLASS_SELECTOR):
-            ref = plan_n[len(CLASS_SELECTOR):].strip()
-
-            def _is_instance(m: torch.nn.Module) -> bool:
-                return any(ref in (c.__name__, f"{c.__module__}.{c.__qualname__}") for c in type(m).__mro__)
-
-            return [n for n, m in named_modules.items() if _is_instance(m)]
-        if plan_n in named_modules:
-            return [plan_n]
-        mpat = re.compile(fr"{plan_n}")
-        return [n for n in named_modules if mpat.match(n)]
+        """The names of the modules an ``fsdp_plan`` key selects (see
+        :func:`~finetuning_scheduler.strategies.plan.plan_key_modules`)."""
+        return plan_key_modules(plan_n, named_modules)
 
     def _fts_auto_configure_model(self) -> None:
         """A wrapper for configuration-driven composable distributed API configurations that may be composed with
@@ -361,53 +339,34 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
             assert isinstance(self.pl_module.get_submodule(n), ActivationWrapper)
         fully_shard(self.pl_module.get_submodule(n), mesh=self.pls_handle.device_mesh["data_parallel"], **kwargs)
 
-    def _shard_kwargs(self, n: str) -> dict[str, Any]:
-        """The ``fully_shard`` kwargs for the plan's module ``n``, with an ``ignored_params`` given by name
-        resolved to the parameters it names.
-
-        ``ignored_params`` may be a parameter name or regex (matched from the start of each name, as schedule entries
-        are), or a list of them, so a plan written in YAML can name the parameters ``fully_shard`` leaves unsharded.
-        Names are the ``LightningModule``'s own parameter names, resolved among the parameters of the module ``n``
-        (``fully_shard`` ignores only those) when the plan is applied, since ``configure_model`` may create the
-        parameters. A collection of parameters is passed through as a set.
-
-        FSDP2 neither shards nor reduces the gradients of ignored parameters, so a schedule that thaws one trains it
-        independently on each rank unless something else synchronizes it.
+    def best_ckpt_path(self, path: str) -> str:
+        """The best checkpoint to restore: ``path``, unless it is an FSDP1 (``FSDPStrategy``) sharded checkpoint,
+        which ``ModelParallelStrategy`` cannot load. A fit resumed from an FSDP1 checkpoint keeps that run's
+        ``best_model_path``; for a sharded one, its consolidation with Lightning's ``consolidate_checkpoint`` utility
+        (written by default beside it, as ``<path>.consolidated``) is restored in its place.
 
         Raises:
-            MisconfigurationException: If a name or regex in ``ignored_params`` matches no parameter of the module.
+            MisconfigurationException: If ``path`` is an FSDP1 sharded checkpoint with no consolidation beside it.
         """
-        kwargs = dict(self.fsdp_plan[n])
-        names = kwargs.get("ignored_params")
-        if names is None:
-            return kwargs
-        names = [names] if isinstance(names, str) else list(names)  # a generator would be consumed by the check below
-        if all(isinstance(p, torch.nn.Parameter) for p in names):
-            kwargs["ignored_params"] = set(names)
-            return kwargs
-        if not all(isinstance(p, str) for p in names):
-            raise MisconfigurationException(
-                f"The `ignored_params` of the `fsdp_plan` entry for '{n}' mixes parameter names and parameters; give "
-                "either names (or regexes) or parameters."
-            )
-        own = set(self.pl_module.get_submodule(n).parameters())
-        # every name of a tied parameter, not only the first registered one
-        named_params = {pn: p for pn, p in self.pl_module.named_parameters(remove_duplicate=False) if p in own}
-        resolved: set[torch.nn.Parameter] = set()
-        for pattern in names:
-            if pattern in named_params:
-                matched = [named_params[pattern]]
-            else:
-                mpat = re.compile(fr"{pattern}")
-                matched = [p for pn, p in named_params.items() if mpat.match(pn)]
-            if not matched:
-                raise MisconfigurationException(
-                    f"The parameter name or regex '{pattern}' in the `ignored_params` of the `fsdp_plan` entry for "
-                    f"'{n}' did not match any parameter of that module."
-                )
-            resolved.update(matched)
-        kwargs["ignored_params"] = resolved
-        return kwargs
+        if not _is_fsdp1_sharded_checkpoint(path):
+            return path
+        consolidated = f"{path.rstrip(os.sep)}.consolidated"
+        if os.path.isfile(consolidated):
+            rank_zero_info(f"Restoring '{consolidated}', the consolidation of the FSDP1 sharded best checkpoint "
+                           f"'{path}'.")
+            return consolidated
+        raise MisconfigurationException(
+            f"The best checkpoint '{path}' is an FSDP1 (`FSDPStrategy`) sharded checkpoint, which"
+            " `ModelParallelStrategy` cannot load. Consolidate it with"
+            f" `python -m lightning.pytorch.utilities.consolidate_checkpoint {path}`, which writes '{consolidated}',"
+            " restored in its place."
+        )
+
+    def _shard_kwargs(self, n: str) -> dict[str, Any]:
+        """The ``fully_shard`` kwargs for the plan's module ``n``, with an ``ignored_params`` given by name
+        resolved among the module's own parameters (see
+        :func:`~finetuning_scheduler.strategies.plan.resolve_ignored_params`)."""
+        return resolve_ignored_params(self.pl_module, n, self.fsdp_plan[n])
 
     def _any_noncomposable_AC(self) -> tuple[str, type] | None:
         for n, m in self.pl_module.named_modules():
