@@ -65,6 +65,84 @@ def test_phase_hooks_receive_each_phases_config(tmp_path):
         fts.add_phase_hook(lambda e: None, when="middle")
 
 
+def test_end_hooks_see_the_restored_best_state(tmp_path):
+    """As under the PyTorch API, the best checkpoint is restored before a phase's end hooks run."""
+    import torch
+    from lightning.pytorch.callbacks import Callback
+
+    class BestWeights(Callback):
+        def on_train_epoch_end(self, trainer, pl_module):
+            if trainer.current_epoch == 0:  # the best epoch (losses 1.0, then 2.0)
+                self.best = pl_module.model[2].weight.detach().clone()
+
+    seed_everything(42)
+    seen = {}
+    schedule = {**SCHEDULE, 0: {**SCHEDULE[0], "max_transition_epoch": 2}}
+    fts = FinetuningScheduler(ft_schedule=schedule, epoch_transitions_only=True)
+    fts.add_phase_hook(lambda e: seen.setdefault(e.depth, e.controller.model.model[2].weight.detach().clone()),
+                       when="end")
+    best = BestWeights()
+    _fit(tmp_path, fts, extra=[best, FTSCheckpoint(monitor="val_loss", dirpath=tmp_path / "c", save_top_k=1)],
+         losses=[1.0, 2.0, 2.0])
+    assert torch.equal(seen[0], best.best)
+
+
+def test_hooks_survive_a_subclass_on_fit_start_without_super(tmp_path):
+    """A subclass whose ``on_fit_start`` does not call ``super()`` gets its controller, with its phase hooks, at
+    the first transition."""
+
+    class NoSuperFitStart(FinetuningScheduler):
+        def on_fit_start(self, trainer, pl_module):
+            self.strategy_adapter.on_before_fts_fit_start()
+
+    seed_everything(42)
+    events = []
+    fts = NoSuperFitStart(ft_schedule=SCHEDULE, epoch_transitions_only=True)
+    fts.add_phase_hook(lambda e: events.append(e.depth))
+    _fit(tmp_path, fts)
+    assert 1 in events and 2 in events
+
+
+def test_the_controller_follows_the_callbacks_depth():
+    """The callback's depth is authoritative: before advancing, a controller behind it is synced to it."""
+    from types import SimpleNamespace
+
+    advanced = []
+    controller = SimpleNamespace(curr_depth=0, _depth=0, request_advance=lambda: advanced.append(controller._depth))
+    fts = FinetuningScheduler(ft_schedule=SCHEDULE)
+    fts._fts_controller = controller
+    fts._fts_state._curr_depth = 2  # set by a subclass, two phases on
+    fts._controller_step()
+    assert advanced == [1]
+
+
+def test_teardown_reaches_the_strategy_adapter():
+    """A fit that ends normally (``teardown``) or fails (``on_exception``) lets the adapter undo its changes."""
+    from types import SimpleNamespace
+
+    calls = []
+    fts = FinetuningScheduler(ft_schedule=SCHEDULE)
+    fts.strategy_adapter = SimpleNamespace(on_fts_teardown=lambda: calls.append(1))
+    fts.teardown(None, None, "fit")
+    fts.on_exception(None, None, RuntimeError("x"))
+    assert calls == [1, 1]
+
+
+def test_a_left_over_restore_patch_is_not_taken_for_the_original():
+    """If an earlier fit's teardown never ran, the next fit's adapter does not record its leftover ``False`` as the
+    strategy class's own value, so its teardown removes the patch."""
+    from finetuning_scheduler.strategy_adapters import FSDPStrategyAdapter
+
+    class SomeStrategy:
+        pass
+
+    SomeStrategy.lightning_restore_optimizer = False  # left by an earlier fit
+    adapter = FSDPStrategyAdapter()
+    adapter._disable_lightning_optimizer_restore(SomeStrategy)
+    adapter.on_fts_teardown()
+    assert "lightning_restore_optimizer" not in vars(SomeStrategy)
+
+
 def test_a_resumed_fit_does_not_restart_phase_zero(tmp_path):
     """A fit resumed at phase 1 runs no start hooks for phases 0 or 1, and phase 1's group keeps its overrides
     (improving losses keep the best checkpoint at the resumed phase)."""

@@ -159,6 +159,15 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         return False
 
+    def _disable_lightning_optimizer_restore(self, strategy_cls: type) -> None:
+        """Disable Lightning's optimizer restoration on the running strategy's own class (a property, so not
+        settable on the instance) until the fit ends (see :meth:`on_fts_teardown`)."""
+        original = vars(strategy_cls).get("lightning_restore_optimizer", _UNSET)
+        if original is False:  # this patch, left by an earlier fit whose teardown did not run: not the original
+            original = _UNSET
+        self._restore_optimizer_patch = (strategy_cls, original)
+        setattr(strategy_cls, "lightning_restore_optimizer", self.lightning_restore_optimizer)
+
     def on_fts_teardown(self) -> None:
         """Undo the patch that disabled Lightning's optimizer restoration for this fit, so later fits in the
         process, with any strategy, restore optimizers as Lightning does."""
@@ -212,11 +221,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
            ``auto_wrap_policy``.
         """
         self._refuse_attached_view()
-        # hack to avoid subclassing FSDP strategy for this adapter: disable Lightning's optimizer restoration on the
-        # running strategy's own class (a property, so not settable on the instance), until the fit ends
-        strategy_cls = type(self.pls_handle)
-        self._restore_optimizer_patch = (strategy_cls, vars(strategy_cls).get("lightning_restore_optimizer", _UNSET))
-        setattr(strategy_cls, "lightning_restore_optimizer", self.lightning_restore_optimizer)
+        # hack to avoid subclassing FSDP strategy for this adapter
+        self._disable_lightning_optimizer_restore(type(self.pls_handle))
         setattr(self.pls_handle, "optimizer_state", self.optimizer_state)
         self._use_orig_params = self.pls_handle.kwargs.get("use_orig_params", False)
         # w/ `use_orig_params`, schedule/wrapping alignment constraints can be relaxed

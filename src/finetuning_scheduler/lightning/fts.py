@@ -430,8 +430,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         ``on_after_phase_transition``, as :meth:`_legacy_step` calls them."""
         from finetuning_scheduler.lightning.controller_bridge import attach_controller
 
-        if self._fts_controller is None:
-            self._fts_controller = attach_controller(self)
+        if self._fts_controller is None:  # a subclass's `on_fit_start` did not attach it
+            self._fts_controller = attach_controller(self, self._phase_hooks,
+                                                     run_start_hooks=not self._fts_state._resume_fit_from_ckpt)
         controller = self._fts_controller
         if self._fts_state._resume_fit_from_ckpt:
             controller.resume_at(self.curr_depth)

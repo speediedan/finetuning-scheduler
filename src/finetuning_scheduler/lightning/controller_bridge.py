@@ -28,6 +28,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from finetuning_scheduler.core.controller import FTSController
+from finetuning_scheduler.core.views import CanonicalView
 from finetuning_scheduler.lightning.host import LightningHost
 
 if TYPE_CHECKING:
@@ -135,8 +136,10 @@ def attach_controller(fts: "FinetuningScheduler", phase_hooks: Sequence[tuple] =
     """
     trainer, pl_module = fts.trainer, fts.pl_module
     assert isinstance(fts.ft_schedule, dict)
+    # the view the strategy adapter schedules through: an adapter that names parameters itself ignores an attached one
+    view = fts.strategy_adapter.tunable_view or CanonicalView(pl_module)
     controller = FTSController(
-        pl_module, optimizer=trainer.optimizers[0], host=LightningHost(trainer, pl_module),
+        pl_module, optimizer=trainer.optimizers[0], host=LightningHost(trainer, pl_module), view=view,
         checkpoint=FTSCheckpointPolicy(fts), restore_best=fts.restore_best, max_depth=fts.max_depth,
         reinit_optim_cfg=fts.reinit_optim_cfg, reinit_lr_cfg=fts.reinit_lr_cfg,
         compile_reset=False,  # the callback resets a compiled module itself, once its transition is complete

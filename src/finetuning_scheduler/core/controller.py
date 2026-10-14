@@ -877,8 +877,8 @@ class FTSController:
         core_phase.reshard_fsdp_modules(self.model)
         schedulers = [s for s, _ in self._host.get_lr_schedulers()]
         pre_state = core_optim.capture_lr_state(schedulers[0] if schedulers else None, self.optimizer)
-        # a host-driven controller restores after the depth advances, as the host's own restore expects
-        restored_depth = self._restore_best_state() if self._restore_best and not self._host_driven else None
+        # restore before the end hooks, so they see the best state under either host
+        restored_depth = self._restore_best_state() if self._restore_best else None
         self._end_phase(prev)
         if not self._run_gates(prev, final=False):
             return
@@ -887,8 +887,6 @@ class FTSController:
         self._fingerprints.setdefault(self._depth, [])
         if self._checkpoint is not None and not self._host_driven:
             self._pin_boundary(self._depth)
-        if self._restore_best and self._host_driven:
-            restored_depth = self._restore_best_state()
         self._run_hooks("start", self._depth)
         self._apply_promotions(self._depth)
         if restored_depth is not None:
