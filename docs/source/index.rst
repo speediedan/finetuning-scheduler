@@ -19,14 +19,14 @@ foundation model experimentation with flexible fine-tuning schedules. Training w
 .. note::
    If you're exploring using the :class:`~finetuning_scheduler.fts.FinetuningScheduler`, this is a great place
    to start!
-   You may also find the `notebook-based tutorial <https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html>`_
+   You may also find the :doc:`notebook-based tutorial<notebooks/superglue/fts_superglue_lightning>`
    useful and for those using the :py:class:`~lightning.pytorch.cli.LightningCLI`, there is a
    :ref:`CLI-based<scheduled-fine-tuning-superglue>` example.
 
 .. note::
    New in 2.15 (experimental): Fine-Tuning Scheduler's schedules also run in a plain PyTorch training loop, without
    Lightning, through :class:`~finetuning_scheduler.core.controller.FTSController`. See
-   :ref:`plain-pytorch-loop`.
+   :ref:`plain-pytorch-loop` and the :doc:`PyTorch API tutorial notebook<notebooks/superglue/fts_superglue_pytorch>`.
 
 Setup
 *****
@@ -247,7 +247,7 @@ and transitions will be exclusively epoch-driven.
 For a practical end-to-end example of using
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` in implicit versus explicit modes,
 see :ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` or the
-`notebook-based tutorial <https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html>`_.
+:doc:`notebook-based tutorial<notebooks/superglue/fts_superglue_lightning>`.
 
 
 Resuming Scheduled Fine-Tuning Training Sessions
@@ -445,7 +445,8 @@ Footnotes
    :name: Basic Examples
    :caption: Basic Examples
 
-   Notebook-based Fine-Tuning Scheduler tutorial <https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/finetuning-scheduler.html>
+   Notebook-based Fine-Tuning Scheduler tutorial <notebooks/superglue/fts_superglue_lightning>
+   PyTorch API tutorial notebook <notebooks/superglue/fts_superglue_pytorch>
    CLI-based Fine-Tuning Scheduler tutorial <examples/superglue_cli>
 
 .. toctree::

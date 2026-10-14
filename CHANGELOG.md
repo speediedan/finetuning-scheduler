@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Added self-hosted tutorial notebooks, rendered with their outputs in the docs and published with a Colab badge: the Lightning tutorial (formerly hosted in the Lightning tutorials, whose link had broken) and a new PyTorch API version that runs the same explicit, implicit and baseline scenarios in a plain training loop driven by `FTSController`. Both take papermill parameters for shortened runs. They are published and rendered by notebook tooling vendored unmodified from interpretune (`scripts/vendored/notebook_tooling`, checked by `scripts/check_vendored_notebook_tooling.py`), and the docs render notebooks with `myst-nb` in place of `nbsphinx` [#105](https://github.com/speediedan/finetuning-scheduler/issues/105).
+
 - `ModelParallelStrategyAdapter.fsdp_plan` keys may select modules by class: `class:TransformerBlock` (or `class:my_pkg.blocks.TransformerBlock`) selects every instance of that class, subclasses included, as `ModuleWrapPolicy` does. An `fsdp_plan` entry's `ignored_params` may name parameters by name or regex (or a list of them), resolved when the plan is applied, so a YAML plan can use it [#55](https://github.com/speediedan/finetuning-scheduler/issues/55).
 
 - Added the `pg_overrides` and `phase_config` schedule keys to the Lightning callback: a phase after the first applies its `pg_overrides` (optimizer options other than `params` and `lr`) to the parameter groups it adds (phase 0's groups come from `configure_optimizers`, so phase 0's `pg_overrides` is refused), and `FinetuningScheduler.add_phase_hook(fn, when="start"|"end")` (experimental) calls `fn` with each phase's `PhaseEvent`, whose `phase_config` is the phase's key: start hooks for phase 0 at fit start (not when a fit resumes) and for each later phase at its transition, end hooks when a phase ends (after the best checkpoint is restored) and for the final phase at train end. Strategy adapters gain an `on_fts_teardown` hook, called when a fit ends or fails [#85](https://github.com/speediedan/finetuning-scheduler/issues/85).
@@ -89,6 +91,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Fixed `tests/special_tests.sh` reporting success when test collection failed, building its default experiment mask from `tests/.experiments` whatever `--experiments_list` named, and failing when `--log-dir` did not exist. It and `scripts/gen_fts_coverage.sh` now reject a bad flag before waiting for the GPU lease [#68](https://github.com/speediedan/finetuning-scheduler/issues/68).
 
 ### Changed
+
+- The SuperGLUE example and its tutorial notebook tokenize through a module-level `convert_to_features` function with explicit arguments, in place of a `LightningDataModule` method. `datasets` now fingerprints the transform from those arguments alone, so its cache is reused across runs [#105](https://github.com/speediedan/finetuning-scheduler/issues/105).
 
 - A `ModelParallelStrategyAdapter.fsdp_plan` that asks for CPU offload (`cpu_offload_policy`, or an `offload_policy` that offloads to the CPU) is now refused with an explanation. Lightning's `ModelParallelStrategy` moves the model to the GPU after `configure_model`, which FSDP2's CPU-offloaded shards cannot follow, so such a plan failed during setup with `_apply(): Couldn't swap ...`. CPU offload works with the PyTorch API (`FTSController`), where it is now tested on NCCL, best-checkpoint restores included [#55](https://github.com/speediedan/finetuning-scheduler/issues/55).
 

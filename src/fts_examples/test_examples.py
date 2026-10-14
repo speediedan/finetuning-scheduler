@@ -171,22 +171,43 @@ def test_model_parallel_examples_torch(tmpdir, config_file):
     assert summary["param_types"] == ["DTensor"]  # nothing left unsharded
     assert summary["lightning_modules"] == []
 
+
+NOTEBOOK_DEV_DIR = os.path.join(os.path.dirname(__file__), "notebooks", "dev")
+
+
+def _run_notebook(rel_path: str, overrides: dict[str, str], workdir: str) -> str:
+    """Execute a dev notebook in ``workdir`` with its ``parameters`` cell overridden; return its stream output."""
+    import nbformat
+    from nbclient import NotebookClient
+
+    nb = nbformat.read(os.path.join(NOTEBOOK_DEV_DIR, rel_path), as_version=4)
+    params = [c for c in nb.cells if "parameters" in c.metadata.get("tags", [])]
+    assert len(params) == 1, f"{rel_path} needs exactly one cell tagged 'parameters'"
+    for name, value in overrides.items():
+        params[0].source, n = re.subn(rf"^{name} = .*$", f"{name} = {value}", params[0].source, count=1, flags=re.M)
+        assert n == 1, f"parameter {name} not found in {rel_path}'s parameters cell"
+    NotebookClient(nb, timeout=1800, kernel_name="python3", resources={"metadata": {"path": workdir}}).execute()
+    return "".join(
+        out.get("text", "") for cell in nb.cells if cell.cell_type == "code" for out in cell.get("outputs", [])
+        if out.get("output_type") == "stream"
+    )
+
+
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 @RunIf(min_cuda_gpus=1, skip_windows=True)
-@pytest.mark.parametrize("nb_name", ["fts_superglue_nb"], ids=["fts_superglue_nb"])
-def test_fts_superglue_nb(nb_name):
-    # simple sanity check that the notebook-based version of the example builds and executes successfully
-    test_example_base = os.path.join(os.path.dirname(__file__), "ipynb_src")
-    example_script = os.path.join(test_example_base, f"{nb_name}.py")
-    command = ["python", "-m", "jupytext", "--set-formats", "ipynb,py:percent", example_script]
-    cp = subprocess.run(command)
-    assert cp.returncode == 0
-    example_ipynb = os.path.join(test_example_base, f"{nb_name}.ipynb")
-    assert os.path.exists(example_ipynb)
-    command = ["python", "-m", "pytest", "--nbval", "-v", example_ipynb]
-    cp = subprocess.run(command, capture_output=True)
-    assert cp.returncode == 0
-    generated_schedule = os.path.join(test_example_base, "RteBoolqModule_ft_schedule_deberta_base.yaml")
-    for f in [example_ipynb, generated_schedule]:
-        os.remove(f)
-        assert not os.path.exists(f)
+def test_fts_superglue_lightning_nb(tmpdir):
+    # the Lightning tutorial notebook, shortened through its parameters cell
+    _run_notebook(
+        "superglue/fts_superglue_lightning.ipynb", {"MAX_EPOCHS": "1", "LIMIT_TRAIN_BATCHES": "2"}, tmpdir.strpath
+    )
+    assert os.path.exists(os.path.join(tmpdir, "RteBoolqModule_ft_schedule_deberta_base.yaml"))
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+@RunIf(min_cuda_gpus=1, skip_windows=True)
+def test_fts_superglue_pytorch_nb(tmpdir):
+    # the PyTorch API notebook, shortened through its parameters cell
+    overrides = {"MAX_EPOCHS": "4", "TRAIN_SUBSET": "32", "VAL_SUBSET": "16"}
+    stdout = _run_notebook("superglue/fts_superglue_pytorch.ipynb", overrides, tmpdir.strpath)
+    for scenario in ("fts_explicit", "fts_implicit", "nofts_baseline"):
+        assert re.search(rf"^{scenario}: finished at phase \d+ after \d+ epochs", stdout, flags=re.M), stdout

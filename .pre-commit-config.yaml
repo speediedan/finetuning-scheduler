@@ -20,7 +20,10 @@ default_language_version:
 # the rewrite is discarded at the next sync, so the churn buys nothing; and this repo's docstring rules
 # would impose its authoring standards on a repo-neutral master shared with other consumers.
 # Corrections belong upstream, never to the vendored copy.
-exclude: '\.claude/skills/.*|\.agents/skills/.*'
+#
+# scripts/vendored/notebook_tooling holds interpretune's repository-neutral notebook publisher, docs-artifact renderer
+# and nbstripout hook, vendored unmodified for the same reasons; its own check (below) asserts the copies are intact.
+exclude: '\.claude/skills/.*|\.agents/skills/.*|scripts/vendored/.*'
 
 ci:
   autofix_prs: true
@@ -112,4 +115,25 @@ repos:
         entry: python scripts/check_vendored_skills.py
         language: python
         always_run: true
+        pass_filenames: false
+      # `always_run: true` for the same reason as the skills check: `scripts/vendored/` is excluded above.
+      - id: check-vendored-notebook-tooling
+        name: Vendored notebook tooling unmodified
+        entry: python scripts/check_vendored_notebook_tooling.py
+        language: python
+        always_run: true
+        pass_filenames: false
+      # docs/notebook_artifacts holds EXECUTED notebook copies whose outputs are what the docs render, so stripping
+      # them would empty every tutorial page.
+      - id: nbstripout
+        name: Strip notebook outputs
+        entry: python scripts/vendored/notebook_tooling/run_nbstripout_hook.py
+        language: python
+        files: \.ipynb$
+        exclude: ^docs/notebook_artifacts/
+      - id: publish-notebooks
+        name: Publish notebooks if changed
+        entry: python scripts/publish_notebooks.py
+        language: python
+        files: ^src/fts_examples/notebooks/dev/
         pass_filenames: false

@@ -232,7 +232,31 @@ grep -i "error\|broken" build/linkcheck/output.txt || echo "No errors found in l
 cross-reference target needs an explicit label (`.. _label_name:`). `docs/source/api`,
 `docs/source/generated`, and `docs/source/*/generated` are generated and gitignored.
 
-The docs theme is a fork pinned by commit SHA in `requirements/docs.txt`.
+The docs use stock pydata-sphinx-theme, pinned in `requirements/docs.txt`, with FTS overrides in
+`docs/source/_static/main.css` and one template, `docs/source/_templates/sidebar-nav-full.html` (the whole captioned
+toctree in the sidebar, since every page is a child of `index`). The theme drops any toctree entry whose link contains
+`#`, so a toctree entry cannot point at an anchor.
+
+### Tutorial notebooks
+
+Edit the authoring copies in `src/fts_examples/notebooks/dev/`. The `publish-notebooks` pre-commit hook copies them to
+`src/fts_examples/notebooks/publish/` (outputs stripped, Colab badge and install cell added); `nbstripout` keeps both
+lanes free of outputs. The docs render the executed copies in `docs/notebook_artifacts/`, which are produced offline and
+committed, never by the docs build:
+
+```bash
+python scripts/render_notebook_docs.py --list
+python scripts/render_notebook_docs.py --notebook fts_superglue --timeout 7200   # GPU work: run under the lease
+python scripts/render_notebook_docs.py --check-stale                              # exit 3 when an artifact drifted
+```
+
+Rendering needs `papermill`, `ipykernel` and the `examples` extra. Each notebook has a cell tagged `parameters`; the
+tests in `src/fts_examples/test_examples.py` run it shortened through those parameters.
+
+The publisher, the renderer and the nbstripout hook are vendored unmodified from interpretune into
+`scripts/vendored/notebook_tooling/`, configured by `[tool.notebook-publishing]` in `pyproject.toml`. Never edit them
+here: make the change in interpretune, then `python scripts/check_vendored_notebook_tooling.py --sync <commit>`. The
+pre-commit check refuses a local edit; `--upstream` reports whether interpretune has moved on.
 
 ## Anything publicly visible is written for a public reader
 
