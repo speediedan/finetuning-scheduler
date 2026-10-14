@@ -408,6 +408,7 @@ Footnotes
 
    pytorch/plain_pytorch_loop
    pytorch/model_parallel_plain_loop
+   pytorch/tunable_views
 
 .. toctree::
    :maxdepth: 1

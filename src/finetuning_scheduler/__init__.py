@@ -20,6 +20,8 @@ from finetuning_scheduler.core.host import LRStepConfig, TorchHost, TrainingHost
 from finetuning_scheduler.core.transitions import (AnyOf, CallableTransition, Decision, EpochTransition, GateEvent,
                                                    GateResult, PlateauTransition, StepTransition, TransitionContext,
                                                    TransitionPolicy)
+from finetuning_scheduler.core.views import (CanonicalView, TunableSupport, TunableView, TunableViewExtras,
+                                             ViewDefaults)
 
 if TYPE_CHECKING:  # pragma: no cover
     from finetuning_scheduler.lightning.fts import FinetuningScheduler
@@ -71,6 +73,7 @@ def __dir__() -> list[str]:
 __all__ = [
     "AnyOf",
     "CallableTransition",
+    "CanonicalView",
     "Decision",
     "EpochTransition",
     "FTSController",
@@ -84,6 +87,10 @@ __all__ = [
     "TrainingHost",
     "TransitionContext",
     "TransitionPolicy",
+    "TunableSupport",
+    "TunableView",
+    "TunableViewExtras",
+    "ViewDefaults",
     "FTSState",
     "FTSCheckpoint",
     "FTSEarlyStopping",

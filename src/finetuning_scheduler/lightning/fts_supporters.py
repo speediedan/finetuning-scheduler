@@ -22,6 +22,7 @@ import pathlib
 import inspect
 import warnings
 from contextlib import contextmanager
+from functools import partial
 from abc import ABC, abstractmethod
 from collections.abc import KeysView
 from dataclasses import fields
@@ -44,6 +45,9 @@ from lightning.pytorch.utilities.types import LRSchedulerConfig
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import schedule as core_schedule
 from finetuning_scheduler.core import transitions as core_transitions
+from finetuning_scheduler.core.compile import compile_schedule, resolves_exactly
+from finetuning_scheduler.core.roles import is_role_selector
+from finetuning_scheduler.core.views import BoundView
 from finetuning_scheduler.core.state import FTSState
 from finetuning_scheduler.strategy_adapters import StrategyAdapter, FSDPStrategyAdapter, ModelParallelStrategyAdapter
 from finetuning_scheduler.lightning.types import BaseCallbackDepType
@@ -562,18 +566,41 @@ class ScheduleParsingMixin(ABC):
         max_phase = 0
         self._validate_schedule_keys()
         self._validate_reinit_cfg()
+        adapter = self.strategy_adapter
+        adapter.compiled_schedule = None
+        # a view attached to the module (or `role:` selectors) compiles the schedule into physical parameters; an
+        # adapter with parameter-naming overrides keeps naming them itself
+        view = adapter.tunable_view
+        assert isinstance(self.ft_schedule, dict)
+        selectors = any(is_role_selector(p) for phase in self.ft_schedule.values() for p in phase.get("params", []))
+        if selectors and view is None:
+            raise MisconfigurationException(
+                f"`role:` selectors are not supported under {type(adapter).__qualname__}, which overrides"
+                f" StrategyAdapter's parameter-naming methods ({', '.join(sorted(adapter.naming_overrides()))}) and so"
+                " names parameters itself. List the parameters by name, or attach a `TunableView` instead.")
+        compiling = view is not None and (adapter.attached_view or selectors)
+        passthrough = self._compiled_entries(view) if compiling and view is not None else None
         # Use strategy adapter to get named params (allows TL-style or other custom naming)
-        named_params = self.strategy_adapter.get_named_params_for_schedule_validation().keys()
+        named_params = adapter.get_named_params_for_schedule_validation().keys()
         msp_ref = core_schedule.shared_params_ref(self.pl_module)
         for depth in self.ft_schedule.keys():  # type: ignore[union-attr]
             max_phase = max(max_phase, depth)
-            self._parse_phase(depth, named_params, msp_ref)
+            self._parse_phase(depth, named_params, msp_ref, passthrough=passthrough)
             if depth > 0:
                 assert isinstance(self.ft_schedule, dict)
                 max_epoch_wm = core_schedule.update_epoch_watermark(
                     self.ft_schedule, depth, max_epoch_wm, self.epoch_transitions_only  # type: ignore[attr-defined]
                 )
         self._validate_phases_disjoint()
+        if compiling:
+            assert view is not None
+            # the implicit canonical view (selectors only) warns where an attached view refuses
+            adapter.compiled_schedule = compile_schedule(self.ft_schedule, view, legacy=not adapter.attached_view)
+            if adapter.compiled_schedule.naming_scheme != "physical" and \
+                    adapter.exec_ft_phase is StrategyAdapter.base_ft_phase:
+                # thaw messages name parameters through the view's logical names
+                adapter.exec_ft_phase = partial(StrategyAdapter.base_ft_phase,
+                                                translation_func=adapter.logical_param_translation)
         if self.epoch_transitions_only:  # type: ignore[attr-defined]
             self._validate_epoch_transitions()
         return max_phase, max_epoch_wm
@@ -820,7 +847,14 @@ class ScheduleParsingMixin(ABC):
         assert isinstance(self.ft_schedule, dict)
         core_schedule.parse_phase_lr(self.ft_schedule, depth, self.base_max_lr)  # type: ignore[attr-defined]
 
-    def _parse_phase(self, depth: int, named_params: KeysView, shared_params: tuple) -> None:
+    def _compiled_entries(self, view: BoundView) -> Callable[[str], bool]:
+        """Whether a schedule entry is left for the compiled schedule to resolve: a ``role:`` selector, or a name
+        the view resolves without listing it (a parametrized tensor's unparametrized name, for example)."""
+        physical = {n for n, _ in self.pl_module.named_parameters()}
+        return lambda entry: is_role_selector(entry) or resolves_exactly(view, entry, physical)
+
+    def _parse_phase(self, depth: int, named_params: KeysView, shared_params: tuple,
+                     passthrough: Callable[[str], bool] | None = None) -> None:
         """Expand any regex expressions specified in an ft_schedule phase to fully qualified parameter names. If
         any shared parameter copies are explicitly specified in the schedule, the copies will be pruned from the
         schedule with a warning.
@@ -830,6 +864,8 @@ class ScheduleParsingMixin(ABC):
             named_params (KeysView): The named parameters of the model
             shared_params (Tuple): A tuple containing the shared parameter names of the current model in both
                 associative list and set forms.
+            passthrough: Entries for which this returns ``True`` (``role:`` selectors) are kept for the compiled
+                schedule to expand.
 
         Raises:
             MisconfigurationException: If a specified parameter or regex does not resolve to at least one parameter.
@@ -837,7 +873,7 @@ class ScheduleParsingMixin(ABC):
         assert isinstance(self.ft_schedule, dict)
         self.ft_schedule[depth].setdefault("max_transition_epoch", -1)
         self._parse_phase_lr(depth)
-        core_schedule.resolve_phase_params(self.ft_schedule, depth, named_params, shared_params)
+        core_schedule.resolve_phase_params(self.ft_schedule, depth, named_params, shared_params, passthrough)
 
     def _validate_phases_disjoint(self) -> None:
         """Validate that the defined schedule does not specify any parameter in multiple phases.

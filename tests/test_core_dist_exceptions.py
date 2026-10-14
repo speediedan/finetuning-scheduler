@@ -31,10 +31,12 @@ from finetuning_scheduler.lightning import FTSMisconfigurationException, LIGHTNI
 
 THIS_FILE = os.path.abspath(__file__)
 CORE_DIR = Path(finetuning_scheduler.__file__).parent / "core"
+# the torch-native distributed adapters live under the same allowlist as the core
+CORE_LIKE_DIRS = (CORE_DIR, CORE_DIR.parent / "strategies")
 CORE_IMPORT_ALLOWLIST = {"torch", "yaml", "fsspec", "typing_extensions"}
-# besides the core itself: the build-time helpers and the package metadata (version strings)
-CORE_FTS_IMPORT_ALLOWLIST = ("finetuning_scheduler.core", "finetuning_scheduler.setup_tools",
-                             "finetuning_scheduler.__about__")
+# besides the core itself: the distributed adapters, the build-time helpers and the package metadata (version strings)
+CORE_FTS_IMPORT_ALLOWLIST = ("finetuning_scheduler.core", "finetuning_scheduler.strategies",
+                             "finetuning_scheduler.setup_tools", "finetuning_scheduler.__about__")
 
 
 @pytest.fixture
@@ -208,7 +210,8 @@ def _imported_top_level_modules(path: Path) -> set[str]:
 
 
 @pytest.mark.parametrize(
-    "path", sorted(CORE_DIR.rglob("*.py")), ids=lambda p: str(p.relative_to(CORE_DIR.parent))
+    "path", sorted(p for d in CORE_LIKE_DIRS for p in d.rglob("*.py")),
+    ids=lambda p: str(p.relative_to(CORE_DIR.parent)),
 )
 def test_core_import_allowlist(path):
     """Core modules import only the standard library, the allowlisted packages and the core itself (never
