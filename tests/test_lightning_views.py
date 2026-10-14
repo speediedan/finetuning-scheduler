@@ -232,6 +232,31 @@ class ShardedLogicalModel(LogicalNamesBoringModel):
         fully_shard(self.model, mesh=dp_mesh)
 
 
+@pytest.mark.parametrize("use_orig_params", [False, True])
+def test_fsdp1_refuses_a_frozen_role_sharing_a_flat_parameter(use_orig_params):
+    """Without ``use_orig_params``, a ``fitted`` bias sharing its module's FSDP-flattened parameter with the
+    scheduled weight would be thawed with it, so the wrap validation counts it as unscheduled and finds the
+    overlap; with ``use_orig_params`` parameters thaw individually, and nothing is reported."""
+    from finetuning_scheduler.core.compile import compile_schedule
+
+    module = LogicalNamesBoringModel()
+    schedule = {0: {"params": ["model.4.weight", "model.4.bias"]}, 1: {"params": ["model.0.weight"]}}
+    adapter = FSDPStrategyAdapter()
+    adapter.fts_handle = SimpleNamespace(pl_module=module, trainer=None, ft_schedule=schedule)
+    adapter.compiled_schedule = compile_schedule(schedule, CanonicalView(module, roles={"model.0.bias": "fitted"}))
+    adapter._allow_mixed_req_grad = use_orig_params
+    adapter._gen_ft_sched_module_map()
+    # one flattened parameter per module, as wrapping each `Linear` and `LayerNorm` builds
+    adapter._fsdp_unflat_to_flat_mapping = {n: f"{n.rpartition('.')[0]}._flat_param" for n, _ in
+                                            module.named_parameters()}
+    adapter._fsdp_flat_to_unflat_mapping = {}
+    for name, flat in adapter._fsdp_unflat_to_flat_mapping.items():
+        adapter._fsdp_flat_to_unflat_mapping.setdefault(flat, []).append(name)
+    assert "model.0.bias" not in adapter._unscheduled_params  # per module, its module is scheduled
+    overlap = adapter._phase_unaligned_fsdp_params(check_unsched=True)
+    assert overlap == (set() if use_orig_params else {"model.0.weight", "model.0.bias"})
+
+
 class AdamLogicalNamesModel(LogicalNamesBoringModel):
     """With a stateful optimizer: Lightning's FSDP (FSDP1) optimizer-state restore expects a non-empty state, which a
     plain ``SGD`` lacks."""

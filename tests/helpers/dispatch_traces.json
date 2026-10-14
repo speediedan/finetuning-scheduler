@@ -1,4 +1,609 @@
 {
+ "class_change_restore": [
+  [
+   "adapter",
+   "on_before_init_fts",
+   0,
+   0,
+   [],
+   {}
+  ],
+  [
+   "adapter",
+   "validate_ft_sched",
+   0,
+   0,
+   [],
+   {}
+  ],
+  [
+   "adapter",
+   "get_named_params_for_schedule_validation",
+   0,
+   0,
+   [],
+   {}
+  ],
+  [
+   "adapter",
+   "on_after_init_fts",
+   0,
+   0,
+   [],
+   {}
+  ],
+  [
+   "adapter",
+   "_maybe_set_bn_track_running_stats",
+   0,
+   0,
+   [
+    0
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_transform",
+   0,
+   0,
+   [
+    [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "exec_ft_phase",
+   0,
+   0,
+   [
+    "ScheduledLossModel"
+   ],
+   {
+    "init_thaw": true,
+    "thaw_pl": [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   }
+  ],
+  [
+   "adapter",
+   "on_before_fts_fit_start",
+   0,
+   0,
+   [],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_inspect",
+   0,
+   0,
+   [
+    [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_inspect",
+   0,
+   0,
+   [
+    [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_inspect",
+   0,
+   0,
+   [
+    [
+     "model.1.weight",
+     "model.1.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_inspect",
+   0,
+   0,
+   [
+    [
+     "model.0.weight",
+     "model.0.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_inspect",
+   0,
+   0,
+   [
+    [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_inspect",
+   0,
+   0,
+   [
+    [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_inspect",
+   0,
+   0,
+   [
+    [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_inspect",
+   0,
+   0,
+   [
+    [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_inspect",
+   0,
+   0,
+   [
+    [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_inspect",
+   0,
+   0,
+   [
+    [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "callback",
+   "step",
+   2,
+   1,
+   [],
+   {}
+  ],
+  [
+   "callback",
+   "restore_best_ckpt",
+   2,
+   1,
+   [],
+   {}
+  ],
+  [
+   "adapter",
+   "before_restore_model",
+   2,
+   1,
+   [
+    "dict"
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "on_before_restore_optimizers_and_lrs",
+   2,
+   1,
+   [],
+   {}
+  ],
+  [
+   "callback",
+   "step_pg",
+   2,
+   1,
+   [],
+   {
+    "depth": 1,
+    "optimizer": "SGD",
+    "pre_reinit_state": "tuple"
+   }
+  ],
+  [
+   "adapter",
+   "_maybe_set_bn_track_running_stats",
+   2,
+   1,
+   [
+    0
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_transform",
+   2,
+   1,
+   [
+    [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "exec_ft_phase",
+   2,
+   1,
+   [
+    "ScheduledLossModel"
+   ],
+   {
+    "thaw_pl": [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   }
+  ],
+  [
+   "callback",
+   "reinit_optimizer",
+   2,
+   1,
+   [],
+   {
+    "init_params": [
+     "model.2.weight",
+     "model.2.bias"
+    ],
+    "new_optimizer": [
+     "optimizer_init"
+    ],
+    "trainer": "Trainer"
+   }
+  ],
+  [
+   "adapter",
+   "_maybe_set_bn_track_running_stats",
+   2,
+   1,
+   [
+    1
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_transform",
+   2,
+   1,
+   [
+    [
+     "model.1.weight",
+     "model.1.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "exec_ft_phase",
+   2,
+   1,
+   [
+    "ScheduledLossModel"
+   ],
+   {
+    "thaw_pl": [
+     "model.1.weight",
+     "model.1.bias"
+    ]
+   }
+  ],
+  [
+   "callback",
+   "reinit_lr_scheduler",
+   2,
+   1,
+   [],
+   {
+    "new_lr_scheduler": [
+     "lr_scheduler_init"
+    ],
+    "optimizer": "Adam",
+    "trainer": "Trainer"
+   }
+  ],
+  [
+   "adapter",
+   "_maybe_set_bn_track_running_stats",
+   2,
+   1,
+   [
+    2
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "on_after_phase_transition",
+   2,
+   1,
+   [],
+   {}
+  ],
+  [
+   "adapter",
+   "logical_param_translation",
+   2,
+   1,
+   [
+    [
+     "model.2.weight",
+     "model.2.bias",
+     "model.1.weight",
+     "model.1.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "callback",
+   "step",
+   4,
+   2,
+   [],
+   {}
+  ],
+  [
+   "callback",
+   "restore_best_ckpt",
+   4,
+   2,
+   [],
+   {}
+  ],
+  [
+   "adapter",
+   "before_restore_model",
+   4,
+   2,
+   [
+    "dict"
+   ],
+   {}
+  ],
+  [
+   "callback",
+   "step_pg",
+   4,
+   2,
+   [],
+   {
+    "depth": 2,
+    "optimizer": "Adam",
+    "pre_reinit_state": "tuple"
+   }
+  ],
+  [
+   "adapter",
+   "_maybe_set_bn_track_running_stats",
+   4,
+   2,
+   [
+    0
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_transform",
+   4,
+   2,
+   [
+    [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "exec_ft_phase",
+   4,
+   2,
+   [
+    "ScheduledLossModel"
+   ],
+   {
+    "thaw_pl": [
+     "model.2.weight",
+     "model.2.bias"
+    ]
+   }
+  ],
+  [
+   "callback",
+   "reinit_optimizer",
+   4,
+   2,
+   [],
+   {
+    "init_params": [
+     "model.2.weight",
+     "model.2.bias"
+    ],
+    "new_optimizer": [
+     "optimizer_init"
+    ],
+    "trainer": "Trainer"
+   }
+  ],
+  [
+   "adapter",
+   "_maybe_set_bn_track_running_stats",
+   4,
+   2,
+   [
+    1
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_transform",
+   4,
+   2,
+   [
+    [
+     "model.1.weight",
+     "model.1.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "exec_ft_phase",
+   4,
+   2,
+   [
+    "ScheduledLossModel"
+   ],
+   {
+    "thaw_pl": [
+     "model.1.weight",
+     "model.1.bias"
+    ]
+   }
+  ],
+  [
+   "callback",
+   "reinit_lr_scheduler",
+   4,
+   2,
+   [],
+   {
+    "new_lr_scheduler": [
+     "lr_scheduler_init"
+    ],
+    "optimizer": "Adam",
+    "trainer": "Trainer"
+   }
+  ],
+  [
+   "adapter",
+   "_maybe_set_bn_track_running_stats",
+   4,
+   2,
+   [
+    2
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "fts_optim_transform",
+   4,
+   2,
+   [
+    [
+     "model.0.weight",
+     "model.0.bias"
+    ]
+   ],
+   {}
+  ],
+  [
+   "adapter",
+   "exec_ft_phase",
+   4,
+   2,
+   [
+    "ScheduledLossModel"
+   ],
+   {
+    "thaw_pl": [
+     "model.0.weight",
+     "model.0.bias"
+    ]
+   }
+  ],
+  [
+   "adapter",
+   "on_after_phase_transition",
+   4,
+   2,
+   [],
+   {}
+  ],
+  [
+   "adapter",
+   "logical_param_translation",
+   4,
+   2,
+   [
+    [
+     "model.1.weight",
+     "model.1.bias",
+     "model.2.weight",
+     "model.2.bias",
+     "model.0.weight",
+     "model.0.bias"
+    ]
+   ],
+   {}
+  ]
+ ],
  "early_stopping_driven": [
   [
    "adapter",
@@ -231,16 +836,7 @@
    2,
    1,
    [
-    [
-     "callbacks",
-     "epoch",
-     "global_step",
-     "loops",
-     "lr_schedulers",
-     "optimizer_states",
-     "pytorch-lightning_version",
-     "state_dict"
-    ]
+    "dict"
    ],
    {}
   ],
@@ -357,16 +953,7 @@
    4,
    2,
    [
-    [
-     "callbacks",
-     "epoch",
-     "global_step",
-     "loops",
-     "lr_schedulers",
-     "optimizer_states",
-     "pytorch-lightning_version",
-     "state_dict"
-    ]
+    "dict"
    ],
    {}
   ],
@@ -686,16 +1273,7 @@
    2,
    1,
    [
-    [
-     "callbacks",
-     "epoch",
-     "global_step",
-     "loops",
-     "lr_schedulers",
-     "optimizer_states",
-     "pytorch-lightning_version",
-     "state_dict"
-    ]
+    "dict"
    ],
    {}
   ],
@@ -812,16 +1390,7 @@
    4,
    2,
    [
-    [
-     "callbacks",
-     "epoch",
-     "global_step",
-     "loops",
-     "lr_schedulers",
-     "optimizer_states",
-     "pytorch-lightning_version",
-     "state_dict"
-    ]
+    "dict"
    ],
    {}
   ],
@@ -1338,16 +1907,7 @@
    1,
    1,
    [
-    [
-     "callbacks",
-     "epoch",
-     "global_step",
-     "loops",
-     "lr_schedulers",
-     "optimizer_states",
-     "pytorch-lightning_version",
-     "state_dict"
-    ]
+    "dict"
    ],
    {}
   ],
@@ -1499,16 +2059,7 @@
    2,
    2,
    [
-    [
-     "callbacks",
-     "epoch",
-     "global_step",
-     "loops",
-     "lr_schedulers",
-     "optimizer_states",
-     "pytorch-lightning_version",
-     "state_dict"
-    ]
+    "dict"
    ],
    {}
   ],
@@ -1869,16 +2420,7 @@
    2,
    1,
    [
-    [
-     "callbacks",
-     "epoch",
-     "global_step",
-     "loops",
-     "lr_schedulers",
-     "optimizer_states",
-     "pytorch-lightning_version",
-     "state_dict"
-    ]
+    "dict"
    ],
    {}
   ],
@@ -2064,16 +2606,7 @@
    4,
    2,
    [
-    [
-     "callbacks",
-     "epoch",
-     "global_step",
-     "loops",
-     "lr_schedulers",
-     "optimizer_states",
-     "pytorch-lightning_version",
-     "state_dict"
-    ]
+    "dict"
    ],
    {}
   ],
@@ -2393,16 +2926,7 @@
    2,
    1,
    [
-    [
-     "callbacks",
-     "epoch",
-     "global_step",
-     "loops",
-     "lr_schedulers",
-     "optimizer_states",
-     "pytorch-lightning_version",
-     "state_dict"
-    ]
+    "dict"
    ],
    {}
   ],
@@ -2519,16 +3043,7 @@
    4,
    2,
    [
-    [
-     "callbacks",
-     "epoch",
-     "global_step",
-     "loops",
-     "lr_schedulers",
-     "optimizer_states",
-     "pytorch-lightning_version",
-     "state_dict"
-    ]
+    "dict"
    ],
    {}
   ],
@@ -2818,16 +3333,7 @@
    4,
    2,
    [
-    [
-     "callbacks",
-     "epoch",
-     "global_step",
-     "loops",
-     "lr_schedulers",
-     "optimizer_states",
-     "pytorch-lightning_version",
-     "state_dict"
-    ]
+    "dict"
    ],
    {}
   ],

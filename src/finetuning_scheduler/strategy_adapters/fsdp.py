@@ -42,6 +42,7 @@ from torch import Tensor
 from torch.distributed import all_gather_object
 from torch.optim import Optimizer
 
+from finetuning_scheduler.core.roles import is_frozen_role
 from finetuning_scheduler.core.views import as_view, VIEW_ATTR
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
@@ -162,8 +163,8 @@ class FSDPStrategyAdapter(StrategyAdapter):
         the wrap), so a view attached to the module must name parameters as the module does (naming scheme
         ``"physical"``); its roles and coupled tensors apply. A view with logical names is refused, by name.
 
-        A tensor whose role is never thawed is never scheduled, so without ``use_orig_params`` the wrap validation
-        refuses an FSDP unit that mixes it with scheduled parameters, as it does any unscheduled parameter.
+        Without ``use_orig_params``, the wrap validation refuses an FSDP-flattened parameter that mixes a tensor whose
+        role is never thawed with scheduled parameters, even of its own module (see :meth:`_frozen_role_params`).
         """
         attached = getattr(self.pl_module, VIEW_ATTR, None)
         if attached is None:
@@ -614,6 +615,15 @@ class FSDPStrategyAdapter(StrategyAdapter):
             )
             return ("ERROR", fts_p0_err)
 
+    def _frozen_role_params(self) -> list:
+        """The parameters an attached view gives a role that is never thawed (``fitted``, ``instrument``), counted
+        as unscheduled parameter by parameter: without ``use_orig_params``, one sharing an FSDP-flattened parameter
+        with a scheduled parameter of its own module would be thawed with it."""
+        if self.compiled_schedule is None or self._allow_mixed_req_grad:
+            return []
+        return [n for n, r in self.compiled_schedule.roles.items()
+                if is_frozen_role(r) and n in self._fsdp_unflat_to_flat_mapping and n not in self._unscheduled_params]
+
     def _phase_unaligned_fsdp_params(self, check_unsched: bool = False) -> set:
         """Inspect the fine-tuning schedule and FSDP-wrapped module for parameters that are unaligned with the FSDP
         wrapped module.
@@ -630,7 +640,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         fsdp_param_sets: dict = {}
         inspection_map = {d: {"params": self.scheduled_physical(d)} for d in self.fts_handle.ft_schedule}
         if check_unsched:
-            inspection_map[-1] = {"params": self._unscheduled_params}
+            inspection_map[-1] = {"params": list(self._unscheduled_params) + self._frozen_role_params()}
         for d, pl in inspection_map.items():
             fsdp_param_sets[d] = set()
             for lp in pl["params"]:

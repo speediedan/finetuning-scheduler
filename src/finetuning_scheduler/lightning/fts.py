@@ -577,7 +577,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.trainer._checkpoint_connector.restore_model()
         # we need to override checkpoint_connector.restore_training_state() to bypass loop restoration
         # if additional customizations are required, may make sense to subclass _CheckpointConnector at some point
-        self._restore_training_state()
+        try:
+            self._restore_training_state()
+        finally:
+            self._restore_model_only = False
         self.trainer._checkpoint_connector.resume_end()
 
     def _restore_training_state(self) -> None:

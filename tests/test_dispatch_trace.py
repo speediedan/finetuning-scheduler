@@ -96,6 +96,16 @@ def test_optimizer_and_lr_scheduler_reinitialization(tmp_path):
     check_snapshot("reinitialization", fts.dispatch_trace)
 
 
+def test_restore_across_an_optimizer_class_change(tmp_path):
+    """The best checkpoint stays phase 0's (SGD) while phase 1 reinitializes to Adam: at the transition to phase 2
+    the callback restores the model state only (no optimizer restore hook) and rebuilds the optimizer (#108)."""
+    seed_everything(42)
+    fts = TracingFinetuningScheduler(ft_schedule=REINIT, epoch_transitions_only=True, custom_strategy_adapters=BASE)
+    _fit(tmp_path, fts, ScheduledLossModel([1.0, 2.0, 2.0, 2.0, 2.0, 2.0]), 6,
+         extra=[FTSCheckpoint(monitor="val_loss", dirpath=tmp_path / "ckpts", save_top_k=1)])
+    check_snapshot("class_change_restore", fts.dispatch_trace)
+
+
 def test_resume_at_a_later_depth(tmp_path):
     """A fit interrupted at depth 1 and resumed from its snapshot: the resumed fit's dispatch."""
     seed_everything(42)

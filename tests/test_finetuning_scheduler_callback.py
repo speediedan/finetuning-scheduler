@@ -3191,3 +3191,6 @@ def test_best_checkpoint_before_an_optimizer_reinitialization(tmpdir, restore_be
     assert type(optimizer) is torch.optim.Adam and all("betas" in g for g in optimizer.param_groups)
     assert len(optimizer.param_groups) == 3 and fts.curr_depth == 2
     assert not torch.equal(initial, model.model[0].weight)  # phase 2 trained
+    # the restore rebuilt the optimizer (its state counts phase 2's 4 steps only), rather than keep phase 1's (6)
+    steps = int(optimizer.state[model.model[1].weight]["step"])
+    assert steps == (4 if restore_best else 6)

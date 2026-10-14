@@ -114,9 +114,10 @@ class CheckpointPolicy(Protocol):
       ``keep_previous=True``), to keep the checkpoints that state refers to;
     - ``verify_resume()``, when a saved state is loaded, to raise ``FileNotFoundError`` if a checkpoint the state
       needs no longer exists;
-    - ``restore() -> int | None``, at a phase boundary with ``restore_best``, to restore the best checkpoint itself
-      and return the depth it was saved at (``None`` when there is none yet), for a training host whose checkpoints
-      the host writes and reads (the controller otherwise restores its own checkpoint files).
+    - ``restore() -> int | None``, on a host-driven controller
+      (:meth:`~finetuning_scheduler.core.controller.FTSController.attach`) at a phase boundary with ``restore_best``,
+      to restore the best checkpoint itself and return the depth it was saved at (``None`` when there is none yet), for
+      a host that writes and reads its own checkpoints (a controller-driven controller restores its own files).
     """
 
     monitor: str | None

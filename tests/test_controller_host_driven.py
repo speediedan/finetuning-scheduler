@@ -97,6 +97,14 @@ def test_host_driven_refusals():
     for loop_method in (lambda: next(fts.epochs(2)), fts.epoch_start, fts.epoch_end, fts.step_end):
         with pytest.raises(FTSConfigurationError, match="host-driven controller refuses it"):
             loop_method()
+    for resume_method in (lambda: fts.save("x.pt"), lambda: fts.load("x.pt"), lambda: fts.load_state_dict({})):
+        with pytest.raises(FTSConfigurationError, match="the host saves and restores the training state"):
+            resume_method()
+    with pytest.raises(FTSConfigurationError, match="Gates are not supported"):
+        fts.add_gate(lambda e: True)
+    for depth in (-1, 2):
+        with pytest.raises(FTSConfigurationError, match=f"Cannot resume at phase {depth}"):
+            fts.resume_at(depth)
     fts.request_advance()
     with pytest.raises(FTSConfigurationError, match="is the last phase"):
         fts.request_advance()
@@ -107,6 +115,23 @@ def test_host_driven_refusals():
     plain.setup()
     with pytest.raises(FTSConfigurationError, match="set it up with `attach\\(\\)`"):
         plain.request_advance()
+
+
+def test_attach_refuses_registered_gates_and_policy_restore_is_host_driven_only():
+    model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4), nn.Linear(4, 2))
+    host = TorchHost(model)
+    host.set_optimizer(0, torch.optim.SGD(model[2].parameters(), lr=0.1))
+    fts = FTSController(model, optimizer=torch.optim.SGD, host=host)
+    fts.add_gate(lambda e: True)
+    with pytest.raises(FTSConfigurationError, match="Gates are not supported"):
+        fts.attach(RecordingExecutor(fts), SCHEDULE)
+    # a controller-driven controller ignores a policy's `restore` and restores its own checkpoint files
+    seen = []
+    policy = HostRestoringPolicy(best_depth=0, seen=seen)
+    policy.best_path = None
+    driven = FTSController(nn.Linear(2, 2), {0: {"params": ["weight", "bias"]}}, optimizer=torch.optim.SGD,
+                           checkpoint=policy)
+    assert driven._restore_best_state() is None and seen == []
 
 
 def test_the_default_executor_resumes_by_thawing_each_phase():

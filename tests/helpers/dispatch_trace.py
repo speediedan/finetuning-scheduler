@@ -72,6 +72,8 @@ def _record(fts: Any, source: str, name: str, args: tuple, kwargs: dict) -> None
     trainer = getattr(fts, "trainer", None)
     epoch = trainer.current_epoch if trainer is not None else None
     depth = fts._fts_state._curr_depth if hasattr(fts, "_fts_state") else None
+    if name == "before_restore_model":  # a whole Lightning checkpoint, whose keys vary by Lightning version
+        args = tuple(type(a).__name__ for a in args)
     trace.append([source, name, epoch, depth, [summarize(a) for a in args],
                   {k: summarize(v) for k, v in sorted(kwargs.items())}])
 
