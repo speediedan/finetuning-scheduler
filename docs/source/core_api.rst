@@ -15,6 +15,7 @@ are not documented as public API.
     core.transitions
     core.host
     core.checkpoint
+    core.executor
     core.views
     core.roles
     core.compile
