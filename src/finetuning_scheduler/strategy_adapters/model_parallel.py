@@ -18,6 +18,7 @@ for PyTorch's distributed composable and Tensor Parallel APIs.
 
 """
 from typing import Any  # Dict used for runtime isinstance() checks
+import os
 from collections.abc import Callable, Mapping, Sequence
 from functools import wraps
 from dataclasses import dataclass, field
@@ -64,6 +65,23 @@ class ActCkptCfg:
             self._func = offload_wrapper
         elif self.mode == ActCkptEnum.WRAPPED:
             self._func = checkpoint_wrapper
+
+
+def _is_fsdp1_sharded_checkpoint(path: str) -> bool:
+    """Whether ``path`` is a local checkpoint directory ``FSDPStrategy`` wrote with ``state_dict_type="sharded"``:
+
+    Lightning's metadata file beside distributed checkpoint shards keyed under ``model`` (``ModelParallelStrategy``
+    keys them under ``state_dict``).
+    """
+    if not (path and os.path.isdir(path) and os.path.isfile(os.path.join(path, "meta.pt"))):
+        return False
+    from torch.distributed.checkpoint import FileSystemReader
+
+    try:
+        keys = FileSystemReader(path).read_metadata().state_dict_metadata
+    except Exception:  # not a distributed checkpoint this reader understands; leave the load to report it
+        return False
+    return any(k.startswith("model.") for k in keys) and not any(k.startswith("state_dict.") for k in keys)
 
 
 class ModelParallelStrategyAdapter(StrategyAdapter):
@@ -320,6 +338,29 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
             setattr(outer_mod, module_name, act_ckpt._func(self.pl_module.get_submodule(n), **act_ckpt.cfg))
             assert isinstance(self.pl_module.get_submodule(n), ActivationWrapper)
         fully_shard(self.pl_module.get_submodule(n), mesh=self.pls_handle.device_mesh["data_parallel"], **kwargs)
+
+    def best_ckpt_path(self, path: str) -> str:
+        """The best checkpoint to restore: ``path``, unless it is an FSDP1 (``FSDPStrategy``) sharded checkpoint,
+        which ``ModelParallelStrategy`` cannot load. A fit resumed from an FSDP1 checkpoint keeps that run's
+        ``best_model_path``; for a sharded one, its consolidation with Lightning's ``consolidate_checkpoint`` utility
+        (written by default beside it, as ``<path>.consolidated``) is restored in its place.
+
+        Raises:
+            MisconfigurationException: If ``path`` is an FSDP1 sharded checkpoint with no consolidation beside it.
+        """
+        if not _is_fsdp1_sharded_checkpoint(path):
+            return path
+        consolidated = f"{path.rstrip(os.sep)}.consolidated"
+        if os.path.isfile(consolidated):
+            rank_zero_info(f"Restoring '{consolidated}', the consolidation of the FSDP1 sharded best checkpoint "
+                           f"'{path}'.")
+            return consolidated
+        raise MisconfigurationException(
+            f"The best checkpoint '{path}' is an FSDP1 (`FSDPStrategy`) sharded checkpoint, which"
+            " `ModelParallelStrategy` cannot load. Consolidate it with"
+            f" `python -m lightning.pytorch.utilities.consolidate_checkpoint {path}`, which writes '{consolidated}',"
+            " restored in its place."
+        )
 
     def _shard_kwargs(self, n: str) -> dict[str, Any]:
         """The ``fully_shard`` kwargs for the plan's module ``n``, with an ``ignored_params`` given by name

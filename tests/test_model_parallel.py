@@ -567,18 +567,23 @@ stateless_optim_upstream = pytest.mark.xfail(
 
 
 @RunIf(min_cuda_gpus=2, standalone=True)
-@pytest.mark.parametrize("state_dict_type", ["full", "sharded"])
-@pytest.mark.parametrize("model_cls", [pytest.param(AdamWModelParallel, id="adamw"),
-                                       pytest.param(fsdp_auto_mod_parallel, id="sgd",
-                                                    marks=stateless_optim_upstream)])
-def test_fsdp1_checkpoint_resumes_under_fsdp2(tmpdir, model_parallel_ft_schedule, model_cls, state_dict_type):
+@pytest.mark.parametrize("model_cls, layout", [
+    pytest.param(AdamWModelParallel, "full", id="adamw-full"),
+    pytest.param(AdamWModelParallel, "sharded", id="adamw-sharded"),
+    pytest.param(AdamWModelParallel, "sharded_best_unconsolidated", id="adamw-sharded_best_unconsolidated"),
+    pytest.param(fsdp_auto_mod_parallel, "full", id="sgd-full", marks=stateless_optim_upstream),
+    pytest.param(fsdp_auto_mod_parallel, "sharded", id="sgd-sharded", marks=stateless_optim_upstream),
+])
+def test_fsdp1_checkpoint_resumes_under_fsdp2(tmpdir, model_parallel_ft_schedule, model_cls, layout):
     """A fit checkpointed under FSDP1 (``FSDPStrategy``) after its first epoch resumes under
     ``ModelParallelStrategy`` with an ``fsdp_plan`` (#55): a full checkpoint directly, and a sharded one after
     consolidation with Lightning's ``consolidate_checkpoint`` utility.
 
     The model, optimizer and schedule state carry over, and the schedule continues from the saved depth to its last
-    phase.
+    phase. The resumed fit keeps the FSDP1 run's best checkpoint, restored at phase transitions: a sharded one is
+    restored from its consolidation (written by default beside it), and without one the resume is refused up front.
     """
+    state_dict_type = "full" if layout == "full" else "sharded"
     ft_sched = model_parallel_ft_schedule[1]
 
     def fit(strategy, adapter_cfg, ckpt_path=None, **trainer_kwargs):
@@ -598,14 +603,21 @@ def test_fsdp1_checkpoint_resumes_under_fsdp2(tmpdir, model_parallel_ft_schedule
     first = fit(fsdp1, {"awp_overrides": ["model.output", "model.norm"]}, max_epochs=1)
     saved_depth = get_fts(first).curr_depth
     ckpt_path = first.checkpoint_callback.last_model_path
-    if state_dict_type == "sharded":  # a directory of shards: consolidate it to one file, as a user would
+    best_path = first.checkpoint_callback.best_model_path
+    if state_dict_type == "sharded":  # directories of shards: consolidate them to files, as a user would
         consolidated = str(tmpdir / "fsdp1_last.ckpt")
         if first.is_global_zero:
-            subprocess.run([sys.executable, "-m", "lightning.pytorch.utilities.consolidate_checkpoint", ckpt_path,
-                            "--output_file", consolidated], check=True)
+            consolidate = [sys.executable, "-m", "lightning.pytorch.utilities.consolidate_checkpoint"]
+            subprocess.run([*consolidate, ckpt_path, "--output_file", consolidated], check=True)
+            if layout == "sharded" and best_path != ckpt_path:  # the default output, `<best>.consolidated`
+                subprocess.run([*consolidate, best_path], check=True)
         first.strategy.barrier()
         ckpt_path = consolidated
     plan_cfg = {"fsdp_plan": {"model.output": {}, "model.norm": {}, r"model.layers.\d*$": {}, "model": {}}}
+    if layout == "sharded_best_unconsolidated":
+        with pytest.raises(MisconfigurationException, match="is an FSDP1 .* sharded checkpoint"):
+            fit(ModelParallelStrategy(**dp2_tp1), plan_cfg, ckpt_path=ckpt_path)
+        return
     resumed = fit(ModelParallelStrategy(**dp2_tp1), plan_cfg, ckpt_path=ckpt_path)
     fts = get_fts(resumed)
     assert saved_depth < fts.max_depth
@@ -616,6 +628,32 @@ def test_fsdp1_checkpoint_resumes_under_fsdp2(tmpdir, model_parallel_ft_schedule
         # optimizer state carried over
         steps = {float(resumed.optimizers[0].state[p]["step"]) for p in resumed.optimizers[0].param_groups[0]["params"]}
         assert steps == {float(resumed.global_step)}, (steps, resumed.global_step, first.global_step)
+
+
+@pytest.mark.parametrize("top_key, consolidate, expected", [
+    ("model", True, "consolidated"),
+    ("model", False, "refused"),
+    ("state_dict", False, "unchanged"),
+], ids=["fsdp1_consolidated", "fsdp1_unconsolidated", "model_parallel"])
+def test_best_ckpt_path_substitutes_fsdp1_consolidation(tmp_path, top_key, consolidate, expected):
+    """``ModelParallelStrategyAdapter.best_ckpt_path`` (#55): a best checkpoint ``FSDPStrategy`` wrote sharded
+    (keyed under ``model``) is restored from its consolidation beside it, or refused with the command that writes
+    one; a ``ModelParallelStrategy`` checkpoint (keyed under ``state_dict``) or a file is left as it is."""
+    import torch.distributed.checkpoint as dcp
+    from finetuning_scheduler.strategy_adapters import ModelParallelStrategyAdapter
+
+    best = tmp_path / "epoch=0-step=2.ckpt"
+    dcp.save({top_key: {"model.output.weight": torch.zeros(2)}}, checkpoint_id=str(best), no_dist=True)
+    torch.save({"epoch": 0}, best / "meta.pt")
+    if consolidate:
+        torch.save({}, f"{best}.consolidated")
+    adapter = ModelParallelStrategyAdapter()
+    if expected == "refused":
+        with pytest.raises(MisconfigurationException, match="consolidate_checkpoint"):
+            adapter.best_ckpt_path(str(best))
+    else:
+        assert adapter.best_ckpt_path(str(best)) == (f"{best}.consolidated" if consolidate else str(best))
+    assert adapter.best_ckpt_path(str(tmp_path / "last.ckpt")) == str(tmp_path / "last.ckpt")
 
 
 def gen_exceptions(trainer, model, exception_expected):

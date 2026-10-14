@@ -341,5 +341,10 @@ under ``ModelParallelStrategy`` with an ``fsdp_plan``, carrying over the model, 
 
       python -m lightning.pytorch.utilities.consolidate_checkpoint <checkpoint directory> --output_file <file>
 
+The resumed fit keeps the FSDP1 run's best checkpoint, which FTS restores at the next phase transition. When it is a
+sharded one, consolidate it too, with the utility's default output (``<best checkpoint directory>.consolidated``,
+beside it): FTS restores that file in its place, and refuses the resume up front, naming the command, when it is
+missing.
+
 The checkpoint's optimizer must have state: Lightning's ``ModelParallelStrategy`` cannot load a single-file checkpoint
 whose optimizer state is empty (plain ``SGD`` without momentum, for example).

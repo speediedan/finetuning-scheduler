@@ -339,6 +339,19 @@ class StrategyAdapter:
         """
         return orig_pl if self.compiled_schedule is None else self._compiled_physical(orig_pl)
 
+    def best_ckpt_path(self, path: str) -> str:
+        """The checkpoint to restore for the checkpoint callback's ``best_model_path`` (at a phase transition, or
+        on resume): ``path`` itself unless the strategy cannot load it and an adapter substitutes a converted
+        counterpart (or refuses with an actionable error).
+
+        Args:
+            path (str): The checkpoint callback's ``best_model_path``.
+
+        Returns:
+            str: The checkpoint path to restore.
+        """
+        return path
+
     def before_restore_model(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
         """Adapter hook executed before model restore.
 
