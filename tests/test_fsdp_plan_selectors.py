@@ -16,6 +16,8 @@ selectors, an ``ignored_params`` given by name, and the refusal of CPU offload, 
 Resolution needs no process group, so these run on CPU; the standalone
 model-parallel tests apply the resolved plans with ``fully_shard``, and the PyTorch API's NCCL tests run CPU offload.
 """
+from types import SimpleNamespace
+
 import pytest
 import torch
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
@@ -78,6 +80,10 @@ class _Adapter(ModelParallelStrategyAdapter):
     def pl_module(self):
         return self._module
 
+    @property
+    def pls_handle(self):
+        return self._pls
+
 
 def _validate(plan: dict, default_kwargs: dict | None = None) -> dict:
     adapter = _Adapter(plan, default_kwargs)
@@ -96,7 +102,7 @@ def test_validate_refuses_an_unmatched_class():
         _validate({"class:NoSuchBlock": {}})
 
 
-def _shard_kwargs(plan_entry: dict, n: str = "model.output") -> tuple[dict, dict]:
+def _shard_kwargs(plan_entry: dict, n: str = "model") -> tuple[dict, dict]:
     adapter = _Adapter({n: plan_entry})
     return adapter._shard_kwargs(n), dict(adapter.pl_module.named_parameters())
 
@@ -118,12 +124,56 @@ def test_ignored_params_leaves_the_plan_unchanged_and_passes_sets_through():
     assert adapter.fsdp_plan["model.output"]["ignored_params"] == "model.output.weight"  # resolved per application
     given = {next(adapter.pl_module.parameters())}
     adapter.fsdp_plan["model.output"]["ignored_params"] = given
-    assert adapter._shard_kwargs("model.output")["ignored_params"] is given
+    assert adapter._shard_kwargs("model.output")["ignored_params"] == given
 
 
 def test_ignored_params_refuses_an_unmatched_name():
     with pytest.raises(MisconfigurationException, match="'model.nosuch' in the `ignored_params` of the `fsdp_plan`"):
         _shard_kwargs({"ignored_params": ["model.output.weight", "model.nosuch"]})
+
+
+def test_ignored_params_resolve_only_among_the_entrys_own_parameters():
+    """``fully_shard`` ignores only the module's own parameters, so a name elsewhere in the model is refused rather
+    than silently left sharded."""
+    kwargs, params = _shard_kwargs({"ignored_params": r"model\."}, n="model.output")
+    assert kwargs["ignored_params"] == {params["model.output.weight"]}
+    with pytest.raises(MisconfigurationException, match="did not match any parameter of that module"):
+        _shard_kwargs({"ignored_params": "model.tok_embeddings.weight"}, n="model.output")
+
+
+@pytest.mark.parametrize("container", [frozenset, list, tuple], ids=["frozenset", "list", "tuple"])
+def test_ignored_params_collections_of_parameters_pass_through_as_a_set(container):
+    adapter = _Adapter({"model.output": {}})
+    given = container(adapter.pl_module.model.output.parameters())
+    adapter.fsdp_plan["model.output"]["ignored_params"] = given
+    assert adapter._shard_kwargs("model.output")["ignored_params"] == set(given)
+
+
+def test_ignored_params_resolve_before_a_checkpoint_wrapper_renames_them(monkeypatch):
+    """With ``act_ckpt: wrapped`` the module's parameters are renamed (``_checkpoint_wrapped_module``) before
+    ``fully_shard`` runs, so names are resolved first."""
+    from finetuning_scheduler.strategy_adapters import model_parallel
+
+    captured = {}
+    monkeypatch.setattr(model_parallel, "fully_shard", lambda module, **kw: captured.update(kw))
+    n = "model.layers.0"
+    adapter = _Adapter({n: model_parallel.ModelParallelStrategyAdapter._resolve_cfg_aliases(
+        {"act_ckpt": ("wrapped",), "ignored_params": f"{n}.attention_norm.weight"})})
+    adapter._pls = SimpleNamespace(device_mesh={"data_parallel": None})
+    norm_weight = adapter.pl_module.get_submodule(n).attention_norm.weight
+    adapter._compose_or_warn(n)
+    assert any("_checkpoint_wrapped_module" in pn for pn, _ in adapter.pl_module.named_parameters())
+    assert captured["ignored_params"] == {norm_weight}
+
+
+def test_restored_scores_move_to_the_cpu():
+    """A distributed checkpoint's restored scores arrive on rank zero's device on every rank (#112)."""
+    from finetuning_scheduler.lightning.fts_supporters import _scores_to_cpu
+
+    scores = {"a.ckpt": torch.tensor(0.5), "b.ckpt": torch.tensor(0.7)}
+    moved = _scores_to_cpu(scores)
+    assert all(v.device.type == "cpu" for v in moved.values()) and moved["a.ckpt"].item() == 0.5
+    assert _scores_to_cpu(torch.tensor(1.0)).device.type == "cpu" and _scores_to_cpu(None) is None
 
 
 @pytest.mark.parametrize("plan, defaults, where", [

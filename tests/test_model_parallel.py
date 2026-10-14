@@ -511,18 +511,24 @@ def test_fts_model_parallel_integration(tmpdir, recwarn, model_parallel_ft_sched
 
 
 @RunIf(min_cuda_gpus=2, standalone=True)
-def test_fsdp2_plan_resume(tmpdir, model_parallel_ft_schedule):
+@pytest.mark.parametrize("same_dirpath", [False, True], ids=["new_dirpath", "same_dirpath"])
+def test_fsdp2_plan_resume(tmpdir, model_parallel_ft_schedule, same_dirpath):
     """A fit sharded by an ``fsdp_plan`` (the root last) and checkpointed after its first epoch resumes in a new
     ``Trainer`` (#55): the distributed checkpoint loads into a freshly sharded model, and the schedule continues
-    from the saved depth to its last phase with one optimizer parameter group per phase."""
+    from the saved depth to its last phase with one optimizer parameter group per phase.
+
+    With the checkpoint directory unchanged, the checkpoint callback also restores its scores, which arrive on rank
+    zero's device on every rank: every comparison with them must work on every rank (#112).
+    """
     plan_cfg = {"fsdp_plan": {'model.output': {}, r'model.layers.\d*$': {}, 'model': {}}, "fsdp_default_kwargs": {}}
     ft_sched = model_parallel_ft_schedule[1]
+    ckpt_kwargs = {"dirpath": str(tmpdir / "checkpoints"), "save_top_k": 1} if same_dirpath else {}
 
     def fit(ckpt_path=None, **trainer_kwargs):
         seed_everything(42)
         callbacks = [FinetuningScheduler(ft_schedule=ft_sched, strategy_adapter_cfg=deepcopy(plan_cfg)),
                      FTSEarlyStopping(monitor="val_loss", patience=1),
-                     FTSCheckpoint(monitor="val_loss", save_last=True)]
+                     FTSCheckpoint(monitor="val_loss", save_last=True, **ckpt_kwargs)]
         trainer = Trainer(strategy=ModelParallelStrategy(**dp2_tp1), callbacks=callbacks, default_root_dir=tmpdir,
                           **{**trainer_defaults, **trainer_kwargs})
         with trainer.init_module(empty_init=True):
@@ -537,6 +543,8 @@ def test_fsdp2_plan_resume(tmpdir, model_parallel_ft_schedule):
     assert saved_depth < fts.max_depth
     default_fts_sanity_chk(resumed)
     assert len(resumed.optimizers[0].param_groups) == fts.max_depth + 1
+    if same_dirpath:  # the scores were restored (on the CPU), not reset
+        assert resumed.checkpoint_callback.best_model_score is not None
 
 
 def gen_exceptions(trainer, model, exception_expected):

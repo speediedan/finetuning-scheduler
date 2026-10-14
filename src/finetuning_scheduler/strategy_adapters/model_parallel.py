@@ -87,21 +87,21 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         ``fully_shard`` to a specified module if it was not already applied to that module.
 
     .. note::
-        In addition to all valid ``fully_shard`` API kwargs, ``fsdp_plan`` also supports a ``act_ckpt`` and
-        ``cpu_offload_policy`` kwargs.
+        In addition to all valid ``fully_shard`` API kwargs, ``fsdp_plan`` also supports an ``act_ckpt`` kwarg and
+        a name-based ``ignored_params``. CPU offload is refused: Lightning's ``ModelParallelStrategy`` moves the model
+        to the GPU after ``configure_model``, which CPU-offloaded FSDP2 shards cannot follow. The PyTorch API
+        (``FTSController``) supports it.
 
     For specified module/patterns (or ``fsdp_default_kwargs``), ``act_ckpt`` allows one
     to pass a string alias specifying the use of the desired activation checkpointing API (e.g. "composable",
     "wrapped", "wrapped_offload") as well as an optional ``Dict`` of activation checkpointing kwargs. The specified
     checkpointing APIs will be applied to the matching module(s) before ``fully_shard``.
 
-    ``cpu_offload_policy`` is a convenience alias that will apply CPUOffloadPolicy to the matching module(s) along
-    with any provided ``Dict`` of policy kwargs.
-
     A plan key may also select modules by class: ``class:TransformerBlock`` selects every module that is an instance
-    of a class named ``TransformerBlock`` (as ``ModuleWrapPolicy({TransformerBlock})`` would), and
+    of a class named ``TransformerBlock`` (the instances ``ModuleWrapPolicy({TransformerBlock})`` selects), and
     ``class:my_pkg.blocks.TransformerBlock`` names the class unambiguously. ``ignored_params`` may name the parameters
-    to leave unsharded, by parameter name or regex (or a list of them), so a plan written in YAML can use it.
+    to leave unsharded, by parameter name or regex (or a list of them), so a plan written in YAML can use it; FSDP2
+    does not reduce their gradients either.
     """
 
     # a built-in adapter: its own overrides are never naming overrides (see `StrategyAdapter.naming_overrides`)
@@ -127,19 +127,17 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                 - :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan` directives are
                   applied in the order provided in the ``fsdp_plan`` dictionary.
                 - A key ``class:<name>`` (or ``class:<module>.<qualname>``) selects every module that is an instance of
-                  that class, as ``ModuleWrapPolicy`` does.
+                  that class, the instances ``ModuleWrapPolicy`` selects.
 
-                Additionally, ``fsdp_plan`` supports ``act_ckpt`` and ``cpu_offload_policy`` kwargs, and an
-                ``ignored_params`` given by parameter name or regex (or a list of them), resolved to the parameters
-                they name when the plan is applied. For specified module/patterns (or ``fsdp_default_kwargs``):
+                Additionally, ``fsdp_plan`` supports an ``act_ckpt`` kwarg, and an ``ignored_params`` given by
+                parameter name or regex (or a list of them), resolved among the module's own parameters when the plan
+                is applied. CPU offload (``cpu_offload_policy``, or a CPU ``offload_policy``) is refused under this
+                strategy. For specified module/patterns (or ``fsdp_default_kwargs``):
 
                 - ``act_ckpt`` (``Sequence`` [ ``str``, ``Dict`` | ``None`` ] | ``ActCkptCfg``): pass an alias
                   specifying the use of the desired activation checkpointing API (e.g. "composable", "wrapped",
                   "wrapped_offload") as well as an optional ``Dict`` of activation checkpointing kwargs. The specified
                   checkpointing APIs will be applied to the matching module(s) before ``fully_shard``.
-                - ``cpu_offload_policy`` (``Dict`` [ ``Optional`` [ ``str`` , ``Any`` ]]) is a convience alias that will
-                  apply ``CPUOffloadPolicy`` to the matching module(s) along with any provided Dict of policy kwargs.
-                  Defaults to ``None``.
 
             fsdp_default_kwargs (Dict | None): An optional dictionary of default ``fully_shard`` API kwargs to apply
                 to each matching module in ``fsdp_plan``. Module-name/pattern specific kwargs will take precedence over
@@ -158,18 +156,17 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                 - :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan` directives are
                   applied in the order provided in the ``fsdp_plan`` dictionary.
                 - A key ``class:<name>`` (or ``class:<module>.<qualname>``) selects every module that is an instance of
-                  that class, as ``ModuleWrapPolicy`` does.
+                  that class, the instances ``ModuleWrapPolicy`` selects.
 
-                Additionally, ``fsdp_plan`` supports ``act_ckpt`` and ``cpu_offload_policy`` kwargs, and an
-                ``ignored_params`` given by parameter name or regex (or a list of them), resolved to the parameters
-                they name when the plan is applied. For specified module/patterns (or ``fsdp_default_kwargs``):
+                Additionally, ``fsdp_plan`` supports an ``act_ckpt`` kwarg, and an ``ignored_params`` given by
+                parameter name or regex (or a list of them), resolved among the module's own parameters when the plan
+                is applied. CPU offload (``cpu_offload_policy``, or a CPU ``offload_policy``) is refused under this
+                strategy. For specified module/patterns (or ``fsdp_default_kwargs``):
 
                 - ``act_ckpt`` (``Sequence`` [ ``str``, ``Dict`` | ``None`` ] | ``ActCkptCfg``): pass an alias
                   specifying the use of the desired activation checkpointing API (e.g. "composable", "wrapped",
                   "wrapped_offload") as well as an optional ``Dict`` of activation checkpointing kwargs. The specified
                   checkpointing APIs will be applied to the matching module(s) before ``fully_shard``.
-                - ``cpu_offload_policy`` (``Dict`` [ ``Optional`` [ ``str`` , ``Any`` ]]) is a convience alias that will
-                  apply ``CPUOffloadPolicy`` to the matching module(s) along with any provided Dict of policy kwargs.
 
             fsdp_default_kwargs: An optional dictionary of default ``fully_shard`` API kwargs to apply to each matching
                 module in ``fsdp_plan``. Module-name/pattern specific kwargs will take precedence over
@@ -336,11 +333,13 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
     def _compose_or_warn(self, n: str) -> str | None:
         # NB PL does not currently support passing user-created meshes so we unconditionally pass the device mesh
         if not getattr(self.pl_module.get_submodule(n), '_is_fsdp_managed_module', False):
-            if act_ckpt := self.fsdp_plan[n].pop('act_ckpt', None):
-                self._apply_activation_checkpointing(act_ckpt,n)
+            act_ckpt = self.fsdp_plan[n].pop('act_ckpt', None)
+            kwargs = self._shard_kwargs(n)  # before a checkpoint wrapper renames the module's parameters
+            if act_ckpt:
+                self._apply_activation_checkpointing(act_ckpt, n, kwargs)
             else:
                 fully_shard(self.pl_module.get_submodule(n), mesh=self.pls_handle.device_mesh["data_parallel"],
-                            **self._shard_kwargs(n))
+                            **kwargs)
         else:
             rank_zero_warn(
                 f"Module '{n}' or one of its parents has already registered the ``fully_shard`` composable "
@@ -350,7 +349,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
             )
             return n  # return the uncomposed fqn for subsequent handling
 
-    def _apply_activation_checkpointing(self, act_ckpt: ActCkptCfg, n: str) -> None:
+    def _apply_activation_checkpointing(self, act_ckpt: ActCkptCfg, n: str, kwargs: dict[str, Any]) -> None:
         assert isinstance(act_ckpt, ActCkptCfg)
         assert isinstance(act_ckpt.cfg, dict) and callable(act_ckpt._func)
         if act_ckpt.mode == ActCkptEnum.COMPOSABLE:
@@ -360,8 +359,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
             outer_mod = self.pl_module if not module_prefix else self.pl_module.get_submodule(module_prefix)
             setattr(outer_mod, module_name, act_ckpt._func(self.pl_module.get_submodule(n), **act_ckpt.cfg))
             assert isinstance(self.pl_module.get_submodule(n), ActivationWrapper)
-        fully_shard(self.pl_module.get_submodule(n), mesh=self.pls_handle.device_mesh["data_parallel"],
-                    **self._shard_kwargs(n))
+        fully_shard(self.pl_module.get_submodule(n), mesh=self.pls_handle.device_mesh["data_parallel"], **kwargs)
 
     def _shard_kwargs(self, n: str) -> dict[str, Any]:
         """The ``fully_shard`` kwargs for the plan's module ``n``, with an ``ignored_params`` given by name
@@ -369,17 +367,25 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
 
         ``ignored_params`` may be a parameter name or regex (matched from the start of each name, as schedule entries
         are), or a list of them, so a plan written in YAML can name the parameters ``fully_shard`` leaves unsharded.
-        Names are the ``LightningModule``'s own parameter names, and are resolved when the plan is applied, since
-        ``configure_model`` may create the parameters. A set of parameters is passed through unchanged.
+        Names are the ``LightningModule``'s own parameter names, resolved among the parameters of the module ``n``
+        (``fully_shard`` ignores only those) when the plan is applied, since ``configure_model`` may create the
+        parameters. A collection of parameters is passed through as a set.
+
+        FSDP2 neither shards nor reduces the gradients of ignored parameters, so a schedule that thaws one trains it
+        independently on each rank unless something else synchronizes it.
 
         Raises:
-            MisconfigurationException: If a name or regex in ``ignored_params`` matches no parameter.
+            MisconfigurationException: If a name or regex in ``ignored_params`` matches no parameter of the module.
         """
         kwargs = dict(self.fsdp_plan[n])
         names = kwargs.get("ignored_params")
-        if names is None or isinstance(names, set):
+        if names is None:
             return kwargs
-        named_params = dict(self.pl_module.named_parameters())
+        if not isinstance(names, str) and all(isinstance(p, torch.nn.Parameter) for p in names):
+            kwargs["ignored_params"] = set(names)
+            return kwargs
+        own = set(self.pl_module.get_submodule(n).parameters())
+        named_params = {pn: p for pn, p in self.pl_module.named_parameters() if p in own}
         resolved: set[torch.nn.Parameter] = set()
         for pattern in [names] if isinstance(names, str) else names:
             if pattern in named_params:
@@ -390,7 +396,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
             if not matched:
                 raise MisconfigurationException(
                     f"The parameter name or regex '{pattern}' in the `ignored_params` of the `fsdp_plan` entry for "
-                    f"'{n}' did not match any named parameter in the provided model."
+                    f"'{n}' did not match any parameter of that module."
                 )
             resolved.update(matched)
         kwargs["ignored_params"] = resolved

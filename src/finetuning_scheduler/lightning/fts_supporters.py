@@ -182,6 +182,21 @@ class CallbackResolverMixin(ABC):
             setattr(self, self.callback_handle, resolved_target_callbacks[0])
 
 
+def _scores_to_cpu(scores: Any) -> Any:
+    """Restored monitor scores (a tensor, or a mapping of them), moved to the CPU.
+
+    A distributed checkpoint's callback state is restored onto the device rank zero saved it from, on every rank, so a
+    restored score compared with (or subtracted from) the current metric on another rank's device raises, on that rank
+    only, and the other ranks then wait in the next collective (#112). A score is a 0-dim tensor, which may meet a
+    tensor on any device once it is on the CPU.
+    """
+    if isinstance(scores, Tensor):
+        return scores.detach().cpu()
+    if isinstance(scores, dict):
+        return {k: _scores_to_cpu(v) for k, v in scores.items()}
+    return scores
+
+
 class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
     r"""Extends/specializes :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping` to facilitate
     multi-phase scheduled fine-tuning.
@@ -306,6 +321,11 @@ class FTSEarlyStopping(EarlyStopping, CallbackResolverMixin):
         if outcome.phase_complete:
             self._transition_es_phase()
         return outcome.should_stop, outcome.reason
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Load the callback state, with ``best_score`` on the CPU (see :func:`_scores_to_cpu`, #112)."""
+        super().load_state_dict(state_dict)
+        self.best_score = _scores_to_cpu(self.best_score)
 
     def _improvement_message(self, current: Tensor) -> str:
         """Override standard EarlyStopping._improvement_message to accommodate loss_parallel/Dtensor, and a
@@ -453,10 +473,10 @@ class FTSCheckpoint(ModelCheckpoint, CallbackResolverMixin):
         if self.finetuningscheduler_callback._fts_state._resume_fit_from_ckpt:
             dirpath_from_ckpt = state_dict.get("dirpath", self.dirpath)
             if self.dirpath == dirpath_from_ckpt:
-                self.best_model_score = state_dict["best_model_score"]
-                self.best_k_models = state_dict.get("best_k_models", self.best_k_models)
+                self.best_model_score = _scores_to_cpu(state_dict["best_model_score"])
+                self.best_k_models = _scores_to_cpu(state_dict.get("best_k_models", self.best_k_models))
                 self.kth_best_model_path = state_dict.get("kth_best_model_path", self.kth_best_model_path)
-                self.kth_value = state_dict.get("kth_value", self.kth_value)
+                self.kth_value = _scores_to_cpu(state_dict.get("kth_value", self.kth_value))
                 self.current_ckpt_depth = state_dict["current_ckpt_depth"]
                 self.best_ckpt_depth = state_dict["best_ckpt_depth"]
             else:

@@ -63,8 +63,10 @@ In addition to all valid ``fully_shard`` API keyword arguments, ``fsdp_plan`` (a
 ``class:my_pkg.blocks.TransformerBlock`` names the class unambiguously.
 
 **ignored_params**: a parameter name or regex (matched from the start of each name, as fine-tuning schedule entries
-are), or a list of them, naming the parameters ``fully_shard`` should leave unsharded. They are resolved to the
-parameters themselves when the plan is applied.
+are), or a list of them, naming the parameters ``fully_shard`` should leave unsharded. They are resolved among the
+module's own parameters (those ``fully_shard`` can ignore) when the plan is applied. FSDP2 does not reduce the gradients
+of ignored parameters either, so a schedule that thaws one trains it independently on each rank unless something else
+synchronizes it.
 
 **CPU offload**: Lightning's ``ModelParallelStrategy`` moves the model to the GPU after ``configure_model``, which
 FSDP2's ``CPUOffloadPolicy`` (shards kept on the CPU) cannot follow, so a plan that asks for CPU offload
