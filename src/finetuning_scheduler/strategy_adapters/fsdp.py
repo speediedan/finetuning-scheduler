@@ -33,7 +33,6 @@ from typing_extensions import override
 import torch
 from lightning.fabric.strategies.fsdp import _get_full_state_dict_context, _setup_activation_checkpointing
 from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
-from lightning.pytorch.strategies.strategy import Strategy
 from lightning.pytorch.trainer.connectors.checkpoint_connector import _CheckpointConnector
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.model_helpers import is_overridden
@@ -42,7 +41,8 @@ from torch import Tensor
 from torch.distributed import all_gather_object
 from torch.optim import Optimizer
 
-from finetuning_scheduler.core.views import CanonicalView, VIEW_ATTR
+from finetuning_scheduler.core.roles import is_frozen_role
+from finetuning_scheduler.core.views import as_view, VIEW_ATTR
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
 # Type checking imports - always available for static analysis
@@ -58,6 +58,8 @@ if TYPE_CHECKING or torch.distributed.is_available():
 
     from finetuning_scheduler.strategy_adapters._wrap_utils import NameDrivenPolicy
 
+# marks a strategy class that did not define `lightning_restore_optimizer` itself before the adapter patched it
+_UNSET = object()
 
 
 class FSDPStrategyAdapter(StrategyAdapter):
@@ -157,15 +159,46 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         return False
 
+    def _disable_lightning_optimizer_restore(self, strategy_cls: type) -> None:
+        """Disable Lightning's optimizer restoration on the running strategy's own class (a property, so not
+        settable on the instance) until the fit ends (see :meth:`on_fts_teardown`)."""
+        original = vars(strategy_cls).get("lightning_restore_optimizer", _UNSET)
+        if original is False:  # this patch, left by an earlier fit whose teardown did not run: not the original
+            original = _UNSET
+        self._restore_optimizer_patch = (strategy_cls, original)
+        setattr(strategy_cls, "lightning_restore_optimizer", self.lightning_restore_optimizer)
+
+    def on_fts_teardown(self) -> None:
+        """Undo the patch that disabled Lightning's optimizer restoration for this fit, so later fits in the
+        process, with any strategy, restore optimizers as Lightning does."""
+        patch = getattr(self, "_restore_optimizer_patch", None)
+        if patch is None:
+            return
+        strategy_cls, original = patch
+        if original is _UNSET:
+            delattr(strategy_cls, "lightning_restore_optimizer")
+        else:
+            setattr(strategy_cls, "lightning_restore_optimizer", original)
+        self._restore_optimizer_patch = None
+
     def _refuse_attached_view(self) -> None:
         """FSDP1 schedules through the module's own parameter names (its flat-parameter transform runs only after
-        the wrap), so a view attached to the module is refused, by name."""
+        the wrap), so a view attached to the module must name parameters as the module does (naming scheme
+        ``"physical"``); its roles and coupled tensors apply. A view with logical names is refused, by name.
+
+        Without ``use_orig_params``, the wrap validation refuses an FSDP-flattened parameter that mixes a tensor whose
+        role is never thawed with scheduled parameters, even of its own module (see :meth:`_frozen_role_params`).
+        """
         attached = getattr(self.pl_module, VIEW_ATTR, None)
-        if attached is not None and not (type(attached) is CanonicalView and not attached.roles()):
+        if attached is None:
+            return
+        scheme = as_view(attached).support().naming_scheme
+        if scheme != "physical":
             raise MisconfigurationException(
-                f"{type(self.pl_module).__name__} carries a `fts_tunable_view` ({type(attached).__qualname__}), which"
-                " the FSDP (FSDP1) strategy does not support: it schedules through the module's own parameter names."
-                " Use `ModelParallelStrategy` (FSDP2) to fine-tune through a view, or remove the attribute."
+                f"{type(self.pl_module).__name__} carries a `fts_tunable_view` ({type(attached).__qualname__}) whose"
+                f" naming scheme is {scheme!r}, which the FSDP (FSDP1) strategy does not support: it schedules through"
+                " the module's own parameter names, so only a view with the 'physical' naming scheme can be attached."
+                " Use `ModelParallelStrategy` (FSDP2) to fine-tune through logical names."
             )
 
     def scheduled_physical(self, depth: int) -> list:
@@ -189,7 +222,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         """
         self._refuse_attached_view()
         # hack to avoid subclassing FSDP strategy for this adapter
-        setattr(Strategy, "lightning_restore_optimizer", self.lightning_restore_optimizer)
+        self._disable_lightning_optimizer_restore(type(self.pls_handle))
         setattr(self.pls_handle, "optimizer_state", self.optimizer_state)
         self._use_orig_params = self.pls_handle.kwargs.get("use_orig_params", False)
         # w/ `use_orig_params`, schedule/wrapping alignment constraints can be relaxed
@@ -605,6 +638,15 @@ class FSDPStrategyAdapter(StrategyAdapter):
             )
             return ("ERROR", fts_p0_err)
 
+    def _frozen_role_params(self) -> list:
+        """The parameters an attached view gives a role that is never thawed (``fitted``, ``instrument``), counted
+        as unscheduled parameter by parameter: without ``use_orig_params``, one sharing an FSDP-flattened parameter
+        with a scheduled parameter of its own module would be thawed with it."""
+        if self.compiled_schedule is None or self._allow_mixed_req_grad:
+            return []
+        return [n for n, r in self.compiled_schedule.roles.items()
+                if is_frozen_role(r) and n in self._fsdp_unflat_to_flat_mapping and n not in self._unscheduled_params]
+
     def _phase_unaligned_fsdp_params(self, check_unsched: bool = False) -> set:
         """Inspect the fine-tuning schedule and FSDP-wrapped module for parameters that are unaligned with the FSDP
         wrapped module.
@@ -621,7 +663,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         fsdp_param_sets: dict = {}
         inspection_map = {d: {"params": self.scheduled_physical(d)} for d in self.fts_handle.ft_schedule}
         if check_unsched:
-            inspection_map[-1] = {"params": self._unscheduled_params}
+            inspection_map[-1] = {"params": list(self._unscheduled_params) + self._frozen_role_params()}
         for d, pl in inspection_map.items():
             fsdp_param_sets[d] = set()
             for lp in pl["params"]:

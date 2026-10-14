@@ -18,7 +18,7 @@ import os
 from copy import deepcopy
 from pprint import pformat
 from typing import Any  # Dict is used for runtime isinstance() checks
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing_extensions import override
 
 import lightning.pytorch as pl
@@ -66,6 +66,13 @@ def _notify_lightning_extra() -> None:
     if not _lightning_extra_notice_issued:
         _lightning_extra_notice_issued = True
         rank_zero_warn(LIGHTNING_EXTRA_NOTICE, category=FutureWarning)
+
+
+def _optimizer_class_name(new_optimizer: dict) -> str | None:
+    """The class name an explicit ``new_optimizer`` configuration builds (``torch.optim.Adam`` and ``Adam`` alike
+    give ``Adam``)."""
+    class_path = (new_optimizer.get("optimizer_init") or {}).get("class_path")
+    return class_path.rsplit(".", 1)[-1] if isinstance(class_path, str) else None
 
 
 class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMixin, BaseFinetuning):
@@ -118,6 +125,14 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
     """
     pl_module: pl.LightningModule
     trainer: pl.Trainer
+    # set while restoring a best checkpoint whose optimizer state predates the optimizer in use (model state only)
+    _restore_model_only: bool = False
+    # the class name of the optimizer `configure_optimizers` built (set at fit start)
+    _initial_optimizer_cls: str | None = None
+    # transitions are sequenced by a host-driven `FTSController` (set to `False` to use the callback's own, for one
+    # release); the controller is attached at the fit's first transition or resume
+    _use_fts_controller: bool = True
+    _fts_controller: Any = None
     strategy_adapter: StrategyAdapter
 
     def __init__(
@@ -296,6 +311,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.reinit_lr_cfg = reinit_lr_cfg
         self.strategy_adapter_cfg = strategy_adapter_cfg or {}
         self.custom_strategy_adapters = custom_strategy_adapters
+        self._phase_hooks: list[tuple] = []  # (fn, when, isolate_rng), registered on each fit's controller
         self.allow_untested = allow_untested
         self.apply_lambdas_new_pgs = apply_lambdas_new_pgs
         self.enforce_phase0_params = enforce_phase0_params
@@ -387,6 +403,52 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert self.trainer is not None
         # the validation loop's forward-only pass leaves an FSDP2 root module's unsharded parameters registered
         core_phase.reshard_fsdp_modules(self.pl_module)
+        if self._use_fts_controller:
+            self._controller_step()
+        else:
+            self._legacy_step()
+        if self.depth_remaining == 0 and not self.epoch_transitions_only:
+            assert self.trainer.early_stopping_callback is not None
+            self.trainer.early_stopping_callback.final_phase = True  # type: ignore[attr-defined]
+        assert self._fts_state._ft_sync_objects is not None
+        FinetuningScheduler.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
+        if self.pl_module._compiler_ctx and self.pl_module._compiler_ctx.get("compiler", None) == "dynamo":
+            # reset currently required as `AOTAutograd`` is getting confused by `requires_grad` alteration
+            torch._dynamo.reset()
+        rank_zero_info(f"Multi-phase fine-tuned training continuing at level {self.curr_depth}.")
+        if self.depth_remaining == 0:
+            max_epochs_msg = f"`max_epochs` ({self.trainer.fit_loop.max_epochs}) is reached."
+            composition_msg = "the early stopping conditions are met or " + max_epochs_msg
+            rank_zero_info(
+                f"Given the current configuration of `max_depth` ({self.max_depth}), this training session"
+                f" will now end when {max_epochs_msg if self.epoch_transitions_only else composition_msg}"
+            )
+
+    def _controller_step(self) -> None:
+        """Hand the transition (or the resume) the callback decided on to its host-driven
+        :class:`~finetuning_scheduler.core.controller.FTSController`, which sequences it and carries it out through
+        this callback's ``restore_best_ckpt``, ``step_pg`` and ``thaw_to_depth`` and the strategy adapter's
+        ``on_after_phase_transition``, as :meth:`_legacy_step` calls them."""
+        from finetuning_scheduler.lightning.controller_bridge import attach_controller
+
+        if self._fts_controller is None:  # a subclass's `on_fit_start` did not attach it
+            self._fts_controller = attach_controller(self, self._phase_hooks,
+                                                     run_start_hooks=not self._fts_state._resume_fit_from_ckpt)
+        controller = self._fts_controller
+        if self._fts_state._resume_fit_from_ckpt:
+            controller.resume_at(self.curr_depth)
+            return
+        if controller.curr_depth != self.curr_depth - 1:
+            # the callback's depth is authoritative (it is checkpointed, and subclasses may set it)
+            rank_zero_debug(f"Syncing the controller's phase ({controller.curr_depth}) to the callback's"
+                            f" ({self.curr_depth - 1}) before advancing.")
+            controller._depth = self.curr_depth - 1
+        controller.request_advance()
+
+    def _legacy_step(self) -> None:
+        """The callback's own transition (or resume), for one release beside the controller's (see
+        ``_use_fts_controller``)."""
+        assert self.trainer is not None
         pre_reinit_state = self._save_pre_reinit_lr_state(self.trainer)
         if not self._fts_state._resume_fit_from_ckpt:
             if self.restore_best:
@@ -406,22 +468,6 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         else:
             self.thaw_to_depth()
         self.strategy_adapter.on_after_phase_transition()
-        if self.depth_remaining == 0 and not self.epoch_transitions_only:
-            assert self.trainer.early_stopping_callback is not None
-            self.trainer.early_stopping_callback.final_phase = True  # type: ignore[attr-defined]
-        assert self._fts_state._ft_sync_objects is not None
-        FinetuningScheduler.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
-        if self.pl_module._compiler_ctx and self.pl_module._compiler_ctx.get("compiler", None) == "dynamo":
-            # reset currently required as `AOTAutograd`` is getting confused by `requires_grad` alteration
-            torch._dynamo.reset()
-        rank_zero_info(f"Multi-phase fine-tuned training continuing at level {self.curr_depth}.")
-        if self.depth_remaining == 0:
-            max_epochs_msg = f"`max_epochs` ({self.trainer.fit_loop.max_epochs}) is reached."
-            composition_msg = "the early stopping conditions are met or " + max_epochs_msg
-            rank_zero_info(
-                f"Given the current configuration of `max_depth` ({self.max_depth}), this training session"
-                f" will now end when {max_epochs_msg if self.epoch_transitions_only else composition_msg}"
-            )
 
     def step_pg(
         self,
@@ -449,9 +495,12 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert isinstance(self.pl_module, pl.LightningModule)
         assert isinstance(self.trainer, pl.Trainer)
         core_phase.reshard_fsdp_modules(self.pl_module)  # thaw and optimize the parameters FSDP2 trains
-        # if the target depth is 0, implicit optimizer reinitialization should not be executed
+        # if the target depth is 0, implicit optimizer reinitialization should not be executed. A restored best
+        # checkpoint that predates an explicit optimizer reinitialization had its optimizer state skipped, so the
+        # optimizer is rebuilt as that reinitialization configured it
+        stale_cfg = self._optimizer_reinit_since_best(depth) if depth_sync else None
         new_optimizer_cfg, thaw_layers = core_phase.thaw_plan(
-            self.ft_schedule, depth, self._fts_state._best_ckpt_depth, depth_sync, self.reinit_optim_cfg
+            self.ft_schedule, depth, self._fts_state._best_ckpt_depth, depth_sync, self.reinit_optim_cfg or stale_cfg
         )
         for i, orig_next_tl in thaw_layers:
             self.strategy_adapter._maybe_set_bn_track_running_stats(i)
@@ -504,6 +553,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             lr=next_tl.get("lr", optimizer.defaults["lr"]),
             no_decay=getattr(self.pl_module, "no_decay", None),
             apply_lambdas=self.apply_lambdas_new_pgs,
+            **({"pg_overrides": next_tl["pg_overrides"]} if next_tl.get("pg_overrides") else {}),
         )
         if new_scheduler_cfg:
             self.reinit_lr_scheduler(
@@ -524,12 +574,20 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert self.trainer is not None
         # wait for all processes to be ready to restore ckpt before restoring
         self.trainer.strategy.barrier("setup_next_level")
+        stale = self._optimizer_reinit_since_best(self.curr_depth) is not None
+        self._restore_model_only = stale
+        if stale:
+            rank_zero_info(
+                f"The best checkpoint (phase {self._fts_state._best_ckpt_depth}) predates the optimizer"
+                " reinitialization configured by a later phase; restoring its model state only and rebuilding the"
+                " optimizer as that phase configures it."
+            )
         # if restarting across multiple depths, need to ensure we're restoring optimizer state appropriately
         # by resetting optimizer groups and allowing state dict to be reset commensurate w/ ckpt state
         # the saved groups name parameters as the saving run's wrappers did (FSDP1's `_fsdp_wrapped_module.`, for a
         # checkpoint resumed under FSDP2), so both sides are matched by wrapper-free name
         named_params = {canonical_fqn(n): p for n, p in self.pl_module.named_parameters()}
-        for opt_idx, optimizer in enumerate(self.trainer.optimizers):
+        for opt_idx, optimizer in enumerate(self.trainer.optimizers if not stale else []):
             saved_pgs = [{**g, "params": [canonical_fqn(n) for n in g["params"]]}
                          for g in self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"][opt_idx]]
             optimizer.param_groups = BaseFinetuning._apply_mapping_to_param_groups(saved_pgs, named_params)
@@ -537,9 +595,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 ScheduleImplMixin._repartition_sharded_optim(optimizer)  # type: ignore[arg-type]
         # we're restoring everything but callbacks and loops, otherwise, checkpoint_connector.restore() could be used
         assert self.trainer.checkpoint_callback is not None
-        checkpoint_path = self.strategy_adapter.best_ckpt_path(
-            self.trainer.checkpoint_callback.best_model_path  # type: ignore[attr-defined]
-        )
+        checkpoint_path = self.trainer.checkpoint_callback.best_model_path  # type: ignore[attr-defined]
+        if (adapter := getattr(self, "strategy_adapter", None)) is not None:
+            checkpoint_path = adapter.best_ckpt_path(checkpoint_path)
         try:
             self.trainer._checkpoint_connector.resume_start(checkpoint_path=checkpoint_path)
         except KeyError as ke:  # we may want to allow training to progress conditioned on context of restoration
@@ -561,7 +619,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.trainer._checkpoint_connector.restore_model()
         # we need to override checkpoint_connector.restore_training_state() to bypass loop restoration
         # if additional customizations are required, may make sense to subclass _CheckpointConnector at some point
-        self._restore_training_state()
+        try:
+            self._restore_training_state()
+        finally:
+            self._restore_model_only = False
         self.trainer._checkpoint_connector.resume_end()
 
     def _restore_training_state(self) -> None:
@@ -579,7 +640,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         # checkpoint_connector.restore_loops()
 
         assert self.trainer.state.fn is not None
-        if self.trainer.state.fn == TrainerFn.FITTING:
+        if self.trainer.state.fn == TrainerFn.FITTING and not self._restore_model_only:
             try:
                 # enable strategy adapters to restore optimizer if `Strategy.lightning_restore_optimizer` is overridden
                 self.strategy_adapter.on_before_restore_optimizers_and_lrs()
@@ -587,6 +648,31 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 checkpoint_connector.restore_optimizers_and_schedulers()
             except KeyError as ke:
                 self._maybe_allow_incompatible_reinit_ckpt(ke)
+
+    def _optimizer_reinit_since_best(self, depth: int) -> dict | None:
+        """The configuration of the latest explicit optimizer reinitialization between the best checkpoint's phase
+        and ``depth`` (exclusive), when it changed the optimizer's class: the best checkpoint's optimizer state
+        then cannot be restored into the optimizer in use (as ``FTSController`` decides, by class).
+
+        ``None`` when nothing is restored (``restore_best=False``), when the optimizer is reinitialized in every phase
+        (implicit mode) or by phase ``depth`` itself (it is rebuilt from phase 0 either way), when no such
+        reinitialization exists, or when the best checkpoint's optimizer has the class of the one in use (its state is
+        restored, as before).
+        """
+        schedule = self.ft_schedule
+        if not isinstance(schedule, dict) or not self.restore_best or self.reinit_optim_cfg or \
+                schedule[depth].get("new_optimizer"):
+            return None
+        best = self._fts_state._best_ckpt_depth
+        later = [d for d in schedule if best < d < depth and schedule[d].get("new_optimizer")]
+        if not later:
+            return None
+        earlier = [d for d in schedule if d <= best and schedule[d].get("new_optimizer")]
+        best_cls = _optimizer_class_name(schedule[max(earlier)]["new_optimizer"]) if earlier else \
+            self._initial_optimizer_cls
+        if best_cls is None or best_cls == type(self.trainer.optimizers[0]).__name__:
+            return None
+        return schedule[max(later)]["new_optimizer"]
 
     def _maybe_allow_incompatible_reinit_ckpt(self, key_error: KeyError) -> None:
         """Inspect context for a given ``KeyError`` and permit continued training if using lr scheduler or
@@ -739,6 +825,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         # TODO: might not be necessary if we move introspection back to IT where it belongs
         # Save pl_module/trainer refs early to allow strategy adapter selection to introspect the module
         self.pl_module, self.trainer = pl_module, trainer  # save pl_module/trainer refs for downstream convenience
+        self._fts_controller = None  # attached afresh for each fit
         self._callback_dep_setup(trainer, pl_module, stage)
         self._strategy_setup(trainer)
         if self.gen_ft_sched_only:
@@ -789,6 +876,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.strategy_adapter.on_before_fts_fit_start()
         if len(trainer.optimizers) > 1:
             raise MisconfigurationException("FTS currently only supports a single-optimizer configuration")
+        # the class `configure_optimizers` built, which checkpoints before any optimizer reinitialization hold
+        self._initial_optimizer_cls = type(trainer.optimizers[0]).__name__
         if getattr(trainer.optimizers[0], "_overlap_with_ddp", False):
             raise MisconfigurationException(
                 "Configuring an optimizer using `overlap_with_ddp=True` is not supported"
@@ -801,6 +890,34 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             assert isinstance(self.ft_schedule, dict)
             self._validate_opt_init()
         super().on_fit_start(trainer, pl_module)
+        if self._use_fts_controller:
+            from finetuning_scheduler.lightning.controller_bridge import attach_controller
+
+            # phase 0's start hooks run now, unless the fit resumes a run (the controller resumes at its phase)
+            self._fts_controller = attach_controller(self, self._phase_hooks,
+                                                     run_start_hooks=not self._fts_state._resume_fit_from_ckpt)
+
+    def add_phase_hook(self, fn: Callable, when: str = "start", *, isolate_rng: bool | None = None) -> None:
+        """Call ``fn(event)`` whenever a phase starts (phase 0 at fit start) or ends (the final phase at train
+        end), as :meth:`~finetuning_scheduler.core.controller.FTSController.add_phase_hook` does: ``event`` is a
+        :class:`~finetuning_scheduler.core.controller.PhaseEvent`, whose ``phase_config`` is the phase's
+        ``phase_config`` schedule key. Hooks run in registration order, for every later fit with this callback
+        (experimental).
+
+        Args:
+            fn: The hook.
+            when: ``"start"`` or ``"end"``.
+            isolate_rng: Whether to isolate the training random streams while ``fn`` runs (the default is to).
+
+        Raises:
+            MisconfigurationException: If ``when`` is neither ``"start"`` nor ``"end"``, or the callback's own
+                transitions are in use (``_use_fts_controller``).
+        """
+        if when not in ("start", "end"):
+            raise MisconfigurationException(f"`when` must be 'start' or 'end', got {when!r}.")
+        if not self._use_fts_controller:
+            raise MisconfigurationException("Phase hooks need the callback's controller (`_use_fts_controller`).")
+        self._phase_hooks.append((fn, when, isolate_rng))
 
     def state_dict(self) -> dict[str, Any]:
         """Before saving a checkpoint, add the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback
@@ -841,8 +958,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         if self._fts_state._resume_fit_from_ckpt:  # if resuming training, on_fit_start will already be called
             # if resuming from a checkpoint, we need to update current fts depth from the used ckpt
             self._fts_state._curr_depth = self._fts_state._fts_ckpt_metadata["current_ckpt_depth"]
-            # if we're restoring from a non-best ckpt depth, ensure it is the new training incarnation's initial best
-            self._fts_state._best_ckpt_depth = self._fts_state._fts_ckpt_metadata["current_ckpt_depth"]
+            # the checkpoint callback reloads the run's best checkpoint, so the phases to replay onto its restored
+            # optimizer state at the next transition start after the depth it was saved at (`best_ckpt_pgs`' depth)
+            self._fts_state._best_ckpt_depth = self._fts_state._fts_ckpt_metadata["best_ckpt_depth"]
 
     def should_transition(self, trainer: "pl.Trainer") -> bool:
         """Phase transition logic is contingent on whether we are composing
@@ -961,3 +1079,21 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         """
         assert self._fts_state._ft_sync_objects is not None
         self.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
+        if self._fts_controller is not None:
+            self._fts_controller.train_end()  # the final phase's end hooks
+
+    def teardown(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
+        """Let the strategy adapter undo what it changed beyond this fit (see
+        :meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.on_fts_teardown`)."""
+        super().teardown(trainer, pl_module, stage)
+        self._fts_adapter_teardown()
+
+    def on_exception(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", exception: BaseException) -> None:
+        """As :meth:`teardown`, for a fit that raised."""
+        super().on_exception(trainer, pl_module, exception)
+        self._fts_adapter_teardown()
+
+    def _fts_adapter_teardown(self) -> None:
+        adapter = getattr(self, "strategy_adapter", None)
+        if adapter is not None:
+            adapter.on_fts_teardown()

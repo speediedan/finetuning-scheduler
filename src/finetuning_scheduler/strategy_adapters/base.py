@@ -307,6 +307,10 @@ class StrategyAdapter:
             )
             rank_zero_warn(warn_msg)
 
+    def on_fts_teardown(self) -> None:
+        """Hook executed when the fit ends (or fails): undo anything the adapter changed beyond this fit's own
+        objects."""
+
     def on_before_restore_optimizers_and_lrs(self) -> None:
         """Hook executed immediately before :class:`~finetuning_scheduler.fts.FinetuningScheduler` restores
         optimizers and schedulers."""
