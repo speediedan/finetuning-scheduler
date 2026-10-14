@@ -381,13 +381,20 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         names = kwargs.get("ignored_params")
         if names is None:
             return kwargs
-        if not isinstance(names, str) and all(isinstance(p, torch.nn.Parameter) for p in names):
+        names = [names] if isinstance(names, str) else list(names)  # a generator would be consumed by the check below
+        if all(isinstance(p, torch.nn.Parameter) for p in names):
             kwargs["ignored_params"] = set(names)
             return kwargs
+        if not all(isinstance(p, str) for p in names):
+            raise MisconfigurationException(
+                f"The `ignored_params` of the `fsdp_plan` entry for '{n}' mixes parameter names and parameters; give "
+                "either names (or regexes) or parameters."
+            )
         own = set(self.pl_module.get_submodule(n).parameters())
-        named_params = {pn: p for pn, p in self.pl_module.named_parameters() if p in own}
+        # every name of a tied parameter, not only the first registered one
+        named_params = {pn: p for pn, p in self.pl_module.named_parameters(remove_duplicate=False) if p in own}
         resolved: set[torch.nn.Parameter] = set()
-        for pattern in [names] if isinstance(names, str) else names:
+        for pattern in names:
             if pattern in named_params:
                 matched = [named_params[pattern]]
             else:

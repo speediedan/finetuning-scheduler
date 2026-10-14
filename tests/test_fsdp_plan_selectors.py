@@ -141,12 +141,27 @@ def test_ignored_params_resolve_only_among_the_entrys_own_parameters():
         _shard_kwargs({"ignored_params": "model.tok_embeddings.weight"}, n="model.output")
 
 
-@pytest.mark.parametrize("container", [frozenset, list, tuple], ids=["frozenset", "list", "tuple"])
+@pytest.mark.parametrize("container", [frozenset, list, tuple, iter], ids=["frozenset", "list", "tuple", "iterator"])
 def test_ignored_params_collections_of_parameters_pass_through_as_a_set(container):
     adapter = _Adapter({"model.output": {}})
-    given = container(adapter.pl_module.model.output.parameters())
-    adapter.fsdp_plan["model.output"]["ignored_params"] = given
-    assert adapter._shard_kwargs("model.output")["ignored_params"] == set(given)
+    expected = set(adapter.pl_module.model.output.parameters())
+    adapter.fsdp_plan["model.output"]["ignored_params"] = container(adapter.pl_module.model.output.parameters())
+    assert adapter._shard_kwargs("model.output")["ignored_params"] == expected and expected
+
+
+def test_ignored_params_name_every_name_of_a_tied_parameter():
+    """A tied parameter can be named by any of its names, not only the first one registered."""
+    adapter = _Adapter({"model.output": {"ignored_params": "model.output.weight"}})
+    adapter.pl_module.model.output.weight = adapter.pl_module.model.tok_embeddings.weight
+    assert adapter._shard_kwargs("model.output")["ignored_params"] == {adapter.pl_module.model.output.weight}
+
+
+def test_ignored_params_refuses_names_mixed_with_parameters():
+    adapter = _Adapter({"model.output": {}})
+    adapter.fsdp_plan["model.output"]["ignored_params"] = ["model.output.weight",
+                                                           adapter.pl_module.model.output.weight]
+    with pytest.raises(MisconfigurationException, match="mixes parameter names and parameters"):
+        adapter._shard_kwargs("model.output")
 
 
 def test_ignored_params_resolve_before_a_checkpoint_wrapper_renames_them(monkeypatch):
