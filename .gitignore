@@ -6,8 +6,15 @@ app/models/
 pip-wheel-metadata/
 lightning_logs/
 .vscode/
-# ignore ipynb files themselves since we want to only store the source *.py
+# notebooks are tracked only in the tutorial lanes (dev, publish and the executed docs artifacts)
 *.ipynb
+!src/fts_examples/notebooks/**/*.ipynb
+!docs/notebook_artifacts/**/*.ipynb
+# what a notebook run writes beside the notebook (the docs-artifact renderer executes in the notebook's directory)
+src/fts_examples/notebooks/**/lightning_logs/
+src/fts_examples/notebooks/**/checkpoints/
+src/fts_examples/notebooks/**/fts_logs/
+src/fts_examples/notebooks/**/*_ft_schedule_*.yaml
 
 # SQLite database files
 *.db

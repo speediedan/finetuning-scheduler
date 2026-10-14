@@ -1,7 +1,7 @@
 # we pin these for docs build stability
 sphinx==8.2.3
 myst-parser==4.0.1
-nbsphinx>=0.8.5
+myst-nb==1.4.0  # renders the tutorial notebooks (execution off; see docs/source/conf.py)
 pandoc>=1.0
 docutils>=0.16
 #sphinxcontrib-fulltoc>=1.0

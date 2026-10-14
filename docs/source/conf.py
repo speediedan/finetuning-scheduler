@@ -16,6 +16,7 @@ import os
 import shutil
 import sys
 from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 
 import lightning.pytorch  # noqa: F401 workaround for TypeError on sphinx import
 
@@ -59,6 +60,47 @@ for md in glob.glob(os.path.join(PATH_ROOT, ".github", "*.md")):
 # copy also the changelog
 _transform_changelog(os.path.join(PATH_ROOT, "CHANGELOG.md"), os.path.join(PATH_HERE, FOLDER_GENERATED, "CHANGELOG.md"))
 
+# The tutorial notebooks, staged into `notebooks/` (gitignored): the executed docs artifact where one exists, the
+# published (output-free) copy otherwise, with the publisher's install cell removed (noise on a static page). The
+# helpers are the docs-artifact renderer vendored from interpretune, loaded by file path; see pyproject's
+# [tool.notebook-publishing] and scripts/render_notebook_docs.py.
+NOTEBOOK_STAGE_DIR = os.path.join(PATH_HERE, "notebooks")
+NOTEBOOK_SOURCES = [
+    os.path.join(PATH_ROOT, "docs", "notebook_artifacts"),
+    os.path.join(PATH_ROOT, "src", "fts_examples", "notebooks", "publish"),
+]
+NOTEBOOK_ASSET_SUFFIXES = {".ipynb", ".png", ".gif", ".jpg", ".jpeg", ".svg"}
+
+
+def _stage_notebooks() -> None:
+    engine = os.path.join(PATH_ROOT, "scripts", "vendored", "notebook_tooling", "notebook_docs.py")
+    nb_spec = spec_from_file_location("_notebook_docs", engine)
+    helpers = module_from_spec(nb_spec)
+    sys.modules[nb_spec.name] = helpers  # dataclasses resolve `from __future__` annotations through sys.modules
+    nb_spec.loader.exec_module(helpers)
+    shutil.rmtree(NOTEBOOK_STAGE_DIR, ignore_errors=True)
+    staged = set()
+    for source_dir in NOTEBOOK_SOURCES:
+        for dirpath, _, filenames in os.walk(source_dir):
+            for name in sorted(filenames):
+                rel = os.path.relpath(os.path.join(dirpath, name), source_dir)
+                # notebooks and their images only: a local run leaves logs and checkpoints beside the notebook
+                if name.startswith(".") or os.path.splitext(name)[1] not in NOTEBOOK_ASSET_SUFFIXES:
+                    continue
+                if rel in staged:  # an executed artifact wins over the published copy
+                    continue
+                target = os.path.join(NOTEBOOK_STAGE_DIR, rel)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                if name.endswith(".ipynb"):
+                    notebook, _ = helpers.strip_docs_excluded_cells(helpers.load_notebook(Path(dirpath, name)))
+                    helpers.save_notebook(notebook, Path(target))
+                else:
+                    shutil.copy2(os.path.join(dirpath, name), target)
+                staged.add(rel)
+
+
+_stage_notebooks()
+
 # -- Project information -----------------------------------------------------
 
 project = "Fine-Tuning Scheduler"
@@ -90,8 +132,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.imgmath",
     "sphinx.ext.autosectionlabel",
-    "myst_parser",
-    "nbsphinx",
+    "myst_nb",  # MyST markdown and the tutorial notebooks; loads myst_parser itself
     "sphinx_autodoc_typehints",
     "sphinx_copybutton",
     "sphinx_paramlinks",
@@ -108,9 +149,10 @@ suppress_warnings = [
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 
-nbsphinx_execute = "never"
-nbsphinx_allow_errors = True
-nbsphinx_requirejs_path = ""
+# Notebooks are never executed by the docs build: the executed copies are rendered offline, under the GPU lease, into
+# docs/notebook_artifacts (scripts/render_notebook_docs.py).
+nb_execution_mode = "off"
+nb_merge_streams = True
 
 # myst-parser, forcing to parse all html pages with mathjax
 # https://github.com/executablebooks/MyST-Parser/issues/394
@@ -119,24 +161,27 @@ myst_update_mathjax = False
 # MyST enables NO extensions by default, so `$x^2$` in a .md page renders as the literal characters
 # until dollarmath is on. The mathjax handling above already assumes math is wanted; this is what
 # actually delivers it.
-myst_enable_extensions = ["dollarmath"]
+# attrs_inline: the tutorial notebooks size their images with `![alt](img.png){height="55px" width="401px"}`.
+myst_enable_extensions = ["dollarmath", "attrs_inline"]
+
+
+# Jupyter-style heading anchors, so a notebook's in-page links (`[Basic Usage](#Basic-Usage)`) resolve in the docs as
+# they do in Jupyter. An import path rather than a function, so Sphinx can cache the configuration.
+sys.path.insert(0, os.path.join(PATH_HERE, "_ext"))
+myst_heading_anchors = 3
+myst_heading_slug_func = "notebook_anchors.jupyter_heading_slug"
 
 # Harden against a prose `$` opening an equation that swallows the rest of the line. These stop a
 # SPACED pair (`$HOME and $PATH`); they do not stop an ADJACENT one (`$TMPDIR/$SLURM_JOB_ID`), so they
 # reduce the blast radius rather than closing it.
 #
 # The pages this governs are NOT the ones under docs/: every .md there is build-generated and
-# gitignored. MyST only ever sees the copies made above from `.github/*.md` and `CHANGELOG.md`, so
-# those are the files to re-scan before adding math-adjacent prose; the .rst pages are not MyST-parsed
-# at all. Both sources scanned clean before enablement:
+# gitignored. MyST only ever sees the copies made above from `.github/*.md` and `CHANGELOG.md`, and the
+# markdown cells of the tutorial notebooks staged above, so those are the files to re-scan before adding
+# math-adjacent prose; the .rst pages are not MyST-parsed at all. The first two scanned clean before enablement:
 #   python .claude/skills/cross-platform-latex/scripts/check_math.py --collision-scan .github --strict
 myst_dmath_allow_space = False
 myst_dmath_allow_digits = False
-
-# The suffix(es) of source filenames.
-# You can specify multiple suffix as a list of string:
-#
-source_parsers = {".rst": "restructuredtext", ".txt": "markdown", ".md": "markdown", ".ipynb": "nbsphinx"}
 
 # The master toctree document.
 master_doc = "index"
