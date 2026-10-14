@@ -10,8 +10,10 @@ trainer:
           reshard_after_forward: True  # default value of a normal ``fully_shard`` kwarg
           act_ckpt: ['composable']  # use composable AC with default kwargs
         # the transformer itself last, so its embeddings are sharded too: a parameter outside every FSDP module would be
-        # a plain tensor beside the DTensors in the optimizer's parameter groups
-        fsdp_plan: {'model.output': {}, 'model.layers.\d*$': {}, 'model': {}}
+        # a plain tensor beside the DTensors in the optimizer's parameter groups. `model.norm` gets its own unit: left
+        # to the transformer's, which reshards after forward, it would thaw in phase 0 beside the embeddings (phase 2)
+        # and every backward pass would all-gather the frozen embeddings again
+        fsdp_plan: {'model.output': {}, 'model.norm': {}, 'model.layers.\d*$': {}, 'model': {}}
   strategy:
     init_args:
       data_parallel_size: 2

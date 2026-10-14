@@ -50,10 +50,14 @@ def shard(ctx, plan: dict, default_kwargs: dict | None = None, pre_shard: str | 
     return {**_layout(model), "feedback": [(f.level, f.message) for f in feedback]}
 
 
-def example_plan(ctx) -> dict:
-    """The plain PyTorch FSDP2 example's plan and schedule (``torch_fsdp_plan.yaml``) on its model, built on the meta
-    device: the layout and the controller's findings, which the example's warning check would otherwise meet only on
-    GPUs."""
+def example_plan(ctx, config: str) -> dict:
+    """An example configuration's FSDP2 plan and schedule on the examples' model, built on the meta device: the
+    layout and the FSDP2 adapter's findings, which the examples' warning checks would otherwise meet only on GPUs.
+
+    The
+    Lightning configurations (``fts_*``) hold the plan in the callback's ``strategy_adapter_cfg``; their
+    ``LightningModule`` holds the transformer as ``model``, as the plain PyTorch example's ``ModParallelModule`` does.
+    """
     import argparse
 
     import yaml
@@ -61,15 +65,26 @@ def example_plan(ctx) -> dict:
     from finetuning_scheduler.core.schedule import load_yaml_schedule, resolve_param_entries, shared_params_ref
     from fts_examples.model_parallel import torch_mp_example as ex
 
-    cfg = ex.load_config(argparse.Namespace(config=ex.example_path("config/torch_fsdp_plan.yaml"), max_epochs=None,
-                                            output_dir=None))
-    with open(ex.example_path(cfg["model_cfg"])) as f:
+    if config.startswith("torch_"):
+        cfg = ex.load_config(argparse.Namespace(config=ex.example_path(f"config/{config}"), max_epochs=None,
+                                                output_dir=None))
+        plan, default_kwargs, sched_path = cfg["fsdp_plan"], cfg["fsdp_default_kwargs"], cfg["ft_schedule"]
+        model_cfg_path = cfg["model_cfg"]
+    else:
+        with open(ex.example_path(f"config/{config}")) as f:
+            fts_args = yaml.safe_load(f)["trainer"]["callbacks+"][0]["init_args"]
+        plan = fts_args["strategy_adapter_cfg"]["fsdp_plan"]
+        default_kwargs = fts_args["strategy_adapter_cfg"].get("fsdp_default_kwargs", {})
+        sched_path, model_cfg_path = fts_args["ft_schedule"], "config/defaults/torchtitan_llama.yaml"
+    with open(ex.example_path(model_cfg_path)) as f:
         model_cfg = ex.ModelCfg(**yaml.safe_load(f))
     with torch.device("meta"):
         model = ex.ModParallelModule(model_cfg)
-    shard_model(model, ctx.mesh(), cfg["fsdp_plan"], default_kwargs=cfg["fsdp_default_kwargs"])
+    # the Lightning adapter shards only what its plan names (here, the transformer last); `shard_model` would shard
+    # the `LightningModule` stand-in too
+    shard_model(model, ctx.mesh(), plan, default_kwargs=default_kwargs, shard_root=config.startswith("torch_"))
     names, shared = [n for n, _ in model.named_parameters()], shared_params_ref(model)
-    schedule = load_yaml_schedule(ex.example_path(cfg["ft_schedule"]))
+    schedule = load_yaml_schedule(ex.example_path(sched_path))
     sched_phases = {d: resolve_param_entries(schedule[d]["params"], d, names, shared) for d in schedule}
     feedback = FSDP2Adapter().validate(model, sched_phases)
     return {**_layout(model), "feedback": [(f.level, f.message) for f in feedback]}

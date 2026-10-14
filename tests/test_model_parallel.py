@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 from typing import Any
 from collections.abc import Callable, KeysView
 from copy import deepcopy
@@ -21,14 +23,14 @@ from torch.distributed.tensor.parallel import (parallelize_module, loss_parallel
 
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.plugins.precision.fsdp import FSDPPrecision
-from lightning.pytorch.strategies import ModelParallelStrategy
+from lightning.pytorch.strategies import FSDPStrategy, ModelParallelStrategy
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 
 from finetuning_scheduler import FinetuningScheduler, FTSCheckpoint, FTSEarlyStopping
 from finetuning_scheduler.strategy_adapters.model_parallel import ActCkptEnum
 from tests.helpers.boring_models import FTSToyTransformer, TestModelArgs, FTSWikiText2
-from tests.dist_cases._mp_models import gen_apply_transformer_tp_plan
+from tests.dist_cases._mp_models import gen_apply_transformer_tp_plan, TransformerBlock
 from tests.helpers.common import (ExpectedResults, fts_check_warns, pytest_param_factory, get_fts,
                                   default_fts_sanity_chk, DeviceMeshSummary)
 from tests.model_parallel_expected_paths import (path_fsdp_autocm, path_tp_fsdp_autocm,
@@ -545,6 +547,75 @@ def test_fsdp2_plan_resume(tmpdir, model_parallel_ft_schedule, same_dirpath):
     assert len(resumed.optimizers[0].param_groups) == fts.max_depth + 1
     if same_dirpath:  # the scores were restored (on the CPU), not reset
         assert resumed.checkpoint_callback.best_model_score is not None
+
+
+class AdamWModelParallel(FTSBaseModelParallel):
+    """The model-parallel test model with a stateful optimizer (AdamW), as a fine-tuning run usually has."""
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, self.parameters()), lr=1e-3)
+        return [optimizer], [torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)]
+
+
+# Lightning's `ModelParallelStrategy` cannot load a single-file checkpoint whose optimizer has no state (plain SGD):
+# `_rekey_optimizer_state_if_needed` indexes the first state key (`IndexError`), and after consolidation, which drops
+# the empty `state`, the `state` key itself (`KeyError`). Strict, so a Lightning fix is noticed.
+stateless_optim_upstream = pytest.mark.xfail(
+    raises=(IndexError, KeyError), strict=True,
+    reason="Lightning cannot load a full checkpoint with empty optimizer state",
+)
+
+
+@RunIf(min_cuda_gpus=2, standalone=True)
+@pytest.mark.parametrize("state_dict_type", ["full", "sharded"])
+@pytest.mark.parametrize("model_cls", [pytest.param(AdamWModelParallel, id="adamw"),
+                                       pytest.param(fsdp_auto_mod_parallel, id="sgd",
+                                                    marks=stateless_optim_upstream)])
+def test_fsdp1_checkpoint_resumes_under_fsdp2(tmpdir, model_parallel_ft_schedule, model_cls, state_dict_type):
+    """A fit checkpointed under FSDP1 (``FSDPStrategy``) after its first epoch resumes under
+    ``ModelParallelStrategy`` with an ``fsdp_plan`` (#55): a full checkpoint directly, and a sharded one after
+    consolidation with Lightning's ``consolidate_checkpoint`` utility.
+
+    The model, optimizer and schedule state carry over, and the schedule continues from the saved depth to its last
+    phase.
+    """
+    ft_sched = model_parallel_ft_schedule[1]
+
+    def fit(strategy, adapter_cfg, ckpt_path=None, **trainer_kwargs):
+        seed_everything(42)
+        callbacks = [FinetuningScheduler(ft_schedule=ft_sched, strategy_adapter_cfg=adapter_cfg),
+                     FTSEarlyStopping(monitor="val_loss", patience=1),
+                     FTSCheckpoint(monitor="val_loss", save_last=True)]
+        trainer = Trainer(strategy=strategy, callbacks=callbacks, default_root_dir=tmpdir,
+                          **{**trainer_defaults, **trainer_kwargs})
+        with trainer.init_module(empty_init=isinstance(strategy, ModelParallelStrategy)):
+            model = model_cls(**fsdp_auto)
+        trainer.fit(model, ckpt_path=ckpt_path)
+        return trainer
+
+    # FSDP1 units aligned with the schedule's phases: each block, the output layer and the final norm
+    fsdp1 = FSDPStrategy(auto_wrap_policy={TransformerBlock}, state_dict_type=state_dict_type)
+    first = fit(fsdp1, {"awp_overrides": ["model.output", "model.norm"]}, max_epochs=1)
+    saved_depth = get_fts(first).curr_depth
+    ckpt_path = first.checkpoint_callback.last_model_path
+    if state_dict_type == "sharded":  # a directory of shards: consolidate it to one file, as a user would
+        consolidated = str(tmpdir / "fsdp1_last.ckpt")
+        if first.is_global_zero:
+            subprocess.run([sys.executable, "-m", "lightning.pytorch.utilities.consolidate_checkpoint", ckpt_path,
+                            "--output_file", consolidated], check=True)
+        first.strategy.barrier()
+        ckpt_path = consolidated
+    plan_cfg = {"fsdp_plan": {"model.output": {}, "model.norm": {}, r"model.layers.\d*$": {}, "model": {}}}
+    resumed = fit(ModelParallelStrategy(**dp2_tp1), plan_cfg, ckpt_path=ckpt_path)
+    fts = get_fts(resumed)
+    assert saved_depth < fts.max_depth
+    default_fts_sanity_chk(resumed)
+    assert len(resumed.optimizers[0].param_groups) == fts.max_depth + 1
+    if model_cls is AdamWModelParallel:
+        # phase 0's parameters train in every step, so their step count equals the run's only if the first fit's
+        # optimizer state carried over
+        steps = {float(resumed.optimizers[0].state[p]["step"]) for p in resumed.optimizers[0].param_groups[0]["params"]}
+        assert steps == {float(resumed.global_step)}, (steps, resumed.global_step, first.global_step)
 
 
 def gen_exceptions(trainer, model, exception_expected):

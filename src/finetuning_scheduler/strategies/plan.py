@@ -23,10 +23,12 @@ start of each module name, or ``class:<name>`` (``class:<module>.<qualname>`` to
 every module that is an instance of that class. An entry's ``ignored_params`` may name parameters by name or regular
 expression (or a list of them).
 
-:func:`phase_feedback` reports the FSDP units (one per ``fully_shard`` call) whose parameters thaw in different phases:
-such a unit all-gathers and reduce-scatters them together from its earliest phase on, so splitting it lets each unit's
-communication start when its parameters train. The controller reports them when it validates a schedule against an
-FSDP2 model (:class:`~finetuning_scheduler.strategies.fsdp2.FSDP2Adapter`).
+:func:`phase_feedback` reports the FSDP units (one per ``fully_shard`` call) that reshard after forward and whose
+parameters thaw in different phases. From the earliest of those phases on, such a unit's backward pass all-gathers all
+of its parameters again, those not yet trained included, so splitting it (or not resharding it after forward) saves that
+communication. :class:`~finetuning_scheduler.FTSController` and the Lightning
+:class:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter` report them when they validate a schedule
+against an FSDP2 model (:class:`~finetuning_scheduler.strategies.fsdp2.FSDP2Adapter`).
 
 .. warning:: This is an experimental API and may change in a future release.
 """
@@ -36,6 +38,7 @@ from typing import Any
 
 from torch import nn
 from torch.distributed.fsdp import CPUOffloadPolicy, FSDPModule, fully_shard
+from torch.distributed.tensor import DTensor
 
 from finetuning_scheduler.core.dist import rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
@@ -152,6 +155,8 @@ def _apply(model: nn.Module, n: str, mesh: Any, kwargs: Mapping[str, Any]) -> No
         kwargs["offload_policy"] = CPUOffloadPolicy(**offload)
     module = model.get_submodule(n)
     if act_ckpt is not None:
+        if isinstance(act_ckpt, Mapping) or not act_ckpt:
+            raise FTSConfigurationError(f"`act_ckpt` for '{n or '<root>'}' must be a mode or a [mode, kwargs] list.")
         mode, ac_kwargs = (act_ckpt, None) if isinstance(act_ckpt, str) else (act_ckpt[0], _second(act_ckpt))
         if mode != "composable":
             raise FTSConfigurationError(
@@ -167,19 +172,57 @@ def _second(seq: Sequence[Any]) -> Any:
     return seq[1] if len(seq) > 1 else None
 
 
-def phase_feedback(model: nn.Module, phases: Mapping[int, Iterable[str]]) -> list[Feedback]:
-    """Report the FSDP units of ``model`` whose parameters thaw in different phases.
+def _sharded_ancestor(model: nn.Module, n: str) -> str | None:
+    """The name of the nearest-to-root ancestor of the module ``n`` that is already sharded, if any."""
+    parts = n.split(".") if n else []
+    for i in range(len(parts)):
+        if isinstance(model.get_submodule(".".join(parts[:i])), FSDPModule):
+            return ".".join(parts[:i])
+    return None
 
-    A unit is a module ``fully_shard`` was applied to, holding its parameters that no nested unit holds. ``phases``
-    maps each phase's depth to the physical parameter names it thaws (``model.named_parameters()`` names); a parameter
-    in no phase is never trained.
+
+def _reshards_after_forward(unit: FSDPModule, is_outermost: bool) -> bool:
+    """Whether ``unit`` frees its unsharded parameters after forward (so backward all-gathers them again).
+
+    ``fully_shard`` without ``reshard_after_forward`` reshards every unit but the root (the outermost unit forward runs
+    through), which it keeps unsharded for backward. Read from FSDP2's state, not a public API, so a unit whose state
+    cannot be read is assumed to reshard.
+    """
+    try:
+        state = unit._get_fsdp_state()
+        group = state._fsdp_param_group
+        if group is None:
+            return False
+        if is_outermost and getattr(state, "_auto_reshard_after_forward", False):
+            return False
+        return group.post_forward_mesh_info is not None
+    except AttributeError:
+        return True
+
+
+def _managed(p: nn.Parameter) -> bool:
+    """Whether an FSDP unit manages ``p``: it shards its parameters into ``DTensor``s and leaves those it ignores
+    plain."""
+    return isinstance(p, DTensor)
+
+
+def phase_feedback(model: nn.Module, phases: Mapping[int, Iterable[str]]) -> list[Feedback]:
+    """Report the FSDP units of ``model`` that reshard after forward and whose parameters thaw in different phases.
+
+    A unit is a module ``fully_shard`` was applied to, managing its parameters that no nested unit manages (parameters
+    it ignores, left plain, are not among them). From the earliest phase that thaws one of its parameters, its backward
+    pass all-gathers all of them again after forward freed them, those not yet trained included. A unit kept unsharded
+    after forward (the root, by default) pays no such cost, nor does gradient reduction, which covers only parameters
+    with gradients. ``phases`` maps each phase's depth to the physical parameter names it thaws
+    (``model.named_parameters()`` names); a parameter in no phase is never trained.
 
     Args:
         model: The sharded model.
         phases: Each phase's physical parameter names.
 
     Returns:
-        A ``warning`` per unit whose parameters thaw in more than one phase (or are partly never trained).
+        A ``warning`` per unit that reshards after forward and whose parameters thaw in more than one phase (or are
+        partly never trained).
     """
     phase_of: dict[str, int] = {}
     for depth, names in sorted(phases.items()):
@@ -187,19 +230,21 @@ def phase_feedback(model: nn.Module, phases: Mapping[int, Iterable[str]]) -> lis
             phase_of.setdefault(pn, depth)
     name_of = {p: pn for pn, p in model.named_parameters()}
     units = [(n, m) for n, m in model.named_modules() if isinstance(m, FSDPModule)]
+    outermost = {n for n, _ in units if not any(o != n and (o == "" or n.startswith(f"{o}.")) for o, _ in units)}
     claimed: set[nn.Parameter] = set()
     feedback: list[Feedback] = []
     for n, unit in reversed(units):  # innermost first, so each unit holds only what no nested unit claimed
-        held = [p for p in unit.parameters() if p not in claimed]
+        held = [p for p in unit.parameters() if p not in claimed and _managed(p)]
         claimed.update(held)
-        depths = {phase_of.get(name_of[p]) for p in held if p in name_of}
-        if len(depths) > 1:
+        depths = {phase_of.get(name_of[p]) for p in held}
+        if len(depths) > 1 and _reshards_after_forward(unit, n in outermost):
             shown = ", ".join("never trained" if d is None else f"phase {d}"
                               for d in sorted(depths, key=lambda d: (d is None, d or 0)))
             feedback.append(Feedback("warning", (
-                f"The FSDP unit '{n or '<root>'}' holds parameters that thaw at different points ({shown}), so it "
-                "communicates all of them from the earliest of those phases on. Applying `fully_shard` to submodules "
-                "whose parameters thaw together lets each unit's communication start when its parameters train.")))
+                f"The FSDP unit '{n or '<root>'}' reshards after forward and holds parameters that thaw at different "
+                f"points ({shown}), so from the earliest of those phases on, every backward pass all-gathers all of "
+                "them again, those not yet trained included. Applying `fully_shard` to submodules whose parameters "
+                "thaw together (or `reshard_after_forward=False` for this unit) avoids that.")))
     return feedback
 
 
@@ -208,9 +253,10 @@ def shard_model(model: nn.Module, mesh: Any, plan: Mapping[str, Mapping[str, Any
     """Apply ``fully_shard`` to the modules an FSDP2 plan selects, then to ``model`` itself.
 
     Modules are sharded in plan order (see :func:`resolve_fsdp_plan`), so list children before their parents; a module
-    already sharded (by the caller, say) is left as it is. With ``shard_root``, ``model`` is sharded last, so every
-    parameter becomes a ``DTensor``: a parameter outside every FSDP unit would be neither sharded nor
-    gradient-synchronized across data-parallel ranks. An entry's ``act_ckpt`` applies composable activation
+    already sharded (by the caller, say) is left as it is. An ``ignored_params`` given by name belongs in a plan entry:
+    in ``default_kwargs`` it would have to name a parameter of every planned module. With ``shard_root``, ``model`` is
+    sharded last, so every parameter becomes a ``DTensor``: a parameter outside every FSDP unit would be neither
+    sharded nor gradient-synchronized across data-parallel ranks. An entry's ``act_ckpt`` applies composable activation
     checkpointing (``"composable"``, optionally with its kwargs) to the module before it is sharded, and
     ``cpu_offload_policy`` (a mapping of ``CPUOffloadPolicy`` kwargs) becomes its ``offload_policy``.
 
@@ -226,12 +272,19 @@ def shard_model(model: nn.Module, mesh: Any, plan: Mapping[str, Mapping[str, Any
         ``model``, sharded.
 
     Raises:
-        FTSConfigurationError: If a plan key selects no module, an ``ignored_params`` name matches no parameter of its
-            module, or ``act_ckpt`` names a mode other than ``composable``.
+        FTSConfigurationError: If a plan key selects no module, a planned module's ancestor is already sharded, an
+            ``ignored_params`` name matches no parameter of its module, or ``act_ckpt`` names a mode other than
+            ``composable``.
     """
     for n, kwargs in resolve_fsdp_plan(model, plan or {}, default_kwargs).items():
-        if not isinstance(model.get_submodule(n), FSDPModule):
-            _apply(model, n, mesh, kwargs)
+        if isinstance(model.get_submodule(n), FSDPModule):
+            continue
+        if (ancestor := _sharded_ancestor(model, n)) is not None:
+            raise FTSConfigurationError(
+                f"`shard_model` cannot shard '{n}': its ancestor '{ancestor or '<root>'}' is already sharded. List a "
+                "module's children before the module itself in the plan (and shard them before any ancestor)."
+            )
+        _apply(model, n, mesh, kwargs)
     if shard_root and not isinstance(model, FSDPModule):
         _apply(model, "", mesh, {k: v for k, v in (default_kwargs or {}).items() if k != "act_ckpt"})
     return model

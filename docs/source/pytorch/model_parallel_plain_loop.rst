@@ -89,10 +89,11 @@ Sharding the root matters in a plain loop:
 - With the root sharded, every parameter is a ``DTensor``, so no optimizer parameter group mixes ``DTensor`` and plain
   parameters, which some optimizer implementations do not support.
 
-The final norm gets its own unit for a different reason. Left to the root's unit, it would sit beside the embeddings,
-which the schedule thaws two phases later, and the root unit would all-gather and reduce-scatter the embeddings from
-phase 0 on. The controller warns about any FSDP unit whose parameters thaw in different phases when it validates the
-schedule against the sharded model.
+The final norm gets its own unit for a different reason. The example reshards every unit after forward, the root
+included (``reshard_after_forward: True``). Left to the root's unit, the norm (phase 0) would sit beside the embeddings,
+which the schedule thaws two phases later, and from phase 0 on every backward pass would all-gather the frozen
+embeddings again. The controller warns about any FSDP unit that reshards after forward and holds parameters thawing in
+different phases when it validates the schedule against the sharded model.
 
 The Training Loop
 *****************
