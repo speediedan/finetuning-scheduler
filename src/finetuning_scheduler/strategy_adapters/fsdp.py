@@ -42,7 +42,7 @@ from torch import Tensor
 from torch.distributed import all_gather_object
 from torch.optim import Optimizer
 
-from finetuning_scheduler.core.views import CanonicalView, VIEW_ATTR
+from finetuning_scheduler.core.views import as_view, VIEW_ATTR
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 
 # Type checking imports - always available for static analysis
@@ -159,13 +159,22 @@ class FSDPStrategyAdapter(StrategyAdapter):
 
     def _refuse_attached_view(self) -> None:
         """FSDP1 schedules through the module's own parameter names (its flat-parameter transform runs only after
-        the wrap), so a view attached to the module is refused, by name."""
+        the wrap), so a view attached to the module must name parameters as the module does (naming scheme
+        ``"physical"``); its roles and coupled tensors apply. A view with logical names is refused, by name.
+
+        A tensor whose role is never thawed is never scheduled, so without ``use_orig_params`` the wrap validation
+        refuses an FSDP unit that mixes it with scheduled parameters, as it does any unscheduled parameter.
+        """
         attached = getattr(self.pl_module, VIEW_ATTR, None)
-        if attached is not None and not (type(attached) is CanonicalView and not attached.roles()):
+        if attached is None:
+            return
+        scheme = as_view(attached).support().naming_scheme
+        if scheme != "physical":
             raise MisconfigurationException(
-                f"{type(self.pl_module).__name__} carries a `fts_tunable_view` ({type(attached).__qualname__}), which"
-                " the FSDP (FSDP1) strategy does not support: it schedules through the module's own parameter names."
-                " Use `ModelParallelStrategy` (FSDP2) to fine-tune through a view, or remove the attribute."
+                f"{type(self.pl_module).__name__} carries a `fts_tunable_view` ({type(attached).__qualname__}) whose"
+                f" naming scheme is {scheme!r}, which the FSDP (FSDP1) strategy does not support: it schedules through"
+                " the module's own parameter names, so only a view with the 'physical' naming scheme can be attached."
+                " Use `ModelParallelStrategy` (FSDP2) to fine-tune through logical names."
             )
 
     def scheduled_physical(self, depth: int) -> list:
