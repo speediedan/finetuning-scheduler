@@ -48,6 +48,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Fixed `tests/special_tests.sh` exiting 1 without its summary when every test passed but the log mentioned an `xfailed` test: its error scan detected with one pattern and printed with another, and the print finding nothing ended the summary trap under `set -eo pipefail` [#116](https://github.com/speediedan/finetuning-scheduler/issues/116).
+
 - Fixed resuming an FSDP1 (`FSDPStrategy`) checkpoint under `ModelParallelStrategy` (FSDP2): restoring the best checkpoint at the next phase transition failed with a `KeyError`, since the checkpoint named its parameter groups' parameters with FSDP1's wrapper segments (`_fsdp_wrapped_module.`). Saved and current parameters are now matched by wrapper-free name. A best checkpoint that is an FSDP1 sharded directory, which `ModelParallelStrategy` cannot load, is restored from its consolidation beside it (`<directory>.consolidated`, the default output of Lightning's `consolidate_checkpoint` utility), and without one a resume that will restore it is refused up front with the command to run [#55](https://github.com/speediedan/finetuning-scheduler/issues/55).
 
 - Fixed resuming a multi-GPU fit deadlocking. A distributed checkpoint's callback state is restored onto rank zero's device on every rank, so on every other rank `FTSEarlyStopping`'s improvement message (subtracting `best_score` from the current metric) and, with an unchanged checkpoint directory, `FTSCheckpoint`'s top-k comparisons raised at the first validation, and rank zero waited in the next collective. Restored scores are now moved to the CPU on load [#112](https://github.com/speediedan/finetuning-scheduler/issues/112).

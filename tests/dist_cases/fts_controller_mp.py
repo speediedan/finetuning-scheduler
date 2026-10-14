@@ -16,6 +16,7 @@ transformer and phase schedule, with the schedule's names unprefixed (the contro
 Each rank trains on an equal shard of every batch, so FSDP2's gradient averaging makes a data-parallel run match a
 single-process run on the full batch; under tensor parallelism every rank sees the whole batch.
 """
+import contextlib
 import math
 import os
 from functools import partial
@@ -59,8 +60,19 @@ def _model(seed: int, device: torch.device, checkpoint_activations: bool = False
 
 
 def _data(epochs: int, steps: int, batch: int, seed: int) -> torch.Tensor:
+    """Every rank's tokens, the same on every rank, as each process of a launch draws them from the same seed.
+
+    Under ``LocalTensorMode`` (one process simulating every rank) they are drawn outside the mode, which would
+    otherwise draw a different batch for each simulated rank from the shared generator.
+    """
+    try:  # a private API (torch 2.12 or later): without it, no mode can be active
+        from torch.distributed._local_tensor import maybe_disable_local_tensor_mode
+    except ImportError:
+        maybe_disable_local_tensor_mode = contextlib.nullcontext
+
     gen = torch.Generator().manual_seed(seed + 1)
-    return torch.randint(0, VOCAB, (epochs, steps, batch, SEQ + 1), generator=gen)
+    with maybe_disable_local_tensor_mode():
+        return torch.randint(0, VOCAB, (epochs, steps, batch, SEQ + 1), generator=gen)
 
 
 def _loss(model: nn.Module, tokens: torch.Tensor, tp_loss_parallel: bool = False) -> torch.Tensor:
@@ -119,6 +131,13 @@ def _full(p: torch.Tensor) -> torch.Tensor:
 
 def _params(model: nn.Module) -> dict:
     return {n: _full(p).detach().float().cpu().flatten().tolist() for n, p in model.named_parameters()}
+
+
+def params_close(a: dict, b: dict, tol: float = 1e-5) -> bool:
+    """Whether two ``_params`` results name the same parameters, each within ``tol`` relative to ``b``'s largest
+    magnitude."""
+    return a.keys() == b.keys() and all(
+        max(abs(u - v) for u, v in zip(a[k], b[k])) <= tol * (1 + max(abs(v) for v in b[k])) for k in a)
 
 
 def _unmoved(model: nn.Module, initial: dict, tol: float = 1e-4) -> list[str]:

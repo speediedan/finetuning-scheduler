@@ -13,8 +13,9 @@
 
 These run the model-parallel pool cases (``tests/dist_cases/fts_controller_mp.py``) once per simulated rank, so the
 scheduling logic is checked on every hosted OS, not only where the gloo pool runs. The fake group's collectives move
-no data, so nothing here compares numerics, and DCP checkpointing (whose global plan needs every rank's real chunks)
-stays with the gloo tests in ``tests/test_controller_model_parallel.py``.
+no data, so those runs compare no numerics; the tensor-parallel case also runs once under ``LocalTensorMode``
+(``run_local``), whose numerics are real, and is compared with a single-process run. DCP checkpointing (whose global
+plan needs every rank's real chunks) stays with the gloo tests in ``tests/test_controller_model_parallel.py``.
 
 The ``core-no-lightning`` CI job runs this module with ``--noconftest``, so it must not import Lightning or
 ``tests.helpers``.
@@ -26,7 +27,8 @@ import torch
 import torch.distributed as dist
 
 from tests.dist_cases import fts_controller_mp as mp
-from tests.dist_cases._fake_pg import assert_ranks_agree, run_fake
+from tests.dist_cases.fts_controller_mp import params_close
+from tests.dist_cases._fake_pg import assert_ranks_agree, run_fake, run_local
 from tests.model_parallel_expected_paths import path_fsdp_autocm, path_tp
 
 pytestmark = pytest.mark.skipif(not dist.is_available(), reason="torch.distributed is not available")
@@ -94,6 +96,16 @@ def test_tp_follows_the_lightning_path(tp_loss_parallel):
     assert _thawed_plain(agreed["path"]) == [[], [], []]
 
 
+@pytest.mark.parametrize("tp_loss_parallel", [True, False], ids=["loss_parallel", "replicated_loss"])
+def test_tp_matches_a_single_process_run(tp_loss_parallel):
+    """Tensor parallelism over two ranks simulated with real numerics (``LocalTensorMode``) follows the Lightning
+    test's TP path and ends with a single-process run's parameters (#57): the gloo pool checks the same on Linux,
+    with a best-checkpoint policy, and this runs on every hosted OS."""
+    out = run_local(mp.tp, tp_loss_parallel=tp_loss_parallel)
+    assert _states(out["path"]) == _expected(path_tp) and out["unmoved"] == []
+    assert params_close(out["params"], mp.reference()["params"])
+
+
 def test_partial_plan_thaws_on_schedule_and_warns_once():
     """With the root unsharded, ``layers.1`` is a root FSDP module frozen through phase 0: phase 1 still thaws it.
 
@@ -144,3 +156,8 @@ def test_run_fake_leaves_no_process_group():
     assert run_fake(lambda ctx: (ctx.rank, dist.get_world_size()), world_size=3) == [(0, 3), (1, 3), (2, 3)]
     assert not dist.is_initialized()
     assert sys.excepthook is excepthook and torch.equal(torch.get_rng_state(), rng)
+
+
+def test_run_local_leaves_no_process_group():
+    run_local(lambda ctx: dist.get_world_size())
+    assert not dist.is_initialized()
