@@ -67,6 +67,13 @@ def _notify_lightning_extra() -> None:
         rank_zero_warn(LIGHTNING_EXTRA_NOTICE, category=FutureWarning)
 
 
+def _optimizer_class_name(new_optimizer: dict) -> str | None:
+    """The class name an explicit ``new_optimizer`` configuration builds (``torch.optim.Adam`` and ``Adam`` alike
+    give ``Adam``)."""
+    class_path = (new_optimizer.get("optimizer_init") or {}).get("class_path")
+    return class_path.rsplit(".", 1)[-1] if isinstance(class_path, str) else None
+
+
 class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMixin, BaseFinetuning):
     r"""This callback enables flexible, multi-phase, scheduled fine-tuning of foundation models. Gradual
     unfreezing/thawing can help maximize foundation model knowledge retention while allowing (typically upper
@@ -117,6 +124,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
     """
     pl_module: pl.LightningModule
     trainer: pl.Trainer
+    # set while restoring a best checkpoint whose optimizer state predates the optimizer in use (model state only)
+    _restore_model_only: bool = False
+    # the class name of the optimizer `configure_optimizers` built (set at fit start)
+    _initial_optimizer_cls: str | None = None
     strategy_adapter: StrategyAdapter
 
     def __init__(
@@ -448,9 +459,12 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert isinstance(self.pl_module, pl.LightningModule)
         assert isinstance(self.trainer, pl.Trainer)
         core_phase.reshard_fsdp_modules(self.pl_module)  # thaw and optimize the parameters FSDP2 trains
-        # if the target depth is 0, implicit optimizer reinitialization should not be executed
+        # if the target depth is 0, implicit optimizer reinitialization should not be executed. A restored best
+        # checkpoint that predates an explicit optimizer reinitialization had its optimizer state skipped, so the
+        # optimizer is rebuilt as that reinitialization configured it
+        stale_cfg = self._optimizer_reinit_since_best(depth) if depth_sync else None
         new_optimizer_cfg, thaw_layers = core_phase.thaw_plan(
-            self.ft_schedule, depth, self._fts_state._best_ckpt_depth, depth_sync, self.reinit_optim_cfg
+            self.ft_schedule, depth, self._fts_state._best_ckpt_depth, depth_sync, self.reinit_optim_cfg or stale_cfg
         )
         for i, orig_next_tl in thaw_layers:
             self.strategy_adapter._maybe_set_bn_track_running_stats(i)
@@ -523,9 +537,17 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert self.trainer is not None
         # wait for all processes to be ready to restore ckpt before restoring
         self.trainer.strategy.barrier("setup_next_level")
+        stale = self._optimizer_reinit_since_best(self.curr_depth) is not None
+        self._restore_model_only = stale
+        if stale:
+            rank_zero_info(
+                f"The best checkpoint (phase {self._fts_state._best_ckpt_depth}) predates the optimizer"
+                " reinitialization configured by a later phase; restoring its model state only and rebuilding the"
+                " optimizer as that phase configures it."
+            )
         # if restarting across multiple depths, need to ensure we're restoring optimizer state appropriately
         # by resetting optimizer groups and allowing state dict to be reset commensurate w/ ckpt state
-        for opt_idx, optimizer in enumerate(self.trainer.optimizers):
+        for opt_idx, optimizer in enumerate(self.trainer.optimizers if not stale else []):
             optimizer.param_groups = BaseFinetuning._apply_mapping_to_param_groups(
                 self._fts_state._fts_ckpt_metadata["best_ckpt_pgs"][opt_idx], dict(self.pl_module.named_parameters())
             )
@@ -555,7 +577,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.trainer._checkpoint_connector.restore_model()
         # we need to override checkpoint_connector.restore_training_state() to bypass loop restoration
         # if additional customizations are required, may make sense to subclass _CheckpointConnector at some point
-        self._restore_training_state()
+        try:
+            self._restore_training_state()
+        finally:
+            self._restore_model_only = False
         self.trainer._checkpoint_connector.resume_end()
 
     def _restore_training_state(self) -> None:
@@ -573,7 +598,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         # checkpoint_connector.restore_loops()
 
         assert self.trainer.state.fn is not None
-        if self.trainer.state.fn == TrainerFn.FITTING:
+        if self.trainer.state.fn == TrainerFn.FITTING and not self._restore_model_only:
             try:
                 # enable strategy adapters to restore optimizer if `Strategy.lightning_restore_optimizer` is overridden
                 self.strategy_adapter.on_before_restore_optimizers_and_lrs()
@@ -581,6 +606,31 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 checkpoint_connector.restore_optimizers_and_schedulers()
             except KeyError as ke:
                 self._maybe_allow_incompatible_reinit_ckpt(ke)
+
+    def _optimizer_reinit_since_best(self, depth: int) -> dict | None:
+        """The configuration of the latest explicit optimizer reinitialization between the best checkpoint's phase
+        and ``depth`` (exclusive), when it changed the optimizer's class: the best checkpoint's optimizer state
+        then cannot be restored into the optimizer in use (as ``FTSController`` decides, by class).
+
+        ``None`` when nothing is restored (``restore_best=False``), when the optimizer is reinitialized in every phase
+        (implicit mode) or by phase ``depth`` itself (it is rebuilt from phase 0 either way), when no such
+        reinitialization exists, or when the best checkpoint's optimizer has the class of the one in use (its state is
+        restored, as before).
+        """
+        schedule = self.ft_schedule
+        if not isinstance(schedule, dict) or not self.restore_best or self.reinit_optim_cfg or \
+                schedule[depth].get("new_optimizer"):
+            return None
+        best = self._fts_state._best_ckpt_depth
+        later = [d for d in schedule if best < d < depth and schedule[d].get("new_optimizer")]
+        if not later:
+            return None
+        earlier = [d for d in schedule if d <= best and schedule[d].get("new_optimizer")]
+        best_cls = _optimizer_class_name(schedule[max(earlier)]["new_optimizer"]) if earlier else \
+            self._initial_optimizer_cls
+        if best_cls is None or best_cls == type(self.trainer.optimizers[0]).__name__:
+            return None
+        return schedule[max(later)]["new_optimizer"]
 
     def _maybe_allow_incompatible_reinit_ckpt(self, key_error: KeyError) -> None:
         """Inspect context for a given ``KeyError`` and permit continued training if using lr scheduler or
@@ -783,6 +833,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         self.strategy_adapter.on_before_fts_fit_start()
         if len(trainer.optimizers) > 1:
             raise MisconfigurationException("FTS currently only supports a single-optimizer configuration")
+        # the class `configure_optimizers` built, which checkpoints before any optimizer reinitialization hold
+        self._initial_optimizer_cls = type(trainer.optimizers[0]).__name__
         if getattr(trainer.optimizers[0], "_overlap_with_ddp", False):
             raise MisconfigurationException(
                 "Configuring an optimizer using `overlap_with_ddp=True` is not supported"
