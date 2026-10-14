@@ -152,8 +152,9 @@ Attach the view to the ``LightningModule`` as ``fts_tunable_view``, rooted at th
     trainer.fit(module)
 
 The schedule keeps its logical names (in logs and in the saved schedule), the callback thaws and optimizes the physical
-parameters, and a generated schedule uses the view's logical names. The FSDP (FSDP1) strategy does not support views;
-use ``ModelParallelStrategy`` (FSDP2) instead.
+parameters, and a generated schedule uses the view's logical names. The FSDP (FSDP1) strategy accepts only a view
+whose naming scheme is ``"physical"`` (its logical names are the module's own parameter names), applying its roles and
+coupled tensors; use ``ModelParallelStrategy`` (FSDP2) to fine-tune through logical names.
 
 A third-party :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that renames parameters (it overrides
 ``logical_param_translation``, ``get_named_params_for_schedule_validation`` or ``gen_ft_schedule``, usually together

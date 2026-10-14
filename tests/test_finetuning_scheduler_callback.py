@@ -3168,3 +3168,29 @@ def test_fts_sync_reads_but_never_writes_dotted_paths():
     assert state._ft_epoch == 6
     assert loop.epoch_progress.current.completed == 4
     assert "epoch_progress.current.completed" not in vars(loop)
+
+
+@pytest.mark.parametrize("restore_best", [True, False])
+def test_best_checkpoint_before_an_optimizer_reinitialization(tmpdir, restore_best):
+    """A best checkpoint saved before an explicit optimizer reinitialization restores the model state only, and the
+    optimizer is rebuilt as that reinitialization configures it, rather than receiving the old optimizer's
+    state."""
+    seed_everything(42)
+    schedule = {0: {"params": ["model.2.weight", "model.2.bias"], "max_transition_epoch": 1},
+                1: {"params": ["model.1.weight", "model.1.bias"], "lr": 0.05, "max_transition_epoch": 2,
+                    "new_optimizer": {"optimizer_init": {"class_path": "torch.optim.Adam", "init_args": {"lr": 0.01}}}},
+                2: {"params": ["model.0.weight", "model.0.bias"], "lr": 0.05, "max_transition_epoch": 4}}
+    model = ScriptedLossModel([1.0, 2.0, 2.0, 2.0])  # the phase-0 checkpoint stays the best
+    fts = FinetuningScheduler(ft_schedule=schedule, epoch_transitions_only=True, restore_best=restore_best)
+    trainer = Trainer(default_root_dir=tmpdir, max_epochs=4, accelerator="cpu", devices=1, logger=False,
+                      callbacks=[fts, FTSCheckpoint(monitor="val_loss", dirpath=tmpdir, save_top_k=1)],
+                      enable_progress_bar=False, enable_model_summary=False, limit_train_batches=2, limit_val_batches=1)
+    initial = model.model[0].weight.detach().clone()
+    trainer.fit(model)
+    optimizer = trainer.optimizers[0]
+    assert type(optimizer) is torch.optim.Adam and all("betas" in g for g in optimizer.param_groups)
+    assert len(optimizer.param_groups) == 3 and fts.curr_depth == 2
+    assert not torch.equal(initial, model.model[0].weight)  # phase 2 trained
+    # the restore rebuilt the optimizer (its state counts phase 2's 4 steps only), rather than keep phase 1's (6)
+    steps = int(optimizer.state[model.model[1].weight]["step"])
+    assert steps == (4 if restore_best else 6)
