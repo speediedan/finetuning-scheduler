@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.nn.attention import SDPBackend
-from torch.distributed._composable.fsdp import FSDPModule, fully_shard
+from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.distributed.tensor.parallel import (parallelize_module, loss_parallel)
 
 from lightning.pytorch import seed_everything, Trainer
@@ -369,7 +369,9 @@ fsdp_auto = {"cm_fsdp_plan": None, "cm_tp_plan": None, "module_cls": FTSToyTrans
 
 ## Model Parallel Strategy Adpater Configuration Aliases
 fsdp_auto_only = {"fsdp_plan": fsdp_basic, "fsdp_default_kwargs":{}}
-fsdp_auto_cpuoffld = {"fsdp_plan": fsdp_basic, "fsdp_default_kwargs":{'cpu_offload_policy': {}}}
+# both transformer blocks by class, then the final norm and output: the modules `fsdp_autocm` shards
+fsdp_auto_class = {"fsdp_plan": {"class:TransformerBlock": {}, 'model.norm': {}, 'model.output': {}},
+                   "fsdp_default_kwargs": {}}
 fsdp_auto_act = {"fsdp_plan": fsdp_auto_tt_basic_act, "fsdp_default_kwargs":{}}
 fsdp_autocm = {"fsdp_plan": fsdp_autocm_shard_tt_warn, "fsdp_default_kwargs":{}}
 fsdp_autocm_err = {"fsdp_plan": fsdp_autocm_shard_tt_err, "fsdp_default_kwargs":{}}
@@ -432,10 +434,10 @@ FTS_MODEL_PARALLEL_PATH_TESTS = (
     ModParallelTestCfg(model_cfg_key="fsdp_cm_fp16", model_cls=cm_mod_parallel, precision_opts=fp16,
                        model_cfg=fsdp_cm_only, runif_alias="alone"),
     # FSDP2 auto plan tests
-    # TODO: debug upstream issues currently preventing use of `fsdp_auto_cpuoffld` cfg with fsdp_auto_* tests
-    # ModParallelTestCfg(model_cfg_key="fsdp_auto", model_cls=fsdp_auto_mod_parallel, model_cfg=fsdp_auto,
-    #                    strategy_adapter_cfg=fsdp_auto_cpuoffld, runif_alias="alone",
-    #                    expected_results=ExpectedResults(expected_state=path_fsdp)),
+    # the root stays unsharded, so the embeddings are plain tensors beside DTensors, as in `fsdp_autocm`
+    ModParallelTestCfg(model_cfg_key="fsdp_auto_class", model_cls=fsdp_auto_mod_parallel, model_cfg=fsdp_auto,
+                       strategy_adapter_cfg=fsdp_auto_class, use_implicit_replication=True, runif_alias="alone",
+                       expected_results=ExpectedResults(expected_state=path_fsdp_autocm)),
     ModParallelTestCfg(model_cfg_key="fsdp_auto", model_cls=fsdp_auto_mod_parallel, model_cfg=fsdp_auto,
                        strategy_adapter_cfg=fsdp_auto_only, runif_alias="alone",
                        expected_results=ExpectedResults(expected_state=path_fsdp)),
@@ -506,6 +508,36 @@ def test_fts_model_parallel_integration(tmpdir, recwarn, model_parallel_ft_sched
         fts_check_warns(recwarn, expected_warns=MODEL_PARALLEL_BASE_WARNS,
                         warns_expected=test_cfg.expected_results.warns_expected,
                         expected_warns_dynamo=MODEL_PARALLEL_DYNAMO_EXPECTED_WARNS, use_dynamo=test_cfg.use_dynamo)
+
+
+@RunIf(min_cuda_gpus=2, standalone=True)
+def test_fsdp2_plan_resume(tmpdir, model_parallel_ft_schedule):
+    """A fit sharded by an ``fsdp_plan`` (the root last) and checkpointed after its first epoch resumes in a new
+    ``Trainer`` (#55): the distributed checkpoint loads into a freshly sharded model, and the schedule continues
+    from the saved depth to its last phase with one optimizer parameter group per phase."""
+    plan_cfg = {"fsdp_plan": {'model.output': {}, r'model.layers.\d*$': {}, 'model': {}}, "fsdp_default_kwargs": {}}
+    ft_sched = model_parallel_ft_schedule[1]
+
+    def fit(ckpt_path=None, **trainer_kwargs):
+        seed_everything(42)
+        callbacks = [FinetuningScheduler(ft_schedule=ft_sched, strategy_adapter_cfg=deepcopy(plan_cfg)),
+                     FTSEarlyStopping(monitor="val_loss", patience=1),
+                     FTSCheckpoint(monitor="val_loss", save_last=True)]
+        trainer = Trainer(strategy=ModelParallelStrategy(**dp2_tp1), callbacks=callbacks, default_root_dir=tmpdir,
+                          **{**trainer_defaults, **trainer_kwargs})
+        with trainer.init_module(empty_init=True):
+            model = fsdp_auto_mod_parallel(**fsdp_auto)
+        trainer.fit(model, ckpt_path=ckpt_path)
+        return trainer
+
+    first = fit(max_epochs=1)
+    saved_depth = get_fts(first).curr_depth
+    resumed = fit(ckpt_path=first.checkpoint_callback.last_model_path)
+    fts = get_fts(resumed)
+    assert saved_depth < fts.max_depth
+    default_fts_sanity_chk(resumed)
+    assert len(resumed.optimizers[0].param_groups) == fts.max_depth + 1
+
 
 def gen_exceptions(trainer, model, exception_expected):
     if isinstance(exception_expected, tuple):

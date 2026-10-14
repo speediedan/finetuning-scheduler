@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 import torch
 from torch.distributed._composable import checkpoint
-from torch.distributed._composable.fsdp import CPUOffloadPolicy, FSDPModule, fully_shard
+from torch.distributed.fsdp import CPUOffloadPolicy, FSDPModule, fully_shard
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (checkpoint_wrapper, offload_wrapper,
                                                                          ActivationWrapper)
 from lightning.fabric.utilities.enums import LightningEnum
@@ -37,6 +37,9 @@ from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 from finetuning_scheduler.strategies.base import DistributedAdapter, select_distributed_adapter
 from finetuning_scheduler.strategy_adapters.base import StrategyAdapter
 from finetuning_scheduler.strategy_adapters._wrap_utils import _compose_ncac
+
+# an `fsdp_plan` key with this prefix selects modules by class rather than by name
+CLASS_SELECTOR = "class:"
 
 
 class ActCkptEnum(LightningEnum):
@@ -94,6 +97,11 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
 
     ``cpu_offload_policy`` is a convenience alias that will apply CPUOffloadPolicy to the matching module(s) along
     with any provided ``Dict`` of policy kwargs.
+
+    A plan key may also select modules by class: ``class:TransformerBlock`` selects every module that is an instance
+    of a class named ``TransformerBlock`` (as ``ModuleWrapPolicy({TransformerBlock})`` would), and
+    ``class:my_pkg.blocks.TransformerBlock`` names the class unambiguously. ``ignored_params`` may name the parameters
+    to leave unsharded, by parameter name or regex (or a list of them), so a plan written in YAML can use it.
     """
 
     # a built-in adapter: its own overrides are never naming overrides (see `StrategyAdapter.naming_overrides`)
@@ -118,9 +126,12 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                 - All valid ``fully_shard`` API kwargs are supported.
                 - :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan` directives are
                   applied in the order provided in the ``fsdp_plan`` dictionary.
+                - A key ``class:<name>`` (or ``class:<module>.<qualname>``) selects every module that is an instance of
+                  that class, as ``ModuleWrapPolicy`` does.
 
-                Additionally, ``fsdp_plan`` supports ``act_ckpt`` and ``cpu_offload_policy`` kwargs. For specified
-                module/patterns (or ``fsdp_default_kwargs``):
+                Additionally, ``fsdp_plan`` supports ``act_ckpt`` and ``cpu_offload_policy`` kwargs, and an
+                ``ignored_params`` given by parameter name or regex (or a list of them), resolved to the parameters
+                they name when the plan is applied. For specified module/patterns (or ``fsdp_default_kwargs``):
 
                 - ``act_ckpt`` (``Sequence`` [ ``str``, ``Dict`` | ``None`` ] | ``ActCkptCfg``): pass an alias
                   specifying the use of the desired activation checkpointing API (e.g. "composable", "wrapped",
@@ -146,9 +157,12 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                 - All valid ``fully_shard`` API kwargs are supported.
                 - :attr:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter.fsdp_plan` directives are
                   applied in the order provided in the ``fsdp_plan`` dictionary.
+                - A key ``class:<name>`` (or ``class:<module>.<qualname>``) selects every module that is an instance of
+                  that class, as ``ModuleWrapPolicy`` does.
 
-                Additionally, ``fsdp_plan`` supports ``act_ckpt`` and ``cpu_offload_policy`` kwargs. For specified
-                module/patterns (or ``fsdp_default_kwargs``):
+                Additionally, ``fsdp_plan`` supports ``act_ckpt`` and ``cpu_offload_policy`` kwargs, and an
+                ``ignored_params`` given by parameter name or regex (or a list of them), resolved to the parameters
+                they name when the plan is applied. For specified module/patterns (or ``fsdp_default_kwargs``):
 
                 - ``act_ckpt`` (``Sequence`` [ ``str``, ``Dict`` | ``None`` ] | ``ActCkptCfg``): pass an alias
                   specifying the use of the desired activation checkpointing API (e.g. "composable", "wrapped",
@@ -234,13 +248,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
     def _resolve_cfg_aliases(config_dict: dict) -> dict:
         """Resolve any provided convenience FSDP default kwargs."""
         for k, v in list(config_dict.items()):
-            # currently adding a `cpu_offload_policy` option alias for convenience
-            # open a GitHub issue if you think other poliy alias options would be useful
-            # TODO: renable coverage below when upstream cpu offload issue addressed
-            if k == "cpu_offload_policy":  # pragma: no cover
-                config_dict["offload_policy"] = CPUOffloadPolicy(**v)
-                del config_dict[k]
-            elif k == "act_ckpt":
+            if k == "act_ckpt":
                 if not isinstance(v, ActCkptCfg):
                     config_dict["act_ckpt"] = ActCkptCfg(*v) if isinstance(v, Sequence) else ActCkptCfg(mode=v)
         return config_dict
@@ -255,30 +263,64 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         """
         if not self.fsdp_plan:
             return
+        self._refuse_cpu_offload()
         # TODO: renable coverage below when upstream cpu offload issue addressed
         if self.fsdp_default_kwargs:  # pragma: no cover
             self.fsdp_default_kwargs = ModelParallelStrategyAdapter._resolve_cfg_aliases(self.fsdp_default_kwargs)
-        named_modules = dict(self.pl_module.named_modules()).keys()
+        named_modules = dict(self.pl_module.named_modules())
         resolved_modules: dict[str, dict] = {}
         for plan_n, kwargs in self.fsdp_plan.items():
-            module_resolved = False
-            if plan_n in named_modules:
-                module_resolved = True
-                if not self._maybe_update_fsdp_plan(resolved_modules, kwargs, plan_n):
-                    continue  # resolution success, but skipping an unsupported module
-            else:
-                mpat = re.compile(fr"{plan_n}")
-                for n in named_modules:
-                    if mpat.match(n):
-                        module_resolved = True
-                        if not self._maybe_update_fsdp_plan(resolved_modules, kwargs, n):
-                            continue  # resolution success, but skipping an unsupported module
-            if not module_resolved:
+            matched = ModelParallelStrategyAdapter._plan_key_modules(plan_n, named_modules)
+            if not matched:
+                what = "class" if plan_n.startswith(CLASS_SELECTOR) else "module or regex"
                 raise MisconfigurationException(
-                    f"The module or regex '{plan_n}' specified in `fsdp_plan` did not match any named modules "
+                    f"The {what} '{plan_n}' specified in `fsdp_plan` did not match any named modules "
                     "in the provided model."
                 )
+            for n in matched:
+                self._maybe_update_fsdp_plan(resolved_modules, kwargs, n)  # skips (with a warning) unsupported types
         self.fsdp_plan = resolved_modules
+
+    def _refuse_cpu_offload(self) -> None:
+        """Refuse a CPU offload policy in the plan, which this strategy cannot run.
+
+        Lightning's ``ModelParallelStrategy`` moves the whole model to the GPU once ``configure_model`` has run, and a
+        module sharded with ``CPUOffloadPolicy`` keeps its shards on the CPU, so the move fails (``_apply(): Couldn't
+        swap ...``). CPU offload works with the PyTorch API (``FTSController``), where the training loop places the
+        model itself.
+
+        Raises:
+            MisconfigurationException: If ``fsdp_default_kwargs`` or an ``fsdp_plan`` entry sets
+                ``cpu_offload_policy``, or an ``offload_policy`` that offloads to the CPU.
+        """
+        entries = [("`fsdp_default_kwargs`", self.fsdp_default_kwargs or {})]
+        entries += [(f"the `fsdp_plan` entry for '{k}'", v or {}) for k, v in self.fsdp_plan.items()]
+        for where, kwargs in entries:
+            if "cpu_offload_policy" in kwargs or isinstance(kwargs.get("offload_policy"), CPUOffloadPolicy):
+                raise MisconfigurationException(
+                    f"{where} asks for CPU offload, which Lightning's ModelParallelStrategy cannot run: it moves the "
+                    "model to the GPU after `configure_model`, and FSDP2 keeps CPU-offloaded shards on the CPU. Use "
+                    "the PyTorch API (`FTSController`) with `fully_shard(..., offload_policy=CPUOffloadPolicy())` for "
+                    "CPU offload."
+                )
+
+    @staticmethod
+    def _plan_key_modules(plan_n: str, named_modules: dict[str, torch.nn.Module]) -> list[str]:
+        """The names of the modules an ``fsdp_plan`` key selects, in module order: a module name, a regex matched
+        from the start of each module name, or ``class:<name>`` for every module that is an instance of a class
+        with that name (``class:<module>.<qualname>`` to name it unambiguously), as ``ModuleWrapPolicy``
+        selects."""
+        if plan_n.startswith(CLASS_SELECTOR):
+            ref = plan_n[len(CLASS_SELECTOR):].strip()
+
+            def _is_instance(m: torch.nn.Module) -> bool:
+                return any(ref in (c.__name__, f"{c.__module__}.{c.__qualname__}") for c in type(m).__mro__)
+
+            return [n for n, m in named_modules.items() if _is_instance(m)]
+        if plan_n in named_modules:
+            return [plan_n]
+        mpat = re.compile(fr"{plan_n}")
+        return [n for n in named_modules if mpat.match(n)]
 
     def _fts_auto_configure_model(self) -> None:
         """A wrapper for configuration-driven composable distributed API configurations that may be composed with
@@ -298,7 +340,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                 self._apply_activation_checkpointing(act_ckpt,n)
             else:
                 fully_shard(self.pl_module.get_submodule(n), mesh=self.pls_handle.device_mesh["data_parallel"],
-                            **self.fsdp_plan[n])
+                            **self._shard_kwargs(n))
         else:
             rank_zero_warn(
                 f"Module '{n}' or one of its parents has already registered the ``fully_shard`` composable "
@@ -319,7 +361,40 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
             setattr(outer_mod, module_name, act_ckpt._func(self.pl_module.get_submodule(n), **act_ckpt.cfg))
             assert isinstance(self.pl_module.get_submodule(n), ActivationWrapper)
         fully_shard(self.pl_module.get_submodule(n), mesh=self.pls_handle.device_mesh["data_parallel"],
-                    **self.fsdp_plan[n])
+                    **self._shard_kwargs(n))
+
+    def _shard_kwargs(self, n: str) -> dict[str, Any]:
+        """The ``fully_shard`` kwargs for the plan's module ``n``, with an ``ignored_params`` given by name
+        resolved to the parameters it names.
+
+        ``ignored_params`` may be a parameter name or regex (matched from the start of each name, as schedule entries
+        are), or a list of them, so a plan written in YAML can name the parameters ``fully_shard`` leaves unsharded.
+        Names are the ``LightningModule``'s own parameter names, and are resolved when the plan is applied, since
+        ``configure_model`` may create the parameters. A set of parameters is passed through unchanged.
+
+        Raises:
+            MisconfigurationException: If a name or regex in ``ignored_params`` matches no parameter.
+        """
+        kwargs = dict(self.fsdp_plan[n])
+        names = kwargs.get("ignored_params")
+        if names is None or isinstance(names, set):
+            return kwargs
+        named_params = dict(self.pl_module.named_parameters())
+        resolved: set[torch.nn.Parameter] = set()
+        for pattern in [names] if isinstance(names, str) else names:
+            if pattern in named_params:
+                matched = [named_params[pattern]]
+            else:
+                mpat = re.compile(fr"{pattern}")
+                matched = [p for pn, p in named_params.items() if mpat.match(pn)]
+            if not matched:
+                raise MisconfigurationException(
+                    f"The parameter name or regex '{pattern}' in the `ignored_params` of the `fsdp_plan` entry for "
+                    f"'{n}' did not match any named parameter in the provided model."
+                )
+            resolved.update(matched)
+        kwargs["ignored_params"] = resolved
+        return kwargs
 
     def _any_noncomposable_AC(self) -> tuple[str, type] | None:
         for n, m in self.pl_module.named_modules():

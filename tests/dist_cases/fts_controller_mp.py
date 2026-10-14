@@ -23,7 +23,7 @@ from functools import partial
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.distributed.fsdp import FSDPModule, fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp import CPUOffloadPolicy, FSDPModule, fully_shard, MixedPrecisionPolicy
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.parallel import loss_parallel
 from torch.nn.attention import SDPBackend
@@ -109,9 +109,16 @@ def _fsdp_layout(model: nn.Module, planned: list[str], world_size: int) -> dict:
     return {"fsdp_modules": sorted(n for n in planned if isinstance(modules[n], FSDPModule)), "uneven": uneven}
 
 
+def _full(p: torch.Tensor) -> torch.Tensor:
+    """A parameter's full value; a CPU-offloaded shard is gathered on its mesh's device, since NCCL gathers no CPU
+    tensors."""
+    if not isinstance(p, DTensor):
+        return p
+    return (p if p.device.type == p.device_mesh.device_type else p.to(p.device_mesh.device_type)).full_tensor()
+
+
 def _params(model: nn.Module) -> dict:
-    return {n: (p.full_tensor() if isinstance(p, DTensor) else p).detach().float().cpu().flatten().tolist()
-            for n, p in model.named_parameters()}
+    return {n: _full(p).detach().float().cpu().flatten().tolist() for n, p in model.named_parameters()}
 
 
 def _unmoved(model: nn.Module, initial: dict, tol: float = 1e-4) -> list[str]:
@@ -137,10 +144,12 @@ def _train(fts, model, data, shard, device, epochs, val=None, tp_loss_parallel=F
     return path
 
 
-def _fsdp_plan(model: nn.Module, mesh, shard_root: bool = True, mp_policy=None, root_only: bool = False) -> list[str]:
+def _fsdp_plan(model: nn.Module, mesh, shard_root: bool = True, mp_policy=None, root_only: bool = False,
+               offload: bool = False) -> list[str]:
     """``fsdp_cm_only``'s plan (``output``, ``layers.1``, ``norm``) plus ``layers.0``, then the root (or the root
-    alone)."""
-    kwargs = {"mesh": mesh} | ({"mp_policy": mp_policy} if mp_policy is not None else {})
+    alone), optionally offloading the sharded parameters, gradients and optimizer step to the CPU."""
+    kwargs = ({"mesh": mesh} | ({"mp_policy": mp_policy} if mp_policy is not None else {})
+              | ({"offload_policy": CPUOffloadPolicy()} if offload else {}))
     planned = [] if root_only else ["layers.0", "layers.1", "norm", "output"]
     for name in planned:
         fully_shard(model.get_submodule(name), **kwargs)
@@ -162,14 +171,14 @@ def _shard(ctx, batch):
 
 def fsdp(ctx, epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, checkpoint_activations: bool = False,
          ckpt_dir: str | None = None, val: list | None = None, fp16: bool = False, evaluate: bool = False,
-         callback_eval: str | None = None, root_only: bool = False) -> dict:
+         callback_eval: str | None = None, root_only: bool = False, offload: bool = False) -> dict:
     """FSDP2 with a manual plan sharding the root last (T1), optionally with activation checkpointing (T2), a best-
-    checkpoint policy restoring at boundaries (T3) or fp16 mixed precision (T4); with a forward-only pass before
-    each ``epoch_end`` (``evaluate``) or inside a gate or a phase's ``start`` or ``end`` hook
-    (``callback_eval``)."""
+    checkpoint policy restoring at boundaries (T3), fp16 mixed precision (T4) or a CPU offload policy (``offload``,
+    #55); with a forward-only pass before each ``epoch_end`` (``evaluate``) or inside a gate or a phase's ``start``
+    or ``end`` hook (``callback_eval``)."""
     model = _model(seed, ctx.device, checkpoint_activations)
     mp_policy = MixedPrecisionPolicy(param_dtype=torch.float16, reduce_dtype=torch.float32) if fp16 else None
-    planned = _fsdp_plan(model, ctx.mesh(), mp_policy=mp_policy, root_only=root_only)
+    planned = _fsdp_plan(model, ctx.mesh(), mp_policy=mp_policy, root_only=root_only, offload=offload)
     initial = _params(model)
     unsharded_dtypes = set()
     if fp16:  # record the dtype each FSDP module computes in, after FSDP2's all-gather
@@ -183,7 +192,9 @@ def fsdp(ctx, epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, ch
     return {"path": path, "layout": _fsdp_layout(model, planned, ctx.world_size), "params": _params(model),
             "unmoved": _unmoved(model, initial),
             "restored": fts.restored_count, "unsharded_dtypes": sorted(unsharded_dtypes),
-            "sharded_best": bool(ckpt_dir) and os.path.isdir(fts._checkpoint.best_path)}
+            "sharded_best": bool(ckpt_dir) and os.path.isdir(fts._checkpoint.best_path),
+            # where each sharded parameter's local shard lives: the CPU under an offload policy
+            "shard_devices": sorted({p.to_local().device.type for p in model.parameters() if isinstance(p, DTensor)})}
 
 
 def reference(epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, ckpt_dir: str | None = None,

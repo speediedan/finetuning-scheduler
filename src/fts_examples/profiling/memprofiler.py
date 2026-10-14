@@ -32,7 +32,7 @@ from pathlib import Path
 
 import yaml
 import torch
-from torch.distributed._composable.fsdp import FSDPModule
+from torch.distributed.fsdp import FSDPModule
 from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
 from lightning.fabric.utilities.rank_zero import _get_rank
 from lightning.fabric.utilities.cloud_io import get_filesystem

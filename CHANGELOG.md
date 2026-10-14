@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- `ModelParallelStrategyAdapter.fsdp_plan` keys may select modules by class: `class:TransformerBlock` (or `class:my_pkg.blocks.TransformerBlock`) selects every instance of that class, subclasses included, as `ModuleWrapPolicy` does. An `fsdp_plan` entry's `ignored_params` may name parameters by name or regex (or a list of them), resolved when the plan is applied, so a YAML plan can use it [#55](https://github.com/speediedan/finetuning-scheduler/issues/55).
+
 - Added `FTSController.export_best(fn=None, *, roles=("adapter",), path=None)`, exporting the best checkpoint's tensors whose role matches `roles` (for example only the adapters), from the checkpoint rather than the live model (keyed by wrapper-free names, for a compiled or activation-checkpointed model too) and, for a sharded model, in full on global rank zero. It writes `{tensors, roles, metadata}` with `torch.save`, or calls `fn(tensors, metadata, path)` to write another format. `FTSController(artifacts=...)` records the external artifacts a run depends on (`{name: {path, sha256, revision}}`, validated at construction) in every checkpoint's and export's metadata [#52](https://github.com/speediedan/finetuning-scheduler/issues/52).
 
 - Added `finetuning_scheduler.strategies`, experimental torch-native distributed adapters (`DistributedAdapter`): `UnshardedAdapter`, `FSDP2Adapter` and `DTensorAdapter` recognize a model's layout, check a schedule's physical parameters against it, and read and write the training state's tensors (one file, or a `torch.distributed.checkpoint` directory written by every rank). `FTSController` takes `distributed=` (detected by default) and delegates its sharded checkpoint IO to the adapter; the package imports only PyTorch and the scheduling core [#54](https://github.com/speediedan/finetuning-scheduler/issues/54).
@@ -75,6 +77,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Fixed `tests/special_tests.sh` reporting success when test collection failed, building its default experiment mask from `tests/.experiments` whatever `--experiments_list` named, and failing when `--log-dir` did not exist. It and `scripts/gen_fts_coverage.sh` now reject a bad flag before waiting for the GPU lease [#68](https://github.com/speediedan/finetuning-scheduler/issues/68).
 
 ### Changed
+
+- A `ModelParallelStrategyAdapter.fsdp_plan` that asks for CPU offload (`cpu_offload_policy`, or an `offload_policy` that offloads to the CPU) is now refused with an explanation. Lightning's `ModelParallelStrategy` moves the model to the GPU after `configure_model`, which FSDP2's CPU-offloaded shards cannot follow, so such a plan failed during setup with `_apply(): Couldn't swap ...`. CPU offload works with the PyTorch API (`FTSController`), where it is now tested on NCCL, best-checkpoint restores included [#55](https://github.com/speediedan/finetuning-scheduler/issues/55).
+
+- The FSDP2 auto-plan example (`fts_fsdp_auto_plan.yaml`) shards the transformer itself last, so its embeddings are sharded too, and runs in the example tests again; the model-parallel adapter imports `fully_shard` from the public `torch.distributed.fsdp` [#55](https://github.com/speediedan/finetuning-scheduler/issues/55).
 
 - A reinitialization `class_path` may now be the bare name of a `torch.optim` optimizer or lr scheduler (for example `SGD` or `StepLR`); other classes still need a fully qualified path [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).
 
