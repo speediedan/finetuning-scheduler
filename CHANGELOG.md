@@ -80,6 +80,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- The Lightning callback now sequences its phase transitions through a host-driven `FTSController` (attached at the fit's first transition or resume): the callback still decides when a phase ends, and the controller carries the transition out through the callback's `restore_best_ckpt`, `step_pg` and `thaw_to_depth` and the strategy adapter's hooks, so strategy adapters and callback subclasses see the same calls, in the same order, as before. The callback's public API, schedule format and checkpoints are unchanged [#85](https://github.com/speediedan/finetuning-scheduler/issues/85).
+
 - A reinitialization `class_path` may now be the bare name of a `torch.optim` optimizer or lr scheduler (for example `SGD` or `StepLR`); other classes still need a fully qualified path [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).
 
 - The Lightning callback now refuses the schedule keys only the PyTorch API interprets (`max_transition_step`, `phase_config`, `pg_overrides`) instead of silently ignoring them [#51](https://github.com/speediedan/finetuning-scheduler/issues/51).

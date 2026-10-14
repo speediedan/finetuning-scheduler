@@ -128,6 +128,10 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
     _restore_model_only: bool = False
     # the class name of the optimizer `configure_optimizers` built (set at fit start)
     _initial_optimizer_cls: str | None = None
+    # transitions are sequenced by a host-driven `FTSController` (set to `False` to use the callback's own, for one
+    # release); the controller is attached at the fit's first transition or resume
+    _use_fts_controller: bool = True
+    _fts_controller: Any = None
     strategy_adapter: StrategyAdapter
 
     def __init__(
@@ -397,6 +401,51 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         assert self.trainer is not None
         # the validation loop's forward-only pass leaves an FSDP2 root module's unsharded parameters registered
         core_phase.reshard_fsdp_modules(self.pl_module)
+        if self._use_fts_controller:
+            self._controller_step()
+        else:
+            self._legacy_step()
+        if self.depth_remaining == 0 and not self.epoch_transitions_only:
+            assert self.trainer.early_stopping_callback is not None
+            self.trainer.early_stopping_callback.final_phase = True  # type: ignore[attr-defined]
+        assert self._fts_state._ft_sync_objects is not None
+        FinetuningScheduler.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
+        if self.pl_module._compiler_ctx and self.pl_module._compiler_ctx.get("compiler", None) == "dynamo":
+            # reset currently required as `AOTAutograd`` is getting confused by `requires_grad` alteration
+            torch._dynamo.reset()
+        rank_zero_info(f"Multi-phase fine-tuned training continuing at level {self.curr_depth}.")
+        if self.depth_remaining == 0:
+            max_epochs_msg = f"`max_epochs` ({self.trainer.fit_loop.max_epochs}) is reached."
+            composition_msg = "the early stopping conditions are met or " + max_epochs_msg
+            rank_zero_info(
+                f"Given the current configuration of `max_depth` ({self.max_depth}), this training session"
+                f" will now end when {max_epochs_msg if self.epoch_transitions_only else composition_msg}"
+            )
+
+    def _controller_step(self) -> None:
+        """Hand the transition (or the resume) the callback decided on to its host-driven
+        :class:`~finetuning_scheduler.core.controller.FTSController`, which sequences it and carries it out through
+        this callback's ``restore_best_ckpt``, ``step_pg`` and ``thaw_to_depth`` and the strategy adapter's
+        ``on_after_phase_transition``, as :meth:`_legacy_step` calls them."""
+        from finetuning_scheduler.lightning.controller_bridge import attach_controller
+
+        if self._fts_controller is None:
+            self._fts_controller = attach_controller(self)
+        controller = self._fts_controller
+        if self._fts_state._resume_fit_from_ckpt:
+            controller.resume_at(self.curr_depth)
+            return
+        if controller.curr_depth != self.curr_depth - 1:
+            # the callback's depth is authoritative (it is checkpointed, and subclasses may set it)
+            rank_zero_debug(f"Syncing the controller's phase ({controller.curr_depth}) to the callback's"
+                            f" ({self.curr_depth - 1}) before advancing.")
+            controller._depth = self.curr_depth - 1
+        controller.request_advance()
+
+    def _legacy_step(self) -> None:
+        """The callback's own transition (or resume), for one release beside the controller's (see
+        ``_use_fts_controller``)."""
+        assert self.trainer is not None
         pre_reinit_state = self._save_pre_reinit_lr_state(self.trainer)
         if not self._fts_state._resume_fit_from_ckpt:
             if self.restore_best:
@@ -416,22 +465,6 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         else:
             self.thaw_to_depth()
         self.strategy_adapter.on_after_phase_transition()
-        if self.depth_remaining == 0 and not self.epoch_transitions_only:
-            assert self.trainer.early_stopping_callback is not None
-            self.trainer.early_stopping_callback.final_phase = True  # type: ignore[attr-defined]
-        assert self._fts_state._ft_sync_objects is not None
-        FinetuningScheduler.sync(self._fts_state._ft_sync_objects, self._fts_state._ft_sync_props)
-        if self.pl_module._compiler_ctx and self.pl_module._compiler_ctx.get("compiler", None) == "dynamo":
-            # reset currently required as `AOTAutograd`` is getting confused by `requires_grad` alteration
-            torch._dynamo.reset()
-        rank_zero_info(f"Multi-phase fine-tuned training continuing at level {self.curr_depth}.")
-        if self.depth_remaining == 0:
-            max_epochs_msg = f"`max_epochs` ({self.trainer.fit_loop.max_epochs}) is reached."
-            composition_msg = "the early stopping conditions are met or " + max_epochs_msg
-            rank_zero_info(
-                f"Given the current configuration of `max_depth` ({self.max_depth}), this training session"
-                f" will now end when {max_epochs_msg if self.epoch_transitions_only else composition_msg}"
-            )
 
     def step_pg(
         self,
@@ -783,6 +816,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
         # TODO: might not be necessary if we move introspection back to IT where it belongs
         # Save pl_module/trainer refs early to allow strategy adapter selection to introspect the module
         self.pl_module, self.trainer = pl_module, trainer  # save pl_module/trainer refs for downstream convenience
+        self._fts_controller = None  # attached afresh for each fit
         self._callback_dep_setup(trainer, pl_module, stage)
         self._strategy_setup(trainer)
         if self.gen_ft_sched_only:

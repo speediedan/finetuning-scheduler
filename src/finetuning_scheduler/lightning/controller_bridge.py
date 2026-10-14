@@ -132,6 +132,7 @@ def attach_controller(fts: "FinetuningScheduler") -> FTSController:
         pl_module, optimizer=trainer.optimizers[0], host=LightningHost(trainer, pl_module),
         checkpoint=FTSCheckpointPolicy(fts), restore_best=fts.restore_best, max_depth=fts.max_depth,
         reinit_optim_cfg=fts.reinit_optim_cfg, reinit_lr_cfg=fts.reinit_lr_cfg,
+        compile_reset=False,  # the callback resets a compiled module itself, once its transition is complete
     )
     controller.attach(LightningPhaseExecutor(fts), fts.ft_schedule)
     return controller
