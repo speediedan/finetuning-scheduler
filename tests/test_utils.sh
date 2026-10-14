@@ -258,7 +258,7 @@ show_test_results(){
       show_final_summary "$test_log"
     fi
   elif [ -f ${test_log} ]; then  # if the summary log but not the raw test log exists, check for collection errors
-    if grep --ignore-case --extended-regexp 'traceback|failed' ${test_log} ; then
+    if grep --ignore-case --extended-regexp 'traceback|\bfailed\b' ${test_log} ; then
       echo "Potential collection error!" | tee -a $test_log
       show_final_summary "$test_log"
       exit 1

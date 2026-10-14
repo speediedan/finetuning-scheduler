@@ -112,7 +112,9 @@ def run_local(case: Callable, world_size: int = 2, seed: int = 1234, **kwargs: A
     them as the ranks would. The case runs as one program for all ranks (its ``ctx.rank`` is 0), so it suits code
     whose ranks run the same program on the same data, such as tensor parallelism; a case that gives each rank its own
     data (data parallelism) needs the gloo pool. Data drawn from a generator inside the mode differs per simulated
-    rank, so a case draws shared data outside it (``maybe_disable_local_tensor_mode``).
+    rank, so a case draws shared data outside it (``maybe_disable_local_tensor_mode``). Converting a tensor whose
+    simulated ranks hold different values to a Python value raises ``RuntimeError("Cannot convert local tensor to
+    list")``: that is how a divergence between ranks surfaces.
 
     ``LocalTensorMode`` is a private PyTorch API (torch 2.12 or later); the calling test is skipped without it.
     """

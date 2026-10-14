@@ -133,6 +133,13 @@ def _params(model: nn.Module) -> dict:
     return {n: _full(p).detach().float().cpu().flatten().tolist() for n, p in model.named_parameters()}
 
 
+def params_close(a: dict, b: dict, tol: float = 1e-5) -> bool:
+    """Whether two ``_params`` results name the same parameters, each within ``tol`` relative to ``b``'s largest
+    magnitude."""
+    return a.keys() == b.keys() and all(
+        max(abs(u - v) for u, v in zip(a[k], b[k])) <= tol * (1 + max(abs(v) for v in b[k])) for k in a)
+
+
 def _unmoved(model: nn.Module, initial: dict, tol: float = 1e-4) -> list[str]:
     """The parameters training left within ``tol`` of their initial values (every one is thawed by the last
     phase)."""

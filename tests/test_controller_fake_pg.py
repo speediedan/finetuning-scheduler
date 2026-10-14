@@ -13,8 +13,9 @@
 
 These run the model-parallel pool cases (``tests/dist_cases/fts_controller_mp.py``) once per simulated rank, so the
 scheduling logic is checked on every hosted OS, not only where the gloo pool runs. The fake group's collectives move
-no data, so nothing here compares numerics, and DCP checkpointing (whose global plan needs every rank's real chunks)
-stays with the gloo tests in ``tests/test_controller_model_parallel.py``.
+no data, so those runs compare no numerics; the tensor-parallel case also runs once under ``LocalTensorMode``
+(``run_local``), whose numerics are real, and is compared with a single-process run. DCP checkpointing (whose global
+plan needs every rank's real chunks) stays with the gloo tests in ``tests/test_controller_model_parallel.py``.
 
 The ``core-no-lightning`` CI job runs this module with ``--noconftest``, so it must not import Lightning or
 ``tests.helpers``.
@@ -26,6 +27,7 @@ import torch
 import torch.distributed as dist
 
 from tests.dist_cases import fts_controller_mp as mp
+from tests.dist_cases.fts_controller_mp import params_close
 from tests.dist_cases._fake_pg import assert_ranks_agree, run_fake, run_local
 from tests.model_parallel_expected_paths import path_fsdp_autocm, path_tp
 
@@ -94,11 +96,6 @@ def test_tp_follows_the_lightning_path(tp_loss_parallel):
     assert _thawed_plain(agreed["path"]) == [[], [], []]
 
 
-def _close(a: dict, b: dict, tol: float = 1e-5) -> bool:
-    return a.keys() == b.keys() and all(
-        max(abs(u - v) for u, v in zip(a[k], b[k])) <= tol * (1 + max(abs(v) for v in b[k])) for k in a)
-
-
 @pytest.mark.parametrize("tp_loss_parallel", [True, False], ids=["loss_parallel", "replicated_loss"])
 def test_tp_matches_a_single_process_run(tp_loss_parallel):
     """Tensor parallelism over two ranks simulated with real numerics (``LocalTensorMode``) follows the Lightning
@@ -106,7 +103,7 @@ def test_tp_matches_a_single_process_run(tp_loss_parallel):
     with a best-checkpoint policy, and this runs on every hosted OS."""
     out = run_local(mp.tp, tp_loss_parallel=tp_loss_parallel)
     assert _states(out["path"]) == _expected(path_tp) and out["unmoved"] == []
-    assert _close(out["params"], mp.reference()["params"])
+    assert params_close(out["params"], mp.reference()["params"])
 
 
 def test_partial_plan_thaws_on_schedule_and_warns_once():

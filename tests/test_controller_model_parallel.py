@@ -39,9 +39,7 @@ def _phases(path: list) -> list:
     return [(epoch, depth, state["thawed"]) for epoch, depth, state in path]
 
 
-def _close(a: dict, b: dict, tol: float = 1e-5) -> bool:
-    return a.keys() == b.keys() and all(
-        max(abs(u - v) for u, v in zip(a[k], b[k])) <= tol * (1 + max(abs(v) for v in b[k])) for k in a)
+_close = mp.params_close
 
 
 def _agreed(results: list) -> dict:
