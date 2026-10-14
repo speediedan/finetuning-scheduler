@@ -241,12 +241,15 @@ show_test_results(){
     cp "$tmp_raw_log" "./lightning_logs/$raw_filename"
     echo -n "##vso[task.uploadfile]"
     echo "${PWD}/lightning_logs/$raw_filename"
-    if grep_errors=($(grep --ignore-case --extended-regexp 'error|exception|traceback|failed' ${tmp_raw_log})); then
+    # `failed` as a word, so pytest's "xfailed" count is not one; the lines printed are the ones detected, and printing
+    # none must not end this EXIT trap under `set -eo pipefail` before the summary and exit status are reported
+    local error_pattern='error|exception|traceback|\bfailed\b'
+    if grep --quiet --ignore-case --extended-regexp "$error_pattern" ${tmp_raw_log}; then
       echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $test_log
       printf "Potential errors detected. Uploading ${tmp_raw_log} and grepping exception/error lines below: \n" | tee -a $test_log
       echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $test_log
       printf ": \n" | tee -a $test_log
-      grep --ignore-case --extended-regexp 'error|exception' ${tmp_raw_log} | tee -a $test_log
+      grep --ignore-case --extended-regexp "$error_pattern" ${tmp_raw_log} | tee -a $test_log || true
       printf "\n" | tee -a $test_log
       show_final_summary "$test_log"
     else
