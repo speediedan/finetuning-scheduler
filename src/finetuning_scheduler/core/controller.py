@@ -1182,9 +1182,8 @@ class FTSController:
 
     @property
     def _sharded(self) -> bool:
-        if self._distributed is not None:
-            return self._distributed.sharded
-        return any(type(p).__name__ == "DTensor" for p in self.model.parameters())
+        assert self._distributed is not None  # selected at setup, before anything asks
+        return self._distributed.sharded
 
     def _validate_layout(self) -> None:
         """Report the distributed adapter's findings on the compiled schedule (after resharding, so a forward-only

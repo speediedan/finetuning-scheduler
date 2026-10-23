@@ -126,6 +126,9 @@ def test_attach_refuses_registered_gates_and_policy_restore_is_host_driven_only(
     fts.add_gate(lambda e: True)
     with pytest.raises(FTSConfigurationError, match="Gates are not supported"):
         fts.attach(RecordingExecutor(fts), SCHEDULE)
+    unrestorable = FTSController(model, optimizer=torch.optim.SGD, host=host, restore_best=True)
+    with pytest.raises(FTSConfigurationError, match="needs a `checkpoint` policy"):
+        unrestorable.attach(RecordingExecutor(unrestorable), SCHEDULE)
     # a controller-driven controller ignores a policy's `restore` and restores its own checkpoint files
     seen = []
     policy = HostRestoringPolicy(best_depth=0, seen=seen)

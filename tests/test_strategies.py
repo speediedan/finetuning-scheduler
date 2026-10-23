@@ -134,6 +134,12 @@ def test_export_best_from_a_sharded_checkpoint(gloo_pool, tmp_path):
 
 
 @GLOO
+def test_export_best_of_a_tensor_the_sharded_checkpoint_lacks_is_refused_everywhere(gloo_pool, tmp_path):
+    results = gloo_pool.run(fts_views.export_missing, ckpt_dir=str(tmp_path / "missing"))
+    assert all(r["raised"] == "FTSConfigurationError" and "does not hold ['2.stat']" in r["message"] for r in results)
+
+
+@GLOO
 def test_export_best_failure_on_rank_zero_raises_everywhere(gloo_pool, tmp_path):
     results = gloo_pool.run(fts_views.export_failure, ckpt_dir=str(tmp_path / "failure"))
     by_rank = {i: r for i, r in enumerate(results)}

@@ -239,7 +239,9 @@ exclude_lines = [
     "pass",
     "rank_zero_warn",
     "raise NotImplementedError",
-    "except Exception"
+    "except Exception",
+    "^\\s*\\.\\.\\.\\s*$",
+    "if TYPE_CHECKING:",
 ]
 
 [tool.pytest.ini_options]
