@@ -100,6 +100,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- The Azure multi-GPU pipeline now records its phases: before the leases it writes each phase's manifest (collection only), each test step runs with its phase's recording plugin and, for a measured phase, its own coverage data file (the GPU coverage upload combines the CUDA and standalone phases, as before), and under the leases it writes one report per phase and publishes the manifests and reports as a build artifact. The reports are advisory for now: the test steps remain the gate. The job also demands an agent declaring `GPU_VENDOR` `nvidia`, which keeps its CUDA image off a second, AMD agent in the same pool [#57](https://github.com/speediedan/finetuning-scheduler/issues/57).
+
 - The SuperGLUE example and its tutorial notebook tokenize through a module-level `convert_to_features` function with explicit arguments, in place of a `LightningDataModule` method. `datasets` now fingerprints the transform from those arguments alone, so its cache is reused across runs [#105](https://github.com/speediedan/finetuning-scheduler/issues/105).
 
 - A `ModelParallelStrategyAdapter.fsdp_plan` that asks for CPU offload (`cpu_offload_policy`, or an `offload_policy` that offloads to the CPU) is now refused with an explanation. Lightning's `ModelParallelStrategy` moves the model to the GPU after `configure_model`, which FSDP2's CPU-offloaded shards cannot follow, so such a plan failed during setup with `_apply(): Couldn't swap ...`. CPU offload works with the PyTorch API (`FTSController`), where it is now tested on NCCL, best-checkpoint restores included [#55](https://github.com/speediedan/finetuning-scheduler/issues/55).

@@ -62,7 +62,13 @@ jobs:
     # how much time to give 'run always even if cancelled tasks' before stopping them
     cancelTimeoutInMinutes: "2"
 
-    pool: default
+    # The CUDA image below runs only on an NVIDIA agent. Each agent declares its vendor as GPU_VENDOR in its `.env`, so
+    # this demand keeps the job off a second, AMD agent in the same pool (#57) until the job selects its image from the
+    # agent it lands on.
+    pool:
+      name: default
+      demands:
+        - GPU_VENDOR -equals nvidia
 
     variables:
       # RunIf(min_cuda_gpus=...) and RunIf(bf16_cuda=True) tests run only with this opt-in, so a plain `pytest` on a
@@ -116,6 +122,28 @@ jobs:
         uv pip list
       displayName: 'Install dependencies'
 
+    # What each GPU phase selects, written before any test runs (tests/gpu_ci/phase_manifest.py, #57). Collection only,
+    # with CUDA_VISIBLE_DEVICES emptied, so it needs no lease. The standalone scope is decided once, here, so the
+    # manifest and the standalone step cannot disagree about it.
+    # A collection error is a warning here (the test steps report it as well), so the manifests never stop a build.
+    - bash: |
+        set -e
+        source /tmp/venvs/fts_dev/bin/activate
+        # the checkout belongs to the host's agent uid, not this container's, so let git name the revision anyway
+        git config --global --add safe.directory "$(Build.SourcesDirectory)"
+        out="$(Agent.TempDirectory)/fts-phases"
+        mkdir -p "$out"  # the publish step always has a directory, even if collection fails outright
+        scope=$(bash .azure-pipelines/scripts/standalone_scope.sh)
+        echo "##vso[task.setvariable variable=standaloneScope]${scope}"
+        phases=(--phase gpu-nonstandalone --phase examples --phase examples-multigpu)
+        [[ "$(Build.Reason)" == Schedule ]] && phases+=(--phase pool-reverse)
+        python -m tests.gpu_ci.phase_manifest collect "${phases[@]}" --out-dir "$out" \
+          || echo "##vso[task.logissue type=warning]phase collection reported errors (see the lines above)"
+        python -m tests.gpu_ci.phase_manifest collect --phase standalone --scope "$scope" --out-dir "$out" \
+          || echo "##vso[task.logissue type=warning]standalone collection reported errors (see the line above)"
+        echo "##vso[task.setvariable variable=phasesCollected]true"
+      displayName: 'Collect phase manifests'
+
     - bash: |
         source /tmp/venvs/fts_dev/bin/activate
         python requirements/collect_env_details.py
@@ -141,9 +169,12 @@ jobs:
       displayName: 'Acquire host GPU leases'
 
     # Only the CUDA tests that are not standalone: the hosted CPU matrix runs every other test in this collection, and
-    # the standalone step below runs the standalone ones (tests/conftest.py, FTS_CUDA_TESTS_ONLY).
+    # the standalone step below runs the standalone ones (tests/conftest.py, FTS_CUDA_TESTS_ONLY). Each test step loads
+    # its phase's environment first (`run-env`): the recording plugin, the phase's record directory and, for a measured
+    # phase, its own coverage data file.
     - bash: |
         source /tmp/venvs/fts_dev/bin/activate
+        eval "$(python -m tests.gpu_ci.phase_manifest run-env --phase gpu-nonstandalone --out-dir "$(Agent.TempDirectory)/fts-phases")"
         python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
       env:
         FTS_CUDA_TESTS_ONLY: "1"
@@ -156,7 +187,9 @@ jobs:
     - bash: |
         set -e
         source /tmp/venvs/fts_dev/bin/activate
-        scope=$(bash .azure-pipelines/scripts/standalone_scope.sh)
+        eval "$(python -m tests.gpu_ci.phase_manifest run-env --phase standalone --out-dir "$(Agent.TempDirectory)/fts-phases")"
+        scope="$(standaloneScope)"
+        echo "standalone scope: ${scope} (decided when the manifests were collected)"
         if [[ "$scope" == smoke ]]; then
           bash ./tests/special_tests.sh --mark_type=standalone --select_file=tests/.standalone_smoke
         else
@@ -169,8 +202,15 @@ jobs:
     #     bash ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0 1"
     #   displayName: 'Testing: Experimental Multi-GPU'
 
+    # The upload covers the two phases it always has, now kept in their own data files and combined here.
     - bash: |
         source /tmp/venvs/fts_dev/bin/activate
+        data=()
+        for phase in gpu-nonstandalone standalone; do
+          f="$(Agent.TempDirectory)/fts-phases/coverage/${phase}/.coverage"
+          if [[ -f "$f" ]]; then data+=("$f"); else echo "##vso[task.logissue type=warning]no coverage data for ${phase}"; fi
+        done
+        python -m coverage combine --keep "${data[@]}"
         python -m coverage report
         python -m coverage xml
         python -m coverage html
@@ -192,6 +232,7 @@ jobs:
     - bash: |
         set -e
         source /tmp/venvs/fts_dev/bin/activate
+        eval "$(python -m tests.gpu_ci.phase_manifest run-env --phase examples --out-dir "$(Agent.TempDirectory)/fts-phases")"
         python -m pytest src/fts_examples -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
       # condition: notIn(variables['scope'], '2.0.1')
       displayName: 'Testing: Examples'
@@ -199,6 +240,7 @@ jobs:
     - bash: |
         source /tmp/venvs/fts_dev/bin/activate
         mkdir -p /__w/_temp/kernel_cache
+        eval "$(python -m tests.gpu_ci.phase_manifest run-env --phase examples-multigpu --out-dir "$(Agent.TempDirectory)/fts-phases")"
         bash ./tests/special_tests.sh --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'
       # condition: notIn(variables['scope'], '2.0.1')
       env:
@@ -213,6 +255,7 @@ jobs:
     - bash: |
         set -e
         source /tmp/venvs/fts_dev/bin/activate
+        eval "$(python -m tests.gpu_ci.phase_manifest run-env --phase pool-reverse --out-dir "$(Agent.TempDirectory)/fts-phases")"
         modules=$(grep -l dist_pool_fixture tests/test_*.py)
         echo "pool modules: ${modules}"
         python -m pytest ${modules} -v --durations=20
@@ -220,6 +263,33 @@ jobs:
         FTS_REVERSE_ORDER: "1"
       condition: and(succeededOrFailed(), eq(variables['Build.Reason'], 'Schedule'), eq(variables['leaseHeld'], 'true'))
       displayName: 'Testing: distributed pool in reverse order'
+
+    # One report per phase that ran: its per-node, per-rank outcomes counted against its manifest, with the run's
+    # identity and coverage (#57). Under the leases, since it reads the device names. Advisory for now: the test steps
+    # remain the gate, and a phase that is not `clean` (an unreviewed skip counts) is a warning, so the reports can be
+    # read against the test results before they decide a build.
+    - bash: |
+        source /tmp/venvs/fts_dev/bin/activate
+        out="$(Agent.TempDirectory)/fts-phases"
+        for manifest in "$out"/manifests/*.json; do
+          phase=$(basename "$manifest" .json)
+          if [[ ! -d "$out/records/$phase" ]]; then
+            echo "##vso[task.logissue type=warning]phase ${phase}: collected, but its step did not run"
+            continue
+          fi
+          # vendor nvidia: the job demands an NVIDIA agent (pool demands above)
+          python -m tests.gpu_ci.phase_manifest report --phase "$phase" --out-dir "$out" --vendor nvidia \
+            --evidence-class pipeline --lease-mode "$(cat /tmp/azp_host_lease.pid.mode 2>/dev/null)" --image "$(image)" \
+            || echo "##vso[task.logissue type=warning]phase ${phase}: report is not clean (see the line above)"
+        done
+        exit 0
+      condition: and(succeededOrFailed(), eq(variables['phasesCollected'], 'true'), eq(variables['leaseHeld'], 'true'))
+      displayName: 'Phase reports'
+
+    - publish: $(Agent.TempDirectory)/fts-phases
+      artifact: fts-phases-nvidia-$(System.JobAttempt)
+      condition: and(always(), eq(variables['phasesCollected'], 'true'))
+      displayName: 'Publish phase manifests and reports'
 
     - bash: |
         # since we use rootless docker and userns-remapping, we need to ensure all files/directories in previous
