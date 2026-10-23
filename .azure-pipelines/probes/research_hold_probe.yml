@@ -1,0 +1,60 @@
+# Admission probe for a GPU agent held for research (#57). CPU only: no checkout, no container, no device and no
+# lease, so it is harmless wherever it lands. Each demand set is the dual-vendor job template's own rendering for
+# one job class, so where Azure places (or refuses) this probe is where it would place the real job.
+# Queued by hand only; the project's Approval check gates every run on the self-hosted pool.
+#   amd-vendor-marked: with the AMD agent in research mode no agent matches, so the job must fail at queue time.
+#   any-vendor: with the AMD agent in research mode the job must run on expectAgent (the always-on CI agent), and
+#               wait for it when it is busy rather than take the idle research agent.
+parameters:
+  - name: demandSet
+    type: string
+    values: [amd-vendor-marked, any-vendor]
+  - name: expectAgent
+    type: string
+  - name: holdSeconds
+    type: number
+    default: 60
+trigger: none
+pr: none
+jobs:
+  - ${{ if eq(parameters.demandSet, 'amd-vendor-marked') }}:
+      - job: probe_amd_vendor_marked
+        timeoutInMinutes: 15
+        pool:
+          name: Default
+          demands:
+            - Agent.OS -equals Linux
+            - GPU_VENDOR
+            - GPU_COUNT -equals 2
+            - ci-vendor-marked
+            - ci-fts
+            - GPU_VENDOR -equals amd
+        steps:
+          - checkout: none
+          - bash: |
+              set -euo pipefail
+              echo "RESEARCH-HOLD-BREACH: an AMD-demanded probe was assigned to $(Agent.Name)"
+              exit 1
+            displayName: Must never be assigned while the AMD agent is in research
+  - ${{ if eq(parameters.demandSet, 'any-vendor') }}:
+      - job: probe_any_vendor
+        timeoutInMinutes: 15
+        pool:
+          name: Default
+          demands:
+            - Agent.OS -equals Linux
+            - GPU_VENDOR
+            - GPU_COUNT -equals 2
+            - ci-any-vendor
+            - ci-fts
+        steps:
+          - checkout: none
+          - bash: |
+              set -euo pipefail
+              echo "any-vendor probe on $(Agent.Name) (GPU_VENDOR=${GPU_VENDOR:-unset}), holding ${HOLD}s"
+              test "$(Agent.Name)" = "$EXPECT" || { echo "RESEARCH-HOLD-BREACH: assigned to $(Agent.Name)"; exit 1; }
+              sleep "$HOLD"
+            env:
+              EXPECT: ${{ parameters.expectAgent }}
+              HOLD: ${{ parameters.holdSeconds }}
+            displayName: Assigned to the expected CI agent only (CPU only)

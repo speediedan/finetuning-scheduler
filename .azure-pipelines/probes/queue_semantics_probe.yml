@@ -1,0 +1,31 @@
+# Queue-semantics probe for the self-hosted pool (#57, measurements M1 to M3). CPU only: no container, no device,
+# no lease, no checkout. Queued by hand only; the project's Approval check gates every run.
+#   M1: a capability no agent carries. Expected (documented): the job fails at queue time.
+#   M2, M3: ci-probe, which only an agent switched to probe mode carries. M2 removes it while a job waits;
+#           M3 queues against a disabled agent that carries it. Neither outcome is documented.
+parameters:
+  - name: probeCapability
+    type: string
+    default: ci-probe
+    values: [ci-probe, ci-probe-absent]
+  - name: holdSeconds
+    type: number
+    default: 300
+trigger: none
+pr: none
+jobs:
+  - job: probe
+    timeoutInMinutes: 15
+    pool:
+      name: Default
+      demands:
+        - ${{ parameters.probeCapability }}
+    steps:
+      - checkout: none
+      - bash: |
+          set -euo pipefail
+          echo "probe on $(Agent.Name), queued $(System.PipelineStartTime), holding ${HOLD}s"
+          sleep "$HOLD"
+        env:
+          HOLD: ${{ parameters.holdSeconds }}
+        displayName: Hold the agent (CPU only)
