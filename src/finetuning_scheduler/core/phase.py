@@ -62,8 +62,9 @@ def thaw_params(module: Module, thaw_pl: list, translation_func: Callable | None
     """
     thawed_p_names = []
     curr_thawed = []
+    thaw = set(thaw_pl)
     for n, p in module.named_parameters():
-        if not p.requires_grad and n in thaw_pl:
+        if not p.requires_grad and n in thaw:
             p.requires_grad = True
             thawed_p_names.append(n)
         elif p.requires_grad:

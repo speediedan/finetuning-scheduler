@@ -259,6 +259,7 @@ def reinit_phase0_pgs(module: Module, thawed_pl: list, no_decay: list | None = N
         A list of one or two new parameter groups (two when ``no_decay`` is used).
     """
     overrides = dict(pg_overrides or {})
+    thawed = set(thawed_pl)
     if no_decay:
         pgs = [
             {
@@ -266,7 +267,7 @@ def reinit_phase0_pgs(module: Module, thawed_pl: list, no_decay: list | None = N
                 "params": [
                     p
                     for n, p in module.named_parameters()
-                    if not any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
+                    if not any(nd in n for nd in no_decay) and n in thawed and p.requires_grad
                 ],
             },
             {
@@ -274,14 +275,14 @@ def reinit_phase0_pgs(module: Module, thawed_pl: list, no_decay: list | None = N
                 "params": [
                     p
                     for n, p in module.named_parameters()
-                    if any(nd in n for nd in no_decay) and n in thawed_pl and p.requires_grad
+                    if any(nd in n for nd in no_decay) and n in thawed and p.requires_grad
                 ],
                 "weight_decay": 0.0,
             },
         ]
     else:
         pgs = [{**overrides,
-                "params": [p for n, p in module.named_parameters() if n in thawed_pl and p.requires_grad]}]
+                "params": [p for n, p in module.named_parameters() if n in thawed and p.requires_grad]}]
     return pgs
 
 
@@ -387,10 +388,11 @@ def add_groups(
     # exclude parameters an existing group already owns; identity rather than equality since parameter tensors
     # are not hashable by value and `in` would trigger elementwise comparison
     existing_params = {id(p) for group in optimizer.param_groups for p in group.get("params", [])}
+    thawed = set(thawed_pl)
     candidates = [
         (n, p)
         for n, p in module.named_parameters()
-        if n in thawed_pl and p.requires_grad and id(p) not in existing_params
+        if n in thawed and p.requires_grad and id(p) not in existing_params
     ]
     if not candidates:
         # nothing left to add: returning 0 keeps the caller from extending `base_lrs`/`min_lrs`/`lr_lambdas`
@@ -488,10 +490,12 @@ def inspect_phase0_opt_state(optimizer: ParamGroupAddable, module: Module, sched
         sets (otherwise empty).
     """
     no_grad_cnt = len([p for pg in optimizer.param_groups for p in pg["params"] if not p.requires_grad])
-    init_ft_cnt = len(optim_inspect(schedule[0]["params"]))
-    total_ft_cnt = len([p for phase in schedule for p in optim_inspect(schedule[phase]["params"])])
+    phase0 = optim_inspect(schedule[0]["params"])  # once: a strategy adapter's inspection can walk the module
+    init_ft_cnt = len(phase0)
+    total_ft_cnt = sum(len(optim_inspect(schedule[phase]["params"])) for phase in schedule)
     optim_grad_param_set = {p for pg in optimizer.param_groups for p in pg["params"] if p.requires_grad}
-    sched_grad_param_set = {p for n, p in module.named_parameters() if n in optim_inspect(schedule[0]["params"])}
+    phase0_names = set(phase0)
+    sched_grad_param_set = {p for n, p in module.named_parameters() if n in phase0_names}
     expected_params_sym_diff = optim_grad_param_set ^ sched_grad_param_set
     p_diff_summary: dict = defaultdict(list)
     if expected_params_sym_diff:

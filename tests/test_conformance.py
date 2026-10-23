@@ -257,6 +257,22 @@ def test_every_case_has_a_mutant():
     assert {c.name for c in TunableViewConformance(one_to_many_view).cases()} == set(MUTANTS)
 
 
+def test_thaw_case_builds_one_view_however_many_names_it_samples():
+    """The thaw case reuses one view across its names (a view over a heavy wrapper is a whole model each, #124)."""
+    built = []
+
+    def make_view():
+        built.append(1)
+        return one_to_many_view()
+
+    from finetuning_scheduler.core.views import as_view
+
+    names = len({n for n, _ in as_view(one_to_many_view()).logical_named_parameters()})
+    report = TunableViewConformance(make_view).run(select=["thaw_is_exact_and_deterministic"], raise_on_failure=True)
+    assert report.ran == ["thaw_is_exact_and_deterministic"] and names > 2
+    assert len(built) == 2  # the suite's probe and the case's one view
+
+
 def test_vacuity_guard():
     suite = TunableViewConformance(one_to_many_view)
     with pytest.raises(ConformanceError, match="No conformance case applied"):

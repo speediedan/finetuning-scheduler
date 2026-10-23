@@ -50,6 +50,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Fixed `TunableViewConformance`'s `thaw_is_exact_and_deterministic` case building a fresh view (through `make_view`) for every logical name it samples. A view over a heavyweight wrapper is a whole model each, so a GPT-2 target with about 150 logical names took 25 GB of memory and failed on Windows; the case now reuses one view, which checks the same thing [#124](https://github.com/speediedan/finetuning-scheduler/issues/124).
+
+- Fixed the check that a configured optimizer matches phase 0 calling the strategy adapter's name inspection once per module parameter instead of once: the FSDP adapter's inspection walks the module, so with `use_orig_params=True` the check was quadratic in the parameter count (about 12 s at 4,000 parameters). Phase thawing and parameter-group construction also test names against sets rather than lists now [#122](https://github.com/speediedan/finetuning-scheduler/issues/122).
+
 - Fixed `tests/special_tests.sh` exiting 1 without its summary when every test passed but the log mentioned an `xfailed` test: its error scan detected with one pattern and printed with another, and the print finding nothing ended the summary trap under `set -eo pipefail` [#116](https://github.com/speediedan/finetuning-scheduler/issues/116).
 
 - Fixed resuming an FSDP1 (`FSDPStrategy`) checkpoint under `ModelParallelStrategy` (FSDP2): restoring the best checkpoint at the next phase transition failed with a `KeyError`, since the checkpoint named its parameter groups' parameters with FSDP1's wrapper segments (`_fsdp_wrapped_module.`). Saved and current parameters are now matched by wrapper-free name. A best checkpoint that is an FSDP1 sharded directory, which `ModelParallelStrategy` cannot load, is restored from its consolidation beside it (`<directory>.consolidated`, the default output of Lightning's `consolidate_checkpoint` utility), and without one a resume that will restore it is refused up front with the command to run [#55](https://github.com/speediedan/finetuning-scheduler/issues/55).
