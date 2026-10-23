@@ -106,7 +106,10 @@ PHASES = {
             "gpu-nonstandalone",
             ("src/finetuning_scheduler", "tests"),
             {"FTS_CUDA_TESTS_ONLY": "1"},
-            command="python -m pytest src/finetuning_scheduler tests -v",
+            # as the pipeline runs it: a measured phase's command must write the coverage data ``run-env`` points at
+            command=(
+                "python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v"
+            ),
         ),
         Phase(
             "standalone",
