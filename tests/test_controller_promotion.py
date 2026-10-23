@@ -232,6 +232,20 @@ def test_rolling_back_before_a_promotion_restores_aliases_and_translated_views(t
     assert all(torch.equal(state[k], v) for k, v in initial.items())
 
 
+class LeavesOutPromoted(OwnRolesView):
+    def checkpoint_state_dict(self):
+        return {k: v for k, v in super().checkpoint_state_dict().items() if not k.startswith("lens.")}
+
+
+def test_a_view_whose_checkpoint_state_leaves_out_the_promoted_tensors_refuses():
+    torch.manual_seed(0)
+    model = InterventionModel()
+    fts = _controller(model, LeavesOutPromoted(model, roles=dict(ROLES)))
+    with pytest.raises(FTSConfigurationError, match="checkpoint state still leaves them out"):
+        for epoch in fts.epochs(2):
+            _epoch(fts, epoch)
+
+
 def test_a_view_translating_checkpoints_without_promote_refuses():
     torch.manual_seed(0)
     model = InterventionModel()

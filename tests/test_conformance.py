@@ -323,3 +323,44 @@ def test_checkpoint_case_catches_unrestored_buffers():
     suite = TunableViewConformance(lambda: DropsFittedBuffersOnLoad(InterventionModel(), roles=ROLES))
     report = suite.run(select=["checkpoint_round_trip"])
     assert "checkpoint_round_trip" in report.failures and "enforce_mean" in report.failures["checkpoint_round_trip"]
+
+
+def test_sample_logical_and_step_fn():
+    """The per-name cases exercise only ``sample_logical``, and the step case steps through ``step_fn``."""
+    from finetuning_scheduler.core.views import as_view
+
+    first = next(iter(as_view(one_to_many_view()).logical_named_parameters()))[0]
+    steps = []
+
+    def step_fn(view, optimizer):
+        for group in optimizer.param_groups:
+            for p in group["params"]:
+                p.grad = torch.ones_like(p)
+        optimizer.step()
+        steps.append(type(view).__name__)
+
+    report = TunableViewConformance(one_to_many_view, sample_logical=[first], step_fn=step_fn).run(
+        raise_on_failure=True)
+    assert report.ok and steps == ["OneToManyView"]
+
+
+def test_untrainable_case_fails_when_the_view_is_not_refused(monkeypatch):
+    import finetuning_scheduler.testing.conformance as conformance
+
+    class Remote(CanonicalView):
+        def support(self):
+            return TunableSupport(trainable=False, reason="remote execution")
+
+    monkeypatch.setattr(conformance, "compile_schedule", lambda *args, **kwargs: None)  # a compiler that accepts it
+    report = TunableViewConformance(lambda: Remote(nn.Linear(2, 2))).run(select=["untrainable_refuses"])
+    assert "was not refused" in report.failures["untrainable_refuses"]
+
+
+def test_pytest_params_raise_on_failure_and_when_vacuous(monkeypatch):
+    failing = {c.__name__: c for c in pytest_params(MUTANTS["checkpoint_round_trip"])}["checkpoint_round_trip"]
+    with pytest.raises(ConformanceError):
+        failing()
+    monkeypatch.setattr(TunableViewConformance, "cases", lambda self: [])
+    (vacuous,) = pytest_params(one_to_many_view)
+    with pytest.raises(ConformanceError, match="No conformance case applied"):
+        vacuous()

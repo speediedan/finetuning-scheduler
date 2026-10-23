@@ -481,3 +481,50 @@ def test_a_failed_best_write_keeps_the_previous_best(tmp_path, monkeypatch):
     assert cp.best_path == previous and float(cp.best_score) == 1.0
     assert not torch.equal(model.l2.weight, saved_l2)  # training moved the parameters past the best
     assert fts.restore_best() and torch.equal(model.l2.weight, saved_l2)
+
+
+def test_verify_resume_refuses_a_missing_rollback_point(tmp_path):
+    cp = BestCheckpoint(tmp_path, "val_loss")
+    cp.load_state_dict({"entries": [], "seq": 0, "boundaries": {1: (str(tmp_path / "gone.pt"), 0)}})
+    with pytest.raises(FileNotFoundError, match="a veto of phase 1 rolls back to"):
+        cp.verify_resume()
+
+
+def test_a_policy_without_verify_resume_loads(tmp_path):
+    """``verify_resume`` is optional: a checkpoint policy without it resumes without the check."""
+
+    class Unverified(BestCheckpoint):
+        verify_resume = None
+
+    def make(model):
+        fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1),
+                            checkpoint=Unverified(tmp_path, "val_loss"))
+        fts.setup()
+        return fts
+
+    torch.manual_seed(0)
+    model = Net()
+    fts = make(model)
+    _run(fts, model, 2, metrics_fn=lambda e: {"val_loss": 1.0 - 0.1 * e})
+    fts.save(tmp_path / "resume.pt")
+    resumed = make(Net())
+    resumed.load(tmp_path / "resume.pt")
+    assert resumed.curr_depth == fts.curr_depth and resumed._checkpoint.best_path == fts._checkpoint.best_path
+
+
+def test_restoring_a_best_saved_before_an_optimizer_reinitialization_keeps_the_new_optimizer(tmp_path, monkeypatch):
+    """A best checkpoint saved under the optimizer a later phase replaced restores the model only."""
+    import finetuning_scheduler.core.controller as controller_module
+
+    infos = []
+    monkeypatch.setattr(controller_module, "rank_zero_info", lambda msg, *a, **k: infos.append(msg))
+    reinit = {**SCHEDULE, 1: {**SCHEDULE[1], "new_optimizer": {"optimizer_init": {
+        "class_path": "Adam", "init_args": {"lr": 0.01}}}}}
+    torch.manual_seed(0)
+    model = Net()
+    fts = FTSController(model, reinit, optimizer=partial(torch.optim.SGD, lr=0.1),
+                        checkpoint=BestCheckpoint(tmp_path, "val_loss"))
+    fts.setup()
+    _run(fts, model, 4, metrics_fn=lambda e: {"val_loss": [0.5, 1.0, 1.0, 1.0][e]})  # the best is phase 0's
+    assert fts.curr_depth == 2 and isinstance(fts.optimizer, torch.optim.Adam)
+    assert any("predates an optimizer reinitialization" in m for m in infos)

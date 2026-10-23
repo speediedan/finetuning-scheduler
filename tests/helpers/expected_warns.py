@@ -13,6 +13,8 @@
 from copy import copy
 from itertools import chain
 
+import torch
+
 # warning inventory last updated w/ PT 2.10.0 and Lightning commit affee288
 
 WORKER_WARNING = "does not have many workers"
@@ -119,6 +121,16 @@ ALL_EXAMPLE_EXPECTED = [
 additional_advanced_lrs_warns = ["Found an `init_pg_lrs` key"]
 EXAMPLE_EXPECTED_WARNS = extend_warns(extend_warns(BASE_EXPECTED_WARNS, EXAMPLE_BASE_WARNS), ALL_EXAMPLE_EXPECTED)
 MODEL_PARALLEL_EXAMPLE_WARNS = extend_warns(MODEL_PARALLEL_BASE_WARNS, ALL_EXAMPLE_EXPECTED)
+# Emitted by PyTorch on ROCm, not driven by FTS (measured on gfx1201 with PyTorch 2.15): hipBLASLt rejects some fp32
+# GEMMs and PyTorch falls back to hipBLAS, and PyTorch's C++ unwinder (allocator history with C++ stacks, used by the
+# profiling example) meets a DWARF call-frame opcode in the ROCm libraries that it does not implement. Expected on
+# ROCm only, so a CUDA run still fails on either.
+ROCM_EXAMPLE_WARNS = [
+    "bgemm_internal_cublaslt error: HIPBLAS_STATUS_NOT_SUPPORTED",
+    "Unsupported unwinding pattern: unknown op code",
+]
+if torch.version.hip:
+    MODEL_PARALLEL_EXAMPLE_WARNS = extend_warns(MODEL_PARALLEL_EXAMPLE_WARNS, ROCM_EXAMPLE_WARNS)
 ADV_EXAMPLE_EXPECTED_WARNS = extend_warns(EXAMPLE_EXPECTED_WARNS, additional_advanced_lrs_warns)
 
 def print_warns(example_warns=False):

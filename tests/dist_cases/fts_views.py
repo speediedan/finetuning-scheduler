@@ -141,6 +141,31 @@ def export_reference(ckpt_dir: str, epochs: int = 4, steps: int = 2, batch: int 
     return {"exported": _exported(fts), "live": _params(model), "best_depth": fts._checkpoint.best_depth}
 
 
+def export_missing(ctx, ckpt_dir: str, epochs: int = 4, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
+    """A role-selected tensor the sharded best checkpoint does not hold (a non-persistent buffer) is refused on
+    every rank, as the configuration error rank zero found."""
+    from functools import partial
+
+    model = _model(seed)
+    model[2].register_buffer("stat", torch.zeros(16), persistent=False)
+    model = model.to(ctx.device)
+    for layer in (model[0], model[2], model[4]):
+        fully_shard(layer, mesh=ctx.mesh())
+    fully_shard(model, mesh=ctx.mesh())
+    fts = FTSController(model, {k: dict(v) for k, v in SCHEDULE.items()}, optimizer=partial(torch.optim.SGD, lr=0.1),
+                        host=TorchHost(model), checkpoint=BestCheckpoint(ckpt_dir, "val_loss"),
+                        view=CanonicalView(model, roles={**ROLES, "2.stat": "fitted"}))
+    fts.setup()
+    x, y = _data(epochs, steps, batch, seed)
+    shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
+    _train(fts, model, x, y, shard, ctx.device, epochs)
+    try:
+        fts.export_best(roles=("fitted",))
+    except FTSConfigurationError as err:
+        return {"raised": type(err).__name__, "message": str(err)}
+    return {"raised": None}
+
+
 def export_failure(ctx, ckpt_dir: str, epochs: int = 4, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
     """A writer that fails on global rank zero makes ``export_best`` raise on every rank, promptly, rather than
     leaving the other ranks waiting at a barrier."""

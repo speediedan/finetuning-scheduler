@@ -562,3 +562,108 @@ def test_breaking_after_should_stop_ends_training():
         if fts.should_stop:
             break
     assert ended == [0]
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"restore_best": True}, "needs a `checkpoint` policy"),
+        ({"schedule": 42}, "`schedule` must be a mapping"),
+        ({"lr_scheduler": 42}, "`lr_scheduler` must be an lr scheduler"),
+    ],
+    ids=["restore_best_without_checkpoint", "schedule_type", "lr_scheduler_type"],
+)
+def test_setup_refusals(kwargs, match):
+    schedule = kwargs.pop("schedule", SCHEDULE)
+    with pytest.raises(FTSConfigurationError, match=match):
+        FTSController(Net(), schedule, optimizer=partial(torch.optim.SGD, lr=0.1), **kwargs).setup()
+
+
+def test_zero_redundancy_optimizer_refused():
+    from torch.distributed.optim import ZeroRedundancyOptimizer
+
+    zero = ZeroRedundancyOptimizer.__new__(ZeroRedundancyOptimizer)  # the type is all the check reads
+    with pytest.raises(FTSConfigurationError, match="`ZeroRedundancyOptimizer` is not supported"):
+        FTSController(Net(), SCHEDULE, optimizer=zero).setup()
+
+
+def test_lr_scheduler_of_another_optimizer_refused():
+    model = Net()
+    opt = torch.optim.SGD(model.parameters(), lr=0.1)
+    other = torch.optim.SGD(Net().parameters(), lr=0.1)
+    fts = FTSController(model, SCHEDULE, optimizer=opt,
+                        lr_scheduler=torch.optim.lr_scheduler.StepLR(other, step_size=1))
+    with pytest.raises(FTSConfigurationError, match="wraps a different optimizer"):
+        fts.setup()
+
+
+def test_new_lr_scheduler_init_pg_lrs_is_validated():
+    phase1 = {**REINIT_SCHEDULE[1], "new_lr_scheduler": {**REINIT_SCHEDULE[1]["new_lr_scheduler"],
+                                                         "init_pg_lrs": [0.1, "fast"]}}
+    with pytest.raises(FTSConfigurationError, match="init_pg_lrs"):
+        FTSController(Net(), {**REINIT_SCHEDULE, 1: phase1}, optimizer=partial(torch.optim.SGD, lr=0.1)).setup()
+
+
+def test_step_level_stop():
+    """A step-level policy deciding ``STOP`` stops the run at that step."""
+    model = Net()
+    fts = FTSController(model, {0: {"params": ["l2.weight"]}, 1: {"params": ["l1.weight"]}},
+                        optimizer=partial(torch.optim.SGD, lr=0.1),
+                        transition=CallableTransition(lambda ctx: (Decision.STOP, "enough") if ctx.global_step >= 2
+                                                      else Decision.CONTINUE, granularity="step"))
+    fts.setup()
+    for _ in range(3):
+        _train_epoch(fts, model, steps=1)
+        fts.step_end()
+    assert fts.should_stop and fts.stop_reason == "enough" and fts.curr_depth == 0
+
+
+def test_frozen_batchnorm_stops_tracking_until_thawed():
+    """With ``frozen_bn_track_running_stats=False``, a frozen ``BatchNorm`` stops tracking running statistics, and
+    tracks them again once its phase thaws it."""
+    model = nn.Sequential(nn.Linear(4, 4), nn.BatchNorm1d(4), nn.Linear(4, 4), nn.BatchNorm1d(4), nn.Linear(4, 1))
+    sched = {0: {"params": ["3.weight", "3.bias", "4.weight", "4.bias"], "max_transition_epoch": 1},
+             1: {"params": ["1.weight", "1.bias", "2.weight", "2.bias"]}}
+    fts = FTSController(model, sched, optimizer=partial(torch.optim.SGD, lr=0.1), frozen_bn_track_running_stats=False)
+    fts.setup()
+    assert (model[1].track_running_stats, model[3].track_running_stats) == (False, True)
+    for epoch in fts.epochs(2):
+        _train_epoch(fts, model, seed=epoch)
+        fts.epoch_end()
+    assert fts.curr_depth == 1 and model[1].track_running_stats
+
+
+def test_a_distributed_adapters_error_refuses_setup():
+    from finetuning_scheduler.strategies import Feedback, UnshardedAdapter
+
+    class Refusing(UnshardedAdapter):
+        def validate(self, model, phases):
+            return [Feedback("error", "this layout cannot be scheduled")]
+
+    with pytest.raises(FTSConfigurationError, match="this layout cannot be scheduled"):
+        FTSController(Net(), SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), distributed=Refusing()).setup()
+
+
+def test_a_sharded_model_refuses_a_view_that_translates_checkpoint_keys():
+    from finetuning_scheduler.core.views import CanonicalView
+    from finetuning_scheduler.strategies import FSDP2Adapter
+
+    class Translating(CanonicalView):
+        def checkpoint_state_dict(self):
+            return dict(super().checkpoint_state_dict())
+
+    model = Net()
+    with pytest.raises(FTSConfigurationError, match="checkpoint key translation is not supported for sharded"):
+        FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), view=Translating(model),
+                      distributed=FSDP2Adapter()).setup()
+
+
+def test_properties_before_setup():
+    """Before ``setup()`` the controller reports its configuration: an invalid view is described rather than
+    refused (setup refuses it), and no roles are known without a view."""
+    fts = FTSController(Net(), SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), view=42, metadata={"run": "a"})
+    assert fts.config_dict()["view"] == {"class_path": "builtins.int"}
+    assert (fts.roles, fts.metadata) == ({}, {"run": "a"}) and isinstance(fts.host, TorchHost)
+    fts = FTSController(Net(), SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), max_depth=1)
+    fts.setup()
+    assert fts.max_depth == 1

@@ -294,3 +294,37 @@ def test_view_default_schedule_leaves_out_a_name_standing_for_frozen_and_trainab
         schedule = view_default_schedule(view)
     assert schedule == {0: {"params": ["head", "block2"]}}
     compile_schedule(schedule, view)  # and the generated schedule compiles
+
+
+@pytest.mark.parametrize(
+    "promote, match",
+    [
+        ({"0.weight": "latent:a", "role:instrument": "latent:b"}, "names these tensors more than once"),
+        ({"": "latent:a"}, "keys must be selectors or names"),
+    ],
+    ids=["twice", "empty_key"],
+)
+def test_compiling_refuses_an_invalid_promotion_source(promote, match):
+    net = _net()
+    view = CanonicalView(net, roles={"0.weight": "instrument"})
+    with pytest.raises(FTSConfigurationError, match=match):
+        compile_schedule({0: {"params": ["4.weight"]}, 1: {"params": ["2.weight"], "promote": promote}}, view)
+
+
+class StrayHeadView(BlockView):
+    BLOCKS = {**BlockView.BLOCKS, "head": ("4.weight", "9.weight")}
+
+
+class StrayNormView(BlockView):
+    def coupled(self, physical):
+        return [*super().coupled(physical), "9.weight"]
+
+
+@pytest.mark.parametrize(
+    "view_cls, match",
+    [(StrayHeadView, "resolved to names that are not parameters"), (StrayNormView, "coupled tensors for phase 0")],
+    ids=["physical", "coupled"],
+)
+def test_a_view_mapping_to_tensors_the_root_lacks_refuses(view_cls, match):
+    with pytest.raises(FTSConfigurationError, match=match):
+        compile_schedule({0: {"params": ["block0", "head"]}}, view_cls(_net()))
