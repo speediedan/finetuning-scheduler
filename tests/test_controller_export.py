@@ -89,6 +89,47 @@ def test_export_best_refusals(tmp_path, roles, match):
         fts.export_best(roles=roles)
 
 
+def test_export_best_of_a_tensor_the_best_checkpoint_lacks_is_refused(tmp_path):
+    """A role-selected tensor the best checkpoint does not hold (a non-persistent buffer) is refused."""
+    model = InterventionModel()
+    model.register_buffer("stat", torch.zeros(1), persistent=False)
+    fts = FTSController(model, {k: dict(v) for k, v in SCHEDULE.items()}, optimizer=SGD,
+                        view=CanonicalView(model, roles={**ROLES, "stat": "fitted"}),
+                        checkpoint=BestCheckpoint(tmp_path, "loss"), restore_best=False)
+    fts.setup()
+    for epoch in fts.epochs(1):
+        _step(fts, epoch, {"loss": 1.0})
+    with pytest.raises(FTSConfigurationError, match=r"does not hold \['stat'\]"):
+        fts.export_best(roles=("fitted",))
+
+
+class TranslatingView(CanonicalView):
+    def checkpoint_state_dict(self):
+        return dict(super().checkpoint_state_dict())
+
+
+def test_export_best_refuses_a_view_that_translates_checkpoint_keys(tmp_path):
+    model = InterventionModel()
+    fts = FTSController(model, {k: dict(v) for k, v in SCHEDULE.items()}, optimizer=SGD,
+                        view=TranslatingView(model, roles=ROLES), checkpoint=BestCheckpoint(tmp_path, "loss"),
+                        restore_best=False)
+    fts.setup()
+    for epoch in fts.epochs(1):
+        _step(fts, epoch, {"loss": 1.0})
+    with pytest.raises(FTSConfigurationError, match="translates checkpoint keys"):
+        fts.export_best()
+
+
+def test_export_best_raises_rank_zeros_configuration_error_on_other_ranks(tmp_path, monkeypatch):
+    """A rank other than global rank zero raises the configuration error rank zero reports (here, a host standing
+    in for rank one of a group)."""
+    _, fts, _ = _run(tmp_path)
+    monkeypatch.setattr(type(fts.host), "is_global_zero", property(lambda self: False))
+    monkeypatch.setattr(fts.host, "broadcast_object", lambda obj, src=0: ("FTSConfigurationError", "refused there"))
+    with pytest.raises(FTSConfigurationError, match="refused there"):
+        fts.export_best()
+
+
 def test_export_best_needs_a_best_checkpoint(tmp_path):
     model = InterventionModel()
     fts = FTSController(model, {k: dict(v) for k, v in SCHEDULE.items()}, optimizer=SGD,
@@ -104,6 +145,8 @@ def test_export_best_needs_a_best_checkpoint(tmp_path):
     ({"lens": {"path": "x", "sha256": "zz" * 32}}, "64 hexadecimal"),
     ({"lens": {"path": "x", "sha256": "ab" * 32, "url": "y"}}, "unknown keys"),
     ({"lens": "x"}, "must be a mapping"),
+    ({"lens": {"path": "x", "sha256": "ab" * 32, "revision": 1}}, "`revision` must be a string"),
+    (["lens"], "must map names to records"),
 ])
 def test_artifacts_are_validated(artifacts, match):
     with pytest.raises(FTSConfigurationError, match=match):

@@ -10,6 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Tests for the core's copies of helpers it previously imported from Lightning (#50)."""
+import sys
+
 import pytest
 import torch
 from torch import nn
@@ -52,3 +54,31 @@ def test_mock_optimizer():
     assert opt.step(lambda: 1.5) == 1.5
     assert repr(opt) == "No Optimizer"
     torch.optim.lr_scheduler.StepLR(opt, step_size=1)  # schedulers can be built against it
+
+
+def test_tensor_bytes_without_numpy(monkeypatch):
+    """Fingerprints hash the same bytes whether or not ``numpy`` (only a faster path) has been imported."""
+    from finetuning_scheduler.core.fingerprint import _tensor_bytes
+
+    t = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+    with_numpy = _tensor_bytes(t)
+    monkeypatch.delitem(sys.modules, "numpy", raising=False)
+    assert _tensor_bytes(t) == with_numpy and _tensor_bytes(torch.empty(0)) == b""
+
+
+def test_reshard_without_torch_distributed_is_a_no_op(monkeypatch):
+    from finetuning_scheduler.core.phase import reshard_fsdp_modules
+
+    monkeypatch.setattr(torch.distributed, "is_available", lambda: False)
+    assert reshard_fsdp_modules(nn.Linear(2, 2)) is None
+
+
+def test_torch_host_rng_devices_include_an_initialized_current_cuda_device(monkeypatch):
+    """Once CUDA is initialized, the current device's generator is captured even when no parameter is on it (here a
+    CPU module, with CUDA's state stubbed)."""
+    from finetuning_scheduler.core.host import TorchHost
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "is_initialized", lambda: True)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
+    assert TorchHost(nn.Linear(2, 2)).rng_devices() == [torch.device("cuda", 1)]
