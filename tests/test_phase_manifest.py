@@ -132,7 +132,10 @@ def test_phase_table_matches_pipeline_and_release_scope():
     assert [n for n, p in pm.PHASES.items() if p.release] == list(pm.PHASES)[:4]
     modules = pm.pool_modules()
     assert modules and modules == tuple(sorted(modules))
-    assert all("dist_pool_fixture" in (pm.ROOT / m).read_text(encoding="utf-8") for m in modules)
+    assert all(pm.POOL_FIXTURE in (pm.ROOT / m).read_text(encoding="utf-8") for m in modules)
+    # this module must not join the reverse-order leg by naming the fixture itself
+    assert "tests/test_phase_manifest.py" not in modules
+    assert [n for n, p in pm.PHASES.items() if not p.measured] == ["examples", "pool-reverse"]
     selector = pm.selector_string(pm.PHASES["pool-reverse"], "full")
     assert selector.startswith("FTS_REVERSE_ORDER=1 PL_RUN_CUDA_TESTS=1; pytest ")
     assert all(m in selector for m in modules)
@@ -144,7 +147,40 @@ def test_phase_table_matches_pipeline_and_release_scope():
 def test_run_env_records_every_rank(tmp_path):
     env = pm.run_env("standalone", tmp_path)
     assert env["PL_RUN_STANDALONE_TESTS"] == "1" and env["PL_RUN_CUDA_TESTS"] == "1"
-    assert env[pm.RECORD_DIR_ENV] == str(tmp_path) and env["PYTEST_ADDOPTS"].endswith(f"-p {pm.PLUGIN}")
+    assert env[pm.RECORD_DIR_ENV] == str(tmp_path.resolve() / "records" / "standalone")
+    assert env["PYTEST_ADDOPTS"].endswith(f"-p {pm.PLUGIN}")
+    # a measured phase gets its own coverage data file; an unmeasured one none
+    assert env["COVERAGE_FILE"] == str(pm.coverage_file(tmp_path, "standalone"))
+    assert "COVERAGE_FILE" not in pm.run_env("examples", tmp_path)
+
+
+def _measure(tmp_path, out_dir, phase, body):
+    """Run a tiny module under coverage into ``phase``'s data file, as a measured phase's command would."""
+    (tmp_path / "mod.py").write_text(body)
+    data = pm.coverage_file(out_dir, phase)
+    data.parent.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "COVERAGE_FILE": str(data)}
+    subprocess.run([sys.executable, "-m", "coverage", "run", "mod.py"], cwd=tmp_path, env=env, check=True)
+
+
+def test_coverage_summary_and_diff(tmp_path):
+    ref, cand = tmp_path / "ref", tmp_path / "cand"
+    _measure(tmp_path, ref, "standalone", "x = 1\nif x:\n    y = 2\nelse:\n    y = 3\n")
+    _measure(tmp_path, cand, "standalone", "x = 0\nif x:\n    y = 2\nelse:\n    y = 3\n")
+    summary = pm.coverage_summary("standalone", ref, root=tmp_path)
+    assert summary["measured"] and not summary["missing"] and summary["files"] == 1
+    assert summary["covered_lines"] == 3 and summary["json"] == "coverage/standalone.json"
+    assert pm.coverage_summary("examples", ref, root=tmp_path) == {"measured": False}
+    assert pm.coverage_summary("gpu-nonstandalone", ref, root=tmp_path)["missing"]
+    pm.coverage_summary("standalone", cand, root=tmp_path)
+    diff = pm.coverage_diff(ref, cand, ["standalone"])
+    # the reference executed line 3, the candidate line 5 instead: one line lost, one gained
+    assert diff["standalone"]["lost"] == {"mod.py": [3]} and diff["standalone"]["gained"] == {"mod.py": [5]}
+    assert diff["union"]["kept_fraction"] == round(2 / 3, 4)
+    assert pm.main(["coverage-diff", str(ref), str(ref), "--phase", "standalone"]) == 0
+    assert pm.main(["coverage-diff", str(ref), str(cand), "--phase", "standalone"]) == 1
+    # a measured phase without coverage on one side is an evidence gap, never a pass
+    assert pm.main(["coverage-diff", str(ref), str(cand), "--phase", "gpu-nonstandalone"]) == 1
 
 
 def test_collect_run_and_report_end_to_end(tmp_path):
@@ -206,7 +242,9 @@ def test_report_refuses_unknown_vendor_or_evidence_class():
         pm.build_report(_manifest([]), [], vendor="nvidia", evidence_class="release")
 
 
-def test_cli_report_round_trip(tmp_path):
+def test_cli_report_round_trip(tmp_path, monkeypatch):
+    # device names would initialize CUDA in the test process; the identity is checked on its own below
+    monkeypatch.setattr(pm, "device_identity", lambda: {"device_count": 0, "devices": []})
     a = "t.py::test_a"
     (tmp_path / "manifests").mkdir()
     (tmp_path / "manifests" / "examples.json").write_text(json.dumps({**_manifest([a]), "phase": "examples"}))
@@ -217,3 +255,19 @@ def test_cli_report_round_trip(tmp_path):
     assert pm.main([*args, "--evidence-class", "pipeline", "--lease-mode", "tool"]) == 0
     report = json.loads((tmp_path / "reports" / "examples.json").read_text(encoding="utf-8"))
     assert report["backend"] == "cuda" and report["lease_mode"] == "tool" and "python" in report["versions"]
+    assert {"lightning_commit", "torch_record_sha256", "device_count"} <= set(report["versions"])
+    assert report["coverage"] == {"measured": False} and report["nodes"][a]["world_size"] is None
+
+
+def test_device_identity_records_visible_device_variables(monkeypatch):
+    monkeypatch.setenv("ROCR_VISIBLE_DEVICES", "GPU-a,GPU-b")
+    monkeypatch.setattr("torch.cuda.device_count", lambda: 0)
+    ident = pm.device_identity()
+    assert ident["ROCR_VISIBLE_DEVICES"] == "GPU-a,GPU-b" and ident["device_count"] == 0 and ident["devices"] == []
+    assert set(pm.DEVICE_VARS) <= set(ident)
+
+
+def test_build_identity_reads_installed_distributions():
+    assert pm._record_sha256("torch") is not None and len(pm._record_sha256("torch")) == 64
+    assert pm._record_sha256("not-an-installed-distribution") is None
+    assert pm._vcs_commit("not-an-installed-distribution") is None

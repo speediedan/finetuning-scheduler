@@ -26,6 +26,13 @@ selection-relevant part of its step (the pytest paths and arguments and the sele
 not change selection (``coverage run``) or that only stop early (``--maxfail``): a phase is reported node by node, and
 a node left unexecuted fails it anyway.
 
+Coverage is part of a phase's evidence: a second host or vendor substitutes for the first only if it executes the same
+lines. The phases the pipeline runs under ``coverage run`` (``measured``) get one coverage data file each
+(``COVERAGE_FILE``, set by ``run-env``); ``report`` exports it with ``coverage json`` from the repository root, so file
+names are relative and two hosts' checkouts compare, and records the export's digest and line counts. ``coverage-diff``
+lists, per phase and file, the lines one run executed and the other did not. A phase the pipeline does not measure is
+reported as unmeasured, never as zero coverage.
+
 The manifest digest is SHA-256 over the manifest serialized as UTF-8 JSON with sorted keys and compact separators and
 no trailing newline, the rule the release eligibility checker applies. A report never claims more than its evidence
 class: ``parity-pre-agent`` marks a run made outside the pipeline (no image digest), which the release checker refuses.
@@ -37,6 +44,10 @@ Usage, from the repository root (``python -m tests.gpu_ci.phase_manifest --help`
     python -m tests.gpu_ci.phase_manifest run-env --phase standalone --out-dir /tmp/fts-phases
     python -m tests.gpu_ci.phase_manifest report --phase standalone --out-dir /tmp/fts-phases \\
         --vendor amd --evidence-class parity-pre-agent --lease-mode tool
+    python -m tests.gpu_ci.phase_manifest coverage-diff /tmp/fts-phases-nvidia /tmp/fts-phases-amd
+
+Keep ``--out-dir`` outside the repository: the manifest records the tree's untracked files, so an out-dir inside the
+checkout marks every later collection dirty.
 """
 import argparse
 import hashlib
@@ -53,6 +64,12 @@ ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY = "speediedan/finetuning-scheduler"
 PLUGIN = "tests.gpu_ci.phase_plugin"
 RECORD_DIR_ENV = "FTS_PHASE_RECORD_DIR"
+# The fixture whose modules form the reverse-order leg (``grep -l`` over ``tests/test_*.py`` in the pipeline). Named
+# here, not spelled out in a test module, so that module does not join the leg itself.
+POOL_FIXTURE = "dist_pool_fixture"
+COVERAGE_SOURCE = "src/finetuning_scheduler"
+# Visible-device variables a report records: a run's device set is part of what makes two hosts comparable.
+DEVICE_VARS = ("CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES")
 # Variables tests/conftest.py selects or orders on; stripped from the environment before every collection.
 SELECTION_VARS = ("PL_RUN_STANDALONE_TESTS", "FTS_EXPERIMENTAL_PATCH_TESTS", "FTS_CUDA_TESTS_ONLY", "FTS_REVERSE_ORDER")
 # Set for every GPU phase (the pipeline's job variable): it gates skips, never selection.
@@ -73,6 +90,8 @@ class Phase:
     args: tuple[str, ...] = ()
     command: str = ""
     release: bool = True
+    # whether the pipeline runs the phase under ``coverage run`` (``special_tests.sh`` always does)
+    measured: bool = True
 
     def resolved_paths(self, root: Path = ROOT) -> tuple[str, ...]:
         if self.name == "pool-reverse":
@@ -95,7 +114,7 @@ PHASES = {
             {"PL_RUN_STANDALONE_TESTS": "1"},
             command="bash ./tests/special_tests.sh --mark_type=standalone",
         ),
-        Phase("examples", ("src/fts_examples",), command="python -m pytest src/fts_examples -v"),
+        Phase("examples", ("src/fts_examples",), command="python -m pytest src/fts_examples -v", measured=False),
         Phase(
             "examples-multigpu",
             ("src/fts_examples",),
@@ -113,17 +132,19 @@ PHASES = {
             {"FTS_REVERSE_ORDER": "1"},
             command="python -m pytest <pool modules> -v",
             release=False,
+            measured=False,
         ),
     )
 }
 
 
 def pool_modules(root: Path = ROOT) -> tuple[str, ...]:
-    """The modules the reverse-order leg runs: ``grep -l dist_pool_fixture tests/test_*.py``, resolved and sorted."""
+    """The modules the reverse-order leg runs (the pipeline's ``grep -l`` for :data:`POOL_FIXTURE` over
+    ``tests/test_*.py``), resolved and sorted."""
     return tuple(
         p.relative_to(root).as_posix()
         for p in sorted((root / "tests").glob("test_*.py"))
-        if "dist_pool_fixture" in p.read_text(encoding="utf-8")
+        if POOL_FIXTURE in p.read_text(encoding="utf-8")
     )
 
 
@@ -239,6 +260,7 @@ def build_report(
     image: str | None = None,
     versions: dict | None = None,
     reviewed_exclusions: dict | None = None,
+    coverage: dict | None = None,
 ) -> dict:
     """Count one phase's per-node, per-rank outcomes against its manifest and describe the run that produced them.
 
@@ -252,17 +274,22 @@ def build_report(
     if evidence_class not in EVIDENCE_CLASSES:
         raise ValueError(f"evidence class must be one of {EVIDENCE_CLASSES}")
     reviewed = reviewed_exclusions or {}
+    phase = PHASES.get(manifest["phase"])
     selected = manifest["selected_node_ids"]
     selected_set = set(selected)
     ranks: dict[str, dict[str, str]] = {}
+    world_sizes: dict[str, set] = {}
     missing_completions = 0
     for records in sessions:
         if not records:
             continue
         rank = str(records[0]["rank"])
         verdicts = _session_node_outcomes(records)
+        world_size = next((r["world_size"] for r in records if r.get("world_size")), None)
         for nodeid, verdict in verdicts.items():
             ranks.setdefault(nodeid, {})[rank] = verdict
+            if world_size:
+                world_sizes.setdefault(nodeid, set()).add(world_size)
         finished = any(r["event"] == "finish" for r in records)
         collected = next((r["nodeids"] for r in records if r["event"] == "collected"), [])
         if not finished and any(r["event"] == "start" for r in records):
@@ -286,7 +313,10 @@ def build_report(
             nodes[nodeid] = {"outcome": "unexecuted", "ranks": per_rank}
             continue
         counts[outcome] += 1
-        nodes[nodeid] = {"outcome": outcome, "ranks": per_rank}
+        # the launcher's world size, when one was set: two hosts can agree on a verdict yet run a node on different
+        # numbers of ranks
+        world_size = max(world_sizes.get(nodeid, ()), default=None)
+        nodes[nodeid] = {"outcome": outcome, "ranks": per_rank, "world_size": world_size}
     unmanifested = sorted(set(ranks) - selected_set)
     exclusions = [
         {"nodeid": n, "outcome": v["outcome"], "reason": reviewed.get(n)}
@@ -321,6 +351,7 @@ def build_report(
         "unmanifested_nodes": unmanifested,
         "nodes": nodes,
         "manifest_sha256": manifest_digest(manifest),
+        "coverage": coverage or {"measured": phase.measured if phase else None},
     }
     report["classification"] = classify(report)
     return report
@@ -359,14 +390,141 @@ def installed_versions() -> dict:
             versions[name] = __import__(module).__version__
         except (ImportError, AttributeError) as exc:
             versions[name] = f"unavailable: {exc}"
+    # A commit pin installs Lightning with a ``.dev0`` version string, and PyTorch's test-channel release candidates
+    # carry the final version string, so neither version names the build: record what does.
+    versions["lightning_commit"] = _vcs_commit("lightning")
+    versions["torch_record_sha256"] = _record_sha256("torch")
     return versions
 
 
-def run_env(phase_name: str, record_dir: Path) -> dict:
-    """The environment a phase's pipeline command needs to run selected and recorded (every rank inherits it)."""
+def _distribution(name: str):
+    from importlib import metadata
+
+    try:
+        return metadata.distribution(name)
+    except metadata.PackageNotFoundError:
+        return None
+
+
+def _vcs_commit(name: str) -> str | None:
+    """The commit a distribution was installed from (its ``direct_url.json``), or ``None`` for an index install."""
+    dist = _distribution(name)
+    direct_url = dist.read_text("direct_url.json") if dist else None
+    return json.loads(direct_url).get("vcs_info", {}).get("commit_id") if direct_url else None
+
+
+def _record_sha256(name: str) -> str | None:
+    """SHA-256 of a distribution's installed ``RECORD``, which hashes every file it installed."""
+    dist = _distribution(name)
+    record = dist.read_text("RECORD") if dist else None
+    return hashlib.sha256(record.encode()).hexdigest() if record else None
+
+
+def device_identity() -> dict:
+    """The devices the run saw: the visible-device variables, the device count and each device's name."""
+    ident = {var: os.environ.get(var) for var in DEVICE_VARS}
+    try:
+        import torch
+
+        count = torch.cuda.device_count()
+        ident.update(device_count=count, devices=[torch.cuda.get_device_name(i) for i in range(count)])
+    except (ImportError, RuntimeError, AssertionError) as exc:
+        ident.update(device_count=None, devices=f"unavailable: {exc}")
+    return ident
+
+
+def coverage_file(out_dir: Path, phase_name: str) -> Path:
+    """The phase's coverage data file (``special_tests.sh`` appends every test's run to it)."""
+    return Path(out_dir).resolve() / "coverage" / phase_name / ".coverage"
+
+
+def coverage_summary(phase_name: str, out_dir: Path, root: Path = ROOT) -> dict:
+    """Export a measured phase's coverage data as JSON (file names relative to ``root``) and summarize it.
+
+    A measured phase without a data file is reported as missing, which a comparison must treat as an evidence gap, not
+    as zero lines.
+    """
+    if not PHASES[phase_name].measured:
+        return {"measured": False}
+    data = coverage_file(out_dir, phase_name)
+    if not data.exists():
+        return {"measured": True, "missing": True, "data_file": str(data)}
+    export = Path(out_dir).resolve() / "coverage" / f"{phase_name}.json"
+    cmd = [sys.executable, "-m", "coverage", "json", f"--data-file={data}", "-o", str(export), "--ignore-errors"]
+    proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
+    if proc.returncode or not export.exists():
+        return {"measured": True, "missing": True, "data_file": str(data), "error": proc.stderr.strip()[-500:]}
+    doc = json.loads(export.read_text(encoding="utf-8"))
+    return {
+        "measured": True,
+        "missing": False,
+        "data_file_sha256": hashlib.sha256(data.read_bytes()).hexdigest(),
+        "json": export.relative_to(Path(out_dir).resolve()).as_posix(),
+        "json_sha256": hashlib.sha256(export.read_bytes()).hexdigest(),
+        "files": len(doc["files"]),
+        "num_statements": doc["totals"]["num_statements"],
+        "covered_lines": doc["totals"]["covered_lines"],
+        "percent_covered": round(doc["totals"]["percent_covered"], 2),
+    }
+
+
+def executed_lines(out_dir: Path, phase_name: str) -> dict[str, set[int]] | None:
+    """The lines a phase's coverage export records as executed, per relative file name; ``None`` if absent."""
+    export = Path(out_dir) / "coverage" / f"{phase_name}.json"
+    if not export.exists():
+        return None
+    doc = json.loads(export.read_text(encoding="utf-8"))
+    return {name: set(f["executed_lines"]) for name, f in doc["files"].items()}
+
+
+def coverage_diff(reference: Path, candidate: Path, phase_names=None) -> dict:
+    """Per measured phase, and for their union, the lines the reference run executed that the candidate did not
+    (``lost``) and the reverse (``gained``).
+
+    Coverage parity is an empty ``lost`` everywhere.
+    """
+    names = [n for n in (phase_names or PHASES) if PHASES[n].measured]
+    result, union = {}, {"reference": {}, "candidate": {}}
+    for name in names:
+        ref, cand = executed_lines(reference, name), executed_lines(candidate, name)
+        if ref is None or cand is None:
+            result[name] = {"missing": [side for side, v in (("reference", ref), ("candidate", cand)) if v is None]}
+            continue
+        for side, lines in (("reference", ref), ("candidate", cand)):
+            for f, ls in lines.items():
+                union[side].setdefault(f, set()).update(ls)
+        result[name] = _line_delta(ref, cand)
+    result["union"] = _line_delta(union["reference"], union["candidate"])
+    return result
+
+
+def _line_delta(ref: dict[str, set[int]], cand: dict[str, set[int]]) -> dict:
+    files = sorted(set(ref) | set(cand))
+    lost = {f: sorted(ref.get(f, set()) - cand.get(f, set())) for f in files}
+    gained = {f: sorted(cand.get(f, set()) - ref.get(f, set())) for f in files}
+    n_ref = sum(map(len, ref.values()))
+    kept = n_ref - sum(map(len, lost.values()))
+    return {
+        "reference_lines": n_ref,
+        "candidate_lines": sum(map(len, cand.values())),
+        "lost": {f: v for f, v in lost.items() if v},
+        "gained": {f: v for f, v in gained.items() if v},
+        "kept_fraction": round(kept / n_ref, 4) if n_ref else None,
+    }
+
+
+def run_env(phase_name: str, out_dir: Path) -> dict:
+    """The environment a phase's pipeline command needs to run selected, recorded and, if the pipeline measures it,
+    under its own coverage data file (every rank inherits it)."""
     phase = PHASES[phase_name]
     addopts = " ".join(filter(None, [os.environ.get("PYTEST_ADDOPTS", ""), "-p", PLUGIN]))
-    return {**RUN_ENV, **phase.selection_env, RECORD_DIR_ENV: str(record_dir), "PYTEST_ADDOPTS": addopts.strip()}
+    record_dir = Path(out_dir).resolve() / "records" / phase_name
+    env = {**RUN_ENV, **phase.selection_env, RECORD_DIR_ENV: str(record_dir), "PYTEST_ADDOPTS": addopts.strip()}
+    if phase.measured:
+        data = coverage_file(out_dir, phase_name)
+        data.parent.mkdir(parents=True, exist_ok=True)
+        env["COVERAGE_FILE"] = str(data)
+    return env
 
 
 def _write_json(path: Path, doc: dict) -> None:
@@ -393,11 +551,19 @@ def main(argv: list[str] | None = None) -> int:
     report.add_argument("--lease-mode", default=None)
     report.add_argument("--image", default=None)
     report.add_argument("--reviewed-exclusions", type=Path, default=None, help="JSON object: node id -> reason")
+    diff = sub.add_parser("coverage-diff", help="lines one run's measured phases executed and the other's did not")
+    diff.add_argument("reference", type=Path, help="out-dir of the reference run (for example the NVIDIA host)")
+    diff.add_argument("candidate", type=Path, help="out-dir of the run compared with it")
+    diff.add_argument("--phase", action="append", choices=sorted(n for n, p in PHASES.items() if p.measured))
+    diff.add_argument("--out", type=Path, default=None, help="write the full result as JSON")
     args = parser.parse_args(argv)
 
     if args.cmd == "list":
         for name, phase in PHASES.items():
-            print(f"{name}\trelease={phase.release}\tselector={selector_string(phase, 'full')}\t{phase.command}")
+            print(
+                f"{name}\trelease={phase.release}\tmeasured={phase.measured}"
+                f"\tselector={selector_string(phase, 'full')}\t{phase.command}"
+            )
         return 0
     if args.cmd == "collect":
         status = 0
@@ -413,9 +579,28 @@ def main(argv: list[str] | None = None) -> int:
             status |= bool(manifest["collection_errors"])
         return status
     if args.cmd == "run-env":
-        for key, value in run_env(args.phase, args.out_dir / "records" / args.phase).items():
+        for key, value in run_env(args.phase, args.out_dir).items():
             print(f"export {key}={json.dumps(value)}")
         return 0
+    if args.cmd == "coverage-diff":
+        result = coverage_diff(args.reference, args.candidate, args.phase)
+        if args.out:
+            _write_json(args.out, result)
+        lost_any = False
+        for name, r in result.items():
+            if "missing" in r:
+                print(f"{name}: coverage export missing on {', '.join(r['missing'])}")
+                lost_any = True
+                continue
+            lost = sum(map(len, r["lost"].values()))
+            lost_any |= bool(lost)
+            print(
+                f"{name}: reference={r['reference_lines']} candidate={r['candidate_lines']} lost={lost}"
+                f" gained={sum(map(len, r['gained'].values()))} kept={r['kept_fraction']}"
+            )
+            for f, lines in r["lost"].items():
+                print(f"  lost {f}: {len(lines)} lines")
+        return 1 if lost_any else 0
     manifest = json.loads((args.out_dir / "manifests" / f"{args.phase}.json").read_text(encoding="utf-8"))
     reviewed = json.loads(args.reviewed_exclusions.read_text(encoding="utf-8")) if args.reviewed_exclusions else None
     doc = build_report(
@@ -425,8 +610,9 @@ def main(argv: list[str] | None = None) -> int:
         evidence_class=args.evidence_class,
         lease_mode=args.lease_mode,
         image=args.image,
-        versions=installed_versions(),
+        versions={**installed_versions(), **device_identity()},
         reviewed_exclusions=reviewed,
+        coverage=coverage_summary(args.phase, args.out_dir),
     )
     _write_json(args.out_dir / "reports" / f"{args.phase}.json", doc)
     o = doc["outcomes"]
@@ -437,6 +623,10 @@ def main(argv: list[str] | None = None) -> int:
         f" rank_failures={doc['rank_failures']} missing_rank_completions={doc['missing_rank_completions']}"
         f" -> {doc['classification']}"
     )
+    cov = doc["coverage"]
+    if cov.get("measured"):
+        status = "MISSING" if cov.get("missing") else f"{cov['covered_lines']}/{cov['num_statements']} lines"
+        print(f"phase={args.phase} coverage: {status}")
     return 0 if doc["classification"] == "clean" else 1
 
 
