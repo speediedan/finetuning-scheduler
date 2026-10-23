@@ -50,7 +50,13 @@ jobs:
     # how much time to give 'run always even if cancelled tasks' before stopping them
     cancelTimeoutInMinutes: "2"
 
-    pool: default
+    # The CUDA image below runs only on an NVIDIA agent. Each agent declares its vendor as GPU_VENDOR in its `.env`, so
+    # this demand keeps the job off a second, AMD agent in the same pool (#57) until the job selects its image from the
+    # agent it lands on.
+    pool:
+      name: default
+      demands:
+        - GPU_VENDOR -equals nvidia
 
     container:
       image: $(image)
