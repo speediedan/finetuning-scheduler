@@ -6,7 +6,8 @@ FSDP Scheduled Fine-Tuning
 
   This guide is for PyTorch's original, wrapper-based FSDP API sometimes referred to as FSDP1. Using the newer
   composable distributed API ``fully_shard`` a.k.a. FSDP2 is likely preferable for most use cases. :doc:`See the
-  FTS guide for using it here <model_parallel_scheduled_fine_tuning>`.
+  FTS guide for using it here <model_parallel_scheduled_fine_tuning>`, and the
+  :doc:`FSDP1-to-FSDP2 migration guide <fsdp1_to_fsdp2_migration>` for moving an existing FSDP1 configuration.
 
 Overview
 ********
