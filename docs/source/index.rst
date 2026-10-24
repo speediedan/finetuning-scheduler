@@ -8,25 +8,27 @@
 Introduction to the Fine-Tuning Scheduler
 =========================================
 
-The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback accelerates and enhances
-foundation model experimentation with flexible fine-tuning schedules. Training with the
-:class:`~finetuning_scheduler.fts.FinetuningScheduler` (FTS) callback is simple and confers a host of benefits:
+Fine-Tuning Scheduler (FTS) accelerates and enhances foundation model experimentation with flexible, multi-phase
+fine-tuning schedules. A schedule says which parameters to thaw in each phase; FTS thaws them, adds them to the
+optimizer's parameter groups (optionally reinitializing the optimizer or lr scheduler) and decides when each phase ends.
+Training with FTS is simple and confers a host of benefits:
 
 * it dramatically increases fine-tuning flexibility
 * expedites and facilitates exploration of model tuning dynamics
 * enables marginal performance improvements of fine-tuned models
 
-.. note::
-   If you're exploring using the :class:`~finetuning_scheduler.fts.FinetuningScheduler`, this is a great place
-   to start!
-   You may also find the :doc:`notebook-based tutorial<notebooks/superglue/fts_superglue_lightning>`
-   useful and for those using the :py:class:`~lightning.pytorch.cli.LightningCLI`, there is a
-   :ref:`CLI-based<scheduled-fine-tuning-superglue>` example.
+FTS runs a schedule in either of two hosts, which share one scheduling core and one schedule format:
+
+* **your own PyTorch training loop**, through :class:`~finetuning_scheduler.core.controller.FTSController`
+  (experimental in 2.15; it imports neither Lightning nor jsonargparse);
+* **Lightning**, through the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback (fully supported).
 
 .. note::
-   New in 2.15 (experimental): Fine-Tuning Scheduler's schedules also run in a plain PyTorch training loop, without
-   Lightning, through :class:`~finetuning_scheduler.core.controller.FTSController`. See
-   :ref:`plain-pytorch-loop` and the :doc:`PyTorch API tutorial notebook<notebooks/superglue/fts_superglue_pytorch>`.
+   If you're exploring Fine-Tuning Scheduler, this is a great place to start! :ref:`basic-usage` below walks through
+   both hosts, and there are tutorials for each: the :doc:`PyTorch API tutorial
+   notebook<notebooks/superglue/fts_superglue_pytorch>`, the :doc:`Lightning tutorial
+   notebook<notebooks/superglue/fts_superglue_lightning>` and, for those using the
+   :py:class:`~lightning.pytorch.cli.LightningCLI`, a :ref:`CLI-based<scheduled-fine-tuning-superglue>` example.
 
 Setup
 *****
@@ -48,29 +50,61 @@ Additional installation options (from source etc.) are discussed under "Addition
 
 Motivation
 **********
-Fundamentally, the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback enables
-multi-phase, scheduled fine-tuning of foundation models. Gradual unfreezing (i.e. thawing) can help maximize
-foundation model knowledge retention while allowing (typically upper layers of) the model to optimally adapt to new
-tasks during transfer learning [#]_ [#]_ [#]_ .
+Fundamentally, Fine-Tuning Scheduler enables multi-phase, scheduled fine-tuning of foundation models. Gradual
+unfreezing (i.e. thawing) can help maximize foundation model knowledge retention while allowing (typically upper layers
+of) the model to optimally adapt to new tasks during transfer learning [#]_ [#]_ [#]_ .
 
-:class:`~finetuning_scheduler.fts.FinetuningScheduler` orchestrates the gradual unfreezing
-of models via a fine-tuning schedule that is either implicitly generated (the default) or explicitly provided by the user
-(more computationally efficient). fine-tuning phase transitions are driven by
-:class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria (a multi-phase
-extension of :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`),
-user-specified epoch transitions or a composition of the two (the default mode). A
-:class:`~finetuning_scheduler.fts.FinetuningScheduler` training session completes when the
-final phase of the schedule has its stopping criteria met. See
-:ref:`Early Stopping<common/early_stopping:Early stopping>` for more details on that callback's configuration.
+FTS orchestrates the gradual unfreezing of models via a fine-tuning schedule that is either implicitly generated (the
+default) or explicitly provided by the user (more computationally efficient). Fine-tuning phase transitions are driven
+by epoch limits for each phase (``max_transition_epoch``), by criteria on a monitored metric (a plateau in validation
+loss, say), or by a composition of the two. A training session completes when the final phase of the schedule has its
+stopping criteria met.
+
+.. _basic-usage:
 
 Basic Usage
 ***********
-If no fine-tuning schedule is user-provided, :class:`~finetuning_scheduler.fts.FinetuningScheduler` will generate a
-:ref:`default schedule<index:The Default Fine-Tuning Schedule>` and proceed to fine-tune
-according to the generated schedule, using default
-:class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping`
-and :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks with
-``monitor=val_loss``.
+
+In Your Own PyTorch Loop
+========================
+Build an :class:`~finetuning_scheduler.core.controller.FTSController` for your model, call
+:meth:`~finetuning_scheduler.core.controller.FTSController.setup` once, iterate over
+:meth:`~finetuning_scheduler.core.controller.FTSController.epochs`, and report each epoch's validation metrics with
+:meth:`~finetuning_scheduler.core.controller.FTSController.epoch_end`. The controller decides when each phase starts and
+which parameters train; the loop stays yours. Passing ``None`` as the schedule uses the
+:ref:`default schedule<default schedule>`:
+
+.. code-block:: python
+
+    from functools import partial
+
+    import torch
+    from finetuning_scheduler import FTSController, PlateauTransition
+
+    fts = FTSController(
+        model,
+        None,  # the default schedule, or a mapping, or the path to a schedule YAML file
+        optimizer=partial(torch.optim.AdamW, lr=1e-3),
+        transition=PlateauTransition(monitor="val_loss", patience=2, min_delta=0.01),
+    )
+    fts.setup()
+    for epoch in fts.epochs(max_epochs=30):
+        for x, y in train_loader:
+            loss = torch.nn.functional.cross_entropy(model(x), y)
+            loss.backward()
+            fts.optimizer.step()  # always `fts.optimizer`: a phase can replace the optimizer
+            fts.optimizer.zero_grad()
+        fts.epoch_end({"val_loss": evaluate(model)})
+
+:ref:`plain-pytorch-loop` covers the rest: transition policies, checkpoints and exact resume, phase hooks and gates,
+and distributed training.
+
+With Lightning
+==============
+Add the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback to your ``Trainer``. Without a user-provided
+schedule, it generates the :ref:`default schedule<default schedule>` and fine-tunes according to it, with default
+:class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` and
+:class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks monitoring ``val_loss``:
 
 .. code-block:: python
 
@@ -79,25 +113,20 @@ and :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks with
 
     trainer = L.Trainer(callbacks=[FinetuningScheduler()])
 
-.. note::
-    If not provided, FTS will instantiate its callback dependencies
-    (:class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` and
-    :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint`) with default configurations and ``monitor=val_loss``.
-    If the user provides base versions of these dependencies (e.g.
-    :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`,
-    :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`) the provided configuration of
-    those callbacks will be used to instantiate their FTS analogs instead.
+:ref:`lightning-scheduled-fine-tuning` covers the rest: the callback's dependencies, early-stopping and epoch-driven
+transitions, resuming, and the supported strategies and lr schedulers.
 
 .. _default schedule:
 
 The Default Fine-Tuning Schedule
 ********************************
-Schedule definition is facilitated via
-:meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.gen_ft_schedule` which dumps
-a default fine-tuning schedule (by default using a naive, 2-parameters per level heuristic) which can be adjusted as
-desired by the user and/or subsequently passed to the callback. Using the default/implicitly generated schedule will
-often be less computationally efficient than a user-defined fine-tuning schedule but can often serve as a
-good baseline for subsequent explicit schedule refinement and will marginally outperform many explicit schedules.
+The default schedule thaws parameters in pairs, starting from the last registered parameter (a naive, two-parameters
+per level heuristic). It is produced by :func:`~finetuning_scheduler.core.schedule.gen_ft_schedule`, which writes it to
+a YAML file named after the model's class with the suffix ``_ft_schedule.yaml``, and under Lightning by
+:meth:`~finetuning_scheduler.strategy_adapters.StrategyAdapter.gen_ft_schedule`, which strategy adapters can override.
+Using the default/implicitly generated schedule will often be less computationally efficient than a user-defined
+fine-tuning schedule but can often serve as a good baseline for subsequent explicit schedule refinement and will
+marginally outperform many explicit schedules.
 
 
 .. _specifying schedule:
@@ -110,15 +139,16 @@ thawed/unfrozen parameter groups associated with each fine-tuning phase as desir
 and executed in ascending order. In addition to being zero-indexed, fine-tuning phase keys should be contiguous and
 either integers or convertible to integers via ``int()``.
 
-1. First, generate the default schedule (output to :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.log_dir`,
-   defaults to ``Trainer.log_dir``). It will be named after your
-   :py:class:`~lightning.pytorch.core.module.LightningModule` subclass with the suffix ``_ft_schedule.yaml``.
+1. First, generate the default schedule.
 
 .. code-block:: python
 
-    import lightning as L
-    from finetuning_scheduler import FinetuningScheduler
+    # in your own loop: write it to a directory
+    from finetuning_scheduler.core.schedule import gen_ft_schedule
 
+    gen_ft_schedule(model, "schedules/")
+
+    # with Lightning: write it to `FinetuningScheduler.log_dir` (`Trainer.log_dir` by default) without training
     trainer = L.Trainer(callbacks=[FinetuningScheduler(gen_ft_sched_only=True)])
 
 
@@ -174,55 +204,24 @@ either integers or convertible to integers via ``int()``.
             params:
             - layer.0.*
 
-3. Once the fine-tuning schedule has been altered as desired, pass it to
-   :class:`~finetuning_scheduler.fts.FinetuningScheduler` to commence scheduled training:
+3. Once the fine-tuning schedule has been altered as desired, pass it to commence scheduled training:
 
 .. code-block:: python
 
-    import lightning as L
-    from finetuning_scheduler import FinetuningScheduler
+    # in your own loop
+    fts = FTSController(model, "/path/to/my/schedule/my_schedule.yaml", optimizer=..., transition=...)
 
+    # with Lightning
     trainer = L.Trainer(callbacks=[FinetuningScheduler(ft_schedule="/path/to/my/schedule/my_schedule.yaml")])
-
-.. note::
-
-    For each fine-tuning phase, :class:`~finetuning_scheduler.fts.FinetuningScheduler` will unfreeze/freeze parameters
-    as directed in the explicitly specified or implicitly generated schedule. Prior to beginning the first phase of
-    training (phase ``0``), FinetuningScheduler will inspect the optimizer to determine if the user has manually
-    initialized the optimizer with parameters that are non-trainable or otherwise altered the parameter trainability
-    states from that expected of the configured phase ``0``. By default, FTS ensures the optimizer configured in
-    ``configure_optimizers`` will optimize the parameters (and only those parameters) scheduled to be optimized in phase
-    ``0`` of the current fine-tuning schedule. This auto-configuration can be disabled if desired by setting
-    :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.enforce_phase0_params` to ``False``.
-
-.. note::
-
-     When freezing ``torch.nn.modules.batchnorm._BatchNorm`` modules, Lightning by default disables
-     ``BatchNorm.track_running_stats``. FTS overrides this behavior by default so that
-     even frozen ``BatchNorm`` layers continue to have ``track_running_stats`` set to ``True``. To disable
-     ``BatchNorm.track_running_stats`` when freezing ``torch.nn.modules.batchnorm._BatchNorm`` modules, one can set the
-     FTS parameter :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.frozen_bn_track_running_stats` to ``False``.
-
-
-EarlyStopping and Epoch-Driven Phase Transition Criteria
-********************************************************
-
-By default, :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` and epoch-driven
-transition criteria are composed. If a ``max_transition_epoch`` is specified for a given phase, the next finetuning
-phase will begin at that epoch unless
-:class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria are met first.
-If :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.epoch_transitions_only` is
-``True``, :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` will not be used
-and transitions will be exclusively epoch-driven.
 
 .. tip::
 
-    Use of regex expressions can be convenient for specifying more complex schedules. Also, a per-phase
-    :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.base_max_lr` can be specified:
+    Use of regex expressions can be convenient for specifying more complex schedules. Also, a per-phase maximum
+    learning rate (``lr``) and an epoch limit (``max_transition_epoch``) can be specified:
 
     .. code-block:: yaml
       :linenos:
-      :emphasize-lines: 2, 7, 13, 15
+      :emphasize-lines: 2, 5, 7, 12, 13, 15
 
        0:
          params: # the parameters for each phase definition can be fully specified
@@ -244,130 +243,30 @@ and transitions will be exclusively epoch-driven.
          - model.albert.encoder.embedding_hidden_mapping_in.weight
          - model.albert.embeddings.*
 
-For a practical end-to-end example of using
-:class:`~finetuning_scheduler.fts.FinetuningScheduler` in implicit versus explicit modes,
-see :ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` or the
-:doc:`notebook-based tutorial<notebooks/superglue/fts_superglue_lightning>`.
+Phase Transitions and Resuming
+******************************
+A phase ends at its ``max_transition_epoch`` or when its transition criteria are met, whichever comes first. In your
+own loop, the criteria are transition policies such as
+:class:`~finetuning_scheduler.core.transitions.PlateauTransition` (see :ref:`plain-pytorch-loop`); under Lightning, they
+are :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` criteria (see
+:ref:`lightning-scheduled-fine-tuning`). Both hosts restore the best checkpoint at each phase boundary by default when
+checkpointing is configured, and both resume a session at the depth it was saved at:
+:meth:`~finetuning_scheduler.core.controller.FTSController.save` and
+:meth:`~finetuning_scheduler.core.controller.FTSController.load` in your own loop, a checkpoint saved by
+:class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` under Lightning.
 
+Where to Go Next
+****************
 
-Resuming Scheduled Fine-Tuning Training Sessions
-************************************************
-
-Resumption of scheduled fine-tuning training is identical to the continuation of
-:ref:`other training sessions<common/trainer:trainer>` with the caveat that the provided checkpoint must
-have been saved by a :class:`~finetuning_scheduler.fts.FinetuningScheduler` session.
-:class:`~finetuning_scheduler.fts.FinetuningScheduler` uses
-:class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` (an extension of
-:py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`) to maintain schedule state with
-special metadata.
-
-
-.. code-block:: python
-
-    import lightning as L
-    from finetuning_scheduler import FinetuningScheduler
-
-    trainer = L.Trainer(callbacks=[FinetuningScheduler()])
-    trainer.ckpt_path = "some/path/to/my_checkpoint.ckpt"
-    trainer.fit(...)
-
-Training will resume at the depth/level of the provided checkpoint according the specified schedule. Schedules can be
-altered between training sessions but schedule compatibility is left to the user for maximal flexibility. If executing a
-user-defined schedule, typically the same schedule should be provided for the original and resumed training
-sessions.
-
-
-.. tip::
-
-    By default (
-    :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.restore_best` is ``True``),
-    :class:`~finetuning_scheduler.fts.FinetuningScheduler` will attempt to restore
-    the best available checkpoint before fine-tuning depth transitions.
-
-    .. code-block:: python
-
-        trainer = Trainer(callbacks=[FinetuningScheduler()])
-        trainer.ckpt_path = "some/path/to/my_kth_best_checkpoint.ckpt"
-        trainer.fit(...)
-
-    Note that similar to the behavior of
-    :py:class:`~lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint`, when resuming training
-    with a different :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` ``dirpath`` from the provided
-    checkpoint, the new training session's checkpoint state will be re-initialized at the resumption depth with the
-    provided checkpoint being set as the best checkpoint.
-
-Fine-Tuning All The Way Down!
-*****************************
-
-There are plenty of options for customizing
-:class:`~finetuning_scheduler.fts.FinetuningScheduler`'s behavior, see
-:ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` for examples of composing different
-configurations.
-
-.. _supported_strategies:
-
-.. note::
-
-   Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports the following distributed strategies:
-
-   .. hlist::
-      :columns: 2
-
-      * :py:class:`~lightning.pytorch.strategies.ddp.DDPStrategy`:``ddp``,
-        ``ddp_find_unused_parameters_false``, ``ddp_find_unused_parameters_true``, ``ddp_spawn``, ``ddp_fork``,
-        ``ddp_notebook``
-      * :py:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`:
-        ``fsdp``, ``fsdp_cpu_offload``
-
-.. _supported_lr_schedulers:
-
-.. note::
-   Currently, :class:`~finetuning_scheduler.fts.FinetuningScheduler` officially supports the following torch lr
-   schedulers:
-
-   .. hlist::
-      :columns: 2
-
-      * :py:class:`~torch.optim.lr_scheduler.StepLR`
-      * :py:class:`~torch.optim.lr_scheduler.MultiStepLR`
-      * :py:class:`~torch.optim.lr_scheduler.CosineAnnealingWarmRestarts`
-      * :py:class:`~torch.optim.lr_scheduler.ReduceLROnPlateau`
-      * :py:class:`~torch.optim.lr_scheduler.LambdaLR`
-      * :py:class:`~torch.optim.lr_scheduler.ConstantLR`
-      * :py:class:`~torch.optim.lr_scheduler.LinearLR`
-      * :py:class:`~torch.optim.lr_scheduler.ExponentialLR`
-      * :py:class:`~torch.optim.lr_scheduler.CosineAnnealingLR`
-      * :py:class:`~torch.optim.lr_scheduler.MultiplicativeLR`
-
-.. _supported_reinit_optimizers:
-
-.. note::
-   :class:`~finetuning_scheduler.fts.FinetuningScheduler` supports reinitializing all PyTorch optimizers (or subclasses
-   thereof) `provided in torch.optim <https://pytorch.org/docs/stable/optim.html#algorithms>`_ in the context of all
-   supported training strategies (including FSDP). Use of
-   :py:class:`~torch.distributed.optim.ZeroRedundancyOptimizer` is also supported, but currently only
-   outside the context of optimizer reinitialization.
-
-.. tip::
-    Custom or officially unsupported strategies and lr schedulers can be used by setting
-    :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.allow_untested` to ``True``.
-
-    Some officially unsupported strategies may work unaltered and are only unsupported due to
-    the Fine-Tuning Scheduler project's lack of CI/testing resources for that strategy (e.g. ``single_tpu``). Most
-    unsupported strategies and schedulers, however, are currently unsupported because they require varying degrees of
-    modification to be compatible.
-
-    For instance, with respect to strategies, ``deepspeed`` will require a
-    :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` similar to the one written for ``FSDP``
-    (:class:`~finetuning_scheduler.strategy_adapters.FSDPStrategyAdapter`) to be written before support can be added,
-    while ``tpu_spawn`` would require an override of the current broadcast method to include python objects.
-
-    Regarding lr schedulers, :py:class:`~torch.optim.lr_scheduler.ChainedScheduler` and
-    :py:class:`~torch.optim.lr_scheduler.SequentialLR` are examples of schedulers not currently supported
-    due to the configuration complexity and semantic conflicts supporting them would introduce. If a supported torch lr
-    scheduler does not meet your requirements, one can always subclass a supported lr scheduler and modify it as
-    required (e.g. :py:class:`~torch.optim.lr_scheduler.LambdaLR` is especially useful for this). PRs are
-    also always welcome!
+- **Your own PyTorch loop:** :ref:`plain-pytorch-loop`, the :ref:`model-parallel example<model-parallel-plain-loop>`
+  (FSDP2 and tensor parallelism), and :doc:`tunable views<pytorch/tunable_views>` for addressing a model through
+  logical parameter names.
+- **Lightning:** :ref:`lightning-scheduled-fine-tuning`, :doc:`model-parallel scheduled
+  fine-tuning<distributed/model_parallel_scheduled_fine_tuning>`, :doc:`FSDP1 scheduled
+  fine-tuning<distributed/fsdp_scheduled_fine_tuning>` and the :doc:`FSDP1-to-FSDP2 migration
+  guide<distributed/fsdp1_to_fsdp2_migration>`.
+- **Either host:** :doc:`lr scheduler<advanced/lr_scheduler_reinitialization>` and
+  :doc:`optimizer<advanced/optimizer_reinitialization>` reinitialization at phase transitions.
 
 ----------
 
@@ -386,11 +285,6 @@ Footnotes
 .. [#] `Peters, M. E., Ruder, S., & Smith, N. A. (2019) <https://arxiv.org/pdf/1903.05987.pdf>`_. To tune or not to
  tune? adapting pretrained representations to diverse tasks. arXiv preprint arXiv:1903.05987.
 
-.. seealso::
-    - :py:class:`~lightning.pytorch.trainer.trainer.Trainer`
-    - :py:class:`~lightning.pytorch.callbacks.early_stopping.EarlyStopping`
-    - :py:class:`~lightning.pytorch.callbacks.finetuning.BaseFinetuning`
-
 .. raw:: html
 
    <div style="display:none">
@@ -407,24 +301,27 @@ Footnotes
    :caption: PyTorch API (experimental)
 
    pytorch/plain_pytorch_loop
+   PyTorch API tutorial notebook <notebooks/superglue/fts_superglue_pytorch>
    pytorch/model_parallel_plain_loop
    pytorch/tunable_views
 
 .. toctree::
    :maxdepth: 1
+   :name: Lightning
+   :caption: Lightning
+
+   lightning/scheduled_fine_tuning
+   Notebook-based Fine-Tuning Scheduler tutorial <notebooks/superglue/fts_superglue_lightning>
+   CLI-based Fine-Tuning Scheduler tutorial <examples/superglue_cli>
+
+.. toctree::
+   :maxdepth: 1
    :name: Enhanced Distributed Strategies
-   :caption: Enhanced Distributed Strategies
+   :caption: Enhanced Distributed Strategies (Lightning)
 
    distributed/model_parallel_scheduled_fine_tuning
    distributed/fsdp_scheduled_fine_tuning
    distributed/fsdp1_to_fsdp2_migration
-
-.. toctree::
-   :maxdepth: 1
-   :name: Configurable Profiling
-   :caption: Configurable Profiling
-
-   profiling/memprofiler_profiling
 
 .. toctree::
    :maxdepth: 1
@@ -436,19 +333,17 @@ Footnotes
 
 .. toctree::
    :maxdepth: 1
+   :name: Configurable Profiling
+   :caption: Configurable Profiling
+
+   profiling/memprofiler_profiling
+
+.. toctree::
+   :maxdepth: 1
    :name: Plugins
    :caption: Plugins
 
    plugins/strategy_adapter_entry_points
-
-.. toctree::
-   :maxdepth: 1
-   :name: Basic Examples
-   :caption: Basic Examples
-
-   Notebook-based Fine-Tuning Scheduler tutorial <notebooks/superglue/fts_superglue_lightning>
-   PyTorch API tutorial notebook <notebooks/superglue/fts_superglue_pytorch>
-   CLI-based Fine-Tuning Scheduler tutorial <examples/superglue_cli>
 
 .. toctree::
    :maxdepth: 2

@@ -86,7 +86,7 @@ A few things to note:
   when ``checkpoint`` is given), as the Lightning callback does: the next phase starts from the best model, optimizer
   and lr scheduler state of the phase that just ended.
 - **The schedule** may be a mapping as above, a path to a schedule YAML file in the
-  :ref:`usual format<motivation>`, or ``None``, which generates the default schedule (parameters thawed in pairs,
+  :ref:`usual format<specifying schedule>`, or ``None``, which generates the default schedule (parameters thawed in pairs,
   starting from the last registered parameter).
 
 Transitions
