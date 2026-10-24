@@ -16,9 +16,11 @@ import subprocess
 import sys
 from unittest import mock
 from itertools import chain
+from pathlib import Path
 import re
 
 import pytest
+import yaml
 from lightning.pytorch.callbacks import ModelCheckpoint
 
 from fts_examples import _HF_AVAILABLE
@@ -130,6 +132,8 @@ def test_model_parallel_examples(tmpdir, config_files):
     cli_args = [
         f"--trainer.default_root_dir={tmpdir.strpath}", "--trainer.max_epochs=1",  "--trainer.limit_train_batches=2",
     ]
+    if "profiling/memprofiler_demo.yaml" in config_files:  # write the profiling artifacts where they are checked
+        cli_args.append(f"--trainer.logger.init_args.save_dir={tmpdir.strpath}")
     command = ["python", example_script, "fit"] + config_locs + cli_args
     cp = subprocess.run(command, capture_output=True, text=True)
     stdout_lines, stderr_lines = cp.stdout.splitlines(), cp.stderr.splitlines()
@@ -140,6 +144,39 @@ def test_model_parallel_examples(tmpdir, config_files):
     assert cp.returncode == 0
     unexpected = unexpected_warns(rec_warns=warn_lines, expected_warns=MODEL_PARALLEL_EXAMPLE_WARNS, raw_warns=True)
     assert not unexpected, unexpected
+    if "profiling/memprofiler_demo.yaml" in config_files:
+        _check_memprofiler_artifacts(Path(tmpdir.strpath))
+
+
+# statistics every backend's snapshots carry: the allocator's peak allocated and reserved bytes, host memory and the
+# default memory hooks
+_MEMPROF_REQUIRED_KEYS = {"allocated_bytes.all.peak", "reserved_bytes.all.peak", "rss", "vms", "npp_diff", "rss_diff"}
+# statistics each backend is measured to add (the profiling guide's backend table): a backend's omission is recorded
+# here and in the table rather than by weakening the required set
+_MEMPROF_BACKEND_KEYS = {
+    "cuda": {"active_bytes.all.current", "num_ooms", "num_oom_rejections"},
+    "rocm": {"active_bytes.all.current", "num_ooms", "num_oom_rejections"},
+}
+
+
+def _check_memprofiler_artifacts(root: Path) -> None:
+    """Each rank of the profiling example records the required and the backend's measured accelerator statistics in
+    every snapshot and writes its allocator history and ``FSDP2MemTracker`` reports (CUDA and ROCm both have device
+    type ``cuda``, so the snapshot names match)."""
+    from fts_examples.profiling.accelerator import accelerator_backend
+
+    expected = _MEMPROF_REQUIRED_KEYS | _MEMPROF_BACKEND_KEYS[accelerator_backend()]
+    for rank in (0, 1):
+        stats_files = list(root.rglob(f"rank_{rank}_memory_stats.yaml"))
+        assert len(stats_files) == 1, f"expected one rank {rank} memory stats file under {root}, found {stats_files}"
+        with open(stats_files[0]) as f:
+            stats = yaml.safe_load(f)
+        assert set(stats) == {f"{rank}.training_step.2.{ctx}" for ctx in ("start", "end")}
+        for snap_key, snap_stats in stats.items():
+            assert not (missing := expected - set(snap_stats)), (snap_key, missing)
+        memprof_dir = stats_files[0].parent
+        assert len(list(memprof_dir.glob(f"cuda_alloc_rank_{rank}.training_step.2.*.pickle"))) == 2
+        assert (memprof_dir / f"fsdp_mem_rank_{rank}_training_step_2.log").exists()
 
 
 @RunIf(min_cuda_gpus=2, standalone=True)
