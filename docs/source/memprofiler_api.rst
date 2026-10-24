@@ -9,3 +9,4 @@ MemProfiler
 
     memprofiler
     config
+    accelerator

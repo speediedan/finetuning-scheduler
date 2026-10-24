@@ -34,11 +34,14 @@ import yaml
 import torch
 from torch.distributed.fsdp import FSDPModule
 from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
+from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
 from lightning.fabric.utilities.rank_zero import _get_rank
 from lightning.fabric.utilities.cloud_io import get_filesystem
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 
 from fts_examples.cfg_utils import resolve_funcs
+from fts_examples.profiling.accelerator import (accelerator_backend, accelerator_memory_stats, accelerator_type,
+                                               allocator_history_module)
 from fts_examples.profiling.config import MemProfilerCfg
 
 
@@ -49,7 +52,8 @@ class MemProfiler:
     The following profiling utilities are integrated and simultaneously configured:
 
     - ``FSDP2MemTracker``
-    - `cuda memory snapshot and allocator history tracking <https://pytorch.org/docs/stable/torch_cuda_memory.html>`_
+    - accelerator memory statistics (``torch.accelerator.memory_stats``) and `allocator history snapshots
+      <https://pytorch.org/docs/stable/torch_cuda_memory.html>`_ on backends that support them (CUDA, ROCm, XPU)
     - host-level memory tracking
     - custom memory hooks (e.g. for activation checkpoint memory tracking via ``saved_tensors_hooks`` etc.)
     """
@@ -60,8 +64,8 @@ class MemProfiler:
         The following profiling utilities are integrated and simultaneously configured:
 
         - ``FSDP2MemTracker``
-        - `cuda memory snapshot and allocator history
-          tracking <https://pytorch.org/docs/stable/torch_cuda_memory.html>`_
+        - accelerator memory statistics (``torch.accelerator.memory_stats``) and `allocator history snapshots
+          <https://pytorch.org/docs/stable/torch_cuda_memory.html>`_ on backends that support them (CUDA, ROCm, XPU)
         - host-level memory tracking
         - custom memory hooks (e.g. for activation checkpoint memory tracking via ``saved_tensors_hooks`` etc.)
 
@@ -107,7 +111,7 @@ class MemProfiler:
 
     def _all_base_collect_funcs(self) -> set:
         funcs = self.memprofiler_cfg.collect_funcs
-        return set(chain(*[funcs.cuda_allocator_history, funcs.cuda, funcs.cpu]))
+        return set(chain(*[funcs.allocator_history, funcs.accelerator, funcs.cpu]))
 
     @property
     def memprofiler_cfg(self) -> MemProfilerCfg:
@@ -196,17 +200,39 @@ class MemProfiler:
         self.memprof_log_dir = Path(self.memprof_log_dir)  # ensure the dir is a Path
         self.memprof_log_dir.mkdir(exist_ok=True, parents=True)
 
-    def cuda_allocator_history_snap(self, snap_key: tuple) -> None:
-        """Dumps a snapshot of the CUDA memory allocator history.
+    def allocator_history_snap(self, snap_key: tuple) -> None:
+        """Dumps a snapshot of the accelerator memory allocator history.
 
-        The snapshot is saved to a file named ``cuda_alloc_rank_<snap_key>.pickle`` in the directory specified by
-        ``memprof_log_dir``.
+        The snapshot is saved to a file named ``<device type>_alloc_rank_<snap_key>.pickle`` (``cuda_alloc_rank_...``
+        on CUDA and ROCm) in the directory specified by ``memprof_log_dir``.
 
         Args:
             snap_key: A tuple used to identify the snapshot.
         """
-        cuda_snapshot_file = (self.memprof_log_dir / f"cuda_alloc_rank_{snap_key}.pickle")
-        torch.cuda.memory._dump_snapshot(cuda_snapshot_file)
+        device_type = accelerator_type()
+        snapshot_file = (self.memprof_log_dir / f"{device_type}_alloc_rank_{snap_key}.pickle")
+        allocator_history_module(device_type)._dump_snapshot(str(snapshot_file))
+
+    def cuda_allocator_history_snap(self, snap_key: tuple) -> None:
+        """Deprecated alias of :meth:`allocator_history_snap`, unsupported no earlier than 2.17."""
+        rank_zero_warn("`MemProfiler.cuda_allocator_history_snap` is deprecated in favor of"
+                       " `MemProfiler.allocator_history_snap` and will be unsupported no earlier than 2.17.",
+                       category=FutureWarning)
+        self.allocator_history_snap(snap_key)
+
+    def _collect_accelerator_stats(self, snap_key: str) -> None:
+        try:
+            stats = accelerator_memory_stats()
+        except RuntimeError as err:  # a backend without device-generic memory statistics
+            rank_zero_warn(f"Disabling accelerator memory statistics collection since the `{accelerator_backend()}`"
+                           f" backend does not provide them: {err}")
+            self.memprofiler_cfg.collect_funcs.accelerator = set()
+            return
+        if not self._state.accelerator_stats_logged:
+            rank_zero_info(f"MemProfiler collecting accelerator memory statistics on the `{accelerator_backend()}`"
+                           " backend.")
+            self._state.accelerator_stats_logged = True
+        self.memory_stats[snap_key].update(stats)
 
     def done(self, iter_idx: int) -> bool:
         """Checks if the profiling is done.
@@ -243,10 +269,10 @@ class MemProfiler:
         if fn_name in mem_cfg.collect_funcs.cpu:
             mem = self._state.curr_pid.memory_info()
             self.memory_stats[snap_key].update({"rss": mem.rss, "vms": mem.vms})
-        if fn_name in mem_cfg.collect_funcs.cuda:
-            self.memory_stats[snap_key].update(torch.cuda.memory_stats())
-        if fn_name in mem_cfg.collect_funcs.cuda_allocator_history and mem_cfg.cuda_allocator_history:
-            self.cuda_allocator_history_snap(snap_key)
+        if fn_name in mem_cfg.collect_funcs.accelerator:
+            self._collect_accelerator_stats(snap_key)
+        if fn_name in mem_cfg.collect_funcs.allocator_history and mem_cfg.allocator_history:
+            self.allocator_history_snap(snap_key)
         if mem_cfg.enable_memory_hooks and reset_mem_hooks:
             self.exec_reset_state_hooks()
 
@@ -355,7 +381,7 @@ class MemProfiler:
             if self.memprofiler_cfg.dump_memorystats_yaml:
                 filename = self.memprof_log_dir / f"rank_{self.rank}_memory_stats.yaml"
                 with open(filename, "w", newline="") as f:
-                    yaml.dump(self.memory_stats, f)
+                    yaml.dump(dict(self.memory_stats), f)  # a plain mapping, readable by `yaml.safe_load`
         if self.fsdp_memory_stats:
             self.save_fsdp_mem_reports()
 
@@ -567,6 +593,7 @@ class _MemProfInternalState:
     _iter_idx: int | None = None
     _snap_key: tuple | None = None
     _iter_incremented: dict[str, int] = field(default_factory=dict)
+    accelerator_stats_logged: bool = False
 
     def maybe_init_iter_state(self, fn_name: str, iter_ctx: str) -> None:
         if not self.snap_indices.get((fn_name, iter_ctx), None):
