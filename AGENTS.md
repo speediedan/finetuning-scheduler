@@ -325,8 +325,8 @@ the `fts-development-branch-version-upgrade` skill.
   through `requirements/ci/requirements-oldest.txt`.
 - `code-checks.yml` ("Type Checks") — `pyright -p pyproject.toml`.
 - `.azure-pipelines/gpu-tests.yml`: self-hosted, on either GPU agent (NVIDIA or AMD), through the any-vendor job
-  template below; a release branch or tag runs one leg per vendor instead, each demanding its vendor, and a manual run
-  can pin one with the `vendor` parameter. It runs the non-standalone CUDA tests only (`FTS_CUDA_TESTS_ONLY=1`; the
+  template below; a manual run can pin one with the `vendor` parameter. A release's per-vendor legs are not part of
+  it: they are queued deliberately, after the AMD agent is switched to release mode. It runs the non-standalone CUDA tests only (`FTS_CUDA_TESTS_ONLY=1`; the
   hosted matrix runs every other test in that collection, on CPU), then the standalone tests under `tests/`,
   examples, and multi-GPU examples as separate steps, asserting `>= 2` devices of the agent's vendor first. It takes
   the host's `gpu` and `cpu-heavy` leases after installing, through `ci_host_lease_hold` in

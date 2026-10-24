@@ -63,8 +63,10 @@ parameters:
 
 # One job, on whichever GPU agent is free (#57): the any-vendor template picks the image and device options from the
 # vendor the agent declares, runs the GPU phases under the host leases, uploads the GPU coverage, and fails when a
-# phase's report is not clean. A release branch or tag instead runs one leg per vendor, each demanding its vendor, so
-# a release has a green on both. The phases (.azure-pipelines/scripts/gpu_job_container.sh):
+# phase's report is not clean. A release's green on each vendor is not this pipeline's: release legs demand their
+# vendor and are queued deliberately, after the AMD agent is switched to release mode, so a triggered build never
+# waits on or fails for an agent that is not taking release work. The phases
+# (.azure-pipelines/scripts/gpu_job_container.sh):
 #   - the CUDA tests that are not standalone (the hosted CPU matrix runs every other test in that collection);
 #   - the standalone tests: on a pull request into main, the smoke set unless it carries the `full-gpu-suite` label,
 #     and otherwise all of them (.azure-pipelines/scripts/standalone_scope.sh);
@@ -72,29 +74,12 @@ parameters:
 #   - on the nightly run only, the persistent distributed pool's modules in reverse order (FTS_REVERSE_ORDER), so a
 #     case that leaves state for the next one in its pool fails.
 jobs:
-  - ${{ if or(startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'), startsWith(variables['Build.SourceBranch'], 'refs/tags/')) }}:
-      - template: templates/gpu-job.yml
-        parameters:
-          jobName: release_nvidia
-          vendor: nvidia
-          jobClass: ci-release
-          scope: full
-          uploadCoverage: true
-          images: ${{ parameters.images }}
-      - template: templates/gpu-job.yml
-        parameters:
-          jobName: release_amd
-          vendor: amd
-          jobClass: ci-release
-          scope: full
-          images: ${{ parameters.images }}
-  - ${{ else }}:
-      - template: templates/gpu-job.yml
-        parameters:
-          jobName: pytest
-          vendor: ${{ parameters.vendor }}
-          jobClass: ci-any-vendor
-          scope: auto
-          poolReverse: ${{ eq(variables['Build.Reason'], 'Schedule') }}
-          uploadCoverage: true
-          images: ${{ parameters.images }}
+  - template: templates/gpu-job.yml
+    parameters:
+      jobName: pytest
+      vendor: ${{ parameters.vendor }}
+      jobClass: ci-any-vendor
+      scope: auto
+      poolReverse: ${{ eq(variables['Build.Reason'], 'Schedule') }}
+      uploadCoverage: true
+      images: ${{ parameters.images }}
