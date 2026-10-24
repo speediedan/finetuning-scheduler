@@ -1,6 +1,7 @@
-import torch
+from lightning.fabric.utilities import rank_zero_warn
 
 from fts_examples.profiling import MemProfiler, MemProfilerCfg
+from fts_examples.profiling.accelerator import record_allocator_history
 
 
 class ProfilerHooksMixin:
@@ -13,8 +14,8 @@ class ProfilerHooksMixin:
         if self.memprofiler_cfg and self.memprofiler_cfg.enabled:
             self.memprofiler = MemProfiler()
             self.memprofiler.connect(self)
-            if self.cuda_allocator_history:
-                torch.cuda.memory._record_memory_history()
+            if self.allocator_history:
+                record_allocator_history()
 
     def setup(self, stage):
         super().setup(stage)
@@ -32,8 +33,16 @@ class ProfilerHooksMixin:
         super().on_train_end()
 
     @property
+    def allocator_history(self) -> bool:
+        return self.memprofiler and self.memprofiler_cfg.allocator_history
+
+    @property
     def cuda_allocator_history(self) -> bool:
-        return self.memprofiler and self.memprofiler_cfg.cuda_allocator_history
+        """Deprecated alias of ``allocator_history``, unsupported no earlier than 2.17."""
+        rank_zero_warn("`ProfilerHooksMixin.cuda_allocator_history` is deprecated in favor of"
+                       " `ProfilerHooksMixin.allocator_history` and will be unsupported no earlier than 2.17.",
+                       category=FutureWarning)
+        return self.allocator_history
 
     @property
     def memprofiler(self) -> MemProfiler | None:

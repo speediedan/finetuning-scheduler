@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 
 import torch
-from lightning.fabric.accelerators.cuda import is_cuda_available
+from fts_examples.profiling.accelerator import accelerator_type
 from lightning.fabric.utilities import rank_zero_info
 from lightning.pytorch.profilers.pytorch import _KINETO_AVAILABLE, PyTorchProfiler
 from torch.profiler.profiler import ProfilerActivity
@@ -61,8 +61,9 @@ class ExtendedPyTorchProfiler(PyTorchProfiler):
         if not _KINETO_AVAILABLE:
             return activities
         activities.append(ProfilerActivity.CPU)
-        if is_cuda_available():
-            activities.append(ProfilerActivity.CUDA)
+        # the accelerator's activity, if the profiler has one (``CUDA`` on both CUDA and ROCm, ``XPU``, etc.)
+        if (device_type := accelerator_type()) is not None and hasattr(ProfilerActivity, device_type.upper()):
+            activities.append(getattr(ProfilerActivity, device_type.upper()))
         return activities
 
     def summary(self) -> str:

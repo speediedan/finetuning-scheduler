@@ -1,7 +1,7 @@
 trainer.profiler: pytorch_profiler.yaml
 memprofiler_cfg:
   enabled: true
-  cuda_allocator_history: true
+  allocator_history: true
   track_fsdp_mem: true
   fsdp_mem_track_module_depth: 3
   fsdp_mem_tracker_tabulate: true
@@ -16,9 +16,9 @@ memprofiler_cfg:
   # collect_funcs:  # customize collection functions by memory collection type
   #   default: []
   #   cpu: []
-  #   cuda: ['training_step', 'validation_step']
+  #   accelerator: ['training_step', 'validation_step']
   #   fsdp: ['training_step', 'validation_step']
-  #   cuda_allocator_history: ['training_step']
+  #   allocator_history: ['training_step']
   #############################################################################
   # collect_funcs:  # collect only fsdp memory stats
   #   default: []

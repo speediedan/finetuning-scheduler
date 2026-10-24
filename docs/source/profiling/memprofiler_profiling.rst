@@ -17,9 +17,14 @@ numerous complementary profiling methods. As demonstrated in this example, the f
 integrated and simultaneously configured:
 
 - ``FSDP2MemTracker``
-- `cuda memory snapshot and allocator history tracking <https://pytorch.org/docs/stable/torch_cuda_memory.html>`_
+- accelerator memory statistics and `allocator history snapshots
+  <https://pytorch.org/docs/stable/torch_cuda_memory.html>`_
 - host-level memory tracking
 - custom memory hooks (e.g. for activation checkpoint memory tracking via ``saved_tensors_hooks`` etc.)
+
+Collection does not assume CUDA: accelerator statistics come from the device-generic ``torch.accelerator`` API, and
+allocator history from the current backend's own memory module, so the same configuration profiles CUDA, ROCm and
+other accelerators (see :ref:`memprofiler-backend-support`).
 
 The PyTorch Profiler (as well as an  extended version), can also be simultaneously configured to provide a remarkably
 complete view of distributed training resource utilization.
@@ -46,11 +51,12 @@ For this ``model_parallel`` example, all artifacts should be nested in the tenso
 
    - Snapshot entries are provided for each profiled method, 'start' and 'end' of each iteration for each
      of the enabled memory tracking types.
-   - By default, keys associated with 'cuda', 'cpu' (host-memory), and custom memory hooks are included.
+   - By default, keys associated with 'accelerator' (the accelerator allocator's statistics), 'cpu' (host-memory), and
+     custom memory hooks are included.
    - The custom hooks are ``saved_tensors_hooks`` in this case, tracking non-parameter packed bytes which is a useful
      proxy for memory associated with activations: ``./memprofiler/rank_1_memory_stats.yaml``
-3. Cuda allocator history tracking, start and end of the collected iteration (per-rank), e.g.:
-   ``./memprofiler/cuda_alloc_rank_0.training_step.2.end.pickle``
+3. Allocator history tracking, start and end of the collected iteration (per-rank), named for the accelerator's device
+   type (``cuda`` on both CUDA and ROCm), e.g.: ``./memprofiler/cuda_alloc_rank_0.training_step.2.end.pickle``
 4. PyTorch Profiler (extended version), according to the separately provided PyTorch Profiler configuration, e.g.:
 
    - ``./fit-fts_extended_pytorch_profiler-0[Strategy]ModelParallelStrategy.training_step.{epoch time}.pt.trace.json``
@@ -67,7 +73,7 @@ Configuration
     # note any method decorated with @MemProfiler.memprofilable can be specified for collection
     memprofiler_cfg:
         enabled: true
-        cuda_allocator_history: true  # enable cuda memory snapshot/allocator history tracking
+        allocator_history: true  # enable accelerator memory snapshot/allocator history tracking
         track_fsdp_mem: true  # enable FSDP2MemTracker tracking
         fsdp_mem_track_module_depth: 3  # collect up to 3 levels of nested FSDP modules
         fsdp_mem_tracker_tabulate: true  # display FSDP2MemTracker stats in a table
@@ -77,6 +83,57 @@ Configuration
 
     For more advanced usage examples (e.g. non-default schedules, custom collection functions, etc.), see the commented
     configuration options in ``fts_examples/model_parallel/config/profiling/memprofiler_demo.yaml``.
+
+.. note::
+
+    The configuration keys ``cuda_allocator_history``, ``collect_funcs.cuda`` and
+    ``collect_funcs.cuda_allocator_history`` are deprecated in favor of ``allocator_history``,
+    ``collect_funcs.accelerator`` and ``collect_funcs.allocator_history``. The old names still work, with a
+    ``FutureWarning``, until no earlier than 2.17.
+
+.. _memprofiler-backend-support:
+
+Backend Support
+***************
+
+Which metrics each backend provides:
+
+.. list-table::
+    :header-rows: 1
+    :widths: 28 18 18 18 18
+
+    * - Metric
+      - CUDA
+      - ROCm
+      - XPU
+      - Other accelerators
+    * - accelerator statistics (``collect_funcs.accelerator``)
+      - ``torch.accelerator.memory_stats``
+      - ``torch.accelerator.memory_stats`` (the HIP caching allocator)
+      - ``torch.accelerator.memory_stats``
+      - where the backend implements ``torch.accelerator.memory_stats``
+    * - allocator history (``allocator_history``)
+      - ``torch.cuda.memory``
+      - ``torch.cuda.memory`` (backed by HIP)
+      - ``torch.xpu.memory``
+      - where ``torch.<device type>.memory`` provides it (no other backend does as of PyTorch 2.15)
+    * - ``FSDP2MemTracker``
+      - yes
+      - yes
+      - yes, without the caching allocator's block rounding
+      - yes, without the caching allocator's block rounding
+    * - host memory and memory hooks
+      - yes
+      - yes
+      - yes
+      - yes
+
+A metric a backend does not provide is skipped with a warning naming the backend rather than failing: allocator history
+is disabled when the configuration is created, and accelerator statistics on the first collection that the backend
+refuses. Without any accelerator, only host memory, memory hooks and ``FSDP2MemTracker`` are collected. On ROCm builds of
+PyTorch the accelerator's device type is ``cuda``, so ROCm artifacts carry ``cuda`` names. The extended PyTorch Profiler
+likewise records the accelerator's activity (``ProfilerActivity.CUDA`` on both CUDA and ROCm, ``ProfilerActivity.XPU``
+on XPU) when the profiler supports it.
 
 Reviewing the Results
 *********************
@@ -97,14 +154,14 @@ have available!
 
    FSDP2 Mem Tracker Report for ``training_step`` iteration 2, rank `0`
 
-2. Consolidated cuda memory snapshot, custom hook ('npp' ``saved_tensors_hooks`` in this case) and host-level memory
+2. Consolidated accelerator memory snapshot, custom hook ('npp' ``saved_tensors_hooks`` in this case) and host-level memory
    summary  (rank ``0`` in this case):
 
 .. code-block:: yaml
 
     0.training_step.2.end:
         #...
-        # standard cuda memory snapshot data
+        # standard accelerator memory snapshot data
         active_bytes.all.allocated: 1948350976
         active_bytes.all.current: 184830976
         active_bytes.all.freed: 1763520000
@@ -118,7 +175,7 @@ have available!
         npp_pre_forward: 0
         num_ooms: 0
         #...
-        # more standard cuda memory snapshot data
+        # more standard accelerator memory snapshot data
         reserved_bytes.all.peak: 551550976
         #...
         # host-level memory snapshot data
@@ -133,7 +190,7 @@ have available!
         active_bytes.all.allocated: 1281527296
         #...
 
-3. Cuda allocator history visualization (generate by dragging the desired ``*.pickle`` file to
+3. Allocator history visualization (generate by dragging the desired ``*.pickle`` file to
 https://pytorch.org/memory_viz)
 
 .. figure:: ../_static/images/fts/cuda_allocation_active_timeline.png
