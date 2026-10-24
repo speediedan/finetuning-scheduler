@@ -113,7 +113,7 @@ CUDA as of PyTorch 2.15):
       - Other accelerators
     * - accelerator statistics (``collect_funcs.accelerator``)
       - ``torch.accelerator.memory_stats``
-      - ``torch.accelerator.memory_stats`` (the HIP caching allocator)
+      - ``torch.accelerator.memory_stats`` (the HIP caching allocator, with the same keys as CUDA)
       - expected (unverified): ``torch.accelerator.memory_stats``
       - where the backend implements ``torch.accelerator.memory_stats``
     * - allocator history (``allocator_history``)
@@ -140,8 +140,9 @@ likewise records the accelerator's activity (``ProfilerActivity.CUDA`` on both C
 ``ProfilerActivity.XPU`` on XPU where the PyTorch build's profiler records it, unverified) when the profiler supports
 it.
 
-The CUDA column is measured by the multi-GPU profiling example's test, which checks every snapshot's statistics,
-allocator history snapshots and ``FSDP2MemTracker`` reports on each rank. The XPU and other-accelerator columns follow
+The CUDA and ROCm columns are measured by the multi-GPU profiling example's test, which checks every snapshot's
+statistics, allocator history snapshots and ``FSDP2MemTracker`` reports on each rank, on NVIDIA and AMD GPUs with
+PyTorch 2.15 (a CUDA and a ROCm build). The XPU and other-accelerator columns follow
 from the APIs PyTorch provides there and have not been run: an API's presence does not show that a given build
 implements it.
 
