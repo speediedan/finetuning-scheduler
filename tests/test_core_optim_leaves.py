@@ -46,6 +46,25 @@ def test_inspect_phase0_opt_state():
                        "phase_0_params": ["logical::1.weight", "logical::1.bias"]}
 
 
+def test_inspect_phase0_opt_state_inspects_each_phase_once():
+    """``optim_inspect`` (a strategy adapter's, which can walk the module) is called once per phase plus once for
+    phase 0's check, however many parameters the module has (#122)."""
+    net = nn.Sequential(*[nn.Linear(2, 2) for _ in range(50)])
+    names = [n for n, _ in net.named_parameters()]
+    schedule = {0: {"params": names[:50]}, 1: {"params": names[50:]}}
+    for n, p in net.named_parameters():
+        p.requires_grad = n in schedule[0]["params"]
+    calls = []
+
+    def inspect(pl):
+        calls.append(len(pl))
+        return list(pl)
+
+    optimizer = torch.optim.SGD([p for p in net.parameters() if p.requires_grad], lr=0.1)
+    assert inspect_phase0_opt_state(optimizer, net, schedule, inspect, list) == (0, 50, 100, {})
+    assert len(calls) == 1 + len(schedule)
+
+
 @pytest.mark.parametrize("plateau", [False, True], ids=["steplr", "rlrop"])
 def test_clean_and_reconfigure_for_phase0(plateau):
     net = _net()

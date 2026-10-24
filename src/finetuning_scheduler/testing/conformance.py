@@ -224,9 +224,13 @@ class TunableViewConformance:
         compile_schedule(view_default_schedule(view), view)
 
     def _thaw_exact(self) -> None:
-        """Compiling a logical name is deterministic, and thawing the result flips exactly those tensors."""
-        for name in self._sample(self._fresh()):
-            view = self._fresh()
+        """Compiling a logical name is deterministic, and thawing the result flips exactly those tensors.
+
+        One view serves every name: each thaw starts from a frozen root, and determinism is checked by compiling a
+        name twice on the same view, so a fresh view per name (a whole model and wrapper each) would add only cost.
+        """
+        view = self._fresh()
+        for name in self._sample(view):
             physical = view.to_physical([name])[name]
             if any(is_frozen_role(view.roles().get(p, "base")) for p in physical):
                 continue
