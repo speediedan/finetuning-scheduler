@@ -96,7 +96,9 @@ Configuration
 Backend Support
 ***************
 
-Which metrics each backend provides:
+Which metrics each backend provides (accelerator statistics also include any key the backend's own
+``torch.<device type>.memory_stats`` reports that the device-generic API does not, such as ``num_oom_rejections`` on
+CUDA as of PyTorch 2.15):
 
 .. list-table::
     :header-rows: 1

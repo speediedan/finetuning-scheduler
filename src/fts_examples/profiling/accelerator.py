@@ -17,6 +17,7 @@ Device-generic helpers that let the MemProfiler collect accelerator memory stati
 assuming CUDA.
 """
 from types import ModuleType
+from typing import Any
 
 import torch
 
@@ -57,6 +58,32 @@ def allocator_history_module(device_type: str | None = None) -> ModuleType | Non
     if all(hasattr(memory_mod, attr) for attr in ("_record_memory_history", "_dump_snapshot")):
         return memory_mod
     return None
+
+
+def accelerator_memory_stats() -> dict[str, Any]:
+    """The current accelerator's memory allocator statistics.
+
+    The device-generic ``torch.accelerator.memory_stats`` provides them, and any key the backend's own
+    ``torch.<device type>.memory_stats`` adds is included as well (``num_oom_rejections`` on CUDA and ROCm as of
+    PyTorch 2.15), so collection through the device-generic API loses no statistic the backend reports. A backend
+    without device-generic statistics falls back to its own ``memory_stats``, if it has one.
+
+    Returns:
+        dict[str, Any]: The flattened allocator statistics.
+
+    Raises:
+        RuntimeError: If the backend provides no memory statistics.
+    """
+    backend_stats_fn = getattr(getattr(torch, accelerator_type() or "", None), "memory_stats", None)
+    try:
+        stats = dict(torch.accelerator.memory_stats())
+    except RuntimeError:
+        if backend_stats_fn is None:
+            raise
+        return dict(backend_stats_fn())
+    if backend_stats_fn is not None:
+        stats.update({k: v for k, v in backend_stats_fn().items() if k not in stats})
+    return stats
 
 
 def record_allocator_history() -> None:

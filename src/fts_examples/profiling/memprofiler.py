@@ -40,7 +40,8 @@ from lightning.fabric.utilities.cloud_io import get_filesystem
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 
 from fts_examples.cfg_utils import resolve_funcs
-from fts_examples.profiling.accelerator import accelerator_backend, accelerator_type, allocator_history_module
+from fts_examples.profiling.accelerator import (accelerator_backend, accelerator_memory_stats, accelerator_type,
+                                               allocator_history_module)
 from fts_examples.profiling.config import MemProfilerCfg
 
 
@@ -221,7 +222,7 @@ class MemProfiler:
 
     def _collect_accelerator_stats(self, snap_key: str) -> None:
         try:
-            stats = torch.accelerator.memory_stats()
+            stats = accelerator_memory_stats()
         except RuntimeError as err:  # a backend without device-generic memory statistics
             rank_zero_warn(f"Disabling accelerator memory statistics collection since the `{accelerator_backend()}`"
                            f" backend does not provide them: {err}")

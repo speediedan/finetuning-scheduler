@@ -24,6 +24,7 @@ from fts_examples.profiling import accelerator as accel  # noqa: E402
 from fts_examples.profiling import (ExtendedPyTorchProfiler, MemProfiler, MemProfilerCfg, MemProfilerFuncs,  # noqa: E402
                                     ProfilerHooksMixin)
 from tests.helpers.boring_models import BoringModel  # noqa: E402
+from tests.helpers.runif import RunIf  # noqa: E402
 
 
 @pytest.fixture
@@ -100,6 +101,24 @@ def test_accelerator_helpers(monkeypatch):
     assert accel.accelerator_type() is None
 
 
+def test_accelerator_memory_stats_merge(monkeypatch):
+    def unsupported():
+        raise RuntimeError("memory stats are not supported")
+
+    monkeypatch.setattr(accel, "accelerator_type", lambda: "cuda")
+    monkeypatch.setattr(torch.accelerator, "memory_stats", lambda: {"allocated_bytes.all.current": 1})
+    monkeypatch.setattr(torch.cuda, "memory_stats", lambda: {"allocated_bytes.all.current": 2, "num_oom_rejections": 0})
+    # device-generic values win, the backend adds the keys they lack
+    assert accel.accelerator_memory_stats() == {"allocated_bytes.all.current": 1, "num_oom_rejections": 0}
+    monkeypatch.setattr(torch.accelerator, "memory_stats", unsupported)
+    assert accel.accelerator_memory_stats() == {"allocated_bytes.all.current": 2, "num_oom_rejections": 0}
+    monkeypatch.setattr(accel, "accelerator_type", lambda: "fakeacc")  # a backend with no `memory_stats` of its own
+    with pytest.raises(RuntimeError, match="not supported"):
+        accel.accelerator_memory_stats()
+    monkeypatch.setattr(torch.accelerator, "memory_stats", lambda: {"allocated_bytes.all.current": 1})
+    assert accel.accelerator_memory_stats() == {"allocated_bytes.all.current": 1}
+
+
 def _connected_profiler(cfg: MemProfilerCfg, tmp_path) -> MemProfiler:
     memprofiler = MemProfiler()
     memprofiler.connect(SimpleNamespace(memprofiler_cfg=cfg))
@@ -173,3 +192,16 @@ def test_memprofiler_cpu_fit(no_accelerator, tmp_path):
     assert {"rss", "vms", "npp_diff", "rss_diff"} <= set(end_stats)
     assert not any(k.startswith("allocated_bytes") for k in end_stats)
     assert not list((tmp_path / "memprofiler").glob("*_alloc_rank_*.pickle"))
+
+
+@RunIf(min_cuda_gpus=1)
+def test_accelerator_stats_match_cuda_stats():
+    """On CUDA and ROCm, the device-generic statistics the MemProfiler collects carry every key
+    ``torch.cuda.memory_stats`` does, so moving collection to ``torch.accelerator`` loses none."""
+    device = torch.device("cuda", torch.cuda.current_device())
+    keep = torch.ones(1024, device=device)
+    stats = accel.accelerator_memory_stats()
+    assert set(torch.cuda.memory_stats()) <= set(stats)
+    assert stats["allocated_bytes.all.current"] >= keep.nbytes
+    assert accel.allocator_history_module() is torch.cuda.memory
+    assert accel.accelerator_backend() == ("rocm" if torch.version.hip else "cuda")

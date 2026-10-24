@@ -132,6 +132,8 @@ def test_model_parallel_examples(tmpdir, config_files):
     cli_args = [
         f"--trainer.default_root_dir={tmpdir.strpath}", "--trainer.max_epochs=1",  "--trainer.limit_train_batches=2",
     ]
+    if "profiling/memprofiler_demo.yaml" in config_files:  # write the profiling artifacts where they are checked
+        cli_args.append(f"--trainer.logger.init_args.save_dir={tmpdir.strpath}")
     command = ["python", example_script, "fit"] + config_locs + cli_args
     cp = subprocess.run(command, capture_output=True, text=True)
     stdout_lines, stderr_lines = cp.stdout.splitlines(), cp.stderr.splitlines()
