@@ -20,6 +20,25 @@ build_version(){
 	docker tag ${azpl_name} ${registry_name}:${azpl_name} >> $docker_build_log
 }
 
+# ROCm twin of build_version (#57): the base from dockers/base-rocm, then the same azpl-init layer on top of it. iv_ref
+# carries ["rocm"] (the wheel index) in place of ["cuda"], and ["channel"] ("" or "test"). The tags carry the backend
+# (base-rocm<ver>-..., ...-rocm<ver>-azpl-init), so a ROCm image can never shadow a CUDA tag.
+build_rocm_version(){
+	local -n iv_ref="$1"
+	base_name=$2
+	azpl_name=$3
+	echo "Building ROCm base image name: ${base_name}" >> $docker_build_log
+	docker image build -t ${base_name} -f dockers/base-rocm/Dockerfile --build-arg ROCM_VERSION=${iv_ref['rocm']} \
+	  --build-arg PYTHON_VERSION=${iv_ref['python']} --build-arg PYTORCH_VERSION=${iv_ref['pytorch']} \
+	  --build-arg TORCH_CHANNEL=${iv_ref['channel']:-} --no-cache . >> $docker_build_log
+	docker tag ${base_name} ${registry_name}:${base_name} >> $docker_build_log
+	echo "Building ROCm azpl-init image name: ${azpl_name}" >> $docker_build_log
+	docker image build -t ${azpl_name} -f dockers/fts-az-base/Dockerfile \
+	  --build-arg PYTHON_VERSION=${iv_ref["python"]} --build-arg CUST_BASE=rocm${iv_ref["rocm"]}- \
+	  --build-arg PYTORCH_VERSION=${iv_ref["pytorch"]} --no-cache . >> $docker_build_log
+	docker tag ${azpl_name} ${registry_name}:${azpl_name} >> $docker_build_log
+}
+
 maybe_deactivate(){
     # `deactivate` is a shell function defined by a venv's activate script, so it only exists if this
     # shell sourced one. A non-interactive invocation can inherit the exported VIRTUAL_ENV without the

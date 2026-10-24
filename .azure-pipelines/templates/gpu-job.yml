@@ -1,0 +1,177 @@
+# The any-vendor GPU job (#57): one job that runs on either GPU agent, choosing its image and device options at RUNTIME
+# from the agent's own GPU_VENDOR (declared in the agent's `.env`, so it is also a capability). A container resource is
+# fixed before the agent is known, which is why this is a host job that starts its own container rather than an Azure
+# container job like gpu-tests.yml.
+#
+# Admission is by demands: the job class (`ci-any-vendor`, `ci-vendor-marked`, `ci-release` or `ci-proof`) and the
+# project (`ci-fts`) are user capabilities an operator toggles on each agent, and a vendor-demanded leg adds
+# `GPU_VENDOR -equals <vendor>`. The phases, their manifests and their reports are those of gpu-tests.yml, run by
+# .azure-pipelines/scripts/gpu_job_container.sh inside the container.
+parameters:
+  - name: jobName
+    type: string
+  # any: either agent. nvidia/amd: a vendor-demanded leg (vendor-marked tests or a release leg).
+  - name: vendor
+    type: string
+    values: [any, nvidia, amd]
+  - name: jobClass
+    type: string
+    values: [ci-any-vendor, ci-vendor-marked, ci-release, ci-proof]
+  - name: project
+    type: string
+    default: ci-fts
+    values: [ci-fts]
+  # {nvidia: <image>@sha256:..., amd: <image>@sha256:...}: digest-pinned, or the job fails before it starts anything.
+  - name: images
+    type: object
+  # full: every standalone test; smoke: tests/.standalone_smoke; auto: as gpu-tests.yml decides (standalone_scope.sh).
+  - name: scope
+    type: string
+    default: full
+    values: [smoke, full, auto]
+  - name: poolReverse
+    type: boolean
+    default: false
+  - name: dependsOn
+    type: object
+    default: []
+
+jobs:
+  - job: ${{ parameters.jobName }}
+    dependsOn: ${{ parameters.dependsOn }}
+    # up to 60 minutes waiting for the host leases, then about 60 minutes of install and tests with the full suite
+    timeoutInMinutes: 150
+    cancelTimeoutInMinutes: 2
+    pool:
+      name: Default
+      demands:
+        - Agent.OS -equals Linux
+        - GPU_VENDOR
+        - GPU_COUNT -equals 2
+        - ${{ parameters.jobClass }}
+        - ${{ parameters.project }}
+        - ${{ if ne(parameters.vendor, 'any') }}:
+            - GPU_VENDOR -equals ${{ parameters.vendor }}
+    workspace:
+      clean: all
+    variables:
+      FTS_EXPECTED_VENDOR: ${{ parameters.vendor }}
+      FTS_CTR: fts-$(Build.BuildId)-$(System.JobAttempt)-${{ parameters.jobName }}
+    steps:
+      - checkout: self
+
+      - bash: |
+          set -euo pipefail
+          # One table maps the agent's vendor to its image, device options and the device node that must exist.
+          case "${GPU_VENDOR:-}" in
+            nvidia) image="$IMAGE_NVIDIA"; devices='--gpus all'; node=/dev/nvidiactl ;;
+            amd)    image="$IMAGE_AMD";    devices='--device=/dev/kfd --device=/dev/dri'; node=/dev/kfd ;;
+            *) echo "##vso[task.logissue type=error]agent GPU_VENDOR '${GPU_VENDOR:-}' is not nvidia or amd"; exit 1 ;;
+          esac
+          if [[ "$FTS_EXPECTED_VENDOR" != any && "$FTS_EXPECTED_VENDOR" != "$GPU_VENDOR" ]]; then
+            echo "##vso[task.logissue type=error]demanded $FTS_EXPECTED_VENDOR, agent reports $GPU_VENDOR"; exit 1
+          fi
+          test -e "$node" || { echo "##vso[task.logissue type=error]no ${node} on $(Agent.Name)"; exit 1; }
+          [[ "$image" == *@sha256:* ]] || { echo "##vso[task.logissue type=error]image is not digest-pinned: ${image}"; exit 1; }
+          scope="$SCOPE"
+          [[ "$scope" == auto ]] && scope=$(bash .azure-pipelines/scripts/standalone_scope.sh)
+          echo "agent $(Agent.Name): vendor ${GPU_VENDOR}, image ${image}, standalone scope ${scope}"
+          echo "##vso[task.setvariable variable=FTS_GPU_VENDOR]$GPU_VENDOR"
+          echo "##vso[task.setvariable variable=FTS_IMAGE]$image"
+          echo "##vso[task.setvariable variable=FTS_DEVICE_OPTIONS]$devices"
+          echo "##vso[task.setvariable variable=FTS_STANDALONE_SCOPE]$scope"
+        env:
+          IMAGE_NVIDIA: ${{ parameters.images.nvidia }}
+          IMAGE_AMD: ${{ parameters.images.amd }}
+          SCOPE: ${{ parameters.scope }}
+        displayName: 'Select runtime from agent vendor'
+
+      - bash: |
+          set -euo pipefail
+          mkdir -p "$(Build.ArtifactStagingDirectory)/evidence"
+          docker pull "$(FTS_IMAGE)"
+          # An AMD host names the devices its lease tool cannot discover, and the devices ROCr may use.
+          extra=()
+          [[ -r /tmp/di_leases/devices.inventory ]] && extra+=(-e "GPU_LEASE_DEVICES=$(cat /tmp/di_leases/devices.inventory)")
+          [[ -n "${ROCR_VISIBLE_DEVICES:-}" ]] && extra+=(-e "ROCR_VISIBLE_DEVICES=${ROCR_VISIBLE_DEVICES}")
+          # sleep outlives the job timeout by 5 minutes, so a container leaked by an agent crash exits on its own and
+          # the kernel drops its lease locks. The checkout is mounted at its host path, so a path a step prints for the
+          # agent (special_tests.sh's `##vso[task.uploadfile]` log) is valid on the host too.
+          # shellcheck disable=SC2086
+          docker run -d --rm --name "$(FTS_CTR)" $(FTS_DEVICE_OPTIONS) --shm-size=512m \
+            -v /tmp/di_leases:/gpu_leases \
+            -v /opt/az_pipeline_agent/gpu_lease.sh:/gpu_lease_tool:ro \
+            -v "$(Build.SourcesDirectory):$(Build.SourcesDirectory)" -w "$(Build.SourcesDirectory)" \
+            -v "$(Build.ArtifactStagingDirectory)/evidence:/evidence" \
+            -e PL_RUN_CUDA_TESTS=1 -e FTS_GPU_VENDOR="$(FTS_GPU_VENDOR)" -e FTS_IMAGE="$(FTS_IMAGE)" \
+            -e FTS_STANDALONE_SCOPE="$(FTS_STANDALONE_SCOPE)" -e FTS_POOL_REVERSE="${POOL_REVERSE}" \
+            -e BUILD_BUILDID="$(Build.BuildId)" "${extra[@]}" \
+            "$(FTS_IMAGE)" sleep 9300
+        env:
+          POOL_REVERSE: ${{ parameters.poolReverse }}
+        displayName: 'Start job container'
+
+      - bash: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh install
+        displayName: 'Install dependencies'
+
+      - bash: |
+          set -e
+          docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh collect
+          echo "##vso[task.setvariable variable=phasesCollected]true"
+        displayName: 'Collect phase manifests'
+
+      - bash: |
+          set -e
+          docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh lease
+          echo "##vso[task.setvariable variable=leaseHeld]true"
+        displayName: 'Acquire host GPU leases'
+
+      - bash: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh verify
+        displayName: 'Verify backend under lease'
+
+      # Every phase runs whether or not an earlier one failed (only with the leases held), so its report says what
+      # happened to each node rather than "did not run".
+      - bash: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh phase gpu-nonstandalone
+        condition: and(succeededOrFailed(), eq(variables['leaseHeld'], 'true'))
+        displayName: 'Testing: CUDA/HIP'
+
+      - bash: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh phase standalone
+        condition: and(succeededOrFailed(), eq(variables['leaseHeld'], 'true'))
+        displayName: 'Testing: standalone multi-gpu'
+
+      - bash: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh phase examples
+        condition: and(succeededOrFailed(), eq(variables['leaseHeld'], 'true'))
+        displayName: 'Testing: Examples'
+
+      - bash: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh phase examples-multigpu
+        condition: and(succeededOrFailed(), eq(variables['leaseHeld'], 'true'))
+        displayName: 'Testing: Multi-GPU Examples'
+
+      - ${{ if eq(parameters.poolReverse, true) }}:
+          - bash: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh phase pool-reverse
+            condition: and(succeededOrFailed(), eq(variables['leaseHeld'], 'true'))
+            displayName: 'Testing: distributed pool in reverse order'
+
+      # Gating: a phase that is not `clean` fails the job, under the vendor the agent reported.
+      - bash: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh report
+        condition: and(succeededOrFailed(), eq(variables['phasesCollected'], 'true'), eq(variables['leaseHeld'], 'true'))
+        displayName: 'Phase reports'
+
+      # Release evidence is published only by vendor-demanded release legs, under the vendor named by the demand. Every
+      # other class publishes under the vendor the agent actually reported.
+      - ${{ if eq(parameters.jobClass, 'ci-release') }}:
+          - publish: $(Build.ArtifactStagingDirectory)/evidence
+            artifact: fts-release-${{ parameters.vendor }}-$(System.JobAttempt)
+            condition: and(always(), eq(variables['phasesCollected'], 'true'))
+            displayName: 'Publish release phase evidence'
+      - ${{ if ne(parameters.jobClass, 'ci-release') }}:
+          - publish: $(Build.ArtifactStagingDirectory)/evidence
+            artifact: fts-${{ parameters.jobName }}-$(FTS_GPU_VENDOR)-$(System.JobAttempt)
+            condition: and(always(), eq(variables['phasesCollected'], 'true'))
+            displayName: 'Publish phase evidence'
+
+      - bash: |
+          docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh release || true
+          docker rm -f "$(FTS_CTR)" >/dev/null 2>&1 || true
+        condition: always()
+        displayName: 'Release host leases and remove container'
