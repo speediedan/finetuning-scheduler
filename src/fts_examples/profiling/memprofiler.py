@@ -204,14 +204,19 @@ class MemProfiler:
         """Dumps a snapshot of the accelerator memory allocator history.
 
         The snapshot is saved to a file named ``<device type>_alloc_rank_<snap_key>.pickle`` (``cuda_alloc_rank_...``
-        on CUDA and ROCm) in the directory specified by ``memprof_log_dir``.
+        on CUDA and ROCm) in the directory specified by ``memprof_log_dir``. Without an accelerator, or on a backend
+        without allocator history, it is skipped with a warning.
 
         Args:
             snap_key: A tuple used to identify the snapshot.
         """
         device_type = accelerator_type()
+        if (memory_mod := allocator_history_module(device_type)) is None:
+            rank_zero_warn(f"Skipping the allocator history snapshot `{snap_key}` since the `{accelerator_backend()}`"
+                           " backend does not support allocator history recording.")
+            return
         snapshot_file = (self.memprof_log_dir / f"{device_type}_alloc_rank_{snap_key}.pickle")
-        allocator_history_module(device_type)._dump_snapshot(str(snapshot_file))
+        memory_mod._dump_snapshot(str(snapshot_file))
 
     def cuda_allocator_history_snap(self, snap_key: tuple) -> None:
         """Deprecated alias of :meth:`allocator_history_snap`, unsupported no earlier than 2.17."""
@@ -381,7 +386,7 @@ class MemProfiler:
             if self.memprofiler_cfg.dump_memorystats_yaml:
                 filename = self.memprof_log_dir / f"rank_{self.rank}_memory_stats.yaml"
                 with open(filename, "w", newline="") as f:
-                    yaml.dump(dict(self.memory_stats), f)  # a plain mapping, readable by `yaml.safe_load`
+                    yaml.dump(dict(self.memory_stats), f)  # a plain outer mapping, without a `defaultdict` tag
         if self.fsdp_memory_stats:
             self.save_fsdp_mem_reports()
 

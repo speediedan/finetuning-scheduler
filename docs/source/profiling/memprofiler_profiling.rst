@@ -89,7 +89,9 @@ Configuration
     The configuration keys ``cuda_allocator_history``, ``collect_funcs.cuda`` and
     ``collect_funcs.cuda_allocator_history`` are deprecated in favor of ``allocator_history``,
     ``collect_funcs.accelerator`` and ``collect_funcs.allocator_history``. The old names still work, with a
-    ``FutureWarning``, until no earlier than 2.17.
+    ``FutureWarning``, until no earlier than 2.17. A deprecated function set is merged into (added to) its
+    replacement, and ``cuda_allocator_history`` sets ``allocator_history`` unless ``allocator_history`` is set too, in
+    which case ``allocator_history`` wins.
 
 .. _memprofiler-backend-support:
 
@@ -112,30 +114,36 @@ CUDA as of PyTorch 2.15):
     * - accelerator statistics (``collect_funcs.accelerator``)
       - ``torch.accelerator.memory_stats``
       - ``torch.accelerator.memory_stats`` (the HIP caching allocator)
-      - ``torch.accelerator.memory_stats``
+      - expected (unverified): ``torch.accelerator.memory_stats``
       - where the backend implements ``torch.accelerator.memory_stats``
     * - allocator history (``allocator_history``)
       - ``torch.cuda.memory``
       - ``torch.cuda.memory`` (backed by HIP)
-      - ``torch.xpu.memory``
+      - expected (unverified): ``torch.xpu.memory``
       - where ``torch.<device type>.memory`` provides it (no other backend does as of PyTorch 2.15)
     * - ``FSDP2MemTracker``
       - yes
       - yes
-      - yes, without the caching allocator's block rounding
-      - yes, without the caching allocator's block rounding
+      - expected (unverified), without the caching allocator's block rounding
+      - expected (unverified), without the caching allocator's block rounding
     * - host memory and memory hooks
       - yes
       - yes
-      - yes
-      - yes
+      - yes (host-side, independent of the backend)
+      - yes (host-side, independent of the backend)
 
 A metric a backend does not provide is skipped with a warning naming the backend rather than failing: allocator history
 is disabled when the configuration is created, and accelerator statistics on the first collection that the backend
 refuses. Without any accelerator, only host memory, memory hooks and ``FSDP2MemTracker`` are collected. On ROCm builds of
 PyTorch the accelerator's device type is ``cuda``, so ROCm artifacts carry ``cuda`` names. The extended PyTorch Profiler
-likewise records the accelerator's activity (``ProfilerActivity.CUDA`` on both CUDA and ROCm, ``ProfilerActivity.XPU``
-on XPU) when the profiler supports it.
+likewise records the accelerator's activity (``ProfilerActivity.CUDA`` on both CUDA and ROCm, and
+``ProfilerActivity.XPU`` on XPU where the PyTorch build's profiler records it, unverified) when the profiler supports
+it.
+
+The CUDA column is measured by the multi-GPU profiling example's test, which checks every snapshot's statistics,
+allocator history snapshots and ``FSDP2MemTracker`` reports on each rank. The XPU and other-accelerator columns follow
+from the APIs PyTorch provides there and have not been run: an API's presence does not show that a given build
+implements it.
 
 Reviewing the Results
 *********************

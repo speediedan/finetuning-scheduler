@@ -77,7 +77,8 @@ class MemProfilerCfg:
 
     :param enabled: Whether to enable memory profiling.
     :param collect_funcs: A MemProfilerFuncs instance specifying the functions to collect per memory collection type.
-    :param allocator_history: Whether to collect accelerator memory allocator history (CUDA, ROCm and XPU).
+    :param allocator_history: Whether to collect accelerator memory allocator history (CUDA, ROCm and XPU). Defaults
+        to ``False``.
     :param track_fsdp_mem: Whether to collect FSDP memory statistics.
     :param fsdp_mem_track_module_depth: The depth of FSDP modules to track.
     :param fsdp_mem_tracker_tabulate: Whether to print FSDP memory statistics in a tabular format.
@@ -93,12 +94,12 @@ class MemProfilerCfg:
     :param saved_tensors_funcs: A list of saved tensors functions.
     :param save_hook_attrs: A list of module state attributes to save.
     :param retain_hooks_for_funcs: A set of functions to retain memory hooks for.
-    :param cuda_allocator_history: Deprecated alias of ``allocator_history``.
+    :param cuda_allocator_history: Deprecated alias of ``allocator_history``, which takes precedence when both are set.
     """
     enabled: bool = False
     # specify funcs to collect per memory collection type, a default list to apply to all types or both composed
     collect_funcs: MemProfilerFuncs = field(default_factory=MemProfilerFuncs)
-    allocator_history: bool = False
+    allocator_history: bool | None = None  # `False` unless set (`None` tells an unset key from an explicit one)
     track_fsdp_mem: bool = False
     fsdp_mem_track_module_depth: int = 2
     fsdp_mem_tracker_tabulate: bool = False
@@ -126,8 +127,10 @@ class MemProfilerCfg:
     def __post_init__(self) -> None:
         if self.cuda_allocator_history is not None:
             _deprecated_key_warning("cuda_allocator_history", "allocator_history")
-            self.allocator_history = self.allocator_history or self.cuda_allocator_history
+            if self.allocator_history is None:  # an explicitly set `allocator_history` takes precedence
+                self.allocator_history = self.cuda_allocator_history
             self.cuda_allocator_history = None
+        self.allocator_history = bool(self.allocator_history)
         if not self.enabled:
             return
         has_hooks = any(getattr(self.memory_hooks, ht.name) for ht in fields(self.memory_hooks))

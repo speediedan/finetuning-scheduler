@@ -65,6 +65,11 @@ def test_deprecated_allocator_history_key(no_accelerator):
     assert [w.category for w in record] == [FutureWarning, UserWarning]
     assert "no accelerator detected" in str(record[1].message)
     assert not cfg.allocator_history
+    # an explicitly set deprecated key overrides the new key's default, but not an explicitly set new key
+    for new, old, expected in ((None, False, False), (None, True, True), (False, True, False), (True, False, True)):
+        with pytest.warns(FutureWarning):
+            assert MemProfilerCfg(allocator_history=new, cuda_allocator_history=old).allocator_history is expected
+    assert MemProfilerCfg().allocator_history is False
 
 
 def test_no_accelerator_disables_accelerator_collection(no_accelerator, recwarn):
@@ -117,6 +122,11 @@ def test_accelerator_memory_stats_merge(monkeypatch):
         accel.accelerator_memory_stats()
     monkeypatch.setattr(torch.accelerator, "memory_stats", lambda: {"allocated_bytes.all.current": 1})
     assert accel.accelerator_memory_stats() == {"allocated_bytes.all.current": 1}
+    # a failing supplement keeps the device-generic statistics
+    monkeypatch.setattr(accel, "accelerator_type", lambda: "cuda")
+    monkeypatch.setattr(torch.cuda, "memory_stats", unsupported)
+    with pytest.warns(UserWarning, match="Skipping the `cuda` backend's own memory statistics"):
+        assert accel.accelerator_memory_stats() == {"allocated_bytes.all.current": 1}
 
 
 def _connected_profiler(cfg: MemProfilerCfg, tmp_path) -> MemProfiler:
@@ -156,6 +166,11 @@ def test_allocator_history_snap(fake_accelerator, monkeypatch, tmp_path):
     with pytest.warns(FutureWarning, match="cuda_allocator_history_snap` is deprecated"):
         memprofiler.cuda_allocator_history_snap("0.training_step.2.start")
     assert dumped == [str(tmp_path / f"fakeacc_alloc_rank_0.training_step.2.{ctx}.pickle") for ctx in ("end", "start")]
+    # a backend without allocator history skips the snapshot rather than failing
+    monkeypatch.setattr("fts_examples.profiling.memprofiler.allocator_history_module", lambda device_type: None)
+    with pytest.warns(UserWarning, match="`fakeacc` backend does not support allocator history"):
+        memprofiler.allocator_history_snap("0.training_step.3.end")
+    assert len(dumped) == 2
 
 
 def test_extended_profiler_activities(monkeypatch):

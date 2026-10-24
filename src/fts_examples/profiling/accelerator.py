@@ -20,6 +20,7 @@ from types import ModuleType
 from typing import Any
 
 import torch
+from lightning.fabric.utilities import rank_zero_warn
 
 
 def accelerator_type() -> str | None:
@@ -64,8 +65,10 @@ def accelerator_memory_stats() -> dict[str, Any]:
     """The current accelerator's memory allocator statistics.
 
     The device-generic ``torch.accelerator.memory_stats`` provides them, and any key the backend's own
-    ``torch.<device type>.memory_stats`` adds is included as well (``num_oom_rejections`` on CUDA and ROCm as of
-    PyTorch 2.15), so collection through the device-generic API loses no statistic the backend reports. A backend
+    ``torch.<device type>.memory_stats`` adds is included as well (``num_oom_rejections`` on CUDA as of PyTorch
+    2.15), so collection through the device-generic API loses no statistic the backend reports. The two calls sample
+    the allocator one after the other, so a supplementary key can be one call newer than the device-generic keys
+    beside it. A supplement that fails is skipped with a warning, keeping the device-generic statistics. A backend
     without device-generic statistics falls back to its own ``memory_stats``, if it has one.
 
     Returns:
@@ -74,7 +77,8 @@ def accelerator_memory_stats() -> dict[str, Any]:
     Raises:
         RuntimeError: If the backend provides no memory statistics.
     """
-    backend_stats_fn = getattr(getattr(torch, accelerator_type() or "", None), "memory_stats", None)
+    device_type = accelerator_type()
+    backend_stats_fn = None if device_type is None else getattr(getattr(torch, device_type, None), "memory_stats", None)
     try:
         stats = dict(torch.accelerator.memory_stats())
     except RuntimeError:
@@ -82,7 +86,12 @@ def accelerator_memory_stats() -> dict[str, Any]:
             raise
         return dict(backend_stats_fn())
     if backend_stats_fn is not None:
-        stats.update({k: v for k, v in backend_stats_fn().items() if k not in stats})
+        try:
+            supplement = backend_stats_fn()
+        except RuntimeError as err:  # the supplement is additive, so its failure keeps the device-generic statistics
+            rank_zero_warn(f"Skipping the `{device_type}` backend's own memory statistics, which failed: {err}")
+        else:
+            stats.update({k: v for k, v in supplement.items() if k not in stats})
     return stats
 
 
