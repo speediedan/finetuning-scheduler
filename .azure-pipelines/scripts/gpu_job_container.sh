@@ -103,7 +103,8 @@ PY
     ;;
   report)
     # One report per collected phase, under the vendor the agent reported. Exits non-zero when any phase is not
-    # clean, so a vendor-marked or proof job is decided by its reports and not only by its test steps.
+    # clean, so a vendor-marked or proof job is decided by its reports and not only by its test steps. A skip or xfail
+    # is clean only when tests/gpu_ci/reviewed_exclusions.json gives its reason.
     venv
     status=0
     for manifest in "$out"/manifests/*.json; do
@@ -115,6 +116,7 @@ PY
       fi
       python -m tests.gpu_ci.phase_manifest report --phase "$phase" --out-dir "$out" --vendor "${FTS_GPU_VENDOR:?}" \
         --evidence-class pipeline --lease-mode "$(cat "${pid}.mode" 2>/dev/null)" --image "${FTS_IMAGE:?}" \
+        --reviewed-exclusions tests/gpu_ci/reviewed_exclusions.json \
         || { echo "##vso[task.logissue type=error]phase ${phase}: report is not clean"; status=1; }
     done
     exit $status

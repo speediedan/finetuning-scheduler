@@ -1,0 +1,10 @@
+{
+  "tests/test_finetuning_scheduler_callback.py::test_fts_distributed_compat[deepspeed_s2]": "RunIf(deepspeed=True): DeepSpeed is not installed in the CI images",
+  "tests/test_model_parallel.py::test_fsdp1_checkpoint_resumes_under_fsdp2[sgd-full]": "strict xfail (stateless_optim_upstream): Lightning cannot load a full checkpoint with empty optimizer state",
+  "tests/test_model_parallel.py::test_fsdp1_checkpoint_resumes_under_fsdp2[sgd-sharded]": "strict xfail (stateless_optim_upstream): Lightning cannot load a full checkpoint with empty optimizer state",
+  "src/fts_examples/test_examples.py::test_model_parallel_examples[fts_fsdp_auto_plan]": "standalone example: skipped in the examples phase, run by examples-multigpu",
+  "src/fts_examples/test_examples.py::test_model_parallel_examples[fts_tp_plan]": "standalone example: skipped in the examples phase, run by examples-multigpu",
+  "src/fts_examples/test_examples.py::test_model_parallel_examples[fts_fsdp_profiling]": "standalone example: skipped in the examples phase, run by examples-multigpu",
+  "src/fts_examples/test_examples.py::test_model_parallel_examples_torch[torch_fsdp_plan]": "standalone example: skipped in the examples phase, run by examples-multigpu",
+  "src/fts_examples/test_examples.py::test_model_parallel_examples_torch[torch_tp_plan]": "standalone example: skipped in the examples phase, run by examples-multigpu"
+}
