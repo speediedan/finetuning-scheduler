@@ -12,10 +12,11 @@
 # limitations under the License.
 #
 # The steps of the any-vendor GPU job (.azure-pipelines/templates/gpu-job.yml, #57), run INSIDE its container with the
-# checkout at the working directory. Each phase runs exactly as in gpu-tests.yml; what differs is only that the image
-# and devices were chosen from the agent's GPU_VENDOR. Phase manifests, records and reports go to /evidence.
+# checkout at the working directory. They are the GPU phases of every pipeline that uses the template (gpu-tests.yml,
+# gpu-proof.yml), on whichever vendor's image and devices the agent's GPU_VENDOR chose. Phase manifests, records and
+# reports go to /evidence.
 #
-#   gpu_job_container.sh install | collect | verify | lease | phase <name> | report | release
+#   gpu_job_container.sh install | collect | verify | lease | phase <name> | coverage | report | release
 set -eo pipefail
 
 out=/evidence/fts-phases
@@ -100,6 +101,34 @@ PY
         ;;
       *) echo "unknown phase ${phase}" >&2; exit 2 ;;
     esac
+    ;;
+  coverage)
+    # The GPU coverage upload: the two phases it has always covered, each in its own data file, combined here. Either
+    # vendor's run covers the same lines (the AMD agent's parity runs lost none), so the upload names the vendor only
+    # in its run name. Without a token (a pipeline that does not map the secret), the report is written but not sent.
+    venv
+    data=()
+    for phase in gpu-nonstandalone standalone; do
+      f="${out}/coverage/${phase}/.coverage"
+      if [[ -f "$f" ]]; then data+=("$f"); else echo "##vso[task.logissue type=warning]no coverage data for ${phase}"; fi
+    done
+    python -m coverage combine --keep "${data[@]}"
+    python -m coverage report
+    python -m coverage xml
+    if [[ -z "${CODECOV_TOK:-}" ]]; then
+      echo "##vso[task.logissue type=warning]no Codecov token in this pipeline: coverage written, not uploaded"
+      exit 0
+    fi
+    curl -s https://keybase.io/codecovsecurity/pgp_keys.asc | gpg --no-default-keyring --keyring trustedkeys.gpg --import
+    curl -Os https://cli.codecov.io/latest/linux/codecov
+    curl -Os https://cli.codecov.io/latest/linux/codecov.SHA256SUM
+    curl -Os https://cli.codecov.io/latest/linux/codecov.SHA256SUM.sig
+    gpg --no-default-keyring --keyring trustedkeys.gpg --verify codecov.SHA256SUM.sig codecov.SHA256SUM
+    sha256sum -c codecov.SHA256SUM
+    chmod +x codecov
+    ./codecov upload-process --slug 'speediedan/finetuning-scheduler' -t "$CODECOV_TOK" \
+      --commit-sha "${BUILD_SOURCEVERSION:?}" --git-service 'github' -n "GPU-coverage-${FTS_GPU_VENDOR:?}" -F gpu -F pytest \
+      --env 'linux,azure' -f 'coverage.xml'
     ;;
   report)
     # One report per collected phase, under the vendor the agent reported. Exits non-zero when any phase is not

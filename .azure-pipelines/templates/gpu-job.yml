@@ -32,6 +32,10 @@ parameters:
   - name: poolReverse
     type: boolean
     default: false
+  # Combine the measured phases' coverage and upload it to Codecov (the pipeline maps CODECOV_TOKEN).
+  - name: uploadCoverage
+    type: boolean
+    default: false
   - name: dependsOn
     type: object
     default: []
@@ -105,7 +109,7 @@ jobs:
             -v "$(Build.ArtifactStagingDirectory)/evidence:/evidence" \
             -e PL_RUN_CUDA_TESTS=1 -e FTS_GPU_VENDOR="$(FTS_GPU_VENDOR)" -e FTS_IMAGE="$(FTS_IMAGE)" \
             -e FTS_STANDALONE_SCOPE="$(FTS_STANDALONE_SCOPE)" -e FTS_POOL_REVERSE="${POOL_REVERSE}" \
-            -e BUILD_BUILDID="$(Build.BuildId)" "${extra[@]}" \
+            -e BUILD_BUILDID="$(Build.BuildId)" -e BUILD_SOURCEVERSION="$(Build.SourceVersion)" "${extra[@]}" \
             "$(FTS_IMAGE)" sleep 9300
         env:
           POOL_REVERSE: ${{ parameters.poolReverse }}
@@ -151,6 +155,13 @@ jobs:
           - bash: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh phase pool-reverse
             condition: and(succeededOrFailed(), eq(variables['leaseHeld'], 'true'))
             displayName: 'Testing: distributed pool in reverse order'
+
+      - ${{ if eq(parameters.uploadCoverage, true) }}:
+          - bash: docker exec -e CODECOV_TOK "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh coverage
+            env:
+              CODECOV_TOK: $(CODECOV_TOKEN)  # explicit mapping required for secret azure pipeline variables
+            condition: and(succeededOrFailed(), eq(variables['leaseHeld'], 'true'))
+            displayName: 'Statistics'
 
       # Gating: a phase that is not `clean` fails the job, under the vendor the agent reported.
       - bash: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh report

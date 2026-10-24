@@ -1,7 +1,5 @@
-# Python package
-# Create and test a Python package on multiple Python versions.
-# Add steps that analyze code, save the dist with the build record, publish to a PyPI-compatible index, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/python
+# The multi-GPU pipeline on the self-hosted GPU agents: pull requests into main and release branches, builds of main,
+# release branches and tags, and a nightly full run.
 
 trigger:
   # tags:
@@ -49,261 +47,54 @@ schedules:
         - main
     always: false
 
+parameters:
+  # The images each vendor's agent runs, digest-pinned (the template refuses an undigested one). The NVIDIA image comes
+  # first: scripts/verify_version_consistency.py reads its tag for the torch, Python and Lightning versions.
+  - name: images
+    type: object
+    default:
+      nvidia: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-azpl-init@sha256:7a3c80e93d8030b58b39d6c4db1e6db9510f2a161e3c8ae4c3fb62a06a97eacc"
+      amd: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-rocm10.0-azpl-init@sha256:9c735f177b231baabcfe608e85d32bec4823e105e26b5b797994dd1dcfd27c9e"
+  # A manual run may pin one vendor's agent; every triggered build runs on either.
+  - name: vendor
+    type: string
+    default: any
+    values: [any, nvidia, amd]
+
+# One job, on whichever GPU agent is free (#57): the any-vendor template picks the image and device options from the
+# vendor the agent declares, runs the GPU phases under the host leases, uploads the GPU coverage, and fails when a
+# phase's report is not clean. A release branch or tag instead runs one leg per vendor, each demanding its vendor, so
+# a release has a green on both. The phases (.azure-pipelines/scripts/gpu_job_container.sh):
+#   - the CUDA tests that are not standalone (the hosted CPU matrix runs every other test in that collection);
+#   - the standalone tests: on a pull request into main, the smoke set unless it carries the `full-gpu-suite` label,
+#     and otherwise all of them (.azure-pipelines/scripts/standalone_scope.sh);
+#   - the examples and the multi-GPU examples;
+#   - on the nightly run only, the persistent distributed pool's modules in reverse order (FTS_REVERSE_ORDER), so a
+#     case that leaves state for the next one in its pool fails.
 jobs:
-  - job: pytest
-    strategy:
-      matrix:
-        'PyTorch | latest':
-          image: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-azpl-init"
-          scope: ""
-    # how long to run the job before automatically cancelling: up to 40 minutes waiting for the host leases, then about
-    # 35 minutes of install and tests with the full standalone suite
-    timeoutInMinutes: "120"
-    # how much time to give 'run always even if cancelled tasks' before stopping them
-    cancelTimeoutInMinutes: "2"
-
-    # The CUDA image below runs only on an NVIDIA agent. Each agent declares its vendor as GPU_VENDOR in its `.env`, so
-    # this demand keeps the job off a second, AMD agent in the same pool (#57) until the job selects its image from the
-    # agent it lands on.
-    pool:
-      name: default
-      demands:
-        - GPU_VENDOR -equals nvidia
-
-    variables:
-      # RunIf(min_cuda_gpus=...) and RunIf(bf16_cuda=True) tests run only with this opt-in, so a plain `pytest` on a
-      # shared GPU host never uses the GPUs unleased (tests/helpers/runif.py). This job holds the host lease, so it
-      # opts in once, for every step.
-      PL_RUN_CUDA_TESTS: "1"
-
-    container:
-      image: $(image)
-      mapDockerSocket: false
-      volumes:
-      - /var/run/user/998/docker.sock:/var/run/docker.sock
-      # Host GPU-lease rendezvous directory. `flock` works on the inode, so a bind-mounted lock file
-      # interlocks between this container and processes on the host -- which is what lets this job
-      # serialize against local multi-GPU runs WITHOUT any change to the agent installation itself.
-      # Absent on hosts that do not use the lease; the acquire step fails open in that case.
-      - /tmp/di_leases:/gpu_leases
-      # The host's lease tool, read-only, so this job queues in the same fair order as every local caller. An operator
-      # installs it (and re-installs it after it changes); the lease step falls back to the plain locks without it.
-      # Docker creates a missing bind-mount source as a DIRECTORY, which the lease step treats as absent.
-      - /opt/az_pipeline_agent/gpu_lease.sh:/gpu_lease_tool:ro
-      options: --gpus all --shm-size=512m
-
-    workspace:
-      clean: outputs
-
-    steps:
-
-    - bash: |
-        set -e  # Exit on any error
-        source /tmp/venvs/fts_dev/bin/activate
-
-        echo "=== Pre-installed torch version ==="
-        python -c "import torch; print(f'torch: {torch.__version__}')"
-
-        echo "=== Installing finetuning-scheduler with locked dependencies ==="
-        # Use UV_OVERRIDE for Lightning commit pinning
-        # NB: requirements.txt DOES pin torch on the stable channel (--no-emit-package torch is only
-        # passed on the prerelease code path in the lock script), so torch-excludes.txt is what keeps
-        # the image's pre-installed CUDA build from being replaced by a PyPI wheel. The pinned version
-        # and the image's version must therefore agree -- verify_version_consistency.py covers the
-        # image side, and the lockfile is regenerated from the same torch release.
-        export UV_OVERRIDE="${PWD}/requirements/ci/overrides.txt"
-        if ! uv pip install -e . -r requirements/ci/requirements.txt --excludes /tmp/venvs/fts_dev/torch-excludes.txt; then
-          echo "ERROR: Failed to install finetuning-scheduler with dependencies"
-          exit 1
-        fi
-        echo "✓ Finetuning-scheduler installation completed"
-
-        echo "=== Installed packages ==="
-        uv pip list
-      displayName: 'Install dependencies'
-
-    # What each GPU phase selects, written before any test runs (tests/gpu_ci/phase_manifest.py, #57). Collection only,
-    # with CUDA_VISIBLE_DEVICES emptied, so it needs no lease. The standalone scope is decided once, here, so the
-    # manifest and the standalone step cannot disagree about it.
-    # A collection error is a warning here (the test steps report it as well), so the manifests never stop a build.
-    - bash: |
-        set -e
-        source /tmp/venvs/fts_dev/bin/activate
-        # the checkout belongs to the host's agent uid, not this container's, so let git name the revision anyway
-        git config --global --add safe.directory "$(Build.SourcesDirectory)"
-        out="$(Agent.TempDirectory)/fts-phases"
-        mkdir -p "$out"  # the publish step always has a directory, even if collection fails outright
-        scope=$(bash .azure-pipelines/scripts/standalone_scope.sh)
-        echo "##vso[task.setvariable variable=standaloneScope]${scope}"
-        phases=(--phase gpu-nonstandalone --phase examples --phase examples-multigpu)
-        [[ "$(Build.Reason)" == Schedule ]] && phases+=(--phase pool-reverse)
-        python -m tests.gpu_ci.phase_manifest collect "${phases[@]}" --out-dir "$out" \
-          || echo "##vso[task.logissue type=warning]phase collection reported errors (see the lines above)"
-        python -m tests.gpu_ci.phase_manifest collect --phase standalone --scope "$scope" --out-dir "$out" \
-          || echo "##vso[task.logissue type=warning]standalone collection reported errors (see the line above)"
-        echo "##vso[task.setvariable variable=phasesCollected]true"
-      displayName: 'Collect phase manifests'
-
-    - bash: |
-        source /tmp/venvs/fts_dev/bin/activate
-        python requirements/collect_env_details.py
-        python -c "import torch ; print(f'PyTorch CUDA version: {torch.version.cuda}') ; mgpu = torch.cuda.device_count() ; assert mgpu >= 2, f'GPU: {mgpu}'"
-        # without the opt-in every CUDA test skips and the phases still pass, so fail here instead
-        python -c "import os ; assert os.environ.get('PL_RUN_CUDA_TESTS') == '1', 'PL_RUN_CUDA_TESTS is not set'"
-      displayName: 'Env details'
-
-    # Serialize the GPU phases against local GPU work on the self-hosted host: the whole server, then host memory
-    # (`cpu-heavy`). The agent already runs one Azure job at a time, so this exists to avoid colliding with interactive
-    # or agent sessions, a collision that surfaces as OOM or flaky timing rather than a clear error. Taken after the
-    # install, which needs neither. Through the host's lease tool when it is mounted (one fair queue for the GPUs
-    # and cpu-heavy, taken together), else through the plain locks (scripts/gpu_lease_wrap.sh, ci_host_lease_hold).
-    # Fails open only when the lease directory is not mounted; any other acquire failure fails the step, and the
-    # cleanup step releases whatever is held.
-    - bash: |
-        set -e
-        source scripts/gpu_lease_wrap.sh
-        ci_host_lease_hold /gpu_leases /gpu_lease_tool /tmp/azp_host_lease.pid 3600 "azure-$(Build.BuildId)" \
-          --gpus all --cpu-heavy
-        # for a step that runs after a failed one (succeededOrFailed): it may use the GPUs only if this step succeeded
-        echo "##vso[task.setvariable variable=leaseHeld]true"
-      displayName: 'Acquire host GPU leases'
-
-    # Only the CUDA tests that are not standalone: the hosted CPU matrix runs every other test in this collection, and
-    # the standalone step below runs the standalone ones (tests/conftest.py, FTS_CUDA_TESTS_ONLY). Each test step loads
-    # its phase's environment first (`run-env`): the recording plugin, the phase's record directory and, for a measured
-    # phase, its own coverage data file.
-    - bash: |
-        source /tmp/venvs/fts_dev/bin/activate
-        eval "$(python -m tests.gpu_ci.phase_manifest run-env --phase gpu-nonstandalone --out-dir "$(Agent.TempDirectory)/fts-phases")"
-        python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v --junitxml=$(Build.Repository.LocalPath)/test-results.xml --durations=50
-      env:
-        FTS_CUDA_TESTS_ONLY: "1"
-      displayName: 'Testing: CUDA'
-
-    # The standalone tests under tests/: on a pull request into main, the smoke set unless the pull request carries the
-    # `full-gpu-suite` label, and otherwise all of them (.azure-pipelines/scripts/standalone_scope.sh). The marker alone
-    # defines the partition, so a standalone test in a module whose name does not start with `test_f` is not silently
-    # left out of the full suite.
-    - bash: |
-        set -e
-        source /tmp/venvs/fts_dev/bin/activate
-        eval "$(python -m tests.gpu_ci.phase_manifest run-env --phase standalone --out-dir "$(Agent.TempDirectory)/fts-phases")"
-        scope="$(standaloneScope)"
-        echo "standalone scope: ${scope} (decided when the manifests were collected)"
-        if [[ "$scope" == smoke ]]; then
-          bash ./tests/special_tests.sh --mark_type=standalone --select_file=tests/.standalone_smoke
-        else
-          bash ./tests/special_tests.sh --mark_type=standalone
-        fi
-      displayName: 'Testing: standalone multi-gpu'
-
-    # - bash: |
-    #     source /tmp/venvs/fts_dev/bin/activate
-    #     bash ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0 1"
-    #   displayName: 'Testing: Experimental Multi-GPU'
-
-    # The upload covers the two phases it always has, now kept in their own data files and combined here.
-    - bash: |
-        source /tmp/venvs/fts_dev/bin/activate
-        data=()
-        for phase in gpu-nonstandalone standalone; do
-          f="$(Agent.TempDirectory)/fts-phases/coverage/${phase}/.coverage"
-          if [[ -f "$f" ]]; then data+=("$f"); else echo "##vso[task.logissue type=warning]no coverage data for ${phase}"; fi
-        done
-        python -m coverage combine --keep "${data[@]}"
-        python -m coverage report
-        python -m coverage xml
-        python -m coverage html
-        # curl -Os https://uploader.codecov.io/latest/linux/codecov
-
-        curl https://keybase.io/codecovsecurity/pgp_keys.asc | gpg --no-default-keyring --keyring trustedkeys.gpg --import
-        curl -Os https://cli.codecov.io/latest/linux/codecov
-        curl -Os https://cli.codecov.io/latest/linux/codecov.SHA256SUM
-        curl -Os https://cli.codecov.io/latest/linux/codecov.SHA256SUM.sig
-        gpg --no-default-keyring --keyring trustedkeys.gpg --verify codecov.SHA256SUM.sig codecov.SHA256SUM
-        shasum -a 256 -c codecov.SHA256SUM
-        chmod +x codecov
-        # ./codecov -t $CODECOV_TOK --commit=$(Build.SourceVersion) -F gpu -F pytest --name="GPU-coverage" --env=linux,azure
-        ./codecov upload-process --slug 'speediedan/finetuning-scheduler' -t $CODECOV_TOK --commit-sha $(Build.SourceVersion) --git-service 'github' -n "GPU-coverage" -F gpu -F pytest --env 'linux,azure' -f 'coverage.xml'
-      env:
-        CODECOV_TOK: $(CODECOV_TOKEN)  # explicit mapping required for secret azure pipeline variables
-      displayName: 'Statistics'
-
-    - bash: |
-        set -e
-        source /tmp/venvs/fts_dev/bin/activate
-        eval "$(python -m tests.gpu_ci.phase_manifest run-env --phase examples --out-dir "$(Agent.TempDirectory)/fts-phases")"
-        python -m pytest src/fts_examples -v --maxfail=1 --durations=0 -W ignore:\`np.object\`:DeprecationWarning -W ignore:'`np.int` is':DeprecationWarning
-      # condition: notIn(variables['scope'], '2.0.1')
-      displayName: 'Testing: Examples'
-
-    - bash: |
-        source /tmp/venvs/fts_dev/bin/activate
-        mkdir -p /__w/_temp/kernel_cache
-        eval "$(python -m tests.gpu_ci.phase_manifest run-env --phase examples-multigpu --out-dir "$(Agent.TempDirectory)/fts-phases")"
-        bash ./tests/special_tests.sh --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'
-      # condition: notIn(variables['scope'], '2.0.1')
-      env:
-        PYTORCH_KERNEL_CACHE_PATH: "/__w/_temp/kernel_cache"
-      displayName: 'Testing: Multi-GPU Examples'
-
-    # The nightly run only (#57's T3): the modules served by the persistent distributed pool, gloo and NCCL cases
-    # alike, in reverse order (FTS_REVERSE_ORDER, tests/conftest.py), so a case that leaves state for the next one in
-    # its pool fails. The forward order runs on every build. Last, and run whether or not an earlier test step failed
-    # (but only with the leases held): a failure here must not skip the night's full suite, examples or coverage
-    # upload, which every later night (a scheduled run repeats while its last one did not succeed) would then skip too.
-    - bash: |
-        set -e
-        source /tmp/venvs/fts_dev/bin/activate
-        eval "$(python -m tests.gpu_ci.phase_manifest run-env --phase pool-reverse --out-dir "$(Agent.TempDirectory)/fts-phases")"
-        modules=$(grep -l dist_pool_fixture tests/test_*.py)
-        echo "pool modules: ${modules}"
-        python -m pytest ${modules} -v --durations=20
-      env:
-        FTS_REVERSE_ORDER: "1"
-      condition: and(succeededOrFailed(), eq(variables['Build.Reason'], 'Schedule'), eq(variables['leaseHeld'], 'true'))
-      displayName: 'Testing: distributed pool in reverse order'
-
-    # One report per phase that ran: its per-node, per-rank outcomes counted against its manifest, with the run's
-    # identity and coverage (#57). Under the leases, since it reads the device names. Advisory for now: the test steps
-    # remain the gate, and a phase that is not `clean` (an unreviewed skip counts) is a warning, so the reports can be
-    # read against the test results before they decide a build.
-    - bash: |
-        source /tmp/venvs/fts_dev/bin/activate
-        out="$(Agent.TempDirectory)/fts-phases"
-        for manifest in "$out"/manifests/*.json; do
-          phase=$(basename "$manifest" .json)
-          if [[ ! -d "$out/records/$phase" ]]; then
-            echo "##vso[task.logissue type=warning]phase ${phase}: collected, but its step did not run"
-            continue
-          fi
-          # vendor nvidia: the job demands an NVIDIA agent (pool demands above)
-          python -m tests.gpu_ci.phase_manifest report --phase "$phase" --out-dir "$out" --vendor nvidia \
-            --evidence-class pipeline --lease-mode "$(cat /tmp/azp_host_lease.pid.mode 2>/dev/null)" --image "$(image)" \
-            --reviewed-exclusions tests/gpu_ci/reviewed_exclusions.json \
-            || echo "##vso[task.logissue type=warning]phase ${phase}: report is not clean (see the line above)"
-        done
-        exit 0
-      condition: and(succeededOrFailed(), eq(variables['phasesCollected'], 'true'), eq(variables['leaseHeld'], 'true'))
-      displayName: 'Phase reports'
-
-    - publish: $(Agent.TempDirectory)/fts-phases
-      artifact: fts-phases-nvidia-$(System.JobAttempt)
-      condition: and(always(), eq(variables['phasesCollected'], 'true'))
-      displayName: 'Publish phase manifests and reports'
-
-    - bash: |
-        # since we use rootless docker and userns-remapping, we need to ensure all files/directories in previous
-        # steps that may have been written with Azure's `az_pipeline_agent_azpcontainer` user (100997 in the host
-        # subuid range) are chmod'd or removed
-        echo "Adjusting ownership/permissions..."
-        sudo chmod -R 775 /__w/1/s || true
-        echo "Cleaning up ephemeral directories..."
-        sudo rm -rf /__w/1/s/.pytest_cache || true
-        # Release the host leases, cpu-heavy first. Belt-and-braces only: if this job dies or its container is torn
-        # down, every process inside it dies too and the kernel frees the leases automatically.
-        source scripts/gpu_lease_wrap.sh 2>/dev/null && \
-          ci_host_lease_release /gpu_leases /gpu_lease_tool /tmp/azp_host_lease.pid || true
-        echo 'Agent workspace cleanup completed'
-      condition: always()
-      displayName: 'Cleaning up agent workspace'
+  - ${{ if or(startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'), startsWith(variables['Build.SourceBranch'], 'refs/tags/')) }}:
+      - template: templates/gpu-job.yml
+        parameters:
+          jobName: release_nvidia
+          vendor: nvidia
+          jobClass: ci-release
+          scope: full
+          uploadCoverage: true
+          images: ${{ parameters.images }}
+      - template: templates/gpu-job.yml
+        parameters:
+          jobName: release_amd
+          vendor: amd
+          jobClass: ci-release
+          scope: full
+          images: ${{ parameters.images }}
+  - ${{ else }}:
+      - template: templates/gpu-job.yml
+        parameters:
+          jobName: pytest
+          vendor: ${{ parameters.vendor }}
+          jobClass: ci-any-vendor
+          scope: auto
+          poolReverse: ${{ eq(variables['Build.Reason'], 'Schedule') }}
+          uploadCoverage: true
+          images: ${{ parameters.images }}
