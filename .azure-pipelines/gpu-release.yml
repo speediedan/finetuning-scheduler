@@ -1,0 +1,81 @@
+# Release validation on both GPU vendors (#57): a release needs one demanded, full, clean run per vendor at the release
+# candidate's revision. One leg per vendor runs through .azure-pipelines/templates/gpu-job.yml under the `ci-release`
+# class, and a CPU job then checks both legs' phase evidence (tests/gpu_ci/release_eligibility.py). Its verdict,
+# published as `fts-release-eligibility`, is the release's GPU gate; the legs' own results are necessary, not
+# sufficient.
+#
+# Queued by hand on the candidate's branch or tag, never triggered: a vendor-demanded job queued while no agent in the
+# pool matches its demands fails at once instead of waiting, and the AMD agent takes release work only in its release
+# mode. So switch the AMD agent to release mode FIRST, then queue this pipeline, and switch it back once both legs have
+# been assigned. The project's Approval check gates every run, as on every pipeline in this pool.
+trigger: none
+pr: none
+
+parameters:
+  # The images both legs run, digest-pinned: the same pins as gpu-tests.yml (scripts/verify_version_consistency.py
+  # checks that every pipeline pins the same images).
+  - name: images
+    type: object
+    default:
+      nvidia: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-azpl-init@sha256:7a3c80e93d8030b58b39d6c4db1e6db9510f2a161e3c8ae4c3fb62a06a97eacc"
+      amd: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-rocm10.0-azpl-init@sha256:9c735f177b231baabcfe608e85d32bec4823e105e26b5b797994dd1dcfd27c9e"
+
+jobs:
+  - template: templates/gpu-job.yml
+    parameters:
+      jobName: release_nvidia
+      vendor: nvidia
+      jobClass: ci-release
+      scope: full
+      images: ${{ parameters.images }}
+
+  - template: templates/gpu-job.yml
+    parameters:
+      jobName: release_amd
+      vendor: amd
+      jobClass: ci-release
+      scope: full
+      images: ${{ parameters.images }}
+
+  # Vendor-neutral and CPU only. It runs on an agent already taking release work (the class demand), on that host's
+  # Python: the checker needs only the standard library. It runs whatever the legs' results, so a failed or missing leg
+  # still ends in a named INELIGIBLE reason.
+  - job: release_eligibility
+    dependsOn: [release_nvidia, release_amd]
+    condition: not(canceled())
+    timeoutInMinutes: 15
+    pool:
+      name: Default
+      demands:
+        - Agent.OS -equals Linux
+        - ci-release
+        - ci-fts
+    workspace:
+      clean: all
+    variables:
+      nvidiaResult: $[ dependencies.release_nvidia.result ]
+      amdResult: $[ dependencies.release_amd.result ]
+    steps:
+      - checkout: self
+
+      # every artifact of this run, each under $(Pipeline.Workspace)/<artifact>; the checker takes each vendor's
+      # latest attempt (fts-release-<vendor>-<attempt>)
+      - download: current
+        displayName: 'Download release evidence'
+
+      - bash: |
+          set -euo pipefail
+          if [[ "$AMD_RESULT" != Succeeded ]]; then
+            echo "##vso[task.logissue type=warning]AMD leg ${AMD_RESULT}. If it never started, the AMD agent was not in release mode when this run was queued: switch it first, then queue."
+          fi
+          python3 -m tests.gpu_ci.release_eligibility --artifacts "$(Pipeline.Workspace)" \
+            --revision "$(Build.SourceVersion)" --nvidia-result "$NVIDIA_RESULT" --amd-result "$AMD_RESULT" \
+            --output "$(Build.ArtifactStagingDirectory)/fts-release-eligibility.json"
+        env:
+          NVIDIA_RESULT: $(nvidiaResult)
+          AMD_RESULT: $(amdResult)
+        displayName: 'Check both vendors'' release evidence'
+
+      - publish: $(Build.ArtifactStagingDirectory)/fts-release-eligibility.json
+        artifact: fts-release-eligibility
+        displayName: 'Publish release eligibility'

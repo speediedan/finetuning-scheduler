@@ -340,6 +340,11 @@ the `fts-development-branch-version-upgrade` skill.
   - **The trade:** a regression in one FSDP or model-parallel case that the smoke set does not cover surfaces at the
     next full run rather than on the pull request that caused it, which is why strategy-driving changes take the
     label (see "Checks required before a change is done").
+  - **Release validation** (`.azure-pipelines/gpu-release.yml`, queued by hand, never triggered): one full leg per
+    vendor under the `ci-release` class, then a CPU job checks both legs' phase evidence
+    (`tests/gpu_ci/release_eligibility.py`) and publishes `fts-release-eligibility`. The AMD agent takes release work
+    only in its release mode, and a vendor-demanded job queued while no agent matches fails at once, so the agent is
+    switched to release mode BEFORE the run is queued.
   - **Nightly** (`schedules:`, 06:00 UTC, only when `main` changed since the last scheduled run): the full standalone
     suite and examples, plus the persistent distributed pool's modules in reverse order (`FTS_REVERSE_ORDER=1`,
     `tests/conftest.py`), which catches a pool case that leaves state for the next. Path filters do not apply to a
