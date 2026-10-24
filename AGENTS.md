@@ -324,12 +324,14 @@ the `fts-development-branch-version-upgrade` skill.
   `.github/actions/install-ci-dependencies`. Sets `DISABLE_MPS=1` on macOS. The `oldest` leg resolves
   through `requirements/ci/requirements-oldest.txt`.
 - `code-checks.yml` ("Type Checks") — `pyright -p pyproject.toml`.
-- `.azure-pipelines/gpu-tests.yml`: self-hosted, asserts `>= 2` CUDA GPUs. Runs the non-standalone CUDA tests
-  only (`FTS_CUDA_TESTS_ONLY=1`; the hosted matrix runs every other test in that collection, on CPU), then the
-  standalone tests under `tests/`, examples, and multi-GPU examples as separate steps. It takes the host's `gpu` and
-  `cpu-heavy` leases after installing, through `ci_host_lease_hold` in `scripts/gpu_lease_wrap.sh`: by the host's
-  lease tool when an operator has installed it at the mounted path, else by the plain locks (the `gpu-lease` skill's
-  "CI jobs in a container" section).
+- `.azure-pipelines/gpu-tests.yml`: self-hosted, on either GPU agent (NVIDIA or AMD), through the any-vendor job
+  template below; a manual run can pin one with the `vendor` parameter. A release's per-vendor legs are not part of
+  it: they are queued deliberately, after the AMD agent is switched to release mode. It runs the non-standalone CUDA tests only (`FTS_CUDA_TESTS_ONLY=1`; the
+  hosted matrix runs every other test in that collection, on CPU), then the standalone tests under `tests/`,
+  examples, and multi-GPU examples as separate steps, asserting `>= 2` devices of the agent's vendor first. It takes
+  the host's `gpu` and `cpu-heavy` leases after installing, through `ci_host_lease_hold` in
+  `scripts/gpu_lease_wrap.sh`: by the host's lease tool when an operator has installed it at the mounted path, else by
+  the plain locks (the `gpu-lease` skill's "CI jobs in a container" section). Its phase reports gate the build.
   - **Standalone scope** (`.azure-pipelines/scripts/standalone_scope.sh`): a pull request into `main` runs the smoke
     set in `tests/.standalone_smoke`, one test per strategy family. Every other build runs every standalone test:
     release branches and tags, builds of `main`, manual runs (one queued on a pull request's merge ref included), and a
@@ -346,9 +348,9 @@ the `fts-development-branch-version-upgrade` skill.
     the next night, so reject the stale one.
 - `.azure-pipelines/templates/gpu-job.yml`: the any-vendor GPU job, a host job that reads the agent's `GPU_VENDOR` and
   starts its own container from a digest-pinned image (CUDA or `dockers/base-rocm`), running the same phases through
-  `.azure-pipelines/scripts/gpu_job_container.sh`. Unlike `gpu-tests.yml`, its phase reports gate the job: a skip or
-  xfail is clean only when `tests/gpu_ci/reviewed_exclusions.json` gives its reason, so a new skip on the GPU phases
-  needs an entry there. Agents are admitted to it by `ci-*` user capabilities; `.azure-pipelines/gpu-proof.yml`
+  `.azure-pipelines/scripts/gpu_job_container.sh`. Its phase reports gate the job: a skip or xfail is clean only when
+  `tests/gpu_ci/reviewed_exclusions.json` gives its reason, so **a new skip on the GPU phases needs an entry there**
+  or every GPU build goes red. Agents are admitted to it by `ci-*` user capabilities; `.azure-pipelines/gpu-proof.yml`
   (manual, `ci-proof`) is the run that admits an agent before its `ci` mode is used.
 
 ## Known stale references
