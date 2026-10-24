@@ -11,6 +11,8 @@ repo_home=$1
 registry_name=$2
 build_new="${3:-1}"
 push_remote="${4:-1}"
+# 0 skips the ROCm images (the AMD agent's twin of the CUDA pair, #57)
+build_rocm="${5:-1}"
 
 maybe_deactivate
 
@@ -28,6 +30,13 @@ maybe_push(){
 		echo "Pushing ${registry_name}:${latest_azpl} ..." >> $docker_build_log
 		docker push ${registry_name}:${latest_azpl} >> $docker_build_log
 		echo "Finished pushing ${registry_name}:${latest_azpl} ..." >> $docker_build_log
+		if [[ $build_rocm -ne 0 ]]; then
+			for tag in ${latest_rocm_pt} ${latest_rocm_azpl}; do
+				echo "Pushing ${registry_name}:${tag} ..." >> $docker_build_log
+				docker push ${registry_name}:${tag} >> $docker_build_log
+				echo "Finished pushing ${registry_name}:${tag} ..." >> $docker_build_log
+			done
+		fi
     else
         echo "Directed to skip push of built images." >> $docker_build_log
     fi
@@ -47,6 +56,14 @@ build_eval(){
 	export latest_pt="base-cu${iv["cuda"]}-py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}"
 	export latest_azpl="py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}-azpl-init"
 	maybe_build iv "${latest_pt}" "${latest_azpl}"
+	# the AMD agent's images: the same Python, PyTorch and Lightning, with PyTorch's own ROCm wheel (dockers/base-rocm)
+	declare -A rv=(["rocm"]="10.0" ["python"]="${iv["python"]}" ["pytorch"]="${iv["pytorch"]}" ["lightning"]="${iv["lightning"]}" ["channel"]="test")
+	export latest_rocm_pt="base-rocm${rv["rocm"]}-py${rv["python"]}-pt${rv["pytorch"]}-pl${rv["lightning"]}"
+	export latest_rocm_azpl="py${rv["python"]}-pt${rv["pytorch"]}-pl${rv["lightning"]}-rocm${rv["rocm"]}-azpl-init"
+	if [[ $build_new -ne 0 && $build_rocm -ne 0 ]]; then
+		echo "Building ROCm images base: ${latest_rocm_pt} and azpl-init: ${latest_rocm_azpl}" >> $docker_build_log
+		build_rocm_version rv "${latest_rocm_pt}" "${latest_rocm_azpl}"
+	fi
 	if [[ $build_new -ne 0 ]]; then
 		echo "All image builds successful." >> $docker_build_log
 	else

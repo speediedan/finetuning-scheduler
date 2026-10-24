@@ -148,6 +148,20 @@ def test_phase_table_matches_pipeline_and_release_scope():
         pm.build_manifest("examples", "smoke")
 
 
+def test_reviewed_exclusions_name_existing_tests():
+    # every reviewed skip or xfail names a test that still exists (its module, function and parameter id) and gives a
+    # reason, so a renamed test cannot leave a stale entry that makes some other skip look reviewed
+    reviewed = json.loads((pm.ROOT / "tests/gpu_ci/reviewed_exclusions.json").read_text(encoding="utf-8"))
+    assert reviewed
+    for nodeid, reason in reviewed.items():
+        assert reason.strip(), nodeid
+        module, _, test = nodeid.partition("::")
+        name, _, param = test.partition("[")
+        source = (pm.ROOT / module).read_text(encoding="utf-8")
+        assert f"def {name}(" in source, nodeid
+        assert not param or f'"{param.rstrip("]")}"' in source, nodeid
+
+
 def test_run_env_records_every_rank(tmp_path):
     env = pm.run_env("standalone", tmp_path)
     assert env["PL_RUN_STANDALONE_TESTS"] == "1" and env["PL_RUN_CUDA_TESTS"] == "1"

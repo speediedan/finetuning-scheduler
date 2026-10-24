@@ -417,6 +417,7 @@ Footnotes
 
    distributed/model_parallel_scheduled_fine_tuning
    distributed/fsdp_scheduled_fine_tuning
+   distributed/fsdp1_to_fsdp2_migration
 
 .. toctree::
    :maxdepth: 1

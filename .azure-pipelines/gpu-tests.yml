@@ -280,6 +280,7 @@ jobs:
           # vendor nvidia: the job demands an NVIDIA agent (pool demands above)
           python -m tests.gpu_ci.phase_manifest report --phase "$phase" --out-dir "$out" --vendor nvidia \
             --evidence-class pipeline --lease-mode "$(cat /tmp/azp_host_lease.pid.mode 2>/dev/null)" --image "$(image)" \
+            --reviewed-exclusions tests/gpu_ci/reviewed_exclusions.json \
             || echo "##vso[task.logissue type=warning]phase ${phase}: report is not clean (see the line above)"
         done
         exit 0

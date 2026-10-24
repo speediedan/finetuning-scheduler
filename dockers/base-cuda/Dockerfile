@@ -99,7 +99,10 @@ RUN \
     uv pip install -U six && \
     rm -rf requirements.* requirements/ && \
     # Diagnostic: Check CUDA architecture support
-    python -c "import torch; print(f'PyTorch {torch.__version__} CUDA archs: {torch.cuda.get_arch_list()}')"
+    python -c "import torch; print(f'PyTorch {torch.__version__} CUDA archs: {torch.cuda.get_arch_list()}')" && \
+    # Allow userns-remapped rootless Docker users to update the venv. In this layer, not a later one: a recursive chmod
+    # in a later layer stores a second copy of every file it touches, which doubled the venv's share of the image.
+    chmod -R 777 /tmp/venvs/fts_dev
 
 RUN \
     set -x && \
@@ -137,8 +140,7 @@ RUN \
     echo "Verifying PyTorch version:" && \
     python -c "import torch; print(f'PyTorch {torch.__version__} detected'); assert torch.__version__.startswith('$PYTORCH_VERSION'), torch.__version__" && \
     echo "============= Environment Verification Complete =============" && \
-    # Apply recursive chmod to allow userns-remapped rootless Docker users to update the venv
-    chmod -R 777 /tmp/venvs/fts_dev && \
-    echo "Verify permission state after final chmod:" && \
-    find /tmp/venvs/fts_dev -type d -name "__pycache__" | head -5 | xargs ls -ld || echo "No __pycache__ found" && \
-    echo "=== Post-env-check chmod complete ==="
+    echo "Verify permission state (applied when the venv was built):" && \
+    test "$(stat -c %a /tmp/venvs/fts_dev)" = 777 && \
+    { find /tmp/venvs/fts_dev -type d -name "__pycache__" | head -5 | xargs ls -ld || echo "No __pycache__ found"; } && \
+    echo "=== Post-env-check permission check complete ==="

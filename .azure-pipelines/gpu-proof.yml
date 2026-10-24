@@ -1,0 +1,23 @@
+# The any-vendor template's admission proof (#57): one full run of .azure-pipelines/templates/gpu-job.yml with every
+# phase reported clean, before an agent's `ci` mode may be used. Admitted only by `ci-proof`, a capability the operator
+# gives the agent under proof and no other, so the run cannot land on the always-on CI agent and no ordinary job can
+# land on the agent under proof. Queued by hand only; the project's Approval check gates every run.
+trigger: none
+pr: none
+
+parameters:
+  - name: scope
+    type: string
+    default: full
+    values: [smoke, full]
+
+jobs:
+  - template: templates/gpu-job.yml
+    parameters:
+      jobName: proof_any_vendor
+      vendor: any
+      jobClass: ci-proof
+      scope: ${{ parameters.scope }}
+      images:
+        nvidia: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-azpl-init@sha256:7a3c80e93d8030b58b39d6c4db1e6db9510f2a161e3c8ae4c3fb62a06a97eacc"
+        amd: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-rocm10.0-azpl-init@sha256:9c735f177b231baabcfe608e85d32bec4823e105e26b5b797994dd1dcfd27c9e"

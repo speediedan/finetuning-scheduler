@@ -329,6 +329,8 @@ As you can observe in (``./mp_examples.py``) our TP plan in this example is appl
     cd ./fts_examples/model_parallel
     python mp_examples.py fit --config config/fts_tp_plan.yaml
 
+.. _model-parallel-fsdp1-resume:
+
 Resuming an FSDP1 Checkpoint under FSDP2
 ****************************************
 A fine-tuning run checkpointed under FSDP1 (:py:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`) can resume
