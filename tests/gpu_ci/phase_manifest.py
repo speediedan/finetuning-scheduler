@@ -21,7 +21,8 @@ A GPU CI run is reported phase by phase. For each phase this module writes two d
   ran, counted against the manifest, plus the run's identity (vendor, backend, evidence class, image, lease mode,
   installed versions) and the manifest's SHA-256.
 
-The phases and their selectors are the steps of ``.azure-pipelines/gpu-tests.yml``. A phase's ``selector`` is the
+The phases and their selectors are the steps of the GPU pipelines' job (``.azure-pipelines/templates/gpu-job.yml``,
+which runs them through ``.azure-pipelines/scripts/gpu_job_container.sh``). A phase's ``selector`` is the
 selection-relevant part of its step (the pytest paths and arguments and the selection variables), not wrappers that do
 not change selection (``coverage run``) or that only stop early (``--maxfail``): a phase is reported node by node, and
 a node left unexecuted fails it anyway.
