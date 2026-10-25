@@ -11,11 +11,11 @@ Scheduled Fine-Tuning in a Plain PyTorch Loop
 
 Overview
 ********
-:class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` brings Fine-Tuning Scheduler's multi-phase schedules to a
-training loop you write yourself, with no Lightning ``Trainer`` involved. It shares its scheduling logic with the
-Lightning callback: the same schedule format, the same phase thawing and parameter-group growth, the same optimizer and
-lr scheduler reinitialization and the same plateau criteria. A parity test suite runs scenarios on both and requires the
-same phase path, trainable-parameter counts and learning rates.
+:class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` brings Fine-Tuning Scheduler's multi-phase
+schedules to a training loop you write yourself, with no Lightning ``Trainer`` involved. It shares its scheduling logic
+with the Lightning callback: the same schedule format, the same phase thawing and parameter-group growth, the same
+optimizer and lr scheduler reinitialization and the same plateau criteria. A parity test suite runs scenarios on both
+and requires the same phase path, trainable-parameter counts and learning rates.
 
 The loop stays yours. The tuning scheduler owns three things: which parameters are trainable, the optimizer's parameter
 groups, and when the next phase starts. You call it at a few well-defined points:
@@ -25,8 +25,8 @@ groups, and when the next phase starts. You call it at a few well-defined points
   :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.epoch_start` and
   :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.epoch_end` if you drive epochs yourself);
 - :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.epoch_end` with the epoch's validation metrics;
-- :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.step_end` after each optimizer step, only when a phase
-  should end at a step count rather than at an epoch boundary.
+- :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.step_end` after each optimizer step, only when a
+  phase should end at a step count rather than at an epoch boundary.
 
 The PyTorch API does not import Lightning or jsonargparse.
 
@@ -85,8 +85,8 @@ Phase 0 runs for two epochs (``max_transition_epoch``); later phases end when va
 A few things to note:
 
 - **Pass an optimizer instance or factory.** This example passes a factory
-  (``partial(torch.optim.AdamW, lr=1e-2)``), which the tuning scheduler calls with phase 0's parameter groups; it then adds
-  groups as later phases thaw parameters. A factory is preferred, and phase 0's ``pg_overrides`` requires one. An
+  (``partial(torch.optim.AdamW, lr=1e-2)``), which the tuning scheduler calls with phase 0's parameter groups; it then
+  adds groups as later phases thaw parameters. A factory is preferred, and phase 0's ``pg_overrides`` requires one. An
   optimizer instance also works: unless ``enforce_phase0_params=False``, it is reconfigured to optimize exactly phase
   0's parameters.
 - **Use** ``fts.optimizer`` **in the loop**, not a reference taken before ``setup()``: a schedule can replace the
@@ -135,12 +135,12 @@ them:
 
 Phase Hooks and Gates
 *********************
-:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.add_phase_hook` runs a function when a phase starts or ends.
-Hooks receive a :class:`~finetuning_scheduler.core.tuning_scheduler.PhaseEvent` and run with the training random streams
-isolated, so a hook that samples data does not change the training run.
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.add_phase_hook` runs a function when a phase starts
+or ends. Hooks receive a :class:`~finetuning_scheduler.core.tuning_scheduler.PhaseEvent` and run with the training
+random streams isolated, so a hook that samples data does not change the training run.
 
-:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.add_gate` registers a check that accepts or vetoes each
-completed phase. A gate receives a :class:`~finetuning_scheduler.core.transitions.GateEvent` and returns a
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.add_gate` registers a check that accepts or vetoes
+each completed phase. A gate receives a :class:`~finetuning_scheduler.core.transitions.GateEvent` and returns a
 :class:`~finetuning_scheduler.core.transitions.GateResult` (or a ``bool``). A veto on any rank stops training and
 restores the best checkpoint as of the vetoed phase's start, when there is one (for phase 0, only with
 ``BestCheckpoint(..., save_initial=True)``):
@@ -165,10 +165,10 @@ Checkpoints and Resuming
 metric (one by default), optionally saving only the scheduled parameters (``include="scheduled"``), and pins the best at
 each phase boundary as the rollback point for a gate's veto. Each checkpoint gets a new name and is never rewritten.
 :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save` and
-:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load` save and restore the full training state for an exact
-resume: the model, optimizer and lr scheduler; the tuning scheduler's own state; every random stream; and anything registered
-with :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.register_stateful` (a sampler or a data position, for
-example):
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load` save and restore the full training state for an
+exact resume: the model, optimizer and lr scheduler; the tuning scheduler's own state; every random stream; and anything
+registered with :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.register_stateful` (a sampler or a
+data position, for example):
 
 .. code-block:: python
 
@@ -182,19 +182,19 @@ example):
 A save keeps the checkpoints it refers to until the next save, so resuming from the latest save always finds them, even
 when the run went on to write newer best checkpoints before it stopped. An older save can be resumed while its
 checkpoints remain; if its best checkpoint or rollback point has been removed,
-:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load` raises ``FileNotFoundError`` rather than restoring the
-wrong state later.
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load` raises ``FileNotFoundError`` rather than
+restoring the wrong state later.
 
 Distributed Training
 ********************
 Shard the model yourself with FSDP2 (``torch.distributed.fsdp.fully_shard``), tensor parallelism
-(``torch.distributed.tensor.parallel.parallelize_module``) or both, before handing it to the tuning scheduler, and call the
-tuning scheduler on every rank. Transition decisions and gate results are agreed across ranks. For sharded models,
+(``torch.distributed.tensor.parallel.parallelize_module``) or both, before handing it to the tuning scheduler, and call
+the tuning scheduler on every rank. Transition decisions and gate results are agreed across ranks. For sharded models,
 checkpoints are written with ``torch.distributed.checkpoint``.
 
 Apply ``fully_shard`` to the root module too, last, so FSDP2 manages every parameter: a parameter no FSDP module
-manages has its gradients synchronized by nothing, so each data-parallel rank would train its own copy. The tuning scheduler
-warns about scheduled parameters left that way. The
+manages has its gradients synchronized by nothing, so each data-parallel rank would train its own copy. The tuning
+scheduler warns about scheduled parameters left that way. The
 :ref:`model-parallel example for the PyTorch API<model-parallel-plain-loop>` shards a Llama model this way, and also
 runs it with tensor parallelism, mapping each part of the Lightning model-parallel example's configuration to its
 plain-loop equivalent.
@@ -209,17 +209,18 @@ Two configurations are currently refused:
 - ``ZeroRedundancyOptimizer``.
 
 The Lightning callback's distributed support is unchanged; see
-:doc:`model-parallel scheduled fine-tuning (FSDP2 and tensor parallelism)<../distributed/model_parallel_scheduled_fine_tuning>`
-and :doc:`FSDP1 scheduled fine-tuning<../distributed/fsdp_scheduled_fine_tuning>`.
+:doc:`model-parallel scheduled fine-tuning (FSDP2 and tensor
+parallelism)<../distributed/model_parallel_scheduled_fine_tuning>` and :doc:`FSDP1 scheduled
+fine-tuning<../distributed/fsdp_scheduled_fine_tuning>`.
 
 Relationship to the Lightning Callback
 **************************************
-The callback and the tuning scheduler share one scheduling core (``finetuning_scheduler.core``), so features land in both
-and the parity tests keep their behavior aligned. The differences are in what each interface owns: under Lightning, the
-``Trainer`` runs the loop, checkpoints through
+The callback and the tuning scheduler share one scheduling core (``finetuning_scheduler.core``), so features land in
+both and the parity tests keep their behavior aligned. The differences are in what each interface owns: under Lightning,
+the ``Trainer`` runs the loop, checkpoints through
 :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` and early-stops through
-:class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping`; in a plain loop, you run the loop and the tuning scheduler
-provides the equivalents.
+:class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping`; in a plain loop, you run the loop and the tuning
+scheduler provides the equivalents.
 
 Lightning remains a base dependency of Fine-Tuning Scheduler until it becomes an optional dependency, no earlier than
 2.17 (see :ref:`versioning`). Until then, a plain install keeps the Lightning integration working as before. Naming

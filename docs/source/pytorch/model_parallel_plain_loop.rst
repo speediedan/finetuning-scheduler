@@ -12,8 +12,8 @@ Overview
 ``fts_examples/model_parallel/torch_mp_example.py`` is the plain PyTorch counterpart of the
 :ref:`Lightning model-parallel examples<model-parallel-fine-tuning-examples>`. It fine-tunes the same ``torchtitan``
 Llama model with the same three-phase schedule and the same FSDP2 and tensor-parallel (TP) plans, but the training loop
-is its own and :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` schedules it. It is a ``torchrun`` script
-and imports neither Lightning nor jsonargparse.
+is its own and :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` schedules it. It is a ``torchrun``
+script and imports neither Lightning nor jsonargparse.
 
 .. code-block:: bash
 
@@ -92,8 +92,8 @@ Sharding the root matters in a plain loop:
 The final norm gets its own unit for a different reason. The example reshards every unit after forward, the root
 included (``reshard_after_forward: True``). Left to the root's unit, the norm (phase 0) would sit beside the embeddings,
 which the schedule thaws two phases later, and from phase 0 on every backward pass would all-gather the frozen
-embeddings again. The tuning scheduler warns about any FSDP unit that reshards after forward and holds parameters thawing in
-different phases when it validates the schedule against the sharded model.
+embeddings again. The tuning scheduler warns about any FSDP unit that reshards after forward and holds parameters
+thawing in different phases when it validates the schedule against the sharded model.
 
 The Training Loop
 *****************

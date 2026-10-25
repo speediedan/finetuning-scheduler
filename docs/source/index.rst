@@ -20,18 +20,18 @@ Training with FTS is simple and brings several benefits:
 
 FTS runs a schedule through either of two interfaces, which share one scheduling core and one schedule format:
 
+* **Lightning**, through the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback (fully supported);
 * **your own PyTorch training loop**, through :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler`
-  (experimental in 2.15);
-* **Lightning**, through the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback (fully supported).
+  (experimental in 2.15).
 
-The examples on this page show both: choose **PyTorch** or **Lightning** on any of them and every example on the page
+The examples on this page show both: choose **Lightning** or **PyTorch** on any of them and every example on the page
 follows.
 
 .. note::
    If you're exploring Fine-Tuning Scheduler, this is a great place to start! :ref:`basic-usage` below walks through
-   both interfaces, and there are tutorials for each: the :doc:`PyTorch API tutorial
-   notebook<notebooks/superglue/fts_superglue_pytorch>`, the :doc:`Lightning tutorial
-   notebook<notebooks/superglue/fts_superglue_lightning>` and, for those using the
+   both interfaces, and the :ref:`examples<examples-overview>` include a tutorial notebook for each (the
+   :doc:`Lightning tutorial<examples/notebooks/superglue/fts_superglue_lightning>` and the :doc:`PyTorch API
+   tutorial<examples/notebooks/superglue/fts_superglue_pytorch>`) and, for those using the
    :py:class:`~lightning.pytorch.cli.LightningCLI`, a :ref:`CLI-based<scheduled-fine-tuning-superglue>` example.
 
 Setup
@@ -72,14 +72,56 @@ Basic Usage
 .. tab-set::
     :sync-group: interface
 
+    .. tab-item:: Lightning
+        :sync: lightning
+
+        Add the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback to your ``Trainer`` and fit as usual,
+        logging ``val_loss`` from your ``LightningModule``. The callback decides when each phase starts and which
+        parameters train, and it configures the optimizer your ``configure_optimizers`` returns to optimize only the
+        first phase's parameters. Without a user-provided schedule, it generates the :ref:`default schedule<default
+        schedule>` and fine-tunes according to it, with default
+        :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` and
+        :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks monitoring ``val_loss``:
+
+        .. code-block:: python
+
+            import lightning as L
+            import torch
+            from finetuning_scheduler import FinetuningScheduler
+
+
+            class MyModule(L.LightningModule):
+                def __init__(self, model):
+                    super().__init__()
+                    self.model = model
+
+                def training_step(self, batch, batch_idx):
+                    x, y = batch
+                    return torch.nn.functional.cross_entropy(self.model(x), y)
+
+                def validation_step(self, batch, batch_idx):
+                    x, y = batch
+                    self.log("val_loss", torch.nn.functional.cross_entropy(self.model(x), y))
+
+                def configure_optimizers(self):
+                    return torch.optim.AdamW(self.parameters(), lr=1e-3)
+
+
+            trainer = L.Trainer(max_epochs=30, callbacks=[FinetuningScheduler()])
+            trainer.fit(MyModule(model), train_dataloaders=train_loader, val_dataloaders=val_loader)
+
+        :ref:`lightning-scheduled-fine-tuning` covers the rest: the callback's dependencies, early-stopping and
+        epoch-driven transitions, resuming, and the supported strategies and lr schedulers.
+
     .. tab-item:: PyTorch
         :sync: pytorch
 
         Build a :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` for your model, call
         :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.setup` once, iterate over
-        :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.epochs`, and report each epoch's validation metrics
-        with :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.epoch_end`. The tuning scheduler decides when each
-        phase starts and which parameters train; the loop stays yours. Passing ``None`` as the schedule uses the
+        :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.epochs`, and report each epoch's validation
+        metrics with :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.epoch_end`. The tuning
+        scheduler decides when each phase starts and which parameters train, and it builds the optimizer from the
+        first phase's parameters; the loop stays yours. Passing ``None`` as the schedule uses the
         :ref:`default schedule<default schedule>`:
 
         .. code-block:: python
@@ -107,24 +149,6 @@ Basic Usage
         :ref:`plain-pytorch-loop` covers the rest: transition policies, checkpoints and exact resume, phase hooks and
         gates, and distributed training.
 
-    .. tab-item:: Lightning
-        :sync: lightning
-
-        Add the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback to your ``Trainer``. Without a
-        user-provided schedule, it generates the :ref:`default schedule<default schedule>` and fine-tunes according to
-        it, with default :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping` and
-        :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks monitoring ``val_loss``:
-
-        .. code-block:: python
-
-            import lightning as L
-            from finetuning_scheduler import FinetuningScheduler
-
-            trainer = L.Trainer(callbacks=[FinetuningScheduler()])
-
-        :ref:`lightning-scheduled-fine-tuning` covers the rest: the callback's dependencies, early-stopping and
-        epoch-driven transitions, resuming, and the supported strategies and lr schedulers.
-
 .. _default schedule:
 
 The Default Fine-Tuning Schedule
@@ -136,19 +160,6 @@ and will marginally outperform many explicit schedules.
 
 .. tab-set::
     :sync-group: interface
-
-    .. tab-item:: PyTorch
-        :sync: pytorch
-
-        Passing ``None`` as the schedule trains with the default schedule.
-        :func:`~finetuning_scheduler.core.schedule.gen_ft_schedule` writes it to a directory as YAML, named after the
-        model's class with the suffix ``_ft_schedule.yaml``, for you to inspect or refine:
-
-        .. code-block:: python
-
-            from finetuning_scheduler.core.schedule import gen_ft_schedule
-
-            schedule_path = gen_ft_schedule(model, "schedules/")  # schedules/<ModelClass>_ft_schedule.yaml
 
     .. tab-item:: Lightning
         :sync: lightning
@@ -166,6 +177,19 @@ and will marginally outperform many explicit schedules.
             from finetuning_scheduler import FinetuningScheduler
 
             trainer = L.Trainer(callbacks=[FinetuningScheduler(gen_ft_sched_only=True)])
+
+    .. tab-item:: PyTorch
+        :sync: pytorch
+
+        Passing ``None`` as the schedule trains with the default schedule.
+        :func:`~finetuning_scheduler.core.schedule.gen_ft_schedule` writes it to a directory as YAML, named after the
+        model's class with the suffix ``_ft_schedule.yaml``, for you to inspect or refine:
+
+        .. code-block:: python
+
+            from finetuning_scheduler.core.schedule import gen_ft_schedule
+
+            schedule_path = gen_ft_schedule(model, "schedules/")  # schedules/<ModelClass>_ft_schedule.yaml
 
 
 .. _specifying schedule:
@@ -237,19 +261,19 @@ either integers or convertible to integers via ``int()``.
 .. tab-set::
     :sync-group: interface
 
-    .. tab-item:: PyTorch
-        :sync: pytorch
-
-        .. code-block:: python
-
-            fts = TuningScheduler(model, "/path/to/my/schedule/my_schedule.yaml", optimizer=..., transition=...)
-
     .. tab-item:: Lightning
         :sync: lightning
 
         .. code-block:: python
 
             trainer = L.Trainer(callbacks=[FinetuningScheduler(ft_schedule="/path/to/my/schedule/my_schedule.yaml")])
+
+    .. tab-item:: PyTorch
+        :sync: pytorch
+
+        .. code-block:: python
+
+            fts = TuningScheduler(model, "/path/to/my/schedule/my_schedule.yaml", optimizer=..., transition=...)
 
 .. tip::
 
@@ -289,24 +313,6 @@ the depth it was saved at.
 .. tab-set::
     :sync-group: interface
 
-    .. tab-item:: PyTorch
-        :sync: pytorch
-
-        The criteria are transition policies such as
-        :class:`~finetuning_scheduler.core.transitions.PlateauTransition`, and
-        :class:`~finetuning_scheduler.core.checkpoint.BestCheckpoint` keeps the best checkpoints.
-        :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save` and
-        :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load` save and restore the full training state for
-        an exact resume (see :ref:`plain-pytorch-loop`):
-
-        .. code-block:: python
-
-            fts.save("run/last.pt")
-
-            # later, in a fresh process, after building the same model, schedule and tuning scheduler
-            fts.setup()
-            fts.load("run/last.pt")
-
     .. tab-item:: Lightning
         :sync: lightning
 
@@ -319,25 +325,38 @@ the depth it was saved at.
             trainer = L.Trainer(callbacks=[FinetuningScheduler()])
             trainer.fit(model, ckpt_path="some/path/to/my_checkpoint.ckpt")
 
+    .. tab-item:: PyTorch
+        :sync: pytorch
+
+        The criteria are transition policies such as
+        :class:`~finetuning_scheduler.core.transitions.PlateauTransition`, and
+        :class:`~finetuning_scheduler.core.checkpoint.BestCheckpoint` keeps the best checkpoints.
+        :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save` and
+        :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load` save and restore the full training
+        state for an exact resume (see :ref:`plain-pytorch-loop`):
+
+        .. code-block:: python
+
+            fts.save("run/last.pt")
+
+            # later, in a fresh process, after building the same model, schedule and tuning scheduler
+            fts.setup()
+            fts.load("run/last.pt")
+
 Where to Go Next
 ****************
 
-- **Your own PyTorch loop:** :ref:`plain-pytorch-loop`, the :ref:`model-parallel example<model-parallel-plain-loop>`
-  (FSDP2 and tensor parallelism), and :doc:`tunable views<pytorch/tunable_views>` for addressing a model through
-  logical parameter names.
 - **Lightning:** :ref:`lightning-scheduled-fine-tuning`, :doc:`model-parallel scheduled
   fine-tuning<distributed/model_parallel_scheduled_fine_tuning>`, :doc:`FSDP1 scheduled
   fine-tuning<distributed/fsdp_scheduled_fine_tuning>` and the :doc:`FSDP1-to-FSDP2 migration
   guide<distributed/fsdp1_to_fsdp2_migration>`.
+- **Your own PyTorch loop:** :ref:`plain-pytorch-loop`, the :ref:`model-parallel example<model-parallel-plain-loop>`
+  (FSDP2 and tensor parallelism), and :doc:`tunable views<pytorch/tunable_views>` for addressing a model through
+  logical parameter names.
 - **Either interface:** :doc:`lr scheduler<advanced/lr_scheduler_reinitialization>` and
   :doc:`optimizer<advanced/optimizer_reinitialization>` reinitialization at phase transitions.
-
-----------
-
-Example: Scheduled Fine-Tuning For SuperGLUE
-********************************************
-The CLI-based example of scheduled fine-tuning on the SuperGLUE RTE and BoolQ tasks now has its own page:
-:ref:`scheduled-fine-tuning-superglue`.
+- **Examples:** the :ref:`examples<examples-overview>`, end to end: scheduled fine-tuning on SuperGLUE as a notebook
+  for each interface and through the ``LightningCLI``.
 
 Footnotes
 *********
@@ -361,22 +380,29 @@ Footnotes
 
 .. toctree::
    :maxdepth: 1
+   :name: Lightning
+   :caption: Lightning
+
+   lightning/scheduled_fine_tuning
+
+.. toctree::
+   :maxdepth: 1
    :name: PyTorch API
    :caption: PyTorch API (experimental)
 
    pytorch/plain_pytorch_loop
-   PyTorch API tutorial notebook <notebooks/superglue/fts_superglue_pytorch>
    pytorch/model_parallel_plain_loop
    pytorch/tunable_views
 
 .. toctree::
    :maxdepth: 1
-   :name: Lightning
-   :caption: Lightning
+   :name: Examples
+   :caption: Examples
 
-   lightning/scheduled_fine_tuning
-   Notebook-based Fine-Tuning Scheduler tutorial <notebooks/superglue/fts_superglue_lightning>
-   CLI-based Fine-Tuning Scheduler tutorial <examples/superglue_cli>
+   examples/index
+   SuperGLUE notebook (Lightning) <examples/notebooks/superglue/fts_superglue_lightning>
+   SuperGLUE notebook (PyTorch API) <examples/notebooks/superglue/fts_superglue_pytorch>
+   SuperGLUE with the LightningCLI <examples/cli/superglue_cli>
 
 .. toctree::
    :maxdepth: 1
