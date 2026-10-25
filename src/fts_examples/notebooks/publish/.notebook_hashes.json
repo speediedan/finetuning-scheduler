@@ -3,11 +3,12 @@
   "src/fts_examples/notebooks/dev/superglue/fts_explicit_accuracy.png": "29b3ac2535678dabb0204241a9fa5918ac1f4a2728a27933ccb8d20040737322",
   "src/fts_examples/notebooks/dev/superglue/fts_explicit_loss_anim.gif": "835fcb4f8f0d27f796c70e0a5225cf8c15d56e8b8fbe0d084f61e983a1298a1d",
   "src/fts_examples/notebooks/dev/superglue/fts_superglue_lightning.ipynb": "79db9139e98c5f14999cbc7f68078a7fc990eecc9c4f7bad8243c2f310bb3a34",
-  "src/fts_examples/notebooks/dev/superglue/fts_superglue_pytorch.ipynb": "8adf9734b6dcc4988b470ff4de5b95195a0252dd783aa885dc4d83f5ffe7613b",
+  "src/fts_examples/notebooks/dev/superglue/fts_superglue_pytorch.ipynb": "f2c081cdfe3b1a64e7a6cb084982229dcb04bbfa7eb7ffa3744f4895c6c55875",
   "src/fts_examples/notebooks/dev/superglue/implicit_training_transition.png": "94237a09a9dd67b6ec3a522cc9879956bb8b333988b79fd23b362c5868eb4a8b",
   "src/fts_examples/notebooks/dev/superglue/logo_fts.png": "2ea31ac2b94dacb4301da51d2e3307fa9183bab5321fc51fa291c00fb2759664",
   "src/fts_examples/notebooks/dev/superglue/nofts_baseline_accuracy.png": "dceaa1ce1d435dc45260f1ffe07695f33f15fa62b3325068bc8ac72514e5afc4",
-  "src/fts_examples/notebooks/dev/superglue/pytorch_fts_explicit_nofts_accuracy.png": "37a403c12335e3bbc311784c36a6e50cbf7ebd676ea696ca8f7bfd14782797cb",
-  "src/fts_examples/notebooks/dev/superglue/pytorch_fts_explicit_transition.png": "adc3acc5ffa52dae86b4a2edc1987ddb23b9572b217fd7ada5f2d0052a1cfea1",
+  "src/fts_examples/notebooks/dev/superglue/pytorch_fts_explicit_nofts_accuracy.png": "d2d360d0f1a126bbec2ce2b17310b34d06a4d1e5a3fcd31da62030284c1709d1",
+  "src/fts_examples/notebooks/dev/superglue/pytorch_fts_explicit_transition.png": "74f3879bd61418dcbd88f57ff3bd68e7296d368621c4d3f2b3445a7b35471a17",
+  "src/fts_examples/notebooks/dev/superglue/pytorch_implicit_training_transition.png": "3cf1d61631ed3bba0952389b69fc967afa4ba5591adf5c6f77490026eb9dd733",
   "src/fts_examples/notebooks/dev/superglue/side_by_side_yaml.png": "d190f0c9c0946347f77f109b4ff1e1d65bc2be70a1903defbf651b9bc75da281"
 }
