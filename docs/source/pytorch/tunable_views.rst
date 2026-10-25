@@ -19,7 +19,7 @@ through the view's *logical* names, and Fine-Tuning Scheduler thaws, optimizes a
 they stand for. One logical name may stand for several physical tensors, and a view may thaw related tensors (a block's
 normalization layer, for example) together with the ones a phase names.
 
-Views work with both hosts: :class:`~finetuning_scheduler.core.controller.FTSController` (pass ``view=``) and the
+Views work with both interfaces: :class:`~finetuning_scheduler.core.controller.FTSController` (pass ``view=``) and the
 Lightning callback (attach the view to the ``LightningModule``). A model without a view is scheduled through
 :class:`~finetuning_scheduler.core.views.CanonicalView`, the identity view, so nothing changes for existing schedules.
 

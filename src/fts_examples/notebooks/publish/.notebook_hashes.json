@@ -3,7 +3,7 @@
   "src/fts_examples/notebooks/dev/superglue/fts_explicit_accuracy.png": "29b3ac2535678dabb0204241a9fa5918ac1f4a2728a27933ccb8d20040737322",
   "src/fts_examples/notebooks/dev/superglue/fts_explicit_loss_anim.gif": "835fcb4f8f0d27f796c70e0a5225cf8c15d56e8b8fbe0d084f61e983a1298a1d",
   "src/fts_examples/notebooks/dev/superglue/fts_superglue_lightning.ipynb": "7a80fde8c6dcda8e7d3d548f4b4721a11d142e4300c14d5f8cc12f96d5915557",
-  "src/fts_examples/notebooks/dev/superglue/fts_superglue_pytorch.ipynb": "79c6b9762202cbafd7672847f3a6c453f991f047b182e0bf5873056534fa566f",
+  "src/fts_examples/notebooks/dev/superglue/fts_superglue_pytorch.ipynb": "a7b89c669514bff1f51e6381eb5359fa9fc91116107a8af995129fe50209f5b8",
   "src/fts_examples/notebooks/dev/superglue/implicit_training_transition.png": "94237a09a9dd67b6ec3a522cc9879956bb8b333988b79fd23b362c5868eb4a8b",
   "src/fts_examples/notebooks/dev/superglue/logo_fts.png": "2ea31ac2b94dacb4301da51d2e3307fa9183bab5321fc51fa291c00fb2759664",
   "src/fts_examples/notebooks/dev/superglue/nofts_baseline_accuracy.png": "dceaa1ce1d435dc45260f1ffe07695f33f15fa62b3325068bc8ac72514e5afc4",

@@ -13,9 +13,9 @@ r"""
 Fine-Tuning Scheduler Controller Bridge
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Running :class:`~finetuning_scheduler.core.controller.FTSController` under the Lightning callback, host-driven (see
-:meth:`~finetuning_scheduler.core.controller.FTSController.attach`): Lightning owns the loop, checkpointing and early
-stopping, the callback decides when a phase ends, and the controller sequences each transition.
+Running :class:`~finetuning_scheduler.core.controller.FTSController` under the Lightning callback, externally driven
+(see :meth:`~finetuning_scheduler.core.controller.FTSController.attach`): Lightning owns the loop, checkpointing and
+early stopping, the callback decides when a phase ends, and the controller sequences each transition.
 
 The bridges keep what strategy adapters and callback subclasses observe unchanged: :class:`LightningPhaseExecutor`
 carries out phases through the callback's own ``step_pg``, ``thaw_to_depth`` and the strategy adapter's
@@ -126,8 +126,8 @@ class FTSCheckpointPolicy:
 
 def attach_controller(fts: "FinetuningScheduler", phase_hooks: Sequence[tuple] = (), *,
                       run_start_hooks: bool = True) -> FTSController:
-    """A host-driven controller for the callback's fit, over its validated schedule (the callback's own optimizer,
-    lr schedulers and phase-0 thaw are adopted as they are).
+    """An externally driven controller for the callback's fit, over its validated schedule (the callback's own
+    optimizer, lr schedulers and phase-0 thaw are adopted as they are).
 
     Args:
         fts: The callback.

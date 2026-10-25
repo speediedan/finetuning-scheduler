@@ -128,7 +128,8 @@ def test_resume_at_a_later_depth(tmp_path):
 
 
 class LegacyStepFTS(TracingFinetuningScheduler):
-    """The callback with its own transitions rather than its host-driven controller's (``_use_fts_controller``)."""
+    """The callback with its own transitions rather than its externally driven controller's
+    (``_use_fts_controller``)."""
 
     _use_fts_controller = False
 
@@ -136,7 +137,7 @@ class LegacyStepFTS(TracingFinetuningScheduler):
 @pytest.mark.parametrize("scenario", ["epoch_driven", "reinitialization", "early_stopping_driven", "restore_best",
                                       "legacy_naming_adapter", "resume"])
 def test_the_callbacks_own_transitions_dispatch_as_its_controller_does(tmp_path, scenario):
-    """The callback sequences transitions through its host-driven controller (#85); with its own transitions
+    """The callback sequences transitions through its externally driven controller (#85); with its own transitions
     instead (``_use_fts_controller = False``, kept for one release), every scenario dispatches identically."""
     seed_everything(42)
     if scenario == "resume":

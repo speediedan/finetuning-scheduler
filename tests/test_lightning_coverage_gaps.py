@@ -37,7 +37,8 @@ THREE_PHASES = {0: {"params": ["model.2.weight", "model.2.bias"], "max_transitio
 
 
 class LegacyStepFTS(FinetuningScheduler):
-    """The callback with its own transitions rather than its host-driven controller's (``_use_fts_controller``)."""
+    """The callback with its own transitions rather than its externally driven controller's
+    (``_use_fts_controller``)."""
 
     _use_fts_controller = False
 

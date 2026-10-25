@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """The ``pg_overrides`` and ``phase_config`` schedule keys under the Lightning callback, which runs its transitions
-on a host-driven ``FTSController`` (#85)."""
+on an externally driven ``FTSController`` (#85)."""
 import pytest
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.utilities.exceptions import MisconfigurationException

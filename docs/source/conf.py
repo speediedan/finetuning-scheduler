@@ -137,6 +137,7 @@ extensions = [
     "sphinx_copybutton",
     "sphinx_paramlinks",
     "sphinx_togglebutton",
+    "sphinx_design",
 ]
 
 autodoc_typehints = "none"

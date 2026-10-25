@@ -32,9 +32,27 @@ The PyTorch API does not import Lightning or jsonargparse.
 
 A Minimal Loop
 **************
-The schedule below thaws the classifier head first, then the layers beneath it. Phase 0 runs for two epochs
-(``max_transition_epoch``); later phases end when validation loss stops improving
+The schedule below, saved as ``my_schedule.yaml``, thaws the classifier head first, then the layers beneath it.
+Phase 0 runs for two epochs (``max_transition_epoch``); later phases end when validation loss stops improving
 (:class:`~finetuning_scheduler.core.transitions.PlateauTransition`). In the final phase, a plateau ends training.
+
+.. code-block:: yaml
+
+    0:
+      params:
+      - 4.weight
+      - 4.bias
+      max_transition_epoch: 2
+    1:
+      params:
+      - 2.weight
+      - 2.bias
+      lr: 1.0e-3
+    2:
+      params:
+      - 0.weight
+      - 0.bias
+      lr: 1.0e-4
 
 .. code-block:: python
 
@@ -48,15 +66,9 @@ The schedule below thaws the classifier head first, then the layers beneath it. 
 
     model = nn.Sequential(nn.Linear(16, 32), nn.ReLU(), nn.Linear(32, 32), nn.ReLU(), nn.Linear(32, 2))
 
-    schedule = {
-        0: {"params": ["4.weight", "4.bias"], "max_transition_epoch": 2},
-        1: {"params": ["2.weight", "2.bias"], "lr": 1e-3},
-        2: {"params": ["0.weight", "0.bias"], "lr": 1e-4},
-    }
-
     fts = FTSController(
         model,
-        schedule,
+        "my_schedule.yaml",
         optimizer=partial(torch.optim.AdamW, lr=1e-2),
         transition=PlateauTransition(monitor="val_loss", patience=2, min_delta=0.01),
         checkpoint=BestCheckpoint("checkpoints", monitor="val_loss"),
@@ -85,9 +97,10 @@ A few things to note:
 - **With a checkpoint policy, the best state is restored at each phase boundary** (``restore_best``, on by default
   when ``checkpoint`` is given), as the Lightning callback does: the next phase starts from the best model, optimizer
   and lr scheduler state of the phase that just ended.
-- **The schedule** may be a mapping as above, a path to a schedule YAML file in the
-  :ref:`usual format<specifying schedule>`, or ``None``, which generates the default schedule (parameters thawed in pairs,
-  starting from the last registered parameter).
+- **The schedule** may be the path to a schedule YAML file in the :ref:`usual format<specifying schedule>`, as above,
+  the same schedule as a mapping (``{0: {"params": ["4.weight", "4.bias"], "max_transition_epoch": 2}, ...}``), or
+  ``None``, which generates the default schedule (parameters thawed in pairs, starting from the last registered
+  parameter).
 
 Transitions
 ***********
@@ -202,7 +215,7 @@ and :doc:`FSDP1 scheduled fine-tuning<../distributed/fsdp_scheduled_fine_tuning>
 Relationship to the Lightning Callback
 **************************************
 The callback and the controller share one scheduling core (``finetuning_scheduler.core``), so features land in both
-and the parity tests keep their behavior aligned. The differences are in what each host owns: under Lightning, the
+and the parity tests keep their behavior aligned. The differences are in what each interface owns: under Lightning, the
 ``Trainer`` runs the loop, checkpoints through
 :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` and early-stops through
 :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping`; in a plain loop, you run the loop and the controller

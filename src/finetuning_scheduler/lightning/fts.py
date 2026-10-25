@@ -129,8 +129,8 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
     _restore_model_only: bool = False
     # the class name of the optimizer `configure_optimizers` built (set at fit start)
     _initial_optimizer_cls: str | None = None
-    # transitions are sequenced by a host-driven `FTSController` (set to `False` to use the callback's own, for one
-    # release); the controller is attached at the fit's first transition or resume
+    # transitions are sequenced by an externally driven `FTSController` (set to `False` to use the callback's own,
+    # for one release); the controller is attached at the fit's first transition or resume
     _use_fts_controller: bool = True
     _fts_controller: Any = None
     strategy_adapter: StrategyAdapter
@@ -425,7 +425,7 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
             )
 
     def _controller_step(self) -> None:
-        """Hand the transition (or the resume) the callback decided on to its host-driven
+        """Hand the transition (or the resume) the callback decided on to its externally driven
         :class:`~finetuning_scheduler.core.controller.FTSController`, which sequences it and carries it out through
         this callback's ``restore_best_ckpt``, ``step_pg`` and ``thaw_to_depth`` and the strategy adapter's
         ``on_after_phase_transition``, as :meth:`_legacy_step` calls them."""

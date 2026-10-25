@@ -306,7 +306,7 @@ class FTSController:
         self._finished = False
         # how phases are put in place, and whether a host drives the loop (`attach`) rather than the controller
         self._executor: PhaseExecutor = ControllerExecutor(self)
-        self._host_driven = False
+        self._externally_driven = False
 
     # ------------------------------------------------------------------------------------------------------------------
     # setup
@@ -353,21 +353,23 @@ class FTSController:
 
     def attach(self, executor: PhaseExecutor, schedule: Mapping[int, Mapping[str, Any]], *,
                run_start_hooks: bool = True) -> None:
-        """Set up for a training host that owns the loop, instead of :meth:`setup` (experimental).
+        """Set up an externally driven controller, for a training framework that owns the loop, instead of
+        :meth:`setup` (experimental).
 
-        The host has already validated ``schedule``, thawed phase 0 and built the optimizer and lr schedulers, which
-        the controller adopts from its :class:`~finetuning_scheduler.core.host.TrainingHost`. The host decides when a
-        phase ends and calls :meth:`request_advance`; the controller sequences the transition (the end and start
-        hooks, gates, the best-checkpoint restore through the checkpoint policy) and ``executor`` puts each phase in
-        place, so the host's own phase execution runs as before. :meth:`epochs`, :meth:`epoch_start`,
+        The framework has already validated ``schedule``, thawed phase 0 and built the optimizer and lr schedulers,
+        which the controller adopts from its :class:`~finetuning_scheduler.core.host.TrainingHost`. The framework
+        decides when a phase ends and calls :meth:`request_advance`; the controller sequences the transition (the end
+        and start hooks, gates, the best-checkpoint restore through the checkpoint policy) and ``executor`` puts each
+        phase in place, so the framework's own phase execution runs as before. :meth:`epochs`, :meth:`epoch_start`,
         :meth:`epoch_end` and :meth:`step_end` belong to a controller-driven loop, and :meth:`save`, :meth:`load` and
         :meth:`load_state_dict` to a controller that owns its checkpoints, so they are refused, as are gates
         (:meth:`add_gate`).
 
         Args:
             executor: Carries out the phases the controller decides on.
-            schedule: The schedule, as the host validated it. Each phase's ``phase_config`` is handed to phase hooks.
-            run_start_hooks: Run phase 0's start hooks now (``False`` when the host is resuming a run at a later
+            schedule: The schedule, as the framework validated it. Each phase's ``phase_config`` is handed to phase
+                hooks.
+            run_start_hooks: Run phase 0's start hooks now (``False`` when the framework is resuming a run at a later
                 phase, which :meth:`resume_at` puts the controller at).
 
         Raises:
@@ -379,8 +381,8 @@ class FTSController:
         if self._restore_best and self._checkpoint is None:
             raise FTSConfigurationError("`restore_best=True` needs a `checkpoint` policy to restore from.")
         if self._gates:
-            raise FTSConfigurationError("Gates are not supported on a host-driven controller in this release.")
-        self._executor, self._host_driven = executor, True
+            raise FTSConfigurationError("Gates are not supported on an externally driven controller in this release.")
+        self._executor, self._externally_driven = executor, True
         self._view = self._resolve_view()
         self._view_roles_at_setup = self._view.view_roles()
         self._schedule = {int(d): dict(p) for d, p in schedule.items()}
@@ -392,20 +394,22 @@ class FTSController:
             self._run_hooks("start", 0)
 
     def request_advance(self, reason: str | None = None) -> None:
-        """Advance a host-driven controller (see :meth:`attach`) to the next phase, which the host decided on.
+        """Advance an externally driven controller (see :meth:`attach`) to the next phase, which the framework
+        decided on.
 
         Raises:
-            FTSConfigurationError: If the controller is not host-driven, or the schedule has no later phase.
+            FTSConfigurationError: If the controller is not externally driven, or the schedule has no later phase.
         """
-        self._require_host_driven("request_advance")
+        self._require_externally_driven("request_advance")
         if self._depth >= self._max_depth:
             raise FTSConfigurationError(f"Phase {self._depth} is the last phase (max_depth {self._max_depth}).")
         self._advance(reason)
 
     def resume_at(self, depth: int) -> None:
-        """Put a host-driven controller (see :meth:`attach`) at ``depth`` when the host resumes a run there: thaw
-        every phase through it, without configuring the optimizer, whose groups the resumed state holds."""
-        self._require_host_driven("resume_at")
+        """Put an externally driven controller (see :meth:`attach`) at ``depth`` when the framework resumes a run
+        there: thaw every phase through it, without configuring the optimizer, whose groups the resumed state
+        holds."""
+        self._require_externally_driven("resume_at")
         if not 0 <= depth <= self._max_depth:
             raise FTSConfigurationError(f"Cannot resume at phase {depth}: the phases run from 0 to {self._max_depth}.")
         self._depth = depth
@@ -413,18 +417,19 @@ class FTSController:
         self._executor.resume_at(depth)
         self._executor.after_transition(depth)
 
-    def _require_host_driven(self, name: str) -> None:
-        if not self._host_driven:
-            raise FTSConfigurationError(f"`{name}` is for a host-driven controller; set it up with `attach()`.")
+    def _require_externally_driven(self, name: str) -> None:
+        if not self._externally_driven:
+            raise FTSConfigurationError(f"`{name}` is for an externally driven controller; set it up with `attach()`.")
 
-    def _refuse_host_driven(self, name: str, resume: bool = False) -> None:
-        if not self._host_driven:
+    def _refuse_externally_driven(self, name: str, resume: bool = False) -> None:
+        if not self._externally_driven:
             return
         if resume:
-            raise FTSConfigurationError(f"`{name}` is refused on a host-driven controller: the host saves and restores"
-                                        " the training state, and resumes the controller with `resume_at`.")
-        raise FTSConfigurationError(f"`{name}` drives the loop itself, so a host-driven controller refuses it; the"
-                                    " host calls `request_advance` instead.")
+            raise FTSConfigurationError(f"`{name}` is refused on an externally driven controller: the framework"
+                                        " driving it saves and restores the training state, and resumes the"
+                                        " controller with `resume_at`.")
+        raise FTSConfigurationError(f"`{name}` drives the loop itself, so an externally driven controller refuses"
+                                    " it; the framework driving it calls `request_advance` instead.")
 
     def _refuse_unsupported_model(self) -> None:
         # the composable `replicate()` mixes this marker class into a module's class rather than wrapping the module
@@ -699,7 +704,7 @@ class FTSController:
         ``max_epochs`` and the schedule's highest ``max_transition_epoch`` (with a warning).
         """
         self._require_setup()
-        self._refuse_host_driven("epochs")
+        self._refuse_externally_driven("epochs")
         # as the Lightning callback does, the schedule's last phase (not `max_depth`'s) decides the extension
         extended = core_schedule.final_phase_max_epochs(self._schedule, len(self._schedule) - 1,
                                                         self._epoch_watermark, max_epochs)
@@ -725,7 +730,7 @@ class FTSController:
         """Begin an epoch: advance to the next phase when a transition is pending or the schedule's
         ``max_transition_epoch`` is reached (at most one phase per epoch)."""
         self._require_setup()
-        self._refuse_host_driven("epoch_start")
+        self._refuse_externally_driven("epoch_start")
         self._epoch_end_called = False
         if self.is_final_phase:
             return
@@ -746,7 +751,7 @@ class FTSController:
             :attr:`should_stop`.
         """
         self._require_setup()
-        self._refuse_host_driven("epoch_end")
+        self._refuse_externally_driven("epoch_end")
         self._epoch_end_called = True
         self._last_metrics = dict(metrics or {})
         decision, reason = self._evaluate("epoch", metrics, completed_epochs=self._host.current_epoch + 1)
@@ -778,7 +783,7 @@ class FTSController:
             The agreed decision.
         """
         self._require_setup()
-        self._refuse_host_driven("step_end")
+        self._refuse_externally_driven("step_end")
         self._steps_since_step_end = 0
         decision, reason = self._evaluate("step", metrics, completed_epochs=self._host.current_epoch)
         if not self.is_final_phase:
@@ -885,7 +890,7 @@ class FTSController:
         self._depth += 1
         self._phase_start_epoch, self._phase_start_step = self._host.current_epoch, self._host.global_step
         self._fingerprints.setdefault(self._depth, [])
-        if self._checkpoint is not None and not self._host_driven:
+        if self._checkpoint is not None and not self._externally_driven:
             self._pin_boundary(self._depth)
         self._run_hooks("start", self._depth)
         self._apply_promotions(self._depth)
@@ -904,7 +909,7 @@ class FTSController:
         """Promote the tensors phase ``depth`` names in its ``promote`` key (when the phase starts, after its start
         hooks and before its thaw), through the view's ``promote`` or the default materialization, and record each
         promoted tensor's value, which restoring a checkpoint saved before the promotion puts back."""
-        if self._host_driven:  # the host compiles (and names) its own schedule; `promote` is refused there
+        if self._externally_driven:  # the host compiles (and names) its own schedule; `promote` is refused there
             return
         assert self._compiled is not None and self._view is not None
         promoted = self._compiled.promotions.get(depth)
@@ -1134,10 +1139,11 @@ class FTSController:
             A handle whose ``remove()`` unregisters the gate.
 
         Raises:
-            FTSConfigurationError: On a host-driven controller (see :meth:`attach`), whose host decides transitions.
+            FTSConfigurationError: On an externally driven controller (see :meth:`attach`), whose framework decides
+                transitions.
         """
-        if self._host_driven:
-            raise FTSConfigurationError("Gates are not supported on a host-driven controller in this release.")
+        if self._externally_driven:
+            raise FTSConfigurationError("Gates are not supported on an externally driven controller in this release.")
         handle = RemovableHandle(self._gates)
         self._gates[handle.id] = (fn, rank_zero_only, isolate_rng)
         return handle
@@ -1351,7 +1357,7 @@ class FTSController:
         """Restore the best checkpoint's model, optimizer and lr scheduler state (as the callback does at a phase
         boundary); return the depth it was saved at, or ``None`` when there is none yet."""
         cp = self._checkpoint
-        restore = getattr(cp, "restore", None) if self._host_driven else None
+        restore = getattr(cp, "restore", None) if self._externally_driven else None
         if restore is not None:  # a policy whose host reads its own checkpoints restores the best itself
             depth = restore()
             self._restored_count += depth is not None
@@ -1497,7 +1503,7 @@ class FTSController:
         Resuming it reopens the run, so the current phase's end hooks run again at its real end.
         """
         self._require_setup()
-        self._refuse_host_driven("save", resume=True)
+        self._refuse_externally_driven("save", resume=True)
         rng_state = capture_rng_state(self._host.rng_devices()) if self.capture_rng else None
         path = self._write_checkpoint(os.fspath(path), extra={"controller": self.state_dict()}, rng_state=rng_state)
         self._checkpoint_hook("mark_resume_point")  # keep the checkpoints this save refers to until the next one
@@ -1511,7 +1517,7 @@ class FTSController:
             FTSConfigurationError: If the checkpoint belongs to a different fine-tuning schedule.
         """
         self._require_setup()
-        self._refuse_host_driven("load", resume=True)
+        self._refuse_externally_driven("load", resume=True)
         path = os.fspath(path)
         meta = self._read_meta(path)
         self.load_state_dict(meta["controller"])
@@ -1643,7 +1649,7 @@ class FTSController:
             FileNotFoundError: If the checkpoint policy's best checkpoint or rollback point no longer exists.
         """
         self._require_setup()
-        self._refuse_host_driven("load_state_dict", resume=True)
+        self._refuse_externally_driven("load_state_dict", resume=True)
         if state_dict["schedule_hash"] != config_hash({"schedule": self._schedule}):
             raise FTSConfigurationError("The saved state belongs to a different fine-tuning schedule.")
         saved_digest = state_dict.get("view_digest")

@@ -9,8 +9,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""A host-driven ``FTSController`` (``attach``): the host owns the loop and phase execution, the controller
-sequences transitions (#85).
+"""An externally driven ``FTSController`` (``attach``): the framework driving it owns the loop and phase execution,
+the controller sequences transitions (#85).
 
 These need only PyTorch and the scheduling core (the ``core-no-lightning`` job runs them with ``--noconftest``).
 """
@@ -93,13 +93,13 @@ def test_resume_at_thaws_through_the_executor_without_configuring_the_optimizer(
     assert fts.curr_depth == 2 and executor.calls == [("resume_at", 2), ("after_transition", 2)]
 
 
-def test_host_driven_refusals():
+def test_externally_driven_refusals():
     fts, _ = _attached(max_depth=1)
     for loop_method in (lambda: next(fts.epochs(2)), fts.epoch_start, fts.epoch_end, fts.step_end):
-        with pytest.raises(FTSConfigurationError, match="host-driven controller refuses it"):
+        with pytest.raises(FTSConfigurationError, match="externally driven controller refuses it"):
             loop_method()
     for resume_method in (lambda: fts.save("x.pt"), lambda: fts.load("x.pt"), lambda: fts.load_state_dict({})):
-        with pytest.raises(FTSConfigurationError, match="the host saves and restores the training state"):
+        with pytest.raises(FTSConfigurationError, match="driving it saves and restores the training state"):
             resume_method()
     with pytest.raises(FTSConfigurationError, match="Gates are not supported"):
         fts.add_gate(lambda e: True)
@@ -118,7 +118,7 @@ def test_host_driven_refusals():
         plain.request_advance()
 
 
-def test_attach_refuses_registered_gates_and_policy_restore_is_host_driven_only():
+def test_attach_refuses_registered_gates_and_policy_restore_is_externally_driven_only():
     model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4), nn.Linear(4, 2))
     host = TorchHost(model)
     host.set_optimizer(0, torch.optim.SGD(model[2].parameters(), lr=0.1))
