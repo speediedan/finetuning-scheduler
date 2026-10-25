@@ -59,8 +59,10 @@ jobs:
       - checkout: self
 
       # every artifact of this run, each under $(Pipeline.Workspace)/<artifact>; the checker takes each vendor's
-      # latest attempt (fts-release-<vendor>-<attempt>)
+      # latest attempt (fts-release-<vendor>-<attempt>). When no leg published anything the download may fail; the
+      # check still runs, so the run ends in a named INELIGIBLE reason rather than a download error.
       - download: current
+        continueOnError: true
         displayName: 'Download release evidence'
 
       - bash: |

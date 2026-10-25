@@ -10,6 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """CPU tests for the release eligibility checker (``tests/gpu_ci/release_eligibility.py``)."""
+import hashlib
 import json
 
 import pytest
@@ -21,6 +22,7 @@ REVISION = "0" * 40
 IMAGES = {"nvidia": "fts:cuda@sha256:" + "a" * 64, "amd": "fts:rocm@sha256:" + "b" * 64}
 TORCH = {"nvidia": "2.15.0+cu132", "amd": "2.15.0+rocm10.0"}
 NODES = [f"tests/test_x.py::test_{i}" for i in range(4)]
+COVERAGE_EXPORT = b'{"totals": {"covered_lines": 10}}'
 
 
 def _manifest(phase):
@@ -44,8 +46,28 @@ def _session(outcomes):
     return records + [{"event": "finish", "exitstatus": 0, "rank": 0}]
 
 
-def _leg(vendor, outcomes=None):
-    versions = {"python": "3.13.16", "torch": TORCH[vendor], "lightning": "2.6.1", "finetuning_scheduler": "2.15.0"}
+def _coverage(phase):
+    if not pm.PHASES[phase].measured:
+        return {"measured": False}
+    sha = hashlib.sha256(COVERAGE_EXPORT).hexdigest()
+    return {
+        "measured": True,
+        "missing": False,
+        "json": f"coverage/{phase}.json",
+        "json_sha256": sha,
+        "covered_lines": 10,
+    }
+
+
+def _leg(vendor, outcomes=None, reviewed=None):
+    versions = {
+        "python": "3.13.16",
+        "torch": TORCH[vendor],
+        "torch_git_version": "c" * 40,
+        "lightning": "2.6.1",
+        "lightning_commit": None,
+        "finetuning_scheduler": "2.15.0",
+    }
     leg = {}
     for phase in re_.REQUIRED_PHASES:
         manifest = _manifest(phase)
@@ -57,8 +79,11 @@ def _leg(vendor, outcomes=None):
             lease_mode="tool",
             image=IMAGES[vendor],
             versions=versions,
+            reviewed_exclusions=reviewed,
+            coverage=_coverage(phase),
         )
-        leg[phase] = {"report": report, "manifest": manifest}
+        coverage_sha = report["coverage"].get("json_sha256")
+        leg[phase] = {"report": report, "manifest": manifest, "coverage_sha256": coverage_sha}
     return leg
 
 
@@ -77,6 +102,9 @@ def _write(root, vendor, leg, attempt=1):
     for phase, docs in leg.items():
         (phases / "reports" / f"{phase}.json").write_text(json.dumps(docs["report"]))
         (phases / "manifests" / f"{phase}.json").write_text(json.dumps(docs["manifest"]))
+        if docs["report"]["coverage"].get("json"):
+            (phases / "coverage").mkdir(exist_ok=True)
+            (phases / docs["report"]["coverage"]["json"]).write_bytes(COVERAGE_EXPORT)
 
 
 def test_required_phases_are_the_release_phases():
@@ -128,6 +156,40 @@ def _other_selection(legs):
     report["manifest_sha256"] = pm.manifest_digest(manifest)
 
 
+def _flip_node(legs):
+    # the reviewed failure mode: a node's recorded outcome is a failure while the summary counts still read clean
+    legs["amd"]["standalone"]["report"]["nodes"][NODES[0]]["outcome"] = "failed"
+
+
+def _drop_node(legs):
+    del legs["amd"]["standalone"]["report"]["nodes"][NODES[0]]
+
+
+def _unmanifested(legs):
+    legs["nvidia"]["examples"]["report"]["unmanifested_nodes"] = ["tests/test_x.py::test_extra"]
+
+
+def _skip_without_reason(legs):
+    # a skipped node whose exclusion has no reason, in a report that nonetheless claims its exclusions were reviewed
+    for vendor in legs:
+        legs[vendor] = _leg(vendor, {**dict.fromkeys(NODES, "passed"), NODES[0]: "skipped"}, {NODES[0]: "reviewed"})
+    legs["amd"]["examples"]["report"]["exclusions"][0]["reason"] = None
+
+
+def _drop_exclusion(legs):
+    for vendor in legs:
+        legs[vendor] = _leg(vendor, {**dict.fromkeys(NODES, "passed"), NODES[0]: "skipped"}, {NODES[0]: "reviewed"})
+    legs["nvidia"]["examples"]["report"]["exclusions"] = []
+
+
+def _coverage_missing(legs):
+    legs["amd"]["standalone"]["report"]["coverage"] = {"measured": True, "missing": True}
+
+
+def _coverage_tampered(legs):
+    legs["nvidia"]["gpu-nonstandalone"]["coverage_sha256"] = "d" * 64
+
+
 def _versions(key, value, vendor="amd"):
     def mutate(legs):
         for docs in legs[vendor].values():
@@ -154,7 +216,15 @@ def _versions(key, value, vendor="amd"):
         (_inflate_passes, "unaccounted nodes"),
         (_set("amd", "standalone", "classification", "failing"), "report claims"),
         (_other_selection, "the vendors collected or selected different nodes"),
+        (_flip_node, "outcome counts disagree with the node records"),
+        (_drop_node, "node records are not the selection"),
+        (_unmanifested, "nodes ran that the manifest did not select"),
+        (_skip_without_reason, "exclusions_reviewed disagrees with reasons"),
+        (_drop_exclusion, "exclusions do not list exactly the skipped and xfailed nodes"),
+        (_coverage_missing, "coverage evidence is missing"),
+        (_coverage_tampered, "coverage export missing or not the one the report digested"),
         (_versions("lightning_commit", "abc123"), "installed versions differ across vendors"),
+        (_versions("torch_git_version", "e" * 40), "installed versions differ across vendors"),
         (_versions("lightning", "2.7.0"), "installed versions differ across vendors"),
         (_versions("finetuning_scheduler", None), "installed versions missing"),
     ],
@@ -175,6 +245,12 @@ def test_unclean_phase_is_ineligible(outcome, classification):
     legs["amd"] = _leg("amd", {**dict.fromkeys(NODES, "passed"), NODES[0]: outcome})
     with pytest.raises(re_.Ineligible, match=f"amd/gpu-nonstandalone: phase is {classification}"):
         _check(legs)
+
+
+def test_reviewed_skip_is_eligible():
+    outcomes = {**dict.fromkeys(NODES, "passed"), NODES[0]: "skipped"}
+    legs = {v: _leg(v, outcomes, {NODES[0]: "reviewed"}) for v in pm.VENDORS}
+    assert _check(legs)["eligible"]
 
 
 def test_vendor_torch_tags_differ_but_releases_agree():
@@ -207,6 +283,16 @@ def test_cli_removes_a_stale_verdict_when_ineligible(tmp_path, capsys):
     assert re_.main(argv + ["--nvidia-result", "Succeeded", "--amd-result", "Failed"]) == 1
     assert not output.exists()
     assert "INELIGIBLE: amd leg result is 'Failed'" in capsys.readouterr().err
+
+
+def test_cli_reports_a_report_of_the_wrong_shape(tmp_path, capsys):
+    artifacts = tmp_path / "artifacts"
+    _write(artifacts, "nvidia", _legs()["nvidia"])
+    _write(artifacts, "amd", _legs()["amd"])
+    (artifacts / "fts-release-amd-1" / "fts-phases" / "reports" / "examples.json").write_text("[]")
+    argv = ["--artifacts", str(artifacts), "--revision", REVISION, "--output", str(tmp_path / "e.json")]
+    assert re_.main(argv + ["--nvidia-result", "Succeeded", "--amd-result", "Succeeded"]) == 1
+    assert "INELIGIBLE" in capsys.readouterr().err
 
 
 def test_cli_reports_unreadable_evidence(tmp_path, capsys):

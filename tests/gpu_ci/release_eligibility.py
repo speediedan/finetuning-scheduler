@@ -25,8 +25,11 @@ The checker re-derives what it can rather than trusting a report's own summary:
   the evidence class is ``pipeline`` (a parity run made outside the pipeline is never release evidence), the lease was
   taken through the host's lease tool, and the image is digest-pinned;
 - within a leg, every phase names the same image and installed versions; across the legs, each phase collected and
-  selected the same node ids with the same selector, and the installed Fine-Tuning Scheduler, Lightning (and the
-  commit a development Lightning came from) and torch release (without its local build tag) agree.
+  selected the same node ids with the same selector, and the installed Fine-Tuning Scheduler, Lightning and torch
+  release (without its local build tag) agree, as do the commits torch and Lightning were built from.
+
+Each phase's summary counts are recounted from its per-node records and its exclusions from the nodes it skipped or
+expected to fail, and a measured phase's coverage export is checked against the digest its report recorded.
 
 Usage, from the repository root, on the downloaded artifacts (standard library only)::
 
@@ -35,6 +38,7 @@ Usage, from the repository root, on the downloaded artifacts (standard library o
         --output eligibility.json
 """
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -49,6 +53,10 @@ DIGEST_PINNED = re.compile(r".+@sha256:[0-9a-f]{64}")
 # Installed versions that must agree across vendors. ``torch`` is compared without its local tag (``+cu132``,
 # ``+rocm10.0``), the one part of it that names the vendor.
 SHARED_VERSIONS = ("finetuning_scheduler", "lightning", "torch")
+# What names the build behind a version string that does not: a test-channel torch release candidate carries the final
+# version, and a commit-pinned Lightning one ``.dev`` version for every commit. Both are vendor-neutral commits, so they
+# must agree too (``torch_record_sha256`` and ``torch_cuda``/``torch_hip`` differ per wheel and stay out).
+SHARED_BUILDS = ("torch_git_version", "lightning_commit")
 
 
 class Ineligible(ValueError):
@@ -74,17 +82,30 @@ def leg_dirs(artifacts: Path) -> dict[str, Path]:
 
 
 def load_leg(root: Path) -> dict[str, dict]:
-    """``{phase: {"report": ..., "manifest": ...}}`` for every required phase present under ``root``."""
+    """``{phase: {"report": ..., "manifest": ..., "coverage_sha256": ...}}`` for every required phase under
+    ``root``.
+
+    ``coverage_sha256`` is the digest of the coverage export the report names, when that file is present.
+    """
     phases = {}
     for phase in REQUIRED_PHASES:
         report, manifest = root / "reports" / f"{phase}.json", root / "manifests" / f"{phase}.json"
         if report.is_file() and manifest.is_file():
-            phases[phase] = {"report": json.loads(report.read_text()), "manifest": json.loads(manifest.read_text())}
+            doc = json.loads(report.read_text())
+            export = root / str((doc.get("coverage") or {}).get("json") or "")
+            phases[phase] = {
+                "report": doc,
+                "manifest": json.loads(manifest.read_text()),
+                "coverage_sha256": hashlib.sha256(export.read_bytes()).hexdigest() if export.is_file() else None,
+            }
     return phases
 
 
-def check_phase(vendor: str, phase: str, report: dict, manifest: dict, revision: str) -> None:
-    """One phase of one leg: identity, digest, counts against the manifest, and a clean classification."""
+def check_phase(
+    vendor: str, phase: str, report: dict, manifest: dict, revision: str, coverage_sha256: str | None = None
+) -> None:
+    """One phase of one leg: identity, digest, counts against the manifest and the node records, exclusions,
+    coverage evidence, and a clean classification."""
     where = f"{vendor}/{phase}"
     for key, expected in (
         ("repository", REPOSITORY),
@@ -122,6 +143,37 @@ def check_phase(vendor: str, phase: str, report: dict, manifest: dict, revision:
     )
     require(collection["selected"] == outcomes["attempted"] + outcomes["unexecuted"], f"{where}: unaccounted nodes")
     require(sum(outcomes[k] for k in OUTCOMES) == outcomes["attempted"], f"{where}: outcomes do not add up")
+    # The summary counts decide cleanliness, so they are recounted from the per-node records, which must cover exactly
+    # the manifest's selection.
+    nodes = report.get("nodes")
+    require(isinstance(nodes, dict) and set(nodes) == set(selected), f"{where}: node records are not the selection")
+    recount = dict.fromkeys((*OUTCOMES, "unexecuted"), 0)
+    for nodeid, node in nodes.items():
+        require(node.get("outcome") in recount, f"{where}: {nodeid} has outcome {node.get('outcome')!r}")
+        recount[node["outcome"]] += 1
+    require(
+        all(outcomes[k] == n for k, n in recount.items()), f"{where}: outcome counts disagree with the node records"
+    )
+    require(not report.get("unmanifested_nodes"), f"{where}: nodes ran that the manifest did not select")
+    # A skip or expected failure is clean only with a reviewed reason: the exclusions must list exactly those nodes,
+    # and "reviewed" must mean every one of them has its reason.
+    excluded = {n for n, node in nodes.items() if node["outcome"] in ("skipped", "xfailed")}
+    reasons = {e.get("nodeid"): e.get("reason") for e in report.get("exclusions", [])}
+    require(set(reasons) == excluded, f"{where}: exclusions do not list exactly the skipped and xfailed nodes")
+    require(
+        report["exclusions_reviewed"] == all(reasons.values()), f"{where}: exclusions_reviewed disagrees with reasons"
+    )
+    # Coverage is part of a measured phase's evidence: the export must be present and be the one the report digested.
+    # It is not compared across vendors here (``phase_manifest coverage-diff`` does that): a backend may run lines of
+    # its own.
+    if PHASES[phase].measured:
+        coverage = report.get("coverage") or {}
+        require(coverage.get("measured") and not coverage.get("missing"), f"{where}: coverage evidence is missing")
+        require(
+            coverage_sha256 is not None and coverage_sha256 == coverage.get("json_sha256"),
+            f"{where}: coverage export missing or not the one the report digested",
+        )
+        require((coverage.get("covered_lines") or 0) > 0, f"{where}: coverage records no executed lines")
     classification = classify(report)
     require(classification == "clean", f"{where}: phase is {classification}")
     require(report.get("classification") == classification, f"{where}: report claims {report.get('classification')!r}")
@@ -144,7 +196,7 @@ def check_release(legs: dict[str, dict[str, dict]], results: dict[str, str], rev
         first = phases[REQUIRED_PHASES[0]]["report"]
         for phase in REQUIRED_PHASES:
             report, manifest = phases[phase]["report"], phases[phase]["manifest"]
-            check_phase(vendor, phase, report, manifest, revision)
+            check_phase(vendor, phase, report, manifest, revision, phases[phase].get("coverage_sha256"))
             for key in ("image", "versions"):
                 require(report[key] == first[key], f"{vendor}/{phase}: {key} differs from the leg's other phases")
             selection = (manifest["selector"], sorted(manifest["raw_node_ids"]), sorted(manifest["selected_node_ids"]))
@@ -155,11 +207,10 @@ def check_release(legs: dict[str, dict[str, dict]], results: dict[str, str], rev
         versions = first["versions"]
         installed = {k: (versions.get(k) or "").split("+")[0] for k in SHARED_VERSIONS}
         require(all(installed.values()), f"{vendor}: installed versions missing ({', '.join(SHARED_VERSIONS)})")
-        # a development Lightning reports one version for every commit, so the commit it was installed from counts too
-        installed_by_vendor[vendor] = {**installed, "lightning_commit": versions.get("lightning_commit")}
+        installed_by_vendor[vendor] = {**installed, **{k: versions.get(k) for k in SHARED_BUILDS}}
         evidence[vendor] = {
             "image": first["image"],
-            "versions": {k: versions.get(k) for k in ("python", *SHARED_VERSIONS, "lightning_commit")},
+            "versions": {k: versions.get(k) for k in ("python", *SHARED_VERSIONS, *SHARED_BUILDS)},
             "phases": {p: phases[p]["report"]["manifest_sha256"] for p in REQUIRED_PHASES},
         }
     require(
@@ -189,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         legs = {vendor: load_leg(root) for vendor, root in leg_dirs(args.artifacts).items()}
         verdict = check_release(legs, {"nvidia": args.nvidia_result, "amd": args.amd_result}, args.revision)
-    except (Ineligible, KeyError, TypeError, OSError, json.JSONDecodeError) as exc:
+    except (Ineligible, KeyError, TypeError, AttributeError, OSError, json.JSONDecodeError) as exc:
         print(f"INELIGIBLE: {exc}", file=sys.stderr)
         return 1
     args.output.parent.mkdir(parents=True, exist_ok=True)
