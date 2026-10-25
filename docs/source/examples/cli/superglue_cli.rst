@@ -74,11 +74,6 @@ Though beyond the scope of this documentation, it might be worth investigating t
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` allows one to do just that quite
 easily.
 
-Full logs/schedules for all three scenarios
-`are available <https://drive.google.com/file/d/1LrUcisRLHeJgh_BDOOD_GUBPp5iHAkoR/view?usp=sharing>`_
-as well as the `checkpoints produced <https://drive.google.com/file/d/1t7myBgcqcZ9ax_IT9QVk-vFH_l_o5UXB/view?usp=sharing>`_
-in the scenarios (caution, ~3.5GB).
-
 .. list-table::
    :widths: 25 25 25 25
    :header-rows: 1

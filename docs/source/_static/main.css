@@ -108,3 +108,21 @@ html[data-theme="dark"] .navbar-brand img {
     display: table;
     clear: both;
 }
+
+/* the examples tables: fixed column widths (they must win over the global `col` rule above, so `!important`) */
+table.fts-examples-table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+table.fts-examples-table col:nth-child(1) {
+    width: 30% !important;
+}
+
+table.fts-examples-table col:nth-child(2) {
+    width: 18% !important;
+}
+
+table.fts-examples-table col:nth-child(3) {
+    width: 52% !important;
+}

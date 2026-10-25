@@ -1,6 +1,6 @@
 .. _examples-overview:
 
-Examples
+Overview
 ########
 
 End-to-end examples of scheduled fine-tuning, grouped by how they run: ``notebooks/`` holds the tutorial notebooks
@@ -12,7 +12,8 @@ Notebooks
 
 .. list-table::
    :header-rows: 1
-   :widths: 35 20 45
+   :widths: 30 18 52
+   :class: fts-examples-table
 
    * - Example
      - Interface
@@ -31,7 +32,8 @@ Command Line
 
 .. list-table::
    :header-rows: 1
-   :widths: 35 20 45
+   :widths: 30 18 52
+   :class: fts-examples-table
 
    * - Example
      - Interface
