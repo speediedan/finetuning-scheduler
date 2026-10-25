@@ -83,6 +83,18 @@ GROUPS: dict[str, list[tuple[str, str, str]]] = {
         ("docker_images_release.sh", "dockers/docker_images_release.sh", r'\["cuda"\]="([\d.]+)"'),
         ("release-docker matrix", ".github/workflows/release-docker.yml", r'cust_base: \["cu([\d.]+)-"\]'),
     ],
+    # The GPU pipelines pin each vendor's image by digest; a release validated on another image than CI's proves
+    # nothing about CI's, so every pipeline must pin the same two.
+    "azure nvidia image": [
+        ("gpu-tests pipeline", ".azure-pipelines/gpu-tests.yml", r'^\s+nvidia: "([^"]+)"'),
+        ("gpu-proof pipeline", ".azure-pipelines/gpu-proof.yml", r'^\s+nvidia: "([^"]+)"'),
+        ("gpu-release pipeline", ".azure-pipelines/gpu-release.yml", r'^\s+nvidia: "([^"]+)"'),
+    ],
+    "azure amd image": [
+        ("gpu-tests pipeline", ".azure-pipelines/gpu-tests.yml", r'^\s+amd: "([^"]+)"'),
+        ("gpu-proof pipeline", ".azure-pipelines/gpu-proof.yml", r'^\s+amd: "([^"]+)"'),
+        ("gpu-release pipeline", ".azure-pipelines/gpu-release.yml", r'^\s+amd: "([^"]+)"'),
+    ],
     "torch-min": [
         (
             "BASE_DEPENDENCIES",

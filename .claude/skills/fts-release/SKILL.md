@@ -77,6 +77,12 @@ task (`Testing: CUDA`, named `Testing: standard` on older branches, then `standa
 `statusFilter=notStarted` before queueing a manual run, or you create a duplicate. Release the gate per the
 `az-pipelines-ops` skill.
 
+**GPU release validation on both vendors:** queue `.azure-pipelines/gpu-release.yml` by hand on the release branch
+head, after an operator has switched the AMD agent to its release mode (a vendor-demanded job queued while no agent
+matches fails at once). Its `release_eligibility` job must succeed and publish `fts-release-eligibility` with
+`"eligible": true` for that head's revision; a green leg alone is not enough. Switch the AMD agent back once both legs
+have been assigned.
+
 **Coverage badges** for the branch must render percentages (URL-encode the slash):
 
 ```bash
