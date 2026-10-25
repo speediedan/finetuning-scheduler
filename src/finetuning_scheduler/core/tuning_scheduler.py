@@ -56,6 +56,7 @@ from finetuning_scheduler.strategies.base import DistributedAdapter, select_dist
 from finetuning_scheduler.strategies.dtensor import DTensorAdapter
 from finetuning_scheduler.core.views import (BoundView, canonical_fqn, CanonicalView, instrument_state_keys,
                                              resolve_view)
+from finetuning_scheduler.tunable_view.errors import TunableViewError
 from finetuning_scheduler.core.transitions import (AnyOf, as_decision, Decision, epoch_transition_due, GateEvent,
                                                    GateResult, TransitionContext, TransitionPolicy)
 
@@ -194,7 +195,7 @@ class TuningScheduler:
         compile_reset: Reset dynamo's compiled graphs at each transition; by default when the module is compiled.
         allow_meta_frozen: Allow meta-device parameters that no phase schedules (they are warned about).
         view: The :class:`~finetuning_scheduler.core.views.TunableView` through which the schedule names the model's
-            parameters (experimental). By default, a view attached to the model as ``fts_tunable_view``, else the
+            parameters (experimental). By default, a view attached to the model as ``tunable_view``, else the
             identity :class:`~finetuning_scheduler.core.views.CanonicalView`. Its ``root`` must be ``model``.
         distributed: The :class:`~finetuning_scheduler.strategies.base.DistributedAdapter` for the model's layout
             (experimental). By default, the first of FSDP2, DTensor (tensor parallelism) and unsharded that recognizes
@@ -1729,7 +1730,7 @@ class TuningScheduler:
         if bound is None:
             try:
                 bound = resolve_view(self.model, self._view_src)
-            except FTSConfigurationError:  # an invalid view is refused at setup
+            except (FTSConfigurationError, TunableViewError):  # an invalid view is refused at setup
                 return {"view": {"class_path": describe_callable(type(self._view_src))}}
         # without promotions, so the hash is the same before and after one (a view that owns promotion may report
         # its promoted roles itself, so the roles it reported at setup are used once set up)

@@ -26,6 +26,10 @@ are not documented as public API.
     strategies.plan
     testing.conformance
     testing.fixtures
+    tunable_view.views
+    tunable_view.roles
+    tunable_view.errors
+    tunable_view.conformance
     core.schedule
     core.state
     core.rng

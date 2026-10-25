@@ -26,7 +26,8 @@ class FTSConfigurationError(ValueError):
     ``FTSConfigurationError`` produces an instance of that subclass, so core code raises one type while each interface
     receives the exception type its users already catch. The Lightning integration registers a subclass that is also a
     ``MisconfigurationException``. Raising a more specific subclass (such as
-    :class:`~finetuning_scheduler.core.views.Unresolvable`) produces an instance of both it and the registered subclass.
+    :class:`~finetuning_scheduler.core.views.ScheduleUnresolvable`) produces an instance of both it and the registered
+    subclass.
     """
 
     def __new__(cls, *args: Any, **kwargs: Any) -> "FTSConfigurationError":

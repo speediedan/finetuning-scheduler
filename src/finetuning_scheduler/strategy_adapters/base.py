@@ -156,14 +156,14 @@ class StrategyAdapter:
             f"`{cls.__qualname__}` overrides StrategyAdapter's parameter-naming methods"
             f" ({', '.join(sorted(overrides))}). Overriding them to name parameters is deprecated since"
             " finetuning-scheduler 2.15 and will be unsupported no earlier than 2.17: implement a `TunableView`"
-            " (`finetuning_scheduler.core.views`) and attach it to your module as `fts_tunable_view` instead. Sharding"
+            " (`finetuning_scheduler.core.views`) and attach it to your module as `tunable_view` instead. Sharding"
             " customization through `StrategyAdapter` subclasses (including a sharding `fts_optim_transform`) is"
             " unaffected.",
         )
 
     @property
     def tunable_view(self) -> BoundView | None:
-        """The view schedules are resolved through: the view attached to the module as ``fts_tunable_view``, or the
+        """The view schedules are resolved through: the view attached to the module as ``tunable_view``, or the
         canonical view. ``None`` for an adapter with parameter-naming overrides, whose overrides name parameters
         instead; an attached view is then ignored, with a notice. Resolved lazily, on first use."""
         if self.naming_overrides():
@@ -174,7 +174,7 @@ class StrategyAdapter:
             view = resolve_view(module)
             if view.root is not module:
                 raise MisconfigurationException(
-                    f"The `fts_tunable_view` attached to {type(module).__name__} is rooted at"
+                    f"The `tunable_view` attached to {type(module).__name__} is rooted at"
                     f" {type(view.root).__name__}; its `root` must be the LightningModule itself, whose parameters the"
                     " optimizer and checkpoints see."
                 )
@@ -183,7 +183,7 @@ class StrategyAdapter:
 
     @property
     def attached_view(self) -> bool:
-        """Whether the module carries a view (``fts_tunable_view``) that this adapter schedules through."""
+        """Whether the module carries a view (``tunable_view``) that this adapter schedules through."""
         return getattr(self.pl_module, VIEW_ATTR, None) is not None and self.tunable_view is not None
 
     def _notice_ignored_view(self) -> None:
@@ -196,7 +196,7 @@ class StrategyAdapter:
             cls,
             f"{cls.__qualname__} overrides StrategyAdapter's parameter-naming methods"
             f" ({', '.join(sorted(self.naming_overrides()))}), so it names the parameters of"
-            f" {type(self.pl_module).__name__} and the `fts_tunable_view` attached to it"
+            f" {type(self.pl_module).__name__} and the `tunable_view` attached to it"
             f" ({type(attached).__qualname__}) is not used.",
         )
 

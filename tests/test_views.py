@@ -20,8 +20,10 @@ from torch.nn.utils import parametrize
 
 from finetuning_scheduler import CanonicalView, TunableSupport, TunableView, TunableViewExtras, ViewDefaults
 from finetuning_scheduler.core import roles as R
+from finetuning_scheduler.tunable_view import roles as protocol_roles
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.core.views import as_view, BoundView, pair_groups, resolve_view, Unresolvable, VIEW_ATTR
+from finetuning_scheduler.core.views import (as_view, BoundView, pair_groups, resolve_view, TunableViewError,
+                                             Unresolvable, VIEW_ATTR)
 
 
 def _net():
@@ -90,6 +92,10 @@ def test_parse_role(role, expected):
 def test_parse_role_refuses(role, match):
     with pytest.raises(FTSConfigurationError, match=match):
         R.parse_role(role)
+    # the protocol raises its own error; Fine-Tuning Scheduler's re-export raises a configuration error
+    with pytest.raises(TunableViewError, match=match) as excinfo:
+        protocol_roles.parse_role(role)
+    assert not isinstance(excinfo.value, FTSConfigurationError)
 
 
 def test_selectors():
@@ -132,7 +138,7 @@ def test_validate_roles_covers_parameters_and_buffers():
 def test_support_record():
     assert TunableSupport(trainable=True).declared_roles == frozenset({"base"})
     assert TunableSupport(trainable=False, reason="remote execution").reason == "remote execution"
-    with pytest.raises(FTSConfigurationError, match="must give a `reason`"):
+    with pytest.raises(TunableViewError, match="must give a `reason`"):
         TunableSupport(trainable=False)
 
 
@@ -145,7 +151,7 @@ def test_canonical_view_identity_and_refusal():
     with pytest.raises(Unresolvable, match=r"\['0.wieght', 'head.bias'\]") as excinfo:
         view.to_physical(["0.wieght", "0.bias", "head.bias"])
     assert excinfo.value.names == ["0.wieght", "head.bias"]
-    assert isinstance(excinfo.value, FTSConfigurationError)
+    assert isinstance(excinfo.value, TunableViewError) and not isinstance(excinfo.value, FTSConfigurationError)
     assert view.support() == TunableSupport(trainable=True)
     assert [n for n, _ in view.logical_named_parameters()] == [n for n, _ in net.named_parameters()]
 
@@ -166,7 +172,7 @@ def test_canonical_view_roles():
     view = CanonicalView(net, roles={"1.running_mean": "fitted", "1.running_var": "fitted", "2.weight": "adapter:x"})
     assert view.support().declared_roles == frozenset({"base", "fitted", "adapter"})
     assert view.roles()["1.running_mean"] == "fitted"
-    with pytest.raises(FTSConfigurationError, match="neither a parameter nor a buffer"):
+    with pytest.raises(TunableViewError, match="neither a parameter nor a buffer"):
         CanonicalView(net, roles={"0.missing": "fitted"})
 
 
@@ -185,7 +191,7 @@ def test_structural_view_needs_no_inheritance():
     assert bound.to_logical(["0.weight", "0.bias", "1.weight"]) == ["block0", "1.weight"]
     assert bound.coupled(["0.weight"]) == [] and bound.roles() == {}
     assert not bound.defines("coupled")
-    with pytest.raises(FTSConfigurationError, match="must define `logical_named_parameters`"):
+    with pytest.raises(TunableViewError, match="must define `logical_named_parameters`"):
         list(bound.logical_named_parameters())
     bound.support()
     bound.support()
@@ -245,14 +251,14 @@ def test_resolve_view_order():
 
 
 def test_resolve_view_refusals():
-    with pytest.raises(FTSConfigurationError, match="lacks `support`, `to_physical`, `to_logical`"):
+    with pytest.raises(TunableViewError, match="lacks `support`, `to_physical`, `to_logical`"):
         resolve_view(_net(), view=type("NotAView", (), {"root": None})())
 
     class BadSupport(LogicalView):
         def support(self):
             return {"trainable": True}
 
-    with pytest.raises(FTSConfigurationError, match="must return a `TunableSupport`"):
+    with pytest.raises(TunableViewError, match="must return a `TunableSupport`"):
         resolve_view(_net(), BadSupport(_net())).support()
 
 
@@ -283,7 +289,7 @@ def test_a_member_set_to_a_value_is_refused():
     compiling an ``instrument`` tensor into a phase."""
     view = CanonicalView(_net())
     view.roles = {"0.weight": "instrument"}  # type: ignore[assignment]
-    with pytest.raises(FTSConfigurationError, match="`roles` must be methods"):
+    with pytest.raises(TunableViewError, match="`roles` must be methods"):
         BoundView(view)
 
 
@@ -299,6 +305,6 @@ def test_a_member_set_on_the_instance_is_used_and_counts_as_an_override():
 @pytest.mark.parametrize("role", ["adapter", "bogus-role", "latent", "instrument"])
 def test_promote_refuses_a_target_that_is_not_a_named_latent_role(role):
     bound = BoundView(CanonicalView(_net(), roles={"0.weight": "instrument"}))
-    with pytest.raises(FTSConfigurationError):
+    with pytest.raises(TunableViewError):
         bound.promote(["0.weight"], role)
     assert bound.promoted == {}

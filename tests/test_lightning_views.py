@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""The Lightning callback scheduling a module through an attached tunable view (``fts_tunable_view``), and its
+"""The Lightning callback scheduling a module through an attached tunable view (``tunable_view``), and its
 precedence rules against a legacy parameter-naming strategy adapter (#53, #54)."""
 import re
 import warnings
@@ -36,7 +36,7 @@ from tests.test_phase_characterization import _rank_zero_debug_records
 
 def _viewed_model(view_cls=EquivalentView):
     module = LogicalNamesBoringModel()
-    module.fts_tunable_view = view_cls(module)
+    module.tunable_view = view_cls(module)
     return module
 
 
@@ -67,7 +67,7 @@ def test_role_selectors_under_lightning(tmp_path):
     seed_everything(42)
     module = LogicalNamesBoringModel()
     roles = {"model.4.weight": "adapter:head", "model.4.bias": "adapter:head", "model.0.weight": "fitted"}
-    module.fts_tunable_view = CanonicalView(module, roles=roles)
+    module.tunable_view = CanonicalView(module, roles=roles)
     schedule = {0: {"params": ["role:adapter:head"], "max_transition_epoch": 1},
                 1: {"params": [r"model\.[23]\..*"], "max_transition_epoch": 2},
                 2: {"params": [r"model\.1\..*"], "max_transition_epoch": 3}}
@@ -93,7 +93,7 @@ def test_role_selectors_without_a_view(tmp_path):
 
 def test_a_view_not_rooted_at_the_lightning_module_refuses(tmp_path):
     module = LogicalNamesBoringModel()
-    module.fts_tunable_view = CanonicalView(module.model)
+    module.tunable_view = CanonicalView(module.model)
     fts = FinetuningScheduler(ft_schedule={0: {"params": [r"4\..*"], "max_transition_epoch": 1}},
                               epoch_transitions_only=True)
     with pytest.raises(MisconfigurationException, match="must be the LightningModule itself"):
@@ -102,7 +102,7 @@ def test_a_view_not_rooted_at_the_lightning_module_refuses(tmp_path):
 
 def test_generated_schedules_leave_out_frozen_roles(tmp_path):
     module = LogicalNamesBoringModel()
-    module.fts_tunable_view = CanonicalView(module, roles={"model.0.weight": "fitted", "model.0.bias": "fitted"})
+    module.tunable_view = CanonicalView(module, roles={"model.0.weight": "fitted", "model.0.bias": "fitted"})
     with pytest.raises(SystemExit):
         _trainer(tmp_path, [FinetuningScheduler(gen_ft_sched_only=True)], logger=True).fit(module)
     sched_file = tmp_path / "lightning_logs" / "version_0" / "LogicalNamesBoringModel_ft_schedule.yaml"
@@ -134,7 +134,7 @@ def test_a_legacy_naming_adapter_takes_precedence_over_an_attached_view(tmp_path
         warnings.simplefilter("always")
         _trainer(tmp_path / "again", [_fts(ft_schedule=LOGICAL_SCHEDULE, epoch_transitions_only=True)]).fit(
             _viewed_model())
-    assert not [w for w in again if "fts_tunable_view" in str(w.message)]
+    assert not [w for w in again if "tunable_view" in str(w.message)]
 
 
 def test_attached_view_generates_its_schedule_over_logical_names(tmp_path):
@@ -187,7 +187,7 @@ def test_fsdp1_accepts_only_views_with_physical_names():
     adapter.fts_handle = SimpleNamespace(pl_module=module, trainer=None)
     with pytest.raises(MisconfigurationException, match="naming scheme is 'logical-blocks'.*FSDP1.*does not support"):
         adapter._refuse_attached_view()
-    module.fts_tunable_view = CanonicalView(module, roles={"model.0.weight": "fitted"})
+    module.tunable_view = CanonicalView(module, roles={"model.0.weight": "fitted"})
     adapter._refuse_attached_view()
 
 
@@ -293,7 +293,7 @@ def test_attached_physical_view_under_fsdp1(tmp_path, use_orig_params):
 
     seed_everything(42)
     module = AdamLogicalNamesModel()
-    module.fts_tunable_view = CoupledNormView(module, roles=FSDP1_VIEW_ROLES)
+    module.tunable_view = CoupledNormView(module, roles=FSDP1_VIEW_ROLES)
     fts, recorder = FinetuningScheduler(ft_schedule=FSDP1_VIEW_SCHEDULE, epoch_transitions_only=True), PathRecorder()
     strategy = FSDPStrategy(auto_wrap_policy=ModuleWrapPolicy({torch.nn.Linear, torch.nn.LayerNorm}),
                             use_orig_params=use_orig_params)
@@ -319,7 +319,7 @@ def test_attached_view_under_model_parallel_strategy(tmp_path):
 
     seed_everything(42)
     module = ShardedLogicalModel()
-    module.fts_tunable_view = EquivalentView(module)
+    module.tunable_view = EquivalentView(module)
     initial = _initial(module)
     fts, recorder = FinetuningScheduler(ft_schedule=LOGICAL_SCHEDULE, epoch_transitions_only=True), PathRecorder()
     trainer = Trainer(default_root_dir=tmp_path, callbacks=[fts, recorder], max_epochs=4, accelerator="gpu", devices=2,
