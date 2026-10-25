@@ -20,7 +20,7 @@ from finetuning_scheduler.strategies import (DistributedAdapter, DTensorAdapter,
 from tests.dist_cases import fts_views
 from tests.helpers.dist_pool import assert_ranks_agree, dist_pool_fixture
 from tests.helpers.runif import RunIf
-from tests.test_controller_distributed import _close
+from tests.test_tuning_scheduler_distributed import _close
 
 gloo_pool = dist_pool_fixture(world_size=2, backend="gloo")
 nccl_pool = dist_pool_fixture(world_size=2, backend="nccl")
@@ -110,7 +110,7 @@ def test_a_sharded_checkpoint_loads_into_an_unsharded_model(gloo_pool, tmp_path)
     """A DCP checkpoint written by FSDP2 ranks loads into a single-process model, as before the adapter split."""
     results = gloo_pool.run(fts_views.save_sharded, ckpt_dir=str(tmp_path / "sharded"))
     model = fts_views._model(107)  # different initial weights: the load must overwrite them
-    fts = fts_views._controller(model, str(tmp_path / "plain"))
+    fts = fts_views._tuning_scheduler(model, str(tmp_path / "plain"))
     assert fts._distributed.name == "unsharded"
     fts.load(results[0]["saved"])
     loaded = fts_views._params(model)

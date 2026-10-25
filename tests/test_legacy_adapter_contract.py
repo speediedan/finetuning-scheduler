@@ -27,7 +27,7 @@ import yaml
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.callbacks import Callback
 
-from finetuning_scheduler import FinetuningScheduler, FTSController, TunableSupport
+from finetuning_scheduler import FinetuningScheduler, TuningScheduler, TunableSupport
 from finetuning_scheduler.strategy_adapters import StrategyAdapter
 from tests.helpers.legacy_naming_adapter import (COUPLED_NORMS, LegacyNamingAdapter, LOGICAL_TO_PHYSICAL,
                                                  LogicalNamesBoringModel)
@@ -172,11 +172,11 @@ class EquivalentView:
 
 def test_equivalent_view_follows_the_legacy_path_on_the_plain_loop():
     """The legacy adapter's phase path (pinned above, under Lightning) is reproduced by an equivalent view driving
-    ``FTSController``: the same depth, thawed tensors and parameter groups at every epoch."""
+    ``TuningScheduler``: the same depth, thawed tensors and parameter groups at every epoch."""
     seed_everything(42)
     model = LogicalNamesBoringModel()
     sgd = partial(torch.optim.SGD, lr=1e-3)
-    fts = FTSController(model, LOGICAL_SCHEDULE, optimizer=sgd, view=EquivalentView(model))
+    fts = TuningScheduler(model, LOGICAL_SCHEDULE, optimizer=sgd, view=EquivalentView(model))
     fts.setup()
     path = []
     for epoch in fts.epochs(max_epochs=4):

@@ -13,26 +13,27 @@ r"""
 Fine-Tuning Scheduler Phase Executors
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-How :class:`~finetuning_scheduler.core.controller.FTSController` carries out a phase once it has decided on it: thawing
-the phase's parameters and configuring the optimizer and lr schedulers for them, resuming at a depth, and finishing a
-transition.
+How :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` carries out a phase once it has decided on it:
+thawing the phase's parameters and configuring the optimizer and lr schedulers for them, resuming at a depth, and
+finishing a transition.
 
-The controller decides *when* phases change (transition policies, gates, best-checkpoint restores); an executor decides
-*how* a phase is put in place. The default, :class:`ControllerExecutor`, is the controller's own implementation. A
-training host that already implements phase execution (the Lightning callback, whose strategy adapters customize it) can
-supply its own executor, so the controller drives the same calls the host made before.
+The tuning scheduler decides *when* phases change (transition policies, gates, best-checkpoint restores); an executor
+decides *how* a phase is put in place. The default, :class:`TuningSchedulerExecutor`, is the tuning scheduler's own
+implementation. A training interface that already implements phase execution (the Lightning callback, whose strategy
+adapters customize it) can supply its own executor, so the tuning scheduler drives the same calls the interface made
+before.
 
 .. warning:: This is an experimental API and may change in a future release.
 """
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from finetuning_scheduler.core.controller import FTSController
+    from finetuning_scheduler.core.tuning_scheduler import TuningScheduler
 
 
 @runtime_checkable
 class PhaseExecutor(Protocol):
-    """Puts the phases a controller decides on in place."""
+    """Puts the phases a tuning scheduler decides on in place."""
 
     def configure_phase(self, depth: int, restored_depth: int, depth_sync: bool, pre_state: Any) -> None:
         """Thaw phase ``depth``'s parameters and configure the optimizer and lr schedulers for them.
@@ -55,25 +56,25 @@ class PhaseExecutor(Protocol):
         ...
 
 
-class ControllerExecutor:
-    """The controller's own phase execution.
+class TuningSchedulerExecutor:
+    """The tuning scheduler's own phase execution.
 
     Args:
-        controller: The controller whose phases it executes.
+        tuning_scheduler: The tuning scheduler whose phases it executes.
     """
 
-    def __init__(self, controller: "FTSController") -> None:
-        self.controller = controller
+    def __init__(self, tuning_scheduler: "TuningScheduler") -> None:
+        self.tuning_scheduler = tuning_scheduler
 
     def configure_phase(self, depth: int, restored_depth: int, depth_sync: bool, pre_state: Any) -> None:
-        self.controller._configure_phase(depth, restored_depth, depth_sync=depth_sync, pre_state=pre_state)
+        self.tuning_scheduler._configure_phase(depth, restored_depth, depth_sync=depth_sync, pre_state=pre_state)
 
     def resume_at(self, depth: int) -> None:
         for d in range(depth + 1):
-            self.controller._thaw_phase(d)
+            self.tuning_scheduler._thaw_phase(d)
 
     def after_transition(self, depth: int) -> None:
-        """Nothing: the controller's phase configuration is complete."""
+        """Nothing: the tuning scheduler's phase configuration is complete."""
 
 
-__all__ = ["ControllerExecutor", "PhaseExecutor"]
+__all__ = ["TuningSchedulerExecutor", "PhaseExecutor"]

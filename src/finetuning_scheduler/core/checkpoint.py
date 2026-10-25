@@ -99,25 +99,26 @@ def copy_checkpoint(source: str, target: str) -> None:
 
 @runtime_checkable
 class CheckpointPolicy(Protocol):
-    """Decides when the controller saves the training state, and where the best checkpoints are.
+    """Decides when the tuning scheduler saves the training state, and where the best checkpoints are.
 
-    The controller calls :meth:`observe` with each epoch's metrics and saves the training state to
+    The tuning scheduler calls :meth:`observe` with each epoch's metrics and saves the training state to
     :meth:`path_for` ``("best")`` when it returns ``True``; it restores from :attr:`best_path` at phase boundaries
     when ``restore_best`` is set, and from :meth:`boundary_path` when a gate vetoes a phase.
 
-    A policy may also define these methods, which the controller calls when they exist:
+    A policy may also define these methods, which the tuning scheduler calls when they exist:
 
     - ``prune(remove: bool)``, after each checkpoint write and boundary pin, to remove the checkpoints the policy no
       longer needs (``remove`` is ``True`` on the one rank that removes files);
     - ``mark_resume_point(remove: bool, keep_previous: bool = False)``, after
-      :meth:`~finetuning_scheduler.core.controller.FTSController.save`, and after a saved state is loaded (with
+      :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save`, and after a saved state is loaded (with
       ``keep_previous=True``), to keep the checkpoints that state refers to;
     - ``verify_resume()``, when a saved state is loaded, to raise ``FileNotFoundError`` if a checkpoint the state
       needs no longer exists;
-    - ``restore() -> int | None``, on an externally driven controller
-      (:meth:`~finetuning_scheduler.core.controller.FTSController.attach`) at a phase boundary with ``restore_best``,
-      to restore the best checkpoint itself and return the depth it was saved at (``None`` when there is none yet), for
-      a host that writes and reads its own checkpoints (a controller-driven controller restores its own files).
+    - ``restore() -> int | None``, on an externally driven tuning scheduler
+      (:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.attach`) at a phase boundary with
+      ``restore_best``, to restore the best checkpoint itself and return the depth it was saved at (``None`` when
+      there is none yet), for an interface that writes and reads its own checkpoints (a self-driven tuning scheduler
+      restores its own files).
     """
 
     monitor: str | None
@@ -177,11 +178,11 @@ class BestCheckpoint:
     checkpoints it was saved with. The best as of each phase's start is pinned by reference as the rollback point for a
     gate's veto, and kept until the next phase starts. A sharded model's checkpoints are directories.
 
-    When resuming, the checkpoints the latest :meth:`~finetuning_scheduler.core.controller.FTSController.save` refers
-    to are kept until the next save, so a resume from the latest save always finds them. An older save can be resumed
-    while its checkpoints remain: if its best or its rollback point has been removed,
-    :meth:`~finetuning_scheduler.core.controller.FTSController.load` raises ``FileNotFoundError``, and any other kept
-    checkpoint that has been removed is dropped with a warning. Checkpoints that an interrupted run wrote after the
+    When resuming, the checkpoints the latest :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save`
+    refers to are kept until the next save, so a resume from the latest save always finds them. An older save can be
+    resumed while its checkpoints remain: if its best or its rollback point has been removed,
+    :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load` raises ``FileNotFoundError``, and any other
+    kept checkpoint that has been removed is dropped with a warning. Checkpoints that an interrupted run wrote after the
     save being resumed are left in place, and so are the checkpoints of a state resumed from another directory: only
     checkpoints under ``dirpath`` are ever removed.
 
@@ -321,7 +322,7 @@ class BestCheckpoint:
 
     def mark_resume_point(self, remove: bool = True, keep_previous: bool = False) -> None:
         """Keep the checkpoints the current state refers to until the next resume point (a later
-        :meth:`~finetuning_scheduler.core.controller.FTSController.save`), then :meth:`prune`.
+        :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save`), then :meth:`prune`.
 
         With ``keep_previous`` (when a saved state is loaded rather than written), the checkpoints the previous resume
         point refers to stay kept as well: loading a state does not supersede the latest save on disk.

@@ -71,7 +71,7 @@ synchronizes it.
 **CPU offload**: Lightning's ``ModelParallelStrategy`` moves the model to the GPU after ``configure_model``, which
 FSDP2's ``CPUOffloadPolicy`` (shards kept on the CPU) cannot follow, so a plan that asks for CPU offload
 (``cpu_offload_policy``, or an ``offload_policy`` that offloads to the CPU) is refused. CPU offload works with the
-PyTorch API (:class:`~finetuning_scheduler.FTSController`), where the training loop places the model itself: a plan
+PyTorch API (:class:`~finetuning_scheduler.TuningScheduler`), where the training loop places the model itself: a plan
 applied with :func:`~finetuning_scheduler.strategies.plan.shard_model` (below) may ask for it.
 
 **The PyTorch API**: :func:`~finetuning_scheduler.strategies.plan.shard_model` applies a plan in this format (with the
@@ -79,7 +79,7 @@ same ``fsdp_default_kwargs``, ``class:`` keys, ``ignored_params`` and the ``comp
 PyTorch model, then shards the root module, so no parameter is left outside an FSDP unit.
 
 **Units spanning phases**: when FTS validates the schedule against an FSDP2 model (under Lightning or
-:class:`~finetuning_scheduler.FTSController`), it warns about each FSDP unit that reshards after forward and holds
+:class:`~finetuning_scheduler.TuningScheduler`), it warns about each FSDP unit that reshards after forward and holds
 parameters thawing in different phases. From the earliest of those phases on, such a unit's backward pass all-gathers
 all of its parameters again, those not yet trained included, so giving the earlier-thawing modules their own units (or
 not resharding the unit after forward) saves that communication. A unit kept unsharded after forward, the root by

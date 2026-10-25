@@ -51,13 +51,13 @@ def default_backend():
 
 @pytest.fixture
 def unregistered_error():
-    """Run a test with no host exception type registered."""
-    orig = core_exceptions._HOST_ERROR_CLS
-    core_exceptions._HOST_ERROR_CLS = None
+    """Run a test with no interface exception type registered."""
+    orig = core_exceptions._INTERFACE_ERROR_CLS
+    core_exceptions._INTERFACE_ERROR_CLS = None
     try:
         yield
     finally:
-        core_exceptions._HOST_ERROR_CLS = orig
+        core_exceptions._INTERFACE_ERROR_CLS = orig
 
 
 def _caller_warns(message: str) -> list[warnings.WarningMessage]:
@@ -79,7 +79,7 @@ def test_lightning_registers_configuration_error():
     assert type(roundtrip) is FTSMisconfigurationException and roundtrip.args == ("bad schedule",)
 
 
-def test_configuration_error_without_host(unregistered_error):
+def test_configuration_error_without_interface(unregistered_error):
     err = FTSConfigurationError("plain")
     assert type(err) is FTSConfigurationError and isinstance(err, ValueError)
     assert not isinstance(err, MisconfigurationException)

@@ -20,7 +20,7 @@ Training with FTS is simple and brings several benefits:
 
 FTS runs a schedule through either of two interfaces, which share one scheduling core and one schedule format:
 
-* **your own PyTorch training loop**, through :class:`~finetuning_scheduler.core.controller.FTSController`
+* **your own PyTorch training loop**, through :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler`
   (experimental in 2.15);
 * **Lightning**, through the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback (fully supported).
 
@@ -75,10 +75,10 @@ Basic Usage
     .. tab-item:: PyTorch
         :sync: pytorch
 
-        Build an :class:`~finetuning_scheduler.core.controller.FTSController` for your model, call
-        :meth:`~finetuning_scheduler.core.controller.FTSController.setup` once, iterate over
-        :meth:`~finetuning_scheduler.core.controller.FTSController.epochs`, and report each epoch's validation metrics
-        with :meth:`~finetuning_scheduler.core.controller.FTSController.epoch_end`. The controller decides when each
+        Build a :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` for your model, call
+        :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.setup` once, iterate over
+        :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.epochs`, and report each epoch's validation metrics
+        with :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.epoch_end`. The tuning scheduler decides when each
         phase starts and which parameters train; the loop stays yours. Passing ``None`` as the schedule uses the
         :ref:`default schedule<default schedule>`:
 
@@ -87,9 +87,9 @@ Basic Usage
             from functools import partial
 
             import torch
-            from finetuning_scheduler import FTSController, PlateauTransition
+            from finetuning_scheduler import TuningScheduler, PlateauTransition
 
-            fts = FTSController(
+            fts = TuningScheduler(
                 model,
                 None,  # the default schedule, or the path to a schedule YAML file, or a mapping
                 optimizer=partial(torch.optim.AdamW, lr=1e-3),
@@ -242,7 +242,7 @@ either integers or convertible to integers via ``int()``.
 
         .. code-block:: python
 
-            fts = FTSController(model, "/path/to/my/schedule/my_schedule.yaml", optimizer=..., transition=...)
+            fts = TuningScheduler(model, "/path/to/my/schedule/my_schedule.yaml", optimizer=..., transition=...)
 
     .. tab-item:: Lightning
         :sync: lightning
@@ -295,15 +295,15 @@ the depth it was saved at.
         The criteria are transition policies such as
         :class:`~finetuning_scheduler.core.transitions.PlateauTransition`, and
         :class:`~finetuning_scheduler.core.checkpoint.BestCheckpoint` keeps the best checkpoints.
-        :meth:`~finetuning_scheduler.core.controller.FTSController.save` and
-        :meth:`~finetuning_scheduler.core.controller.FTSController.load` save and restore the full training state for
+        :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save` and
+        :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load` save and restore the full training state for
         an exact resume (see :ref:`plain-pytorch-loop`):
 
         .. code-block:: python
 
             fts.save("run/last.pt")
 
-            # later, in a fresh process, after building the same model, schedule and controller
+            # later, in a fresh process, after building the same model, schedule and tuning scheduler
             fts.setup()
             fts.load("run/last.pt")
 

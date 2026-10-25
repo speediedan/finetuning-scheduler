@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """The ``pg_overrides`` and ``phase_config`` schedule keys under the Lightning callback, which runs its transitions
-on an externally driven ``FTSController`` (#85)."""
+on an externally driven ``TuningScheduler`` (#85)."""
 import pytest
 from lightning.pytorch import seed_everything, Trainer
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
@@ -79,7 +79,7 @@ def test_end_hooks_see_the_restored_best_state(tmp_path):
     seen = {}
     schedule = {**SCHEDULE, 0: {**SCHEDULE[0], "max_transition_epoch": 2}}
     fts = FinetuningScheduler(ft_schedule=schedule, epoch_transitions_only=True)
-    fts.add_phase_hook(lambda e: seen.setdefault(e.depth, e.controller.model.model[2].weight.detach().clone()),
+    fts.add_phase_hook(lambda e: seen.setdefault(e.depth, e.tuning_scheduler.model.model[2].weight.detach().clone()),
                        when="end")
     best = BestWeights()
     _fit(tmp_path, fts, extra=[best, FTSCheckpoint(monitor="val_loss", dirpath=tmp_path / "c", save_top_k=1)],
@@ -88,8 +88,8 @@ def test_end_hooks_see_the_restored_best_state(tmp_path):
 
 
 def test_hooks_survive_a_subclass_on_fit_start_without_super(tmp_path):
-    """A subclass whose ``on_fit_start`` does not call ``super()`` gets its controller, with its phase hooks, at
-    the first transition."""
+    """A subclass whose ``on_fit_start`` does not call ``super()`` gets its tuning scheduler, with its phase hooks,
+    at the first transition."""
 
     class NoSuperFitStart(FinetuningScheduler):
         def on_fit_start(self, trainer, pl_module):
@@ -103,16 +103,17 @@ def test_hooks_survive_a_subclass_on_fit_start_without_super(tmp_path):
     assert 1 in events and 2 in events
 
 
-def test_the_controller_follows_the_callbacks_depth():
-    """The callback's depth is authoritative: before advancing, a controller behind it is synced to it."""
+def test_the_tuning_scheduler_follows_the_callbacks_depth():
+    """The callback's depth is authoritative: before advancing, a tuning scheduler behind it is synced to it."""
     from types import SimpleNamespace
 
     advanced = []
-    controller = SimpleNamespace(curr_depth=0, _depth=0, request_advance=lambda: advanced.append(controller._depth))
+    tuning_scheduler = SimpleNamespace(curr_depth=0, _depth=0,
+                                       request_advance=lambda: advanced.append(tuning_scheduler._depth))
     fts = FinetuningScheduler(ft_schedule=SCHEDULE)
-    fts._fts_controller = controller
+    fts._tuning_scheduler = tuning_scheduler
     fts._fts_state._curr_depth = 2  # set by a subclass, two phases on
-    fts._controller_step()
+    fts._tuning_scheduler_step()
     assert advanced == [1]
 
 

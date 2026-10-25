@@ -16,10 +16,10 @@ Fine-Tuning Scheduler Core Distributed Utilities
 Rank-aware warnings and logging for the framework-neutral Fine-Tuning Scheduler core.
 
 By default, the global rank comes from an initialized ``torch.distributed`` process group (or, before one exists, the
-usual launcher environment variables), and messages are logged to the ``finetuning_scheduler`` logger. A training host
-may register its own backend with :func:`register_rank_zero_backend`. The Lightning integration registers one that
-logs through Lightning's rank-zero logger, so loggers and logging levels behave as they do for other Lightning code,
-and takes the rank from an initialized process group before Lightning's own rank.
+usual launcher environment variables), and messages are logged to the ``finetuning_scheduler`` logger. A training
+interface may register its own backend with :func:`register_rank_zero_backend`. The Lightning integration registers one
+that logs through Lightning's rank-zero logger, so loggers and logging levels behave as they do for other Lightning
+code, and takes the rank from an initialized process group before Lightning's own rank.
 
 The ``stacklevel`` arguments follow :func:`warnings.warn`: the default of 2 attributes a message to the code that
 called the function.

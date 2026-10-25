@@ -19,7 +19,7 @@ from functools import partial
 import pytest
 import torch
 
-from finetuning_scheduler import CanonicalView, FTSController
+from finetuning_scheduler import CanonicalView, TuningScheduler
 from finetuning_scheduler.core.checkpoint import BestCheckpoint, load_payload
 from finetuning_scheduler.core.compile import compile_schedule
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
@@ -42,8 +42,8 @@ def _model():
     return model, CanonicalView(model, roles=ROLES)
 
 
-def _controller(model, view, schedule=PROMOTE_SCHEDULE, **kwargs):
-    fts = FTSController(model, {k: dict(v) for k, v in schedule.items()}, optimizer=SGD, view=view, **kwargs)
+def _tuning_scheduler(model, view, schedule=PROMOTE_SCHEDULE, **kwargs):
+    fts = TuningScheduler(model, {k: dict(v) for k, v in schedule.items()}, optimizer=SGD, view=view, **kwargs)
     fts.setup()
     return fts
 
@@ -66,7 +66,7 @@ def _lens(model):
 def test_promotion_makes_an_instrument_trainable_from_its_phase():
     """The promoted lens stays frozen and out of the optimizer until its phase starts, then trains as a latent."""
     model, view = _model()
-    fts = _controller(model, view)
+    fts = _tuning_scheduler(model, view)
     assert fts.roles["lens.weight"] == "instrument" and sorted(fts.compiled_schedule.physical_for(1)) == LENS
     initial, seen = _lens(model), []
     for epoch in fts.epochs(4):
@@ -82,7 +82,7 @@ def test_promotion_makes_an_instrument_trainable_from_its_phase():
 def test_promoted_tensors_are_checkpointed_from_their_promotion(tmp_path):
     model, view = _model()
     cp = BestCheckpoint(tmp_path, "loss")
-    fts = _controller(model, view, checkpoint=cp, restore_best=False)
+    fts = _tuning_scheduler(model, view, checkpoint=cp, restore_best=False)
     saved = []
     for epoch in fts.epochs(2):
         _epoch(fts, epoch, {"loss": 1.0 - epoch})
@@ -95,18 +95,18 @@ def test_resume_replays_promotions_before_loading(tmp_path):
     """A state saved after a promotion resumes as the uninterrupted run continues: the promotion is replayed before
     the saved state (which holds the promoted tensors) loads."""
     ref_model, view = _model()
-    ref = _controller(ref_model, view)
+    ref = _tuning_scheduler(ref_model, view)
     for epoch in ref.epochs(4):
         _epoch(ref, epoch)
     model, view = _model()
-    first = _controller(model, view)
+    first = _tuning_scheduler(model, view)
     for epoch in first.epochs(4):
         _epoch(first, epoch)
         if epoch == 1:
             first.save(tmp_path / "s.pt")
             break
     model, view = _model()
-    resumed = _controller(model, view)
+    resumed = _tuning_scheduler(model, view)
     resumed.load(tmp_path / "s.pt")
     assert resumed.roles["lens.weight"] == "latent:lens" and len(resumed.state_dict()["promotions"]) == 1
     for epoch in resumed.epochs(4):
@@ -120,7 +120,7 @@ def test_vetoing_the_promoting_phase_restores_the_values_at_promotion(tmp_path):
     they were promoted (they were not checkpointed then)."""
     model, view = _model()
     initial = _lens(model)
-    fts = _controller(model, view, checkpoint=BestCheckpoint(tmp_path, "loss"))
+    fts = _tuning_scheduler(model, view, checkpoint=BestCheckpoint(tmp_path, "loss"))
     fts.add_gate(lambda e: GateResult(accept=e.depth != 1, reason="the lens phase hurt"))
     for epoch in fts.epochs(4):
         _epoch(fts, epoch, {"loss": 1.0 - 0.1 * epoch})
@@ -135,7 +135,7 @@ def test_promoting_a_tied_instrument_gives_it_its_own_storage():
     model.lens_tied = torch.nn.Linear(4, 4)  # placeholder, replaced by a tie below
     model.lens_tied.weight = model.lens.weight
     tied_before = model.lens_tied.weight.detach().clone()
-    fts = _controller(model, view)
+    fts = _tuning_scheduler(model, view)
     for epoch in fts.epochs(3):
         _epoch(fts, epoch)
     assert fts.state_dict()["promotions"][0]["materialized"] == ["lens.weight"]
@@ -153,14 +153,14 @@ def test_invalid_promotions_refuse(promote, match):
     model, view = _model()
     schedule = {**PROMOTE_SCHEDULE, 1: {**PROMOTE_SCHEDULE[1], "promote": promote}}
     with pytest.raises(FTSConfigurationError, match=match):
-        _controller(model, view, schedule)
+        _tuning_scheduler(model, view, schedule)
 
 
 def test_phase_zero_promotion_and_the_lightning_callback_refuse():
     model, view = _model()
     schedule = {**PROMOTE_SCHEDULE, 0: {**PROMOTE_SCHEDULE[0], "promote": {"role:instrument": "latent:lens"}}}
     with pytest.raises(FTSConfigurationError, match="Phase 0 may not `promote`"):
-        _controller(model, view, schedule)
+        _tuning_scheduler(model, view, schedule)
     with pytest.raises(FTSConfigurationError, match="phase 1: promote"):
         refuse_direct_api_keys({k: dict(v) for k, v in PROMOTE_SCHEDULE.items()})
 
@@ -172,7 +172,7 @@ def test_a_view_that_renames_on_promotion_refuses():
         def promote(self, physical, role):
             return {n: f"{n}_promoted" for n in physical}
 
-    fts = _controller(model, Renaming(model, roles=ROLES))
+    fts = _tuning_scheduler(model, Renaming(model, roles=ROLES))
     with pytest.raises(FTSConfigurationError, match="must keep each tensor's name"):
         for epoch in fts.epochs(2):
             _epoch(fts, epoch)
@@ -223,7 +223,7 @@ def test_rolling_back_before_a_promotion_restores_aliases_and_translated_views(t
         model = InterventionModel()
         view = OwnRolesView(model, roles=dict(ROLES))
     initial = {k: v.detach().clone() for k, v in model.state_dict().items() if k.startswith("lens")}
-    fts = _controller(model, view, checkpoint=BestCheckpoint(tmp_path, "loss"))
+    fts = _tuning_scheduler(model, view, checkpoint=BestCheckpoint(tmp_path, "loss"))
     fts.add_gate(lambda e: GateResult(accept=e.depth != 1, reason="the lens phase hurt"))
     for epoch in fts.epochs(4):
         _epoch(fts, epoch, {"loss": 1.0 - 0.1 * epoch})
@@ -240,7 +240,7 @@ class LeavesOutPromoted(OwnRolesView):
 def test_a_view_whose_checkpoint_state_leaves_out_the_promoted_tensors_refuses():
     torch.manual_seed(0)
     model = InterventionModel()
-    fts = _controller(model, LeavesOutPromoted(model, roles=dict(ROLES)))
+    fts = _tuning_scheduler(model, LeavesOutPromoted(model, roles=dict(ROLES)))
     with pytest.raises(FTSConfigurationError, match="checkpoint state still leaves them out"):
         for epoch in fts.epochs(2):
             _epoch(fts, epoch)
@@ -250,7 +250,7 @@ def test_a_view_translating_checkpoints_without_promote_refuses():
     torch.manual_seed(0)
     model = InterventionModel()
     with pytest.raises(FTSConfigurationError, match="must define `promote`"):
-        _controller(model, CheckpointsWithoutPromote(model, roles=dict(ROLES)))
+        _tuning_scheduler(model, CheckpointsWithoutPromote(model, roles=dict(ROLES)))
 
 
 def test_resume_after_a_promotion_keeps_the_configuration_hash_and_the_values_at_promotion(tmp_path):
@@ -265,7 +265,7 @@ def test_resume_after_a_promotion_keeps_the_configuration_hash_and_the_values_at
     def run(load_from=None, save_to=None):
         nonlocal model
         model, view = _model()
-        fts = _controller(model, view, checkpoint=BestCheckpoint(tmp_path / "c", "loss"))
+        fts = _tuning_scheduler(model, view, checkpoint=BestCheckpoint(tmp_path / "c", "loss"))
         fts.add_phase_hook(prepare)
         fts.add_gate(lambda e: GateResult(accept=e.depth != 1, reason="the lens phase hurt"))
         if load_from is not None:
@@ -283,7 +283,7 @@ def test_resume_after_a_promotion_keeps_the_configuration_hash_and_the_values_at
         model.lens.weight, 5.0))
     first = run(save_to=tmp_path / "s.pt")
     with warnings.catch_warnings():
-        warnings.simplefilter("error")  # no "different controller configuration" warning
+        warnings.simplefilter("error")  # no "different tuning scheduler configuration" warning
         resumed = run(load_from=tmp_path / "s.pt")
     assert resumed.config_hash == first.config_hash and resumed.stop_reason.startswith("veto: phase 1")
     assert torch.equal(model.lens.weight, torch.full_like(model.lens.weight, 5.0))
@@ -294,7 +294,7 @@ def test_the_configuration_hash_survives_a_promotion_the_view_tracks_itself(tmp_
     setup, so it is the same before and after the promotion (and a resume does not warn)."""
     torch.manual_seed(0)
     model = InterventionModel()
-    fts = _controller(model, OwnRolesView(model, roles=dict(ROLES)))
+    fts = _tuning_scheduler(model, OwnRolesView(model, roles=dict(ROLES)))
     before = fts.config_hash
     for epoch in fts.epochs(3):
         _epoch(fts, epoch)
@@ -305,8 +305,8 @@ def test_a_frozen_role_tensor_made_trainable_by_hand_is_refused_at_the_next_thaw
     """The runtime guard: compilation keeps frozen roles out of every phase, and a tensor thawed outside the
     schedule is refused when the next phase thaws."""
     model, view = _model()
-    fts = _controller(model, view, schedule={0: {"params": ["role:adapter"], "max_transition_epoch": 1},
-                                             1: {"params": ["role:latent"]}})
+    fts = _tuning_scheduler(model, view, schedule={0: {"params": ["role:adapter"], "max_transition_epoch": 1},
+                                                   1: {"params": ["role:latent"]}})
     model.lens.weight.requires_grad_(True)  # an `instrument` tensor, never promoted here
     with pytest.raises(FTSConfigurationError, match=r"never thawed .* require grad: \['lens.weight'\]"):
         for epoch in fts.epochs(3):

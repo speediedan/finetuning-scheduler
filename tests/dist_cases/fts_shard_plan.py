@@ -20,7 +20,7 @@ from torch.distributed.tensor import DTensor
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.strategies.fsdp2 import FSDP2Adapter
 from finetuning_scheduler.strategies.plan import shard_model
-from tests.dist_cases.fts_controller_mp import SCHEDULE, _model
+from tests.dist_cases.fts_tuning_scheduler_mp import SCHEDULE, _model
 
 
 def phases(model: torch.nn.Module) -> dict[int, list[str]]:
@@ -36,7 +36,7 @@ def _layout(model: torch.nn.Module) -> dict:
 
 def shard(ctx, plan: dict, default_kwargs: dict | None = None, pre_shard: str | None = None) -> dict:
     """Shard the toy transformer with ``plan`` (the root last) and report its layout and the FSDP2 adapter's
-    findings on the schedule (what the controller reports)."""
+    findings on the schedule (what the tuning scheduler reports)."""
     model = _model(7, ctx.device)
     if pre_shard is not None:  # a module the caller shards itself before the plan runs
         from torch.distributed.fsdp import fully_shard

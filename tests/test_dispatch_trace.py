@@ -63,7 +63,7 @@ def test_epoch_driven(tmp_path):
     fts = TracingFinetuningScheduler(ft_schedule=THREE_PHASES, epoch_transitions_only=True,
                                      custom_strategy_adapters=BASE)
     _fit(tmp_path, fts, ScriptedLossModel([1.0] * 6), 6)
-    assert fts._fts_controller is not None and fts._fts_controller.curr_depth == fts.curr_depth == 2
+    assert fts._tuning_scheduler is not None and fts._tuning_scheduler.curr_depth == fts.curr_depth == 2
     check_snapshot("epoch_driven", fts.dispatch_trace)
 
 
@@ -123,22 +123,23 @@ def test_resume_at_a_later_depth(tmp_path):
                                          custom_strategy_adapters=BASE)
     _fit(tmp_path, resumed, ScriptedLossModel(losses), 6,
          extra=[FTSCheckpoint(monitor="val_loss", dirpath=tmp_path / "b", save_top_k=1)], ckpt_path=snapshot)
-    assert resumed._fts_controller is not None and resumed._fts_controller.curr_depth == resumed.curr_depth == 2
+    assert resumed._tuning_scheduler is not None and resumed._tuning_scheduler.curr_depth == resumed.curr_depth == 2
     check_snapshot("resume", resumed.dispatch_trace)
 
 
 class LegacyStepFTS(TracingFinetuningScheduler):
-    """The callback with its own transitions rather than its externally driven controller's
-    (``_use_fts_controller``)."""
+    """The callback with its own transitions rather than its externally driven tuning scheduler's
+    (``_use_tuning_scheduler``)."""
 
-    _use_fts_controller = False
+    _use_tuning_scheduler = False
 
 
 @pytest.mark.parametrize("scenario", ["epoch_driven", "reinitialization", "early_stopping_driven", "restore_best",
                                       "legacy_naming_adapter", "resume"])
-def test_the_callbacks_own_transitions_dispatch_as_its_controller_does(tmp_path, scenario):
-    """The callback sequences transitions through its externally driven controller (#85); with its own transitions
-    instead (``_use_fts_controller = False``, kept for one release), every scenario dispatches identically."""
+def test_the_callbacks_own_transitions_dispatch_as_its_tuning_scheduler_does(tmp_path, scenario):
+    """The callback sequences transitions through its externally driven tuning scheduler (#85); with its own
+    transitions instead (``_use_tuning_scheduler = False``, kept for one release), every scenario dispatches
+    identically."""
     seed_everything(42)
     if scenario == "resume":
         losses, snapshot = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5], tmp_path / "snap.ckpt"
@@ -168,7 +169,7 @@ def test_the_callbacks_own_transitions_dispatch_as_its_controller_does(tmp_path,
         extra = [FTSEarlyStopping(monitor="val_loss", patience=1, min_delta=0.0),
                  FTSCheckpoint(monitor="val_loss", dirpath=tmp_path / "ckpts", save_top_k=1)]
         _fit(tmp_path, fts, ScriptedLossModel(losses), len(losses), extra=extra)
-    assert fts._fts_controller is None  # never attached
+    assert fts._tuning_scheduler is None  # never attached
     check_snapshot(scenario, fts.dispatch_trace)
 
 

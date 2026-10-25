@@ -10,15 +10,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 r"""
-Fine-Tuning Scheduler Lightning Host
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Fine-Tuning Scheduler Lightning Interface
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The :class:`~finetuning_scheduler.core.host.TrainingHost` for a Lightning ``Trainer``. This module is where the
-Lightning integration's uses of ``Trainer`` and ``Strategy`` internals are to be gathered.
+The :class:`~finetuning_scheduler.core.interface.TrainingInterface` for a Lightning ``Trainer``. This module is where
+the Lightning integration's uses of ``Trainer`` and ``Strategy`` internals are to be gathered.
 
 .. warning::
 
-    Experimental: the ``TrainingHost`` protocol may change in minor releases until the PyTorch API stabilizes.
+    Experimental: the ``TrainingInterface`` protocol may change in minor releases until the PyTorch API stabilizes.
 
 """
 import os
@@ -28,12 +28,12 @@ import lightning.pytorch as pl
 import torch
 from lightning.pytorch.utilities.types import LRSchedulerConfig
 
-from finetuning_scheduler.core.host import LRStepConfig
+from finetuning_scheduler.core.interface import LRStepConfig
 
 
-class LightningHost:
+class LightningInterface:
     """Present a Lightning ``Trainer`` and ``LightningModule`` as a
-    :class:`~finetuning_scheduler.core.host.TrainingHost`.
+    :class:`~finetuning_scheduler.core.interface.TrainingInterface`.
 
     Args:
         trainer: The ``Trainer`` running the fit.

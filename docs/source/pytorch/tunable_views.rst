@@ -19,7 +19,7 @@ through the view's *logical* names, and Fine-Tuning Scheduler thaws, optimizes a
 they stand for. One logical name may stand for several physical tensors, and a view may thaw related tensors (a block's
 normalization layer, for example) together with the ones a phase names.
 
-Views work with both interfaces: :class:`~finetuning_scheduler.core.controller.FTSController` (pass ``view=``) and the
+Views work with both interfaces: :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` (pass ``view=``) and the
 Lightning callback (attach the view to the ``LightningModule``). A model without a view is scheduled through
 :class:`~finetuning_scheduler.core.views.CanonicalView`, the identity view, so nothing changes for existing schedules.
 
@@ -75,7 +75,7 @@ The schedule then uses the logical names:
 
 .. code-block:: python
 
-    fts = FTSController(model, {0: {"params": ["head"]}, 1: {"params": ["block0"]}}, optimizer=opt, view=BlockView(model))
+    fts = TuningScheduler(model, {0: {"params": ["head"]}, 1: {"params": ["block0"]}}, optimizer=opt, view=BlockView(model))
 
 Fine-Tuning Scheduler compiles the schedule once, at setup, into the physical parameters each phase thaws
 (:func:`~finetuning_scheduler.core.compile.compile_schedule`). A coupled tensor joins the first phase that pulls it in.
@@ -120,12 +120,12 @@ gives that name, ``base`` if none); a view can own the promotion with its own ``
 name. Promoted tensors are checkpointed from their promotion on, and promotions are replayed before a
 saved state loads. Restoring a checkpoint saved before a promotion (a best checkpoint, or the rollback point of a vetoed
 phase) puts the promoted tensors back to their values at promotion; those values are kept on the CPU and saved with
-:meth:`~finetuning_scheduler.core.controller.FTSController.save`. Promotion is not supported on a sharded model, and a
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save`. Promotion is not supported on a sharded model, and a
 view that overrides its checkpoint state must define ``promote``.
 
 Exporting by Role
 *****************
-:meth:`~finetuning_scheduler.core.controller.FTSController.export_best` writes the best checkpoint's tensors whose role
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.export_best` writes the best checkpoint's tensors whose role
 matches, for example only the adapters, so a large frozen base and the optimizer state need not be kept:
 
 .. code-block:: python
@@ -137,7 +137,7 @@ The tensors come from the best checkpoint, not the live model, keyed by wrapper-
 ``torch.compile``'s ``_orig_mod.``); a sharded model's are read in full on global rank zero. ``fn`` receives
 ``path=None`` when no path is given.
 ``instrument`` tensors are never checkpointed, so they cannot be exported. The external artifacts a run depends on can be
-recorded with ``FTSController(artifacts={"lens": {"path": ..., "sha256": ..., "revision": ...}})``; they appear in
+recorded with ``TuningScheduler(artifacts={"lens": {"path": ..., "sha256": ..., "revision": ...}})``; they appear in
 every checkpoint's and export's metadata.
 
 Views With the Lightning Callback
