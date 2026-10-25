@@ -125,7 +125,7 @@ def test_checkpoint_policy_reports_the_lightning_checkpoint_callback():
     assert empty.best_path is None and empty.best_score is None and empty.config() == {"monitor": None}
 
 
-def _host(world_size, pl_module=None):
+def _interface(world_size, pl_module=None):
     trainer = SimpleNamespace(world_size=world_size, strategy=SimpleNamespace(root_device=torch.device("cpu")))
     return LightningInterface(trainer, pl_module if pl_module is not None else nn.Linear(1, 1))
 
@@ -145,11 +145,11 @@ def test_interface_collectives_with_several_ranks(monkeypatch):
 
     monkeypatch.setattr(torch.distributed, "all_reduce", fake_all_reduce)
     monkeypatch.setattr(torch.distributed, "all_gather_object", fake_all_gather_object)
-    interface = _host(world_size=2)
+    interface = _interface(world_size=2)
     assert interface.reduce_max(3) == 7 and interface.reduce_any(False) is True
     assert interface.all_gather_object("r0") == ["r0", "r0-peer"]
     assert calls == [("all_reduce", torch.distributed.ReduceOp.MAX)] * 2 + [("all_gather_object", 2)]
-    single = _host(world_size=1)
+    single = _interface(world_size=1)
     assert single.reduce_max(3) == 3 and single.all_gather_object("r0") == ["r0"]
 
 
@@ -160,7 +160,7 @@ def test_interface_compile_reset_follows_the_modules_compiler(monkeypatch, compi
     module = nn.Linear(1, 1)
     if compiler is not None:
         module._compiler_ctx = {"compiler": compiler}
-    _host(world_size=1, pl_module=module).on_compile_reset()
+    _interface(world_size=1, pl_module=module).on_compile_reset()
     assert len(calls) == resets
 
 

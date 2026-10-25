@@ -247,7 +247,7 @@ def test_the_setup_rank_agreement_check_covers_roles():
         model = InterventionModel()
         fts = TuningScheduler(model, {k: dict(v) for k, v in schedule.items()}, optimizer=SGD,
                               view=CanonicalView(model, roles=roles))
-        fts._host.all_gather_object = lambda obj: gathered.append(obj) or [obj, other_rank or obj]
+        fts._interface.all_gather_object = lambda obj: gathered.append(obj) or [obj, other_rank or obj]
         return fts
 
     tuning_scheduler(ROLES).setup()

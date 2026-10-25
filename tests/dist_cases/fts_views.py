@@ -117,7 +117,7 @@ def _exported(fts, roles=("adapter", "fitted")) -> dict | None:
     from finetuning_scheduler.core.checkpoint import load_payload
 
     path = fts.export_best(roles=roles)
-    if not fts._host.is_global_zero:
+    if not fts._interface.is_global_zero:
         return None
     return {n: t.flatten().tolist() for n, t in load_payload(path)["tensors"].items()}
 
