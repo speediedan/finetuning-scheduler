@@ -149,4 +149,4 @@ jobs:
         python -m pytest --noconftest tests/test_core_import_isolation.py tests/test_controller.py
         tests/test_controller_fake_pg.py tests/test_shard_model.py tests/test_views.py tests/test_compile.py
         tests/test_conformance.py tests/test_controller_views.py tests/test_controller_promotion.py
-        tests/test_controller_export.py tests/test_controller_host_driven.py -v
+        tests/test_controller_export.py tests/test_controller_externally_driven.py -v
