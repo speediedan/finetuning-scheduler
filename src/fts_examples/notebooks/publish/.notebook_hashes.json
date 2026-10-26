@@ -1,10 +1,9 @@
 {
   "src/fts_examples/notebooks/dev/superglue/fts_explicit_loss_anim.gif": "835fcb4f8f0d27f796c70e0a5225cf8c15d56e8b8fbe0d084f61e983a1298a1d",
-  "src/fts_examples/notebooks/dev/superglue/fts_superglue_lightning.ipynb": "f04b52705b121cf314e9496eb6383f8056b3e77445e127c27cc7e8de24653cac",
-  "src/fts_examples/notebooks/dev/superglue/fts_superglue_pytorch.ipynb": "d5c6e0b28f78de5605f7e3cf6978e2f6045eca556c426d7bf5ee2a0763045722",
-  "src/fts_examples/notebooks/dev/superglue/implicit_training_transition.png": "94237a09a9dd67b6ec3a522cc9879956bb8b333988b79fd23b362c5868eb4a8b",
+  "src/fts_examples/notebooks/dev/superglue/fts_superglue_lightning.ipynb": "7f08fb8ce4d819a2917c496362a48e3fffc8d6211112cd496fcda059d8565272",
+  "src/fts_examples/notebooks/dev/superglue/fts_superglue_pytorch.ipynb": "0b0eb782b3bdab3433cc61905bca76dced04e5ce39caea30ab6e63621f2f05a5",
   "src/fts_examples/notebooks/dev/superglue/logo_fts.png": "2ea31ac2b94dacb4301da51d2e3307fa9183bab5321fc51fa291c00fb2759664",
-  "src/fts_examples/notebooks/dev/superglue/pytorch_fts_explicit_transition.png": "74f3879bd61418dcbd88f57ff3bd68e7296d368621c4d3f2b3445a7b35471a17",
-  "src/fts_examples/notebooks/dev/superglue/pytorch_implicit_training_transition.png": "3cf1d61631ed3bba0952389b69fc967afa4ba5591adf5c6f77490026eb9dd733",
+  "src/fts_examples/notebooks/dev/superglue/pytorch_fts_explicit_trajectory.png": "c931840e257281161bd5c106e901bc4ea0de4e1b8277c018db34fe19db968d21",
+  "src/fts_examples/notebooks/dev/superglue/pytorch_fts_implicit_trajectory.png": "2be6d03da393c8f0fdf0628aaf86171a480d1fddc64b21e5cf8bd83c169d9547",
   "src/fts_examples/notebooks/dev/superglue/side_by_side_yaml.png": "d190f0c9c0946347f77f109b4ff1e1d65bc2be70a1903defbf651b9bc75da281"
 }

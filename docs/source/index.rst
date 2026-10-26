@@ -15,8 +15,7 @@ Training with FTS is simple and brings several benefits:
 
 * it conveniently abstracts and composes a broad space of fine-tuning methods
 * expedites and facilitates exploration of model tuning dynamics
-* it composes with mechanistic interpretability research packages, through :doc:`tunable views<pytorch/tunable_views>`,
-  enabling latent space tuning and expanding the space of experimental interventions
+* it composes with interpretability research packages, expanding the space of experimental interventions
 
 FTS runs a schedule through either of two interfaces, which share one scheduling core and one schedule format:
 
