@@ -14,6 +14,10 @@ inputs:
     description: "Whether to use Lightning commit pinning via UV_OVERRIDE"
     required: false
     default: "true"
+  install_interpretune:
+    description: "Whether to install interpretune from requirements/ci/interpretune.txt (ignored for oldest builds)"
+    required: false
+    default: "false"
   show_pip_list:
     description: "Whether to show package list output after installations"
     required: false
@@ -117,6 +121,12 @@ runs:
         echo "Running: ${INSTALL_CMD}"
         echo "  UV_OVERRIDE=${UV_OVERRIDE:-'(not set)'}"
         ${INSTALL_CMD}
+    # Install interpretune for the interpretune example's test (`latest` only: see the file's header)
+    - name: Install interpretune (CI pin)
+      if: inputs.use_oldest != 'true' && inputs.install_interpretune == 'true'
+      shell: bash
+      run: |
+        uv pip install -r requirements/ci/interpretune.txt
 
     - name: Show package list
       if: inputs.show_pip_list == 'true'

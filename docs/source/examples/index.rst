@@ -41,3 +41,11 @@ Command Line
    * - :ref:`Scheduled fine-tuning on SuperGLUE<scheduled-fine-tuning-superglue>`
      - Lightning (``LightningCLI``)
      - Explicit, implicit and baseline scenarios for RTE and BoolQ, configured entirely in YAML.
+   * - Phased fine-tuning in an interpretune session (``fts_examples/interpretune_phased_tuning.py``)
+     - PyTorch (experimental), in `interpretune <https://interpretune.org>`_
+     - A small GPT-2 class model tuned in three phases by interpretune's core training loop, whose
+       ``FTSCoreCallback`` drives a
+       :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler`. The first phase selects a steering
+       vector registered beside the model by its role (``role:intervention:steer``) through the tunable view
+       interpretune attaches. Runs on a CPU in seconds, with no downloads; it needs an interpretune revision that
+       is not yet released (the one in ``requirements/ci/interpretune.txt``).
