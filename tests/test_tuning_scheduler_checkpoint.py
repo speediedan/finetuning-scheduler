@@ -194,6 +194,80 @@ def test_save_load_resumes_exactly(tmp_path):
         assert torch.equal(p, q), n
 
 
+def test_resume_state_resumes_a_loop_owned_checkpoint_exactly(tmp_path):
+    """A loop that checkpoints the model and optimizer itself, with ``resume_state()`` beside them, resumes exactly
+    as the uninterrupted run (#143): after an optimizer reinitialization, with an lr scheduler, registered state
+    and the random streams."""
+    reinit_schedule = {**SCHEDULE, 1: {**SCHEDULE[1], "new_optimizer": {"optimizer_init": {
+        "class_path": "Adam", "init_args": {"lr": 0.01}}}}}
+
+    def make(model, dirpath):
+        fts = TuningScheduler(model, reinit_schedule, optimizer=partial(torch.optim.SGD, lr=0.1, momentum=0.9),
+                              lr_scheduler=partial(torch.optim.lr_scheduler.StepLR, step_size=1, gamma=0.5),
+                              lr_scheduler_cfg={"interval": "epoch"}, checkpoint=BestCheckpoint(dirpath, "val_loss"),
+                              transition=None)
+        counter = Counter()
+        fts.register_stateful("counter", counter)
+        fts.setup()
+        return fts, counter
+
+    def run(fts, model, counter, max_epochs, trace):
+        for epoch in fts.epochs(max_epochs):
+            counter.n += 1
+            _train_epoch(fts, model, seed=epoch)
+            lrs = [round(g["lr"], 8) for g in fts.optimizer.param_groups]
+            trace.append((epoch, fts.curr_depth, lrs, round(torch.rand(1).item(), 6), random.random()))
+            fts.step_lr_schedulers("epoch")
+            fts.epoch_end({"val_loss": [1.0, 0.8, 0.9, 0.7, 0.6][epoch]})
+
+    torch.manual_seed(3), random.seed(3)
+    ref_model = Net()
+    init = {k: v.clone() for k, v in ref_model.state_dict().items()}
+    ref, ref_counter = make(ref_model, tmp_path / "ref")
+    ref_trace: list = []
+    run(ref, ref_model, ref_counter, 5, ref_trace)
+
+    torch.manual_seed(3), random.seed(3)
+    model = Net()
+    model.load_state_dict(init)
+    first, counter = make(model, tmp_path / "run")
+    trace: list = []
+    run(first, model, counter, 2, trace)
+    assert isinstance(first.optimizer, torch.optim.Adam)
+    # the loop's own checkpoint: the model and optimizer, and the tuning scheduler's resume state beside them
+    torch.save({"model": model.state_dict(), "optimizer": first.optimizer.state_dict(),
+                "fts": first.resume_state()}, tmp_path / "loop.pt")
+    torch.rand(5), random.random()  # disturb the streams; the resume state must restore them
+
+    resumed_model = Net()
+    resumed, resumed_counter = make(resumed_model, tmp_path / "run")
+    loop_ckpt = torch.load(tmp_path / "loop.pt", weights_only=False)
+    resumed.load_resume_state(loop_ckpt["fts"])
+    resumed_model.load_state_dict(loop_ckpt["model"])
+    resumed.optimizer.load_state_dict(loop_ckpt["optimizer"])  # the rebuilt optimizer: the reinitialized Adam
+    assert isinstance(resumed.optimizer, torch.optim.Adam) and resumed_counter.n == 2
+    run(resumed, resumed_model, resumed_counter, 5, trace)
+    assert trace == ref_trace
+    for (n, p), (_, q) in zip(ref_model.named_parameters(), resumed_model.named_parameters()):
+        assert torch.equal(p, q), n
+
+
+def test_resume_state_without_the_random_streams():
+    """``rng=False`` leaves the random streams to the loop's checkpoint; ``rng`` defaults to ``capture_rng``."""
+    fts = TuningScheduler(Net(), SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), capture_rng=False)
+    fts.setup()
+    assert fts.resume_state()["rng"] is None and fts.resume_state(rng=True)["rng"] is not None
+    fts = TuningScheduler(Net(), SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1))
+    fts.setup()
+    resume = fts.resume_state(rng=False)
+    assert resume["rng"] is None and resume["tuning_scheduler"]["depth"] == 0
+    torch.manual_seed(0)
+    expected = torch.rand(1)
+    torch.manual_seed(0)
+    fts.load_resume_state(resume)  # no random stream is restored, so this one continues where it was
+    assert torch.equal(torch.rand(1), expected)
+
+
 def test_checkpoint_files_are_replaced_only_when_complete(tmp_path):
     """Writes go beside the target and are moved over it, and a copy replaces a file or a directory alike."""
     from finetuning_scheduler.core.checkpoint import copy_checkpoint, save_payload
@@ -342,9 +416,13 @@ def test_only_needed_checkpoints_are_kept(tmp_path, save_top_k):
 
 
 def _resumable_run(dirpath, save_top_k, init, gate=None, saves=None, stop_after=None, load_from=None,
-                   losses=(1.0, 2.0, 0.5, 3.0, 3.0)):
+                   losses=(1.0, 2.0, 0.5, 3.0, 3.0), loop_owned=False):
     """Train ``Net`` under ``SCHEDULE`` from ``init`` with a best checkpoint, saving after the epochs ``saves``
-    maps to a path, stopping after ``stop_after`` (an interruption) or resuming from ``load_from``."""
+    maps to a path, stopping after ``stop_after`` (an interruption) or resuming from ``load_from``.
+
+    With ``loop_owned``, the loop writes its own checkpoint (the model, the optimizer and ``resume_state()``) in
+    place of ``save()``, and resumes with ``load_resume_state()``.
+    """
     model = Net()
     model.load_state_dict(init)
     cp = BestCheckpoint(dirpath, "val_loss", save_top_k=save_top_k)
@@ -352,12 +430,20 @@ def _resumable_run(dirpath, save_top_k, init, gate=None, saves=None, stop_after=
     if gate is not None:
         fts.add_gate(gate)
     fts.setup()
-    if load_from is not None:
+    if load_from is not None and loop_owned:
+        loop_ckpt = torch.load(load_from, weights_only=False)
+        fts.load_resume_state(loop_ckpt["fts"])
+        model.load_state_dict(loop_ckpt["model"])
+        fts.optimizer.load_state_dict(loop_ckpt["optimizer"])
+    elif load_from is not None:
         fts.load(load_from)
     for epoch in fts.epochs(5):
         _train_epoch(fts, model, seed=epoch)
         fts.epoch_end({"val_loss": losses[epoch]})
-        if saves and epoch in saves:
+        if saves and epoch in saves and loop_owned:
+            torch.save({"model": model.state_dict(), "optimizer": fts.optimizer.state_dict(),
+                        "fts": fts.resume_state()}, saves[epoch])
+        elif saves and epoch in saves:
             fts.save(saves[epoch])
         if epoch == stop_after:
             break
@@ -368,16 +454,20 @@ def _same_params(a, b):
     return all(torch.equal(p, q) for p, q in zip(a.parameters(), b.parameters()))
 
 
+@pytest.mark.parametrize("loop_owned", [False, True], ids=["save", "resume_state"])
 @pytest.mark.parametrize("save_top_k", [1, 2])
-def test_resume_from_a_save_older_than_the_latest_best(tmp_path, save_top_k):
+def test_resume_from_a_save_older_than_the_latest_best(tmp_path, save_top_k, loop_owned):
     """A run interrupted after writing a newer best than its latest save refers to resumes from that save as if
-    uninterrupted: the next boundary restores the save's best, not the interrupted run's (#52)."""
+    uninterrupted: the next boundary restores the save's best, not the interrupted run's (#52). A loop-owned
+    checkpoint with ``resume_state()`` keeps the checkpoints it refers to as ``save()`` does (#143)."""
     torch.manual_seed(0)
     init = Net().state_dict()
     ref, _ = _resumable_run(tmp_path / "ref", save_top_k, init)
     # the save after epoch 0 refers to epoch 0's best; epoch 2 then writes a better one before the run stops
-    _resumable_run(tmp_path / "run", save_top_k, init, saves={0: tmp_path / "s.pt"}, stop_after=2)
-    resumed, fts = _resumable_run(tmp_path / "run", save_top_k, init, load_from=tmp_path / "s.pt")
+    _resumable_run(tmp_path / "run", save_top_k, init, saves={0: tmp_path / "s.pt"}, stop_after=2,
+                   loop_owned=loop_owned)
+    resumed, fts = _resumable_run(tmp_path / "run", save_top_k, init, load_from=tmp_path / "s.pt",
+                                  loop_owned=loop_owned)
     assert fts.restored_count == 2 and _same_params(ref, resumed)
 
 
