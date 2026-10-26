@@ -230,28 +230,6 @@ def _run_notebook(rel_path: str, overrides: dict[str, str], workdir: str) -> str
     )
 
 
-@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
-@RunIf(min_cuda_gpus=1, skip_windows=True)
-def test_fts_superglue_lightning_nb(tmpdir):
-    # the Lightning tutorial notebook, shortened through its parameters cell
-    _run_notebook(
-        "superglue/fts_superglue_lightning.ipynb", {"MAX_EPOCHS": "1", "LIMIT_TRAIN_BATCHES": "2"}, tmpdir.strpath
-    )
-    assert os.path.exists(os.path.join(tmpdir, "RteBoolqModule_ft_schedule_deberta_base.yaml"))
-
-
-@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
-@RunIf(min_cuda_gpus=1, skip_windows=True)
-def test_fts_superglue_pytorch_nb(tmpdir):
-    # the PyTorch API notebook, shortened through its parameters cell
-    overrides = {"MAX_EPOCHS": "4", "TRAIN_SUBSET": "32", "VAL_SUBSET": "16"}
-    stdout = _run_notebook("superglue/fts_superglue_pytorch.ipynb", overrides, tmpdir.strpath)
-    for scenario in ("fts_explicit", "fts_implicit", "nofts_baseline"):
-        assert re.search(rf"^{scenario}: finished at phase \d+ after \d+ epochs", stdout, flags=re.M), stdout
-    generated = os.path.join(tmpdir, "fts_logs", "generated", "DebertaV2ForSequenceClassification_ft_schedule.yaml")
-    assert os.path.exists(generated)
-
-
 GSM8K_SMOKE = {"TRAIN_SUBSET": "8", "VAL_SUBSET": "4", "RETENTION_WINDOWS": "2", "BATCH_SIZE": "2"}
 
 

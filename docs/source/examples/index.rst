@@ -18,14 +18,16 @@ Notebooks
    * - Example
      - Interface
      - What it shows
-   * - :doc:`Scheduled fine-tuning on SuperGLUE<notebooks/superglue/fts_superglue_lightning>`
+   * - :doc:`Scheduled fine-tuning for math reasoning<notebooks/gsm8k/fts_gsm8k_lightning>`
      - Lightning
-     - Explicit, implicit (default) and baseline schedules for DeBERTa-v3 on RTE with the
+     - An explicit schedule (top decoder blocks, then LoRA adapters addressed by role, then the lower blocks) against
+       a baseline for Qwen3-0.6B on GSM8K, measuring what the model retains as it tunes, with the
        :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback.
-   * - :doc:`Scheduled fine-tuning on SuperGLUE<notebooks/superglue/fts_superglue_pytorch>`
+   * - :doc:`Scheduled fine-tuning for math reasoning<notebooks/gsm8k/fts_gsm8k_pytorch>`
      - PyTorch (experimental)
      - The same experiment in a training loop you write yourself, with
-       :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler`.
+       :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler`, and a review of the runs' training
+       trajectory.
 
 Command Line
 ************
