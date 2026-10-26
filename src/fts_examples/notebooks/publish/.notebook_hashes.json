@@ -1,4 +1,9 @@
 {
+  "src/fts_examples/notebooks/dev/gsm8k/fts_explicit_loss_anim.gif": "835fcb4f8f0d27f796c70e0a5225cf8c15d56e8b8fbe0d084f61e983a1298a1d",
+  "src/fts_examples/notebooks/dev/gsm8k/fts_gsm8k_lightning.ipynb": "65b85c6de69f27b77e1dfdf5158f1eb605e1eec62e92ed04d26eb266b3dca8d9",
+  "src/fts_examples/notebooks/dev/gsm8k/fts_gsm8k_pytorch.ipynb": "906f74cc3c5b7c74bf36ad2e179c8b37582166cad8d8e3e6768b83abaf9c1c37",
+  "src/fts_examples/notebooks/dev/gsm8k/logo_fts.png": "2ea31ac2b94dacb4301da51d2e3307fa9183bab5321fc51fa291c00fb2759664",
+  "src/fts_examples/notebooks/dev/gsm8k/side_by_side_yaml.png": "d190f0c9c0946347f77f109b4ff1e1d65bc2be70a1903defbf651b9bc75da281",
   "src/fts_examples/notebooks/dev/superglue/fts_explicit_loss_anim.gif": "835fcb4f8f0d27f796c70e0a5225cf8c15d56e8b8fbe0d084f61e983a1298a1d",
   "src/fts_examples/notebooks/dev/superglue/fts_superglue_lightning.ipynb": "7f08fb8ce4d819a2917c496362a48e3fffc8d6211112cd496fcda059d8565272",
   "src/fts_examples/notebooks/dev/superglue/fts_superglue_pytorch.ipynb": "c2f710c25174ada6bc186c12822f6add58f84e0e6d0aa6816e1e1b245e40717a",
