@@ -77,6 +77,7 @@ easily.
 .. list-table::
    :widths: 25 25 25 25
    :header-rows: 1
+   :class: fts-scenarios-table
 
    * - | **Example Scenario**
      - | **nofts_baseline**

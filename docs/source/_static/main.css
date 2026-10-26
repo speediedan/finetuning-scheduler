@@ -126,3 +126,13 @@ table.fts-examples-table col:nth-child(2) {
 table.fts-examples-table col:nth-child(3) {
     width: 52% !important;
 }
+
+/* the LightningCLI example's scenario table: four equal columns */
+table.fts-scenarios-table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+table.fts-scenarios-table col {
+    width: 25% !important;
+}
