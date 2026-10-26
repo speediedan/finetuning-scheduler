@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tests for the core's training host seam and its transition policies (#51)."""
+"""Tests for the core's training interface seam and its transition policies (#51)."""
 import warnings
 
 import pytest
@@ -17,7 +17,7 @@ import torch
 from torch import nn
 
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.core.host import LRStepConfig, TorchHost, TrainingHost
+from finetuning_scheduler.core.interface import LRStepConfig, TorchInterface, TrainingInterface
 from finetuning_scheduler.core.transitions import (AnyOf, CallableTransition, Decision, EpochTransition, GateResult,
                                                    PlateauTransition, StepTransition, TransitionContext, as_decision)
 from tests.test_phase_characterization import PLATEAU_CASES
@@ -29,48 +29,49 @@ def _ctx(**overrides):
     return TransitionContext(**{**base, **overrides})
 
 
-def test_torch_host_without_process_group():
+def test_torch_interface_without_process_group():
     module = nn.Linear(2, 2)
-    host = TorchHost(module, log_dir="logs")
-    assert isinstance(host, TrainingHost)
-    assert host.module is module and host.log_dir == "logs"
-    assert (host.is_global_zero, host.world_size) == (True, 1)
-    assert host.broadcast_object({"a": 1}) == {"a": 1}
-    assert host.all_gather_object(3) == [3]
-    assert (host.reduce_max(4), host.reduce_any(False)) == (4, False)
-    host.barrier("noop")
+    interface = TorchInterface(module, log_dir="logs")
+    assert isinstance(interface, TrainingInterface)
+    assert interface.module is module and interface.log_dir == "logs"
+    assert (interface.is_global_zero, interface.world_size) == (True, 1)
+    assert interface.broadcast_object({"a": 1}) == {"a": 1}
+    assert interface.all_gather_object(3) == [3]
+    assert (interface.reduce_max(4), interface.reduce_any(False)) == (4, False)
+    interface.barrier("noop")
     opt = torch.optim.SGD(module.parameters(), lr=0.1)
-    host.set_optimizer(0, opt)
+    interface.set_optimizer(0, opt)
     sched = torch.optim.lr_scheduler.StepLR(opt, 1)
-    host.set_lr_scheduler(0, sched, LRStepConfig(interval="step"))
-    assert host.get_optimizers() == [opt]
-    assert host.get_lr_schedulers() == [(sched, LRStepConfig(interval="step"))]
+    interface.set_lr_scheduler(0, sched, LRStepConfig(interval="step"))
+    assert interface.get_optimizers() == [opt]
+    assert interface.get_lr_schedulers() == [(sched, LRStepConfig(interval="step"))]
     replacement = torch.optim.SGD(module.parameters(), lr=0.2)
-    host.set_optimizer(0, replacement)
-    assert host.get_optimizers() == [replacement]
-    host.advance_epoch(), host.advance_step(3)
-    assert (host.current_epoch, host.global_step) == (1, 3)
-    host.load_counters(5, 50)
-    assert (host.current_epoch, host.global_step) == (5, 50)
-    host.set_max_epochs(7)
-    assert host.max_epochs == 7
-    assert host.rng_devices() == [] or all(d.type == "cuda" for d in host.rng_devices())
-    assert TorchHost(module, rng_devices=[0, "cpu"]).rng_devices() == [torch.device("cuda", 0), torch.device("cpu")]
+    interface.set_optimizer(0, replacement)
+    assert interface.get_optimizers() == [replacement]
+    interface.advance_epoch(), interface.advance_step(3)
+    assert (interface.current_epoch, interface.global_step) == (1, 3)
+    interface.load_counters(5, 50)
+    assert (interface.current_epoch, interface.global_step) == (5, 50)
+    interface.set_max_epochs(7)
+    assert interface.max_epochs == 7
+    assert interface.rng_devices() == [] or all(d.type == "cuda" for d in interface.rng_devices())
+    assert TorchInterface(module, rng_devices=[0, "cpu"]).rng_devices() == [torch.device("cuda", 0),
+    torch.device("cpu")]
 
 
-def test_torch_host_collectives_single_process_group(tmp_path):
+def test_torch_interface_collectives_single_process_group(tmp_path):
     """With a (single-process, gloo) group initialized, the collectives run through ``torch.distributed``."""
     dist = torch.distributed
     if not dist.is_available() or dist.is_initialized():
         pytest.skip("needs torch.distributed with no process group already initialized")
     dist.init_process_group("gloo", init_method=f"file://{tmp_path / 'pg'}", rank=0, world_size=1)
     try:
-        host = TorchHost(nn.Linear(2, 2))
-        assert (host.is_global_zero, host.world_size) == (True, 1)
-        assert host.reduce_max(3) == 3 and host.reduce_any(True) is True
-        assert host.broadcast_object([1, 2]) == [1, 2]
-        assert host.all_gather_object("x") == ["x"]
-        host.barrier()
+        interface = TorchInterface(nn.Linear(2, 2))
+        assert (interface.is_global_zero, interface.world_size) == (True, 1)
+        assert interface.reduce_max(3) == 3 and interface.reduce_any(True) is True
+        assert interface.broadcast_object([1, 2]) == [1, 2]
+        assert interface.all_gather_object("x") == ["x"]
+        interface.barrier()
     finally:
         dist.destroy_process_group()
 
@@ -109,7 +110,7 @@ def test_plateau_transition_matches_lightning(case):
             plain_loop_reason = reason.replace("Signaling Trainer to stop.", "Stopping training.")
             assert (decision, why) == (Decision.STOP, plain_loop_reason)
         elif phase_complete and decision == Decision.ADVANCE:
-            policy.reset(0)  # the controller resets policies at the phase boundary
+            policy.reset(0)  # the tuning scheduler resets policies at the phase boundary
         else:
             assert decision == Decision.CONTINUE and why == reason
         assert float(policy.best_score) == best

@@ -15,10 +15,12 @@ lightning_logs/
 src/fts_examples/notebooks/**/lightning_logs/
 src/fts_examples/notebooks/**/checkpoints/
 src/fts_examples/notebooks/**/fts_logs/
+src/fts_examples/notebooks/**/tensorboard_logs/
 src/fts_examples/notebooks/**/*_ft_schedule_*.yaml
 docs/notebook_artifacts/**/lightning_logs/
 docs/notebook_artifacts/**/checkpoints/
 docs/notebook_artifacts/**/fts_logs/
+docs/notebook_artifacts/**/tensorboard_logs/
 docs/notebook_artifacts/**/*_ft_schedule_*.yaml
 
 # SQLite database files
@@ -32,7 +34,7 @@ docs/source/api
 docs/source/*.md
 docs/source/generated
 docs/source/*/generated
-docs/source/notebooks
+docs/source/examples/notebooks
 docs/source/_static/images/course_UvA-DL
 docs/source/_static/images/lightning_examples
 

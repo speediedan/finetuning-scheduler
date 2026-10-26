@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Host parity: one scenario run by the Lightning callback and by ``FTSController`` must follow the same
+"""Interface parity: one scenario run by the Lightning callback and by ``TuningScheduler`` must follow the same
 phase path (#51).
 
 Transitions are driven by scripted validation metrics, so the path does not depend on numerics. Each run records, at
@@ -25,7 +25,7 @@ from lightning.pytorch import Callback, LightningModule, seed_everything, Traine
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from finetuning_scheduler import (FinetuningScheduler, FTSCheckpoint, FTSController, FTSEarlyStopping,
+from finetuning_scheduler import (FinetuningScheduler, FTSCheckpoint, TuningScheduler, FTSEarlyStopping,
                                   PlateauTransition)
 from finetuning_scheduler.core.checkpoint import BestCheckpoint
 
@@ -127,7 +127,7 @@ SCENARIOS = {
     ),
     # an optimizer configured over every parameter, reconfigured for phase 0
     "enforce_phase0": dict(
-        # max_epochs=4 is extended to the schedule's highest max_transition_epoch (5) on both hosts
+        # max_epochs=4 is extended to the schedule's highest max_transition_epoch (5) on both interfaces
         schedule=EPOCH_DRIVEN, scripted=[1.0] * 5, max_epochs=4, plateau=False, max_depth=-1, all_params=True,
     ),
     # an explicit lr scheduler reinitialization at phase 1
@@ -188,11 +188,11 @@ def _torch_path(schedule, scripted, max_epochs, plateau, max_depth, all_params=F
         optimizer = partial(torch.optim.SGD, lr=0.1)
         lr_scheduler = (partial(torch.optim.lr_scheduler.ReduceLROnPlateau, patience=0, factor=0.5) if rlrop else
                         partial(torch.optim.lr_scheduler.StepLR, step_size=1, gamma=0.5))
-    fts = FTSController(model, schedule, optimizer=optimizer, lr_scheduler=lr_scheduler,
-                        lr_scheduler_cfg={"interval": "epoch", "monitor": "val_loss" if rlrop else None},
-                        max_depth=max_depth,
-                        transition=PlateauTransition("val_loss", patience=1) if plateau else None,
-                        checkpoint=BestCheckpoint(ckpt_dir, "val_loss") if restore_best else None)
+    fts = TuningScheduler(model, schedule, optimizer=optimizer, lr_scheduler=lr_scheduler,
+                          lr_scheduler_cfg={"interval": "epoch", "monitor": "val_loss" if rlrop else None},
+                          max_depth=max_depth,
+                          transition=PlateauTransition("val_loss", patience=1) if plateau else None,
+                          checkpoint=BestCheckpoint(ckpt_dir, "val_loss") if restore_best else None)
     fts.setup()
     path = []
     for epoch in fts.epochs(max_epochs):
@@ -235,8 +235,8 @@ EXPECTED_PATHS = {
 
 
 @pytest.mark.parametrize("scenario", list(SCENARIOS), ids=list(SCENARIOS))
-def test_host_parity(tmpdir, scenario):
-    """Both hosts follow the scenario's expected path."""
+def test_interface_parity(tmpdir, scenario):
+    """Both interfaces follow the scenario's expected path."""
     cfg = SCENARIOS[scenario]
     lightning_path = _lightning_path(os.path.join(tmpdir, "lightning"), **cfg)
     torch_path = _torch_path(**cfg, ckpt_dir=os.path.join(tmpdir, "torch"))

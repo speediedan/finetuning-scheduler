@@ -9,13 +9,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""``FTSController``'s FSDP2 and tensor-parallel scheduling in one process, on the fake process group.
+"""``TuningScheduler``'s FSDP2 and tensor-parallel scheduling in one process, on the fake process group.
 
-These run the model-parallel pool cases (``tests/dist_cases/fts_controller_mp.py``) once per simulated rank, so the
-scheduling logic is checked on every hosted OS, not only where the gloo pool runs. The fake group's collectives move
+These run the model-parallel pool cases (``tests/dist_cases/fts_tuning_scheduler_mp.py``) once per simulated rank, so
+the scheduling logic is checked on every hosted OS, not only where the gloo pool runs. The fake group's collectives move
 no data, so those runs compare no numerics; the tensor-parallel case also runs once under ``LocalTensorMode``
 (``run_local``), whose numerics are real, and is compared with a single-process run. DCP checkpointing (whose global
-plan needs every rank's real chunks) stays with the gloo tests in ``tests/test_controller_model_parallel.py``.
+plan needs every rank's real chunks) stays with the gloo tests in ``tests/test_tuning_scheduler_model_parallel.py``.
 
 The ``core-no-lightning`` CI job runs this module with ``--noconftest``, so it must not import Lightning or
 ``tests.helpers``.
@@ -26,8 +26,8 @@ import pytest
 import torch
 import torch.distributed as dist
 
-from tests.dist_cases import fts_controller_mp as mp
-from tests.dist_cases.fts_controller_mp import params_close
+from tests.dist_cases import fts_tuning_scheduler_mp as mp
+from tests.dist_cases.fts_tuning_scheduler_mp import params_close
 from tests.dist_cases._fake_pg import assert_ranks_agree, run_fake, run_local
 from tests.model_parallel_expected_paths import path_fsdp_autocm, path_tp
 
@@ -109,7 +109,7 @@ def test_tp_matches_a_single_process_run(tp_loss_parallel):
 def test_partial_plan_thaws_on_schedule_and_warns_once():
     """With the root unsharded, ``layers.1`` is a root FSDP module frozen through phase 0: phase 1 still thaws it.
 
-    The controller warns, on rank 0 only, about the embeddings no FSDP module manages.
+    The tuning scheduler warns, on rank 0 only, about the embeddings no FSDP module manages.
     """
     results = run_fake(mp.partial_plan)
     path = _scheduling(results)["path"]

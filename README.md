@@ -33,7 +33,7 @@ ______________________________________________________________________
   - explicit schedules for performance tuning, fine-grained behavioral experimentation and computational efficiency
 - automatic restoration of best per-phase checkpoints driven by iterative application of early-stopping criteria to each fine-tuning phase
 - composition of early-stopping and manually-set epoch-driven fine-tuning phase transitions
-- an experimental PyTorch API ([FTSController](https://finetuning-scheduler.readthedocs.io/en/latest/pytorch/plain_pytorch_loop.html)) that brings the same schedules to a plain PyTorch training loop, without Lightning
+- an experimental PyTorch API ([TuningScheduler](https://finetuning-scheduler.readthedocs.io/en/latest/pytorch/plain_pytorch_loop.html)) that brings the same schedules to a plain PyTorch training loop, without Lightning
 
 ______________________________________________________________________
 
@@ -157,7 +157,7 @@ from finetuning_scheduler import FinetuningScheduler
 trainer = L.Trainer(callbacks=[FinetuningScheduler()])
 ```
 
-Get started by following [the Fine-Tuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/stable/index.html#example-scheduled-fine-tuning-for-superglue) or by following the [notebook-based](https://finetuning-scheduler.readthedocs.io/en/latest/notebooks/superglue/fts_superglue_lightning.html) Fine-Tuning Scheduler tutorial.
+Get started by following [the Fine-Tuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/stable/index.html#example-scheduled-fine-tuning-for-superglue) or by following the [notebook-based](https://finetuning-scheduler.readthedocs.io/en/latest/examples/notebooks/superglue/fts_superglue_lightning.html) Fine-Tuning Scheduler tutorial.
 
 ______________________________________________________________________
 
@@ -206,8 +206,8 @@ ______________________________________________________________________
 
 ### Scheduled Fine-Tuning For SuperGLUE
 
-- [Notebook-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/latest/notebooks/superglue/fts_superglue_lightning.html)
-- [PyTorch API Notebook-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/latest/notebooks/superglue/fts_superglue_pytorch.html) (experimental, new in 2.15)
+- [Notebook-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/latest/examples/notebooks/superglue/fts_superglue_lightning.html)
+- [PyTorch API Notebook-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/latest/examples/notebooks/superglue/fts_superglue_pytorch.html) (experimental, new in 2.15)
 - [CLI-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/stable/#example-scheduled-fine-tuning-for-superglue)
 - [FSDP Scheduled Fine-Tuning](https://finetuning-scheduler.readthedocs.io/en/stable/advanced/fsdp_scheduled_fine_tuning.html)
 - [LR Scheduler Reinitialization](https://finetuning-scheduler.readthedocs.io/en/stable/advanced/lr_scheduler_reinitialization.html) (advanced)

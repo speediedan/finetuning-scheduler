@@ -9,5 +9,5 @@ fsdp_default_kwargs:
   act_ckpt: ['composable']  # use composable AC with default kwargs
   # cpu_offload_policy: {}  # apply default cpu offload policy
 # `model.norm` gets its own FSDP unit: left to the root's, it would thaw in phase 0 beside the embeddings (phase 2), and
-# the controller would warn that the root unit communicates the embeddings from phase 0 on
+# the tuning scheduler would warn that the root unit communicates the embeddings from phase 0 on
 fsdp_plan: {'model.output': {}, 'model.norm': {}, 'class:TransformerBlock': {}}

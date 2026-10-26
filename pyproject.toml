@@ -276,6 +276,10 @@ install_cell = [
 docs_artifact_dir = "docs/notebook_artifacts"
 docs_render_command = "python scripts/render_notebook_docs.py"
 
+# the PyTorch tutorial's docs render runs every phase, so its fts_implicit run reaches the transition its review shows
+[tool.notebook-publishing.docs_parameters."superglue/fts_superglue_pytorch"]
+MAX_DEPTH = -1
+
 # Dependency groups for development (PEP 735)
 # These are NOT installed by default, only via uv pip install --group <name>
 [dependency-groups]

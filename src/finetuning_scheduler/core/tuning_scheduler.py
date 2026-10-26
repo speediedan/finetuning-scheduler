@@ -10,11 +10,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 r"""
-Fine-Tuning Scheduler Controller
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Fine-Tuning Scheduler Tuning Scheduler
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-:class:`FTSController` schedules multi-phase fine-tuning in a plain PyTorch training loop. The loop stays yours: the
-controller is driven by explicit calls, in the spirit of ``torch.optim.lr_scheduler``, and never runs training itself.
+:class:`TuningScheduler` schedules multi-phase fine-tuning in a plain PyTorch training loop. The loop stays yours: the
+tuning scheduler is driven by explicit calls, in the spirit of ``torch.optim.lr_scheduler``, and never runs training
+itself.
 
 .. warning::
 
@@ -45,9 +46,9 @@ from finetuning_scheduler.core.compile import CompiledSchedule, compile_schedule
 from finetuning_scheduler.core.config import config_hash, describe_callable
 from finetuning_scheduler.core.dist import rank_zero_info, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.core.executor import ControllerExecutor, PhaseExecutor
+from finetuning_scheduler.core.executor import TuningSchedulerExecutor, PhaseExecutor
 from finetuning_scheduler.core.fingerprint import batch_fingerprint
-from finetuning_scheduler.core.host import LRStepConfig, TorchHost, TrainingHost
+from finetuning_scheduler.core.interface import LRStepConfig, TorchInterface, TrainingInterface
 from finetuning_scheduler.core.rng import capture_rng_state, fork_rngs, restore_rng_state
 from finetuning_scheduler.core.roles import (is_frozen_role, is_role_selector, role_kind, SELECTOR_PREFIX,
                                              selector_matches)
@@ -100,7 +101,7 @@ class PhaseEvent:
         global_step: The number of completed optimizer steps.
         phase_config: The phase's payload: the ``phase_config_type`` instance if one was given, otherwise the mapping.
         metadata: The run's user metadata.
-        controller: The controller, for access to the module, optimizer and schedule.
+        tuning_scheduler: The tuning scheduler, for access to the module, optimizer and schedule.
         physical_params: The physical parameters the phase thaws (its own, then its coupled ones).
         logical_params: The logical names the phase's schedule entries resolved to (role selectors excluded).
     """
@@ -110,7 +111,7 @@ class PhaseEvent:
     global_step: int
     phase_config: Any
     metadata: Mapping[str, Any]
-    controller: "FTSController" = field(repr=False)
+    tuning_scheduler: "TuningScheduler" = field(repr=False)
     physical_params: tuple[str, ...] = ()
     logical_params: tuple[str, ...] = ()
 
@@ -134,12 +135,12 @@ def _checkpoint_keys(names: Iterable[str], saved: Iterable[str]) -> tuple[dict[s
     return {n: k for n, k in keys.items() if k is not None}, [n for n, k in keys.items() if k is None]
 
 
-class FTSController:
+class TuningScheduler:
     """Schedule multi-phase fine-tuning in a plain PyTorch training loop.
 
     The minimal loop is::
 
-        fts = FTSController(model, "schedule.yaml", optimizer=partial(torch.optim.AdamW, lr=1e-4))
+        fts = TuningScheduler(model, "schedule.yaml", optimizer=partial(torch.optim.AdamW, lr=1e-4))
         fts.setup()
         for epoch in fts.epochs(max_epochs=10):
             for batch in loader:
@@ -188,8 +189,8 @@ class FTSController:
         fingerprint_batches: How many batches per phase :meth:`observe_batch` fingerprints.
         metadata: User metadata, part of the configuration hash and handed to hooks.
         log_dir: Where a generated schedule is saved.
-        host: The :class:`~finetuning_scheduler.core.host.TrainingHost`; a
-            :class:`~finetuning_scheduler.core.host.TorchHost` by default.
+        interface: The :class:`~finetuning_scheduler.core.interface.TrainingInterface`; a
+            :class:`~finetuning_scheduler.core.interface.TorchInterface` by default.
         compile_reset: Reset dynamo's compiled graphs at each transition; by default when the module is compiled.
         allow_meta_frozen: Allow meta-device parameters that no phase schedules (they are warned about).
         view: The :class:`~finetuning_scheduler.core.views.TunableView` through which the schedule names the model's
@@ -229,7 +230,7 @@ class FTSController:
         fingerprint_batches: int = 4,
         metadata: Mapping[str, Any] | None = None,
         log_dir: str | os.PathLike | None = None,
-        host: TrainingHost | None = None,
+        interface: TrainingInterface | None = None,
         compile_reset: bool | None = None,
         allow_meta_frozen: bool = False,
         view: Any | None = None,
@@ -263,7 +264,7 @@ class FTSController:
         self.fingerprint_batches = fingerprint_batches
         self._metadata = dict(metadata or {})
         self.log_dir = log_dir
-        self._host = host if host is not None else TorchHost(model, log_dir=log_dir)
+        self._interface = interface if interface is not None else TorchInterface(model, log_dir=log_dir)
         self._compile_reset = compile_reset
         self.allow_meta_frozen = allow_meta_frozen
         self._view_src = view
@@ -304,9 +305,10 @@ class FTSController:
         self._step_hook: RemovableHandle | None = None
         self._is_setup = False
         self._finished = False
-        # how phases are put in place, and whether a host drives the loop (`attach`) rather than the controller
-        self._executor: PhaseExecutor = ControllerExecutor(self)
-        self._host_driven = False
+        # how phases are put in place, and whether an interface drives the loop (`attach`) rather than the tuning
+        # scheduler
+        self._executor: PhaseExecutor = TuningSchedulerExecutor(self)
+        self._externally_driven = False
 
     # ------------------------------------------------------------------------------------------------------------------
     # setup
@@ -315,7 +317,7 @@ class FTSController:
         """Load, generate or validate the schedule; freeze the model and thaw phase 0; build or reconfigure the
         optimizer and lr scheduler; then run the phase-0 start hooks."""
         if self._is_setup:
-            raise FTSConfigurationError("`FTSController.setup()` has already been called.")
+            raise FTSConfigurationError("`TuningScheduler.setup()` has already been called.")
         if self._restore_best and self._checkpoint is None:
             raise FTSConfigurationError("`restore_best=True` needs a `checkpoint` policy to restore from.")
         self._refuse_unsupported_model()
@@ -338,49 +340,52 @@ class FTSController:
                                       bn_track_running_stats=self.frozen_bn_track_running_stats)
         self._thaw_phase(0, init_thaw=True)
         optimizer, schedulers = self._configure_optimizer_and_schedulers()
-        self._host.set_optimizer(0, optimizer)
+        self._interface.set_optimizer(0, optimizer)
         for i, sched in enumerate(schedulers):
-            self._host.set_lr_scheduler(i, sched, self._lr_step_cfg)
+            self._interface.set_lr_scheduler(i, sched, self._lr_step_cfg)
         self._step_hook = optimizer.register_step_post_hook(self._on_optimizer_step)
         self._check_schedule_agreement()
         self._fingerprints.setdefault(0, [])
         self._is_setup = True
         if self._checkpoint is not None and getattr(self._checkpoint, "save_initial", False):
-            initial = self._write_checkpoint(self._host.broadcast_object(self._checkpoint.path_for("initial")))
+            initial = self._write_checkpoint(self._interface.broadcast_object(self._checkpoint.path_for("initial")))
             self._pin_boundary(0, initial_path=initial)
         self._run_hooks("start", 0)
         rank_zero_info(f"Fine-tuning schedule set up with {len(self._schedule)} phases (max_depth {self._max_depth}).")
 
     def attach(self, executor: PhaseExecutor, schedule: Mapping[int, Mapping[str, Any]], *,
                run_start_hooks: bool = True) -> None:
-        """Set up for a training host that owns the loop, instead of :meth:`setup` (experimental).
+        """Set up an externally driven tuning scheduler, for a training framework that owns the loop, instead of
+        :meth:`setup` (experimental).
 
-        The host has already validated ``schedule``, thawed phase 0 and built the optimizer and lr schedulers, which
-        the controller adopts from its :class:`~finetuning_scheduler.core.host.TrainingHost`. The host decides when a
-        phase ends and calls :meth:`request_advance`; the controller sequences the transition (the end and start
-        hooks, gates, the best-checkpoint restore through the checkpoint policy) and ``executor`` puts each phase in
-        place, so the host's own phase execution runs as before. :meth:`epochs`, :meth:`epoch_start`,
-        :meth:`epoch_end` and :meth:`step_end` belong to a controller-driven loop, and :meth:`save`, :meth:`load` and
-        :meth:`load_state_dict` to a controller that owns its checkpoints, so they are refused, as are gates
-        (:meth:`add_gate`).
+        The framework has already validated ``schedule``, thawed phase 0 and built the optimizer and lr schedulers,
+        which the tuning scheduler adopts from its :class:`~finetuning_scheduler.core.interface.TrainingInterface`. The
+        framework decides when a phase ends and calls :meth:`request_advance`; the tuning scheduler sequences the
+        transition (the end and start hooks, gates, the best-checkpoint restore through the checkpoint policy) and
+        ``executor`` puts each phase in place, so the framework's own phase execution runs as before. :meth:`epochs`,
+        :meth:`epoch_start`, :meth:`epoch_end` and :meth:`step_end` belong to a self-driven loop, and :meth:`save`,
+        :meth:`load` and :meth:`load_state_dict` to a tuning scheduler that owns its checkpoints, so they are refused,
+        as are gates (:meth:`add_gate`).
 
         Args:
-            executor: Carries out the phases the controller decides on.
-            schedule: The schedule, as the host validated it. Each phase's ``phase_config`` is handed to phase hooks.
-            run_start_hooks: Run phase 0's start hooks now (``False`` when the host is resuming a run at a later
-                phase, which :meth:`resume_at` puts the controller at).
+            executor: Carries out the phases the tuning scheduler decides on.
+            schedule: The schedule, as the framework validated it. Each phase's ``phase_config`` is handed to phase
+                hooks.
+            run_start_hooks: Run phase 0's start hooks now (``False`` when the framework is resuming a run at a later
+                phase, which :meth:`resume_at` puts the tuning scheduler at).
 
         Raises:
-            FTSConfigurationError: If the controller is already set up, ``restore_best`` has no checkpoint policy, or
-                gates are registered.
+            FTSConfigurationError: If the tuning scheduler is already set up, ``restore_best`` has no checkpoint
+                policy, or gates are registered.
         """
         if self._is_setup:
-            raise FTSConfigurationError("`FTSController` is already set up.")
+            raise FTSConfigurationError("`TuningScheduler` is already set up.")
         if self._restore_best and self._checkpoint is None:
             raise FTSConfigurationError("`restore_best=True` needs a `checkpoint` policy to restore from.")
         if self._gates:
-            raise FTSConfigurationError("Gates are not supported on a host-driven controller in this release.")
-        self._executor, self._host_driven = executor, True
+            raise FTSConfigurationError("Gates are not supported on an externally driven tuning scheduler in this"
+                                        " release.")
+        self._executor, self._externally_driven = executor, True
         self._view = self._resolve_view()
         self._view_roles_at_setup = self._view.view_roles()
         self._schedule = {int(d): dict(p) for d, p in schedule.items()}
@@ -392,20 +397,22 @@ class FTSController:
             self._run_hooks("start", 0)
 
     def request_advance(self, reason: str | None = None) -> None:
-        """Advance a host-driven controller (see :meth:`attach`) to the next phase, which the host decided on.
+        """Advance an externally driven tuning scheduler (see :meth:`attach`) to the next phase, which the
+        framework decided on.
 
         Raises:
-            FTSConfigurationError: If the controller is not host-driven, or the schedule has no later phase.
+            FTSConfigurationError: If the tuning scheduler is not externally driven, or the schedule has no later phase.
         """
-        self._require_host_driven("request_advance")
+        self._require_externally_driven("request_advance")
         if self._depth >= self._max_depth:
             raise FTSConfigurationError(f"Phase {self._depth} is the last phase (max_depth {self._max_depth}).")
         self._advance(reason)
 
     def resume_at(self, depth: int) -> None:
-        """Put a host-driven controller (see :meth:`attach`) at ``depth`` when the host resumes a run there: thaw
-        every phase through it, without configuring the optimizer, whose groups the resumed state holds."""
-        self._require_host_driven("resume_at")
+        """Put an externally driven tuning scheduler (see :meth:`attach`) at ``depth`` when the framework resumes a run
+        there: thaw every phase through it, without configuring the optimizer, whose groups the resumed state
+        holds."""
+        self._require_externally_driven("resume_at")
         if not 0 <= depth <= self._max_depth:
             raise FTSConfigurationError(f"Cannot resume at phase {depth}: the phases run from 0 to {self._max_depth}.")
         self._depth = depth
@@ -413,18 +420,20 @@ class FTSController:
         self._executor.resume_at(depth)
         self._executor.after_transition(depth)
 
-    def _require_host_driven(self, name: str) -> None:
-        if not self._host_driven:
-            raise FTSConfigurationError(f"`{name}` is for a host-driven controller; set it up with `attach()`.")
+    def _require_externally_driven(self, name: str) -> None:
+        if not self._externally_driven:
+            raise FTSConfigurationError(f"`{name}` is for an externally driven tuning scheduler; set it up with"
+                                        " `attach()`.")
 
-    def _refuse_host_driven(self, name: str, resume: bool = False) -> None:
-        if not self._host_driven:
+    def _refuse_externally_driven(self, name: str, resume: bool = False) -> None:
+        if not self._externally_driven:
             return
         if resume:
-            raise FTSConfigurationError(f"`{name}` is refused on a host-driven controller: the host saves and restores"
-                                        " the training state, and resumes the controller with `resume_at`.")
-        raise FTSConfigurationError(f"`{name}` drives the loop itself, so a host-driven controller refuses it; the"
-                                    " host calls `request_advance` instead.")
+            raise FTSConfigurationError(f"`{name}` is refused on an externally driven tuning scheduler: the framework"
+                                        " driving it saves and restores the training state, and resumes the"
+                                        " tuning scheduler with `resume_at`.")
+        raise FTSConfigurationError(f"`{name}` drives the loop itself, so an externally driven tuning scheduler refuses"
+                                    " it; the framework driving it calls `request_advance` instead.")
 
     def _refuse_unsupported_model(self) -> None:
         # the composable `replicate()` mixes this marker class into a module's class rather than wrapping the module
@@ -440,19 +449,19 @@ class FTSController:
             if replicated is not None and isinstance(module, replicated):
                 raise FTSConfigurationError(
                     f"{where} is under the composable `replicate()`, which builds its `DistributedDataParallel` at the"
-                    " first forward, after the controller has frozen the model, so parameters thawed in later phases"
-                    " would never be gradient-synchronized. Shard it with FSDP2 (`fully_shard`) instead."
+                    " first forward, after the tuning scheduler has frozen the model, so parameters thawed in later"
+                    " phases would never be gradient-synchronized. Shard it with FSDP2 (`fully_shard`) instead."
                 )
         if isinstance(self._optimizer_src, core_optim.ZeroRedundancyOptimizer):
             raise FTSConfigurationError(
-                "`ZeroRedundancyOptimizer` is not supported by `FTSController`; shard with FSDP2 instead."
+                "`ZeroRedundancyOptimizer` is not supported by `TuningScheduler`; shard with FSDP2 instead."
             )
 
     def _resolve_view(self) -> BoundView:
         view = resolve_view(self.model, self._view_src)
         if view.root is not self.model:
             raise FTSConfigurationError(
-                f"The view's `root` ({type(view.root).__name__}) must be the module given to the controller"
+                f"The view's `root` ({type(view.root).__name__}) must be the module given to the tuning scheduler"
                 f" ({type(self.model).__name__}): the optimizer and checkpoints see the root's parameters."
             )
         support = view.support()
@@ -466,9 +475,9 @@ class FTSController:
         if src is None:
             assert self._view is not None
             schedule = view_default_schedule(self._view)
-            if self.log_dir is not None and self._host.is_global_zero:
+            if self.log_dir is not None and self._interface.is_global_zero:
                 core_schedule.save_schedule(f"{type(self.model).__name__}_ft_schedule.yaml", schedule, self.log_dir)
-            return self._host.broadcast_object(schedule)
+            return self._interface.broadcast_object(schedule)
         if isinstance(src, (str, os.PathLike)):
             return core_schedule.load_yaml_schedule(src)
         if isinstance(src, Mapping):
@@ -553,7 +562,7 @@ class FTSController:
         unsupported = sorted(set(step_cfg) - {"interval", "frequency", "monitor"})
         if unsupported:
             raise FTSConfigurationError(
-                f"`FTSController` steps lr schedulers with `interval`, `frequency` and `monitor` only; remove"
+                f"`TuningScheduler` steps lr schedulers with `interval`, `frequency` and `monitor` only; remove"
                 f" {unsupported} from `pl_lrs_cfg`."
             )
         if step_cfg.get("interval", "epoch") not in ("step", "epoch"):
@@ -571,7 +580,7 @@ class FTSController:
     def _warn_unsynchronized_params(self) -> None:
         """Warn about scheduled parameters no FSDP2 module manages in a data-parallel run (a plan that does not
         shard the root module): nothing synchronizes their gradients, so each rank would train its own copy."""
-        if self._host.world_size < 2 or not torch.distributed.is_available():
+        if self._interface.world_size < 2 or not torch.distributed.is_available():
             return
         from torch.distributed.fsdp import FSDPModule
 
@@ -674,8 +683,8 @@ class FTSController:
     def _check_schedule_agreement(self) -> None:
         assert self._compiled is not None
         # the compiled digest covers the physical parameters each phase thaws and the view's roles
-        digests = self._host.all_gather_object(config_hash({"schedule": self._schedule,
-                                                            "compiled": self._compiled.digest}))
+        digests = self._interface.all_gather_object(config_hash({"schedule": self._schedule,
+                                                                 "compiled": self._compiled.digest}))
         if len(set(digests)) > 1:
             raise FTSConfigurationError(
                 "Ranks resolved different schedules or roles (their models' parameter names, or their views' roles,"
@@ -699,18 +708,18 @@ class FTSController:
         ``max_epochs`` and the schedule's highest ``max_transition_epoch`` (with a warning).
         """
         self._require_setup()
-        self._refuse_host_driven("epochs")
+        self._refuse_externally_driven("epochs")
         # as the Lightning callback does, the schedule's last phase (not `max_depth`'s) decides the extension
         extended = core_schedule.final_phase_max_epochs(self._schedule, len(self._schedule) - 1,
                                                         self._epoch_watermark, max_epochs)
         max_epochs = extended if extended is not None else max_epochs
-        self._host.set_max_epochs(max_epochs)
-        while self._host.current_epoch < max_epochs and not self._should_stop:
+        self._interface.set_max_epochs(max_epochs)
+        while self._interface.current_epoch < max_epochs and not self._should_stop:
             self.epoch_start()
             if self._should_stop:  # a gate vetoed the phase at this boundary
                 break
             try:
-                yield self._host.current_epoch
+                yield self._interface.current_epoch
             except GeneratorExit:
                 # the loop was left early: end training only if it had already decided to stop (the common
                 # `if fts.should_stop: break`); a failure or an arbitrary early exit does not end it
@@ -725,12 +734,12 @@ class FTSController:
         """Begin an epoch: advance to the next phase when a transition is pending or the schedule's
         ``max_transition_epoch`` is reached (at most one phase per epoch)."""
         self._require_setup()
-        self._refuse_host_driven("epoch_start")
+        self._refuse_externally_driven("epoch_start")
         self._epoch_end_called = False
         if self.is_final_phase:
             return
         phase = self._schedule[self._depth]
-        due = epoch_transition_due(phase["max_transition_epoch"], self._host.current_epoch)
+        due = epoch_transition_due(phase["max_transition_epoch"], self._interface.current_epoch)
         if self._pending >= Decision.ADVANCE or due:
             reason = self._pending_reason if self._pending >= Decision.ADVANCE else (
                 f"max_transition_epoch ({phase['max_transition_epoch']}) reached")
@@ -746,12 +755,12 @@ class FTSController:
             :attr:`should_stop`.
         """
         self._require_setup()
-        self._refuse_host_driven("epoch_end")
+        self._refuse_externally_driven("epoch_end")
         self._epoch_end_called = True
         self._last_metrics = dict(metrics or {})
-        decision, reason = self._evaluate("epoch", metrics, completed_epochs=self._host.current_epoch + 1)
+        decision, reason = self._evaluate("epoch", metrics, completed_epochs=self._interface.current_epoch + 1)
         # with several ranks, every rank joins the agreement, even one that reported no metrics this epoch
-        if self._checkpoint is not None and (metrics is not None or self._host.world_size > 1):
+        if self._checkpoint is not None and (metrics is not None or self._interface.world_size > 1):
             before = self._checkpoint.state_dict()
             if self._observe_best(metrics):
                 try:
@@ -761,7 +770,7 @@ class FTSController:
                     self._checkpoint.load_state_dict(before)
                     raise
                 self._checkpoint_hook("prune")
-        self._host.advance_epoch()
+        self._interface.advance_epoch()
         if decision >= Decision.STOP:
             self._stop(reason or decision.name.lower())
         elif decision == Decision.ADVANCE and not self.is_final_phase:
@@ -778,12 +787,12 @@ class FTSController:
             The agreed decision.
         """
         self._require_setup()
-        self._refuse_host_driven("step_end")
+        self._refuse_externally_driven("step_end")
         self._steps_since_step_end = 0
-        decision, reason = self._evaluate("step", metrics, completed_epochs=self._host.current_epoch)
+        decision, reason = self._evaluate("step", metrics, completed_epochs=self._interface.current_epoch)
         if not self.is_final_phase:
             mts = self._schedule[self._depth]["max_transition_step"]
-            if decision < Decision.ADVANCE and 0 <= mts <= self._host.global_step:
+            if decision < Decision.ADVANCE and 0 <= mts <= self._interface.global_step:
                 decision, reason = Decision.ADVANCE, f"max_transition_step ({mts}) reached"
         if decision >= Decision.STOP:
             self._stop(reason or decision.name.lower())
@@ -821,10 +830,10 @@ class FTSController:
         """
         self._require_setup()
         if interval == "step":
-            count = self._host.global_step
+            count = self._interface.global_step
         else:
-            count = self._host.current_epoch if self._epoch_end_called else self._host.current_epoch + 1
-        for sched, cfg in self._host.get_lr_schedulers():
+            count = self._interface.current_epoch if self._epoch_end_called else self._interface.current_epoch + 1
+        for sched, cfg in self._interface.get_lr_schedulers():
             if cfg.interval != interval or count % cfg.frequency != 0:
                 continue
             if isinstance(sched, torch.optim.lr_scheduler.ReduceLROnPlateau):
@@ -846,14 +855,15 @@ class FTSController:
             phase = self._schedule[self._depth]
             ctx = TransitionContext(
                 depth=self._depth, max_depth=self._max_depth, is_final_phase=self.is_final_phase, unit=unit,
-                epoch=completed_epochs, global_step=self._host.global_step, phase_start_epoch=self._phase_start_epoch,
-                phase_start_step=self._phase_start_step, max_transition_epoch=phase["max_transition_epoch"],
-                max_transition_step=phase["max_transition_step"], max_epochs=self._host.max_epochs,
+                epoch=completed_epochs, global_step=self._interface.global_step,
+                phase_start_epoch=self._phase_start_epoch, phase_start_step=self._phase_start_step,
+                max_transition_epoch=phase["max_transition_epoch"], max_transition_step=phase["max_transition_step"],
+                max_epochs=self._interface.max_epochs,
                 metrics=dict(metrics or {}), phase_config=self._phase_configs.get(self._depth),
                 metadata=self._metadata,
             )
             local, reason = as_decision(self._policy.evaluate(ctx))
-        agreed = Decision(self._host.reduce_max(int(local)))
+        agreed = Decision(self._interface.reduce_max(int(local)))
         if agreed != local:
             rank_zero_warn(
                 f"Ranks disagreed on the {unit}'s transition decision ({local.name} here); following the greatest,"
@@ -875,17 +885,17 @@ class FTSController:
         thaw and configure the optimizer for it."""
         prev = self._depth
         core_phase.reshard_fsdp_modules(self.model)
-        schedulers = [s for s, _ in self._host.get_lr_schedulers()]
+        schedulers = [s for s, _ in self._interface.get_lr_schedulers()]
         pre_state = core_optim.capture_lr_state(schedulers[0] if schedulers else None, self.optimizer)
-        # restore before the end hooks, so they see the best state under either host
+        # restore before the end hooks, so they see the best state under either interface
         restored_depth = self._restore_best_state() if self._restore_best else None
         self._end_phase(prev)
         if not self._run_gates(prev, final=False):
             return
         self._depth += 1
-        self._phase_start_epoch, self._phase_start_step = self._host.current_epoch, self._host.global_step
+        self._phase_start_epoch, self._phase_start_step = self._interface.current_epoch, self._interface.global_step
         self._fingerprints.setdefault(self._depth, [])
-        if self._checkpoint is not None and not self._host_driven:
+        if self._checkpoint is not None and not self._externally_driven:
             self._pin_boundary(self._depth)
         self._run_hooks("start", self._depth)
         self._apply_promotions(self._depth)
@@ -895,7 +905,7 @@ class FTSController:
             self._executor.configure_phase(self._depth, self._depth - 1, depth_sync=False, pre_state=pre_state)
         self._executor.after_transition(self._depth)
         if self._compile_reset or (self._compile_reset is None and _is_compiled(self.model)):
-            self._host.on_compile_reset()
+            self._interface.on_compile_reset()
         self._policy.reset(self._depth)
         rank_zero_info(f"Fine-tuning advanced from phase {prev} to phase {self._depth}"
                        f"{f' ({reason})' if reason else ''}.")
@@ -904,7 +914,7 @@ class FTSController:
         """Promote the tensors phase ``depth`` names in its ``promote`` key (when the phase starts, after its start
         hooks and before its thaw), through the view's ``promote`` or the default materialization, and record each
         promoted tensor's value, which restoring a checkpoint saved before the promotion puts back."""
-        if self._host_driven:  # the host compiles (and names) its own schedule; `promote` is refused there
+        if self._externally_driven:  # the interface compiles (and names) its own schedule; `promote` is refused there
             return
         assert self._compiled is not None and self._view is not None
         promoted = self._compiled.promotions.get(depth)
@@ -961,7 +971,7 @@ class FTSController:
         # after any phase hooks and gates, which may have run a forward-only pass, and on `load_state_dict`'s replay
         core_phase.reshard_fsdp_modules(self.model)
         optimizer = self.optimizer
-        schedulers = [s for s, _ in self._host.get_lr_schedulers()]
+        schedulers = [s for s, _ in self._interface.get_lr_schedulers()]
         new_optimizer_cfg, phases = core_phase.thaw_plan(self._schedule, depth, restored_depth, depth_sync=depth_sync,
                                                          reinit_optim_cfg=self.reinit_optim_cfg)
         for i, phase in phases:
@@ -971,7 +981,7 @@ class FTSController:
             if new_optimizer_cfg and i == 0:
                 # a reinitialized optimizer starts from phase 0's groups; later phases are replayed onto it
                 optimizer = self._reinit_optimizer(new_optimizer_cfg, phase["params"])
-                schedulers = [s for s, _ in self._host.get_lr_schedulers()]
+                schedulers = [s for s, _ in self._interface.get_lr_schedulers()]
                 continue
             if i == depth and depth > 0 and pre_state is not None:
                 core_optim.restore_latest_lr_state(optimizer, schedulers, *pre_state)
@@ -983,14 +993,14 @@ class FTSController:
             new_scheduler_cfg = core_phase.lr_reinit_cfg_for(phase, depth, self.reinit_lr_cfg)
             if new_scheduler_cfg:
                 self._reinit_lr_scheduler(new_scheduler_cfg, optimizer)
-                schedulers = [s for s, _ in self._host.get_lr_schedulers()]
+                schedulers = [s for s, _ in self._interface.get_lr_schedulers()]
             else:
                 core_optim.warn_unapplied_lr_lambdas(schedulers, self.apply_lambdas_new_pgs)
 
     def _pin_boundary(self, depth: int, initial_path: str | None = None) -> None:
         assert self._checkpoint is not None
-        self._checkpoint.pin_boundary(depth, initial_path=initial_path, copy=self._host.is_global_zero)
-        self._host.barrier("fts_boundary_pinned")
+        self._checkpoint.pin_boundary(depth, initial_path=initial_path, copy=self._interface.is_global_zero)
+        self._interface.barrier("fts_boundary_pinned")
         self._checkpoint_hook("prune")
 
     def _checkpoint_hook(self, name: Literal["prune", "mark_resume_point"], **kwargs: Any) -> None:
@@ -998,7 +1008,7 @@ class FTSController:
         files."""
         hook = getattr(self._checkpoint, name, None)
         if hook is not None:
-            hook(remove=self._host.is_global_zero, **kwargs)
+            hook(remove=self._interface.is_global_zero, **kwargs)
 
     def _verify_checkpoint_resume(self) -> None:
         """Have the checkpoint policy check, on global rank zero, that the checkpoints a loaded state refers to
@@ -1008,13 +1018,13 @@ class FTSController:
         if cp is None or verify is None:
             return
         error = None
-        if self._host.is_global_zero:
+        if self._interface.is_global_zero:
             try:
                 verify()
             except FileNotFoundError as err:
                 error = str(err)
-        if self._host.world_size > 1:
-            error, state = self._host.broadcast_object((error, cp.state_dict()))
+        if self._interface.world_size > 1:
+            error, state = self._interface.broadcast_object((error, cp.state_dict()))
             cp.load_state_dict(state)
         if error is not None:
             raise FileNotFoundError(error)
@@ -1032,9 +1042,9 @@ class FTSController:
         optimizer = core_optim.build_phase0_optimizer(optimizer_class, optimizer_init.get("init_args", {}),
                                                       reinit_pgs)
         self._retire_optimizer(self.optimizer)
-        self._host.set_optimizer(0, optimizer)
+        self._interface.set_optimizer(0, optimizer)
         self._step_hook = optimizer.register_step_post_hook(self._on_optimizer_step)  # type: ignore[attr-defined]
-        for sched, _ in self._host.get_lr_schedulers():
+        for sched, _ in self._interface.get_lr_schedulers():
             sched.optimizer = optimizer
         rank_zero_info(f"Optimizer reinitialized at phase {self._depth}: {optimizer_class.__name__}.")
         return optimizer  # type: ignore[return-value]
@@ -1044,12 +1054,12 @@ class FTSController:
         lrs_class = core_optim.import_reinit_class(lr_scheduler_init)
         core_optim.apply_reinit_pg_lrs(optimizer, new_lr_scheduler)
         new_scheduler = lrs_class(optimizer=optimizer, **lr_scheduler_init.get("init_args", {}))
-        existing = self._host.get_lr_schedulers()
+        existing = self._interface.get_lr_schedulers()
         step_cfg = LRStepConfig(**{**(vars(existing[0][1]) if existing else vars(self._lr_step_cfg)),
                                    **new_lr_scheduler.get("pl_lrs_cfg", {})})
         if existing:
             self._retire_lr_scheduler(existing[0][0])
-        self._host.set_lr_scheduler(0, new_scheduler, step_cfg)
+        self._interface.set_lr_scheduler(0, new_scheduler, step_cfg)
         rank_zero_info(f"Lr scheduler reinitialized at phase {self._depth}: {lrs_class.__name__}.")
 
     def _retire_optimizer(self, optimizer: Optimizer) -> None:
@@ -1060,7 +1070,7 @@ class FTSController:
         def _refuse(*_: Any, **__: Any) -> None:
             raise FTSConfigurationError(
                 f"This optimizer was replaced when phase {depth} reinitialized the optimizer; step"
-                " `FTSController.optimizer` instead."
+                " `TuningScheduler.optimizer` instead."
             )
 
         optimizer.register_step_pre_hook(_refuse)
@@ -1071,7 +1081,7 @@ class FTSController:
         def _refuse(*_: Any, **__: Any) -> None:
             raise FTSConfigurationError(
                 f"This lr scheduler was replaced when phase {depth} reinitialized it; use"
-                " `FTSController.lr_scheduler` (or `step_lr_schedulers`) instead."
+                " `TuningScheduler.lr_scheduler` (or `step_lr_schedulers`) instead."
             )
 
         scheduler.step = _refuse
@@ -1134,10 +1144,12 @@ class FTSController:
             A handle whose ``remove()`` unregisters the gate.
 
         Raises:
-            FTSConfigurationError: On a host-driven controller (see :meth:`attach`), whose host decides transitions.
+            FTSConfigurationError: On an externally driven tuning scheduler (see :meth:`attach`), whose framework
+                decides transitions.
         """
-        if self._host_driven:
-            raise FTSConfigurationError("Gates are not supported on a host-driven controller in this release.")
+        if self._externally_driven:
+            raise FTSConfigurationError("Gates are not supported on an externally driven tuning scheduler in this"
+                                        " release.")
         handle = RemovableHandle(self._gates)
         self._gates[handle.id] = (fn, rank_zero_only, isolate_rng)
         return handle
@@ -1153,13 +1165,14 @@ class FTSController:
         accepted, reasons = True, []
         for fn, rank_zero_only, isolate in list(self._gates.values()):
             result: GateResult | None = None
-            if not rank_zero_only or self._host.is_global_zero:
+            if not rank_zero_only or self._interface.is_global_zero:
                 isolate = self.isolate_rng if isolate is None else isolate
-                with self._suspend_step_counting(), (fork_rngs(self._host.rng_devices()) if isolate else nullcontext()):
+                rngs = fork_rngs(self._interface.rng_devices()) if isolate else nullcontext()
+                with self._suspend_step_counting(), rngs:
                     raw = fn(event)
                 result = raw if isinstance(raw, GateResult) else GateResult(accept=bool(raw))
             if rank_zero_only:
-                result = self._host.broadcast_object(result)
+                result = self._interface.broadcast_object(result)
             assert result is not None
             self._gate_records.append({"depth": depth, "final": final, "gate": describe_callable(fn),
                                        "accept": result.accept, "reason": result.reason,
@@ -1167,10 +1180,10 @@ class FTSController:
             if not result.accept:
                 accepted = False
                 reasons.append(result.reason or describe_callable(fn))
-        if not self._host.reduce_any(not accepted):
+        if not self._interface.reduce_any(not accepted):
             return True
         # every rank reports the same reasons, whichever rank vetoed
-        gathered = [r for rank_reasons in self._host.all_gather_object(reasons) for r in rank_reasons]
+        gathered = [r for rank_reasons in self._interface.all_gather_object(reasons) for r in rank_reasons]
         reasons = list(dict.fromkeys(gathered))
         boundary = cp.boundary_path(depth) if cp else None
         if boundary is not None:
@@ -1240,35 +1253,35 @@ class FTSController:
         core_phase.reshard_fsdp_modules(self.model)
         # registered state (a data-loader position, for example) and random streams are per rank
         statefuls = {name: obj.state_dict() for name, (obj, _) in self._statefuls.items()}
-        per_rank = (self._host.all_gather_object({"statefuls": statefuls, "rng": rng_state})
-                    if self._host.world_size > 1 else None)
+        per_rank = (self._interface.all_gather_object({"statefuls": statefuls, "rng": rng_state})
+                    if self._interface.world_size > 1 else None)
         if self._sharded:
             assert self._distributed is not None
             # written beside `path` and moved over it once complete, so an interrupted save keeps the old one
             # (a fixed name, so a later save to the same path clears what an interrupted one left behind)
-            tmp = self._host.broadcast_object(f"{path}.tmp")
-            if self._host.is_global_zero:
+            tmp = self._interface.broadcast_object(f"{path}.tmp")
+            if self._interface.is_global_zero:
                 remove_checkpoint(tmp)
-            self._host.barrier("fts_checkpoint_tmp")
+            self._interface.barrier("fts_checkpoint_tmp")
             model_sd, optim_sd = self._distributed.state_dict(self.model, self.optimizer, exclude=self._instrument_keys,
                                                               quiesce=self._suspend_step_counting)
             optim_saved = optim_sd is not None
             self._distributed.save({"model": model_sd, "optim": optim_sd}, tmp)
-            if self._host.is_global_zero:
+            if self._interface.is_global_zero:
                 save_payload({**self._training_payload(with_tensors=False), "optim_saved": optim_saved,
                               "per_rank": per_rank, **(extra or {})}, os.path.join(tmp, META_FILE))
             if rng_state is not None:
                 rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
                 save_payload({"rng": rng_state}, os.path.join(tmp, f"rng_rank{rank}.pt"))
-            self._host.barrier("fts_checkpoint_staged")
-            if self._host.is_global_zero:
+            self._interface.barrier("fts_checkpoint_staged")
+            if self._interface.is_global_zero:
                 replace_checkpoint(tmp, path)
-        elif self._host.is_global_zero:
+        elif self._interface.is_global_zero:
             payload = {**self._training_payload(with_tensors=True), "per_rank": per_rank, **(extra or {})}
             if rng_state is not None:
                 payload["rng"] = rng_state
             save_payload(payload, path)
-        self._host.barrier("fts_checkpoint_written")
+        self._interface.barrier("fts_checkpoint_written")
         return path
 
     def _refuse_sharded_key_translation(self) -> None:
@@ -1342,8 +1355,8 @@ class FTSController:
         """
         assert self._checkpoint is not None
         improved = self._checkpoint.observe(metrics, self._depth) if metrics is not None else False
-        if self._host.world_size > 1:
-            improved, state = self._host.broadcast_object((improved, self._checkpoint.state_dict()))
+        if self._interface.world_size > 1:
+            improved, state = self._interface.broadcast_object((improved, self._checkpoint.state_dict()))
             self._checkpoint.load_state_dict(state)
         return bool(improved)
 
@@ -1351,14 +1364,14 @@ class FTSController:
         """Restore the best checkpoint's model, optimizer and lr scheduler state (as the callback does at a phase
         boundary); return the depth it was saved at, or ``None`` when there is none yet."""
         cp = self._checkpoint
-        restore = getattr(cp, "restore", None) if self._host_driven else None
-        if restore is not None:  # a policy whose host reads its own checkpoints restores the best itself
+        restore = getattr(cp, "restore", None) if self._externally_driven else None
+        if restore is not None:  # a policy whose interface reads its own checkpoints restores the best itself
             depth = restore()
             self._restored_count += depth is not None
             return depth
         if cp is None or cp.best_path is None:
             return None
-        self._host.barrier("fts_restore_best")
+        self._interface.barrier("fts_restore_best")
         meta = self._restore_checkpoint(cp.best_path, restore_optimizer=True)
         self._restored_count += 1
         return meta["depth"]
@@ -1374,7 +1387,7 @@ class FTSController:
         cp = self._checkpoint
         if cp is None or cp.best_path is None:
             return False
-        self._host.barrier("fts_restore_best")
+        self._interface.barrier("fts_restore_best")
         self._restore_checkpoint(cp.best_path, restore_optimizer=False)
         return True
 
@@ -1433,8 +1446,8 @@ class FTSController:
         result: Any = None if fn is not None else dest
         failure: tuple[str, str] | None = None
         raised: BaseException | None = None
-        self._host.barrier("fts_export_best")
-        if self._host.is_global_zero:
+        self._interface.barrier("fts_export_best")
+        if self._interface.is_global_zero:
             try:
                 meta = self._read_meta(best)
                 tensors = self._read_checkpoint_tensors(best, meta, names)
@@ -1448,7 +1461,7 @@ class FTSController:
                     save_payload({"tensors": tensors, "roles": export_roles, "metadata": metadata}, dest)
             except BaseException as err:  # every rank raises it, rather than waiting for rank zero at a barrier
                 raised, failure = err, (type(err).__name__, str(err))
-        failure = self._host.broadcast_object(failure)
+        failure = self._interface.broadcast_object(failure)
         if failure is not None:
             if raised is not None:
                 raise raised
@@ -1485,7 +1498,7 @@ class FTSController:
         return {canonical_fqn(n): model_state[k] for n, k in keys.items()}
 
     def save(self, path: str | os.PathLike) -> str:
-        """Save everything needed to resume exactly: the controller's state, the model, optimizer, lr schedulers,
+        """Save everything needed to resume exactly: the tuning scheduler's state, the model, optimizer, lr schedulers,
         registered state, the checkpoint policy's state and (with ``capture_rng``) every random generator's state.
 
         An unsharded model is saved to the file ``path`` (by global rank zero); a sharded (FSDP2/DTensor) model to the
@@ -1497,9 +1510,10 @@ class FTSController:
         Resuming it reopens the run, so the current phase's end hooks run again at its real end.
         """
         self._require_setup()
-        self._refuse_host_driven("save", resume=True)
-        rng_state = capture_rng_state(self._host.rng_devices()) if self.capture_rng else None
-        path = self._write_checkpoint(os.fspath(path), extra={"controller": self.state_dict()}, rng_state=rng_state)
+        self._refuse_externally_driven("save", resume=True)
+        rng_state = capture_rng_state(self._interface.rng_devices()) if self.capture_rng else None
+        path = self._write_checkpoint(os.fspath(path), extra={"tuning_scheduler": self.state_dict()},
+                                      rng_state=rng_state)
         self._checkpoint_hook("mark_resume_point")  # keep the checkpoints this save refers to until the next one
         return path
 
@@ -1511,10 +1525,10 @@ class FTSController:
             FTSConfigurationError: If the checkpoint belongs to a different fine-tuning schedule.
         """
         self._require_setup()
-        self._refuse_host_driven("load", resume=True)
+        self._refuse_externally_driven("load", resume=True)
         path = os.fspath(path)
         meta = self._read_meta(path)
-        self.load_state_dict(meta["controller"])
+        self.load_state_dict(meta["tuning_scheduler"])
         self._restore_checkpoint(path, restore_optimizer=True, statefuls="all", meta=meta)
         if meta.get("sharded"):
             rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
@@ -1533,12 +1547,12 @@ class FTSController:
                        isolate_rng: bool | None = None) -> RemovableHandle:
         """Call ``fn(event)`` whenever a phase starts (phase 0 at :meth:`setup`) or ends (the final phase at
         :meth:`train_end`). Hooks run in registration order, with the training random streams isolated unless
-        ``isolate_rng`` (or the controller's default) is ``False``.
+        ``isolate_rng`` (or the tuning scheduler's default) is ``False``.
 
         Start hooks for phase 0 run at the end of :meth:`setup`, after phase 0 is thawed and the optimizer built. Start
         hooks for a later phase run at its boundary before its parameters are thawed and its parameter groups added
         (after any best-checkpoint restore, the previous phase's end hooks and the gates), so they can prepare the
-        model for the thaw; the new phase's parameters are listed in ``event.controller.schedule[event.depth]``.
+        model for the thaw; the new phase's parameters are listed in ``event.tuning_scheduler.schedule[event.depth]``.
 
         Returns:
             A handle whose ``remove()`` unregisters the hook.
@@ -1550,13 +1564,14 @@ class FTSController:
         return handle
 
     def _run_hooks(self, when: str, depth: int) -> None:
-        event = PhaseEvent(depth=depth, epoch=self._host.current_epoch, global_step=self._host.global_step,
-                           phase_config=self._phase_configs.get(depth), metadata=self._metadata, controller=self,
+        event = PhaseEvent(depth=depth, epoch=self._interface.current_epoch, global_step=self._interface.global_step,
+                           phase_config=self._phase_configs.get(depth), metadata=self._metadata, tuning_scheduler=self,
                            physical_params=tuple(self._schedule[depth]["params"]),
                            logical_params=self._logical_params.get(depth, ()))
         for fn, isolate in list(self._hooks[when].values()):
             isolate = self.isolate_rng if isolate is None else isolate
-            with self._suspend_step_counting(), (fork_rngs(self._host.rng_devices()) if isolate else nullcontext()):
+            rngs = fork_rngs(self._interface.rng_devices()) if isolate else nullcontext()
+            with self._suspend_step_counting(), rngs:
                 fn(event)
 
     def observe_batch(self, batch: Any) -> None:
@@ -1577,7 +1592,7 @@ class FTSController:
 
         Some state-dict utilities step the optimizer to initialize its state (for example
         ``torch.distributed.checkpoint.state_dict.get_state_dict`` on an optimizer with no state yet). Wrap your own
-        calls to them in this context; the controller's own checkpointing already does.
+        calls to them in this context; the tuning scheduler's own checkpointing already does.
         """
         prev, self._counting_suspended = self._counting_suspended, True
         try:
@@ -1590,11 +1605,11 @@ class FTSController:
     def _on_optimizer_step(self, optimizer: Optimizer, args: Any, kwargs: Any) -> None:
         if self._counting_suspended:
             return
-        self._host.advance_step(1)
+        self._interface.advance_step(1)
         self._steps_since_step_end += 1
         if self._steps_since_step_end > 1 and self._step_granular and not self.is_final_phase:
             raise FTSConfigurationError(
-                "Two optimizer steps ran without `FTSController.step_end()` between them, but a step-granular"
+                "Two optimizer steps ran without `TuningScheduler.step_end()` between them, but a step-granular"
                 " transition is configured. Call `step_end()` after each optimizer step."
             )
 
@@ -1602,7 +1617,7 @@ class FTSController:
     # state and configuration
     # ------------------------------------------------------------------------------------------------------------------
     def state_dict(self) -> dict[str, Any]:
-        """The controller's resumable state: depth, counters, pending decision, stop state, policy state,
+        """The tuning scheduler's resumable state: depth, counters, pending decision, stop state, policy state,
         fingerprints and the schedule and configuration hashes.
 
         Optimizer and lr scheduler state are saved separately.
@@ -1610,8 +1625,8 @@ class FTSController:
         return {
             "version": STATE_VERSION,
             "depth": self._depth,
-            "epoch": self._host.current_epoch,
-            "global_step": self._host.global_step,
+            "epoch": self._interface.current_epoch,
+            "global_step": self._interface.global_step,
             "phase_start_epoch": self._phase_start_epoch,
             "phase_start_step": self._phase_start_step,
             "pending": int(self._pending),
@@ -1643,7 +1658,7 @@ class FTSController:
             FileNotFoundError: If the checkpoint policy's best checkpoint or rollback point no longer exists.
         """
         self._require_setup()
-        self._refuse_host_driven("load_state_dict", resume=True)
+        self._refuse_externally_driven("load_state_dict", resume=True)
         if state_dict["schedule_hash"] != config_hash({"schedule": self._schedule}):
             raise FTSConfigurationError("The saved state belongs to a different fine-tuning schedule.")
         saved_digest = state_dict.get("view_digest")
@@ -1652,7 +1667,7 @@ class FTSController:
                 "The saved state was compiled through a view that maps the schedule to different tensors or roles; it"
                 " would thaw different parameters on resume.")
         if state_dict["config_hash"] != self.config_hash:
-            rank_zero_warn("The saved state was produced with a different controller configuration.")
+            rank_zero_warn("The saved state was produced with a different tuning scheduler configuration.")
         if self._checkpoint is not None and state_dict.get("checkpoint") is not None:
             self._checkpoint.load_state_dict(state_dict["checkpoint"])
             self._verify_checkpoint_resume()
@@ -1664,7 +1679,7 @@ class FTSController:
             self._executor.configure_phase(depth, depth - 1, depth_sync=False, pre_state=None)
         self._promoted_values.update(state_dict.get("promoted_values", {}))
         self._depth = state_dict["depth"]
-        self._host.load_counters(state_dict["epoch"], state_dict["global_step"])  # type: ignore[attr-defined]
+        self._interface.load_counters(state_dict["epoch"], state_dict["global_step"])  # type: ignore[attr-defined]
         self._phase_start_epoch, self._phase_start_step = state_dict["phase_start_epoch"], state_dict[
             "phase_start_step"]
         self._pending, self._pending_reason = Decision(state_dict["pending"]), state_dict["pending_reason"]
@@ -1744,19 +1759,19 @@ class FTSController:
     # ------------------------------------------------------------------------------------------------------------------
     def _require_setup(self) -> None:
         if not self._is_setup:
-            raise FTSConfigurationError("Call `FTSController.setup()` first.")
+            raise FTSConfigurationError("Call `TuningScheduler.setup()` first.")
 
     @property
-    def host(self) -> TrainingHost:
-        return self._host
+    def interface(self) -> TrainingInterface:
+        return self._interface
 
     @property
     def optimizer(self) -> Optimizer:
-        return self._host.get_optimizers()[0]
+        return self._interface.get_optimizers()[0]
 
     @property
     def lr_schedulers(self) -> list[Any]:
-        return [s for s, _ in self._host.get_lr_schedulers()]
+        return [s for s, _ in self._interface.get_lr_schedulers()]
 
     @property
     def lr_scheduler(self) -> Any | None:
@@ -1821,11 +1836,11 @@ class FTSController:
 
     @property
     def epoch(self) -> int:
-        return self._host.current_epoch
+        return self._interface.current_epoch
 
     @property
     def global_step(self) -> int:
-        return self._host.global_step
+        return self._interface.global_step
 
     @property
     def metadata(self) -> dict[str, Any]:

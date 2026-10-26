@@ -19,8 +19,8 @@ through the view's *logical* names, and Fine-Tuning Scheduler thaws, optimizes a
 they stand for. One logical name may stand for several physical tensors, and a view may thaw related tensors (a block's
 normalization layer, for example) together with the ones a phase names.
 
-Views work with both hosts: :class:`~finetuning_scheduler.core.controller.FTSController` (pass ``view=``) and the
-Lightning callback (attach the view to the ``LightningModule``). A model without a view is scheduled through
+Views work with both interfaces: :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` (pass ``view=``)
+and the Lightning callback (attach the view to the ``LightningModule``). A model without a view is scheduled through
 :class:`~finetuning_scheduler.core.views.CanonicalView`, the identity view, so nothing changes for existing schedules.
 
 Writing a View
@@ -75,7 +75,7 @@ The schedule then uses the logical names:
 
 .. code-block:: python
 
-    fts = FTSController(model, {0: {"params": ["head"]}, 1: {"params": ["block0"]}}, optimizer=opt, view=BlockView(model))
+    fts = TuningScheduler(model, {0: {"params": ["head"]}, 1: {"params": ["block0"]}}, optimizer=opt, view=BlockView(model))
 
 Fine-Tuning Scheduler compiles the schedule once, at setup, into the physical parameters each phase thaws
 (:func:`~finetuning_scheduler.core.compile.compile_schedule`). A coupled tensor joins the first phase that pulls it in.
@@ -120,24 +120,24 @@ gives that name, ``base`` if none); a view can own the promotion with its own ``
 name. Promoted tensors are checkpointed from their promotion on, and promotions are replayed before a
 saved state loads. Restoring a checkpoint saved before a promotion (a best checkpoint, or the rollback point of a vetoed
 phase) puts the promoted tensors back to their values at promotion; those values are kept on the CPU and saved with
-:meth:`~finetuning_scheduler.core.controller.FTSController.save`. Promotion is not supported on a sharded model, and a
-view that overrides its checkpoint state must define ``promote``.
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save`. Promotion is not supported on a sharded model,
+and a view that overrides its checkpoint state must define ``promote``.
 
 Exporting by Role
 *****************
-:meth:`~finetuning_scheduler.core.controller.FTSController.export_best` writes the best checkpoint's tensors whose role
-matches, for example only the adapters, so a large frozen base and the optimizer state need not be kept:
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.export_best` writes the best checkpoint's tensors
+whose role matches, for example only the adapters, so a large frozen base and the optimizer state need not be kept:
 
 .. code-block:: python
 
     fts.export_best(roles=("adapter",))  # best_export.pt beside the best checkpoint
-    fts.export_best(write_peft, roles=("role:adapter:char",))  # write_peft(tensors, metadata, path) writes another format
+    fts.export_best(write_peft, roles=("role:adapter:char",))  # write_peft(tensors, metadata, path): another format
 
 The tensors come from the best checkpoint, not the live model, keyed by wrapper-free names (without segments such as
 ``torch.compile``'s ``_orig_mod.``); a sharded model's are read in full on global rank zero. ``fn`` receives
 ``path=None`` when no path is given.
-``instrument`` tensors are never checkpointed, so they cannot be exported. The external artifacts a run depends on can be
-recorded with ``FTSController(artifacts={"lens": {"path": ..., "sha256": ..., "revision": ...}})``; they appear in
+``instrument`` tensors are never checkpointed, so they cannot be exported. The external artifacts a run depends on can
+be recorded with ``TuningScheduler(artifacts={"lens": {"path": ..., "sha256": ..., "revision": ...}})``; they appear in
 every checkpoint's and export's metadata.
 
 Views With the Lightning Callback
@@ -161,9 +161,9 @@ A third-party :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` t
 with ``fts_optim_transform`` and ``validate_ft_sched``) keeps naming parameters itself, and takes precedence over an
 attached view, with a ``FutureWarning`` naming both; ``role:`` selectors are refused under it. Renaming through those
 methods is deprecated in favor of a view and will be unsupported no earlier than 2.17. Sharding customization through
-``StrategyAdapter`` subclasses is unaffected: an adapter that overrides only ``fts_optim_transform`` (calling ``super()``
-first, which resolves an attached view's names) or only adds checks in ``validate_ft_sched`` schedules through views and
-selectors as the built-in adapters do.
+``StrategyAdapter`` subclasses is unaffected: an adapter that overrides only ``fts_optim_transform`` (calling
+``super()`` first, which resolves an attached view's names) or only adds checks in ``validate_ft_sched`` schedules
+through views and selectors as the built-in adapters do.
 
 Testing a View
 **************

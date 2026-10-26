@@ -248,3 +248,5 @@ def test_fts_superglue_pytorch_nb(tmpdir):
     stdout = _run_notebook("superglue/fts_superglue_pytorch.ipynb", overrides, tmpdir.strpath)
     for scenario in ("fts_explicit", "fts_implicit", "nofts_baseline"):
         assert re.search(rf"^{scenario}: finished at phase \d+ after \d+ epochs", stdout, flags=re.M), stdout
+    generated = os.path.join(tmpdir, "fts_logs", "generated", "DebertaV2ForSequenceClassification_ft_schedule.yaml")
+    assert os.path.exists(generated)

@@ -50,7 +50,7 @@ plan.
     * - ``cpu_offload: True``
       - refused under ``ModelParallelStrategy`` (see the
         :ref:`CPU offload note<model-parallel-fsdp2-auto-plan-aliases>`); use the PyTorch API
-        (:class:`~finetuning_scheduler.FTSController` with :func:`~finetuning_scheduler.strategies.plan.shard_model`,
+        (:class:`~finetuning_scheduler.TuningScheduler` with :func:`~finetuning_scheduler.strategies.plan.shard_model`,
         whose plan may set ``cpu_offload_policy``)
     * - ``state_dict_type: full`` / ``sharded``
       - ``save_distributed_checkpoint: False`` / ``True`` (the default)
@@ -146,7 +146,7 @@ In practice:
   earlier-thawing children their own units, or set ``reshard_after_forward: False`` on it.
 
 The same plan format serves the PyTorch API: :func:`~finetuning_scheduler.strategies.plan.shard_model` applies it to a
-plain PyTorch model for :class:`~finetuning_scheduler.FTSController`.
+plain PyTorch model for :class:`~finetuning_scheduler.TuningScheduler`.
 
 Checkpoints
 ***********

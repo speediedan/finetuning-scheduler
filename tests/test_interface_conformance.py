@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tests for the direct-API schedule keys and the Lightning training host (#51)."""
+"""Tests for the direct-API schedule keys and the Lightning training interface (#51)."""
 import pytest
 import torch
 from lightning.pytorch import Callback, seed_everything, Trainer
@@ -17,9 +17,9 @@ from lightning.pytorch.utilities.exceptions import MisconfigurationException
 
 from finetuning_scheduler import FinetuningScheduler
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.core.host import LRStepConfig, TrainingHost
+from finetuning_scheduler.core.interface import LRStepConfig, TrainingInterface
 from finetuning_scheduler.core.schedule import parse_phase_extensions, refuse_direct_api_keys
-from finetuning_scheduler.lightning.host import LightningHost
+from finetuning_scheduler.lightning.interface import LightningInterface
 from tests.test_finetuning_scheduler_callback import FinetuningSchedulerBoringModel
 
 
@@ -70,35 +70,35 @@ def test_lightning_refuses_direct_api_keys(tmpdir):
         trainer.fit(FinetuningSchedulerBoringModel())
 
 
-class _HostProbe(Callback):
+class _InterfaceProbe(Callback):
     def on_train_start(self, trainer, pl_module):
-        host = LightningHost(trainer, pl_module)
+        interface = LightningInterface(trainer, pl_module)
         opt = trainer.optimizers[0]
         replacement = torch.optim.SGD([p for p in pl_module.parameters() if p.requires_grad], lr=0.5)
-        host.set_optimizer(0, replacement)
+        interface.set_optimizer(0, replacement)
         sched = torch.optim.lr_scheduler.StepLR(replacement, step_size=1)
-        host.set_lr_scheduler(0, sched, LRStepConfig(interval="step", frequency=2))
+        interface.set_lr_scheduler(0, sched, LRStepConfig(interval="step", frequency=2))
         self.observed = {
-            "conforms": isinstance(host, TrainingHost),
-            "module": host.module is pl_module,
-            "optimizers": host.get_optimizers() == [replacement] and opt is not replacement,
-            "schedulers": host.get_lr_schedulers() == [(sched, LRStepConfig(interval="step", frequency=2))],
-            "counters": (host.current_epoch, host.global_step, host.max_epochs),
-            "dist": (host.is_global_zero, host.world_size, host.reduce_max(3), host.reduce_any(True),
-                     host.broadcast_object("x"), host.all_gather_object(1)),
-            "log_dir": host.log_dir == trainer.log_dir,
-            "rng_devices": host.rng_devices(),
+            "conforms": isinstance(interface, TrainingInterface),
+            "module": interface.module is pl_module,
+            "optimizers": interface.get_optimizers() == [replacement] and opt is not replacement,
+            "schedulers": interface.get_lr_schedulers() == [(sched, LRStepConfig(interval="step", frequency=2))],
+            "counters": (interface.current_epoch, interface.global_step, interface.max_epochs),
+            "dist": (interface.is_global_zero, interface.world_size, interface.reduce_max(3),
+                     interface.reduce_any(True), interface.broadcast_object("x"), interface.all_gather_object(1)),
+            "log_dir": interface.log_dir == trainer.log_dir,
+            "rng_devices": interface.rng_devices(),
         }
-        host.set_max_epochs(1)
-        host.barrier("probe")
-        host.on_compile_reset()
+        interface.set_max_epochs(1)
+        interface.barrier("probe")
+        interface.on_compile_reset()
         trainer.should_stop = True
 
 
-def test_lightning_host_conformance(tmpdir):
-    """``LightningHost`` satisfies the ``TrainingHost`` protocol against a real ``Trainer``."""
+def test_lightning_interface_conformance(tmpdir):
+    """``LightningInterface`` satisfies the ``TrainingInterface`` protocol against a real ``Trainer``."""
     seed_everything(42)
-    probe = _HostProbe()
+    probe = _InterfaceProbe()
     trainer = Trainer(default_root_dir=tmpdir, callbacks=[FinetuningScheduler(), probe], accelerator="cpu",
                       devices=1, max_epochs=2, limit_train_batches=1, limit_val_batches=1, logger=False,
                       enable_checkpointing=False, enable_progress_bar=False)
@@ -126,10 +126,10 @@ def test_lightning_extra_notice_once(monkeypatch):
     assert len(notices) == 1 and "finetuning-scheduler[lightning]" in str(notices[0].message)
 
 
-def test_hosts_implement_the_counter_members():
-    from finetuning_scheduler.core.host import TorchHost, TrainingHost
-    from finetuning_scheduler.lightning.host import LightningHost
+def test_interfaces_implement_the_counter_members():
+    from finetuning_scheduler.core.interface import TorchInterface, TrainingInterface
+    from finetuning_scheduler.lightning.interface import LightningInterface
 
     for member in ("advance_epoch", "advance_step", "load_counters"):
-        assert hasattr(TrainingHost, member)
-        assert callable(getattr(TorchHost, member)) and callable(getattr(LightningHost, member))
+        assert hasattr(TrainingInterface, member)
+        assert callable(getattr(TorchInterface, member)) and callable(getattr(LightningInterface, member))

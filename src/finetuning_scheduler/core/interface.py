@@ -10,16 +10,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 r"""
-Fine-Tuning Scheduler Training Hosts
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Fine-Tuning Scheduler Training Interfaces
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The narrow seam between the scheduling core and whatever runs the training loop. A host owns the module, the
+The narrow seam between the scheduling core and whatever runs the training loop. An interface owns the module, the
 optimizers and lr schedulers, the loop counters, the process collectives and the device set; the core asks it, and never
 reaches into a training framework itself.
 
 .. warning::
 
-    Experimental: the ``TrainingHost`` protocol may change in minor releases until the PyTorch API stabilizes.
+    Experimental: the ``TrainingInterface`` protocol may change in minor releases until the PyTorch API stabilizes.
 
 """
 import os
@@ -34,7 +34,7 @@ from torch import nn
 
 @dataclass(frozen=True)
 class LRStepConfig:
-    """How the host steps an lr scheduler.
+    """How the interface steps an lr scheduler.
 
     Attributes:
         interval: Step after every optimizer step (``"step"``) or every epoch (``"epoch"``).
@@ -48,7 +48,7 @@ class LRStepConfig:
 
 
 @runtime_checkable
-class TrainingHost(Protocol):
+class TrainingInterface(Protocol):
     """What the scheduling core needs from the code that runs the training loop."""
 
     @property
@@ -97,11 +97,11 @@ class TrainingHost(Protocol):
     def rng_devices(self) -> list[torch.device]: ...
 
     def advance_epoch(self) -> None:
-        """Count a completed epoch (a no-op for a host whose framework counts epochs itself)."""
+        """Count a completed epoch (a no-op for an interface whose framework counts epochs itself)."""
         ...
 
     def advance_step(self, steps: int = 1) -> None:
-        """Count completed optimizer steps (a no-op for a host whose framework counts them itself)."""
+        """Count completed optimizer steps (a no-op for an interface whose framework counts them itself)."""
         ...
 
     def load_counters(self, current_epoch: int, global_step: int) -> None:
@@ -109,11 +109,11 @@ class TrainingHost(Protocol):
         ...
 
 
-class TorchHost:
-    """The :class:`TrainingHost` for a plain PyTorch training loop.
+class TorchInterface:
+    """The :class:`TrainingInterface` for a plain PyTorch training loop.
 
-    Collectives run only when ``torch.distributed`` is initialized; the host never creates or destroys a process group.
-    The loop counters are owned by the controller, which advances them through :meth:`advance_epoch` and
+    Collectives run only when ``torch.distributed`` is initialized; the interface never creates or destroys a process
+    group. The loop counters are owned by the tuning scheduler, which advances them through :meth:`advance_epoch` and
     :meth:`advance_step`.
 
     Args:

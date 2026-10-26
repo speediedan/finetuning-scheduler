@@ -9,12 +9,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""``FTSController`` on a model-parallel toy transformer, mirroring the Lightning callback's model-parallel tests
+"""``TuningScheduler`` on a model-parallel toy transformer, mirroring the Lightning callback's model-parallel tests
 (#87): the same phase path and parameter states, ranks in agreement, and parameters equal to a single-process
 run."""
 import pytest
 
-from tests.dist_cases import fts_controller_mp as mp
+from tests.dist_cases import fts_tuning_scheduler_mp as mp
 from tests.helpers.dist_pool import assert_ranks_agree, dist_pool_fixture
 from tests.helpers.runif import RunIf
 from tests.model_parallel_expected_paths import path_fsdp_autocm, path_tp
@@ -81,8 +81,8 @@ def test_fsdp_restores_the_best_and_resumes(gloo_pool, tmp_path):
 @GLOO
 @pytest.mark.parametrize("where", ["gate", "end", "start"])
 def test_forward_in_a_gate_or_phase_hook_before_the_thaw(gloo_pool, where):
-    """A gate or a phase hook may evaluate the model between the controller's restore and its thaw; the thaw must
-    still reach the parameters FSDP2 trains (#90)."""
+    """A gate or a phase hook may evaluate the model between the tuning scheduler's restore and its thaw; the thaw
+    must still reach the parameters FSDP2 trains (#90)."""
     results = gloo_pool.run(mp.fsdp, callback_eval=where)
     agreed = _agreed(results)
     assert _states(agreed["path"]) == _expected(path_fsdp_autocm) and agreed["unmoved"] == []
@@ -140,8 +140,8 @@ def test_tp_follows_the_lightning_path(gloo_pool, tmp_path, tp_loss_parallel):
 @GLOO
 def test_partial_plan_reshards_before_thawing_and_warns(gloo_pool):
     """With the root unsharded, ``layers.1`` is a root FSDP module frozen through phase 0, which FSDP2 leaves
-    unsharded after its forward: the controller reshards before thawing, so phase 1 trains it. The embeddings, which
-    no FSDP module manages, are not synchronized across ranks, and the controller warns about them."""
+    unsharded after its forward: the tuning scheduler reshards before thawing, so phase 1 trains it. The embeddings,
+    which no FSDP module manages, are not synchronized across ranks, and the tuning scheduler warns about them."""
     results = gloo_pool.run(mp.partial_plan)
     path = assert_ranks_agree([r["path"] for r in results])
     assert [state["thawed"] for _, _, state in path] == [3, 15, 29]

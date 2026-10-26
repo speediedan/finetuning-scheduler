@@ -10,12 +10,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 r"""
-Fine-Tuning Scheduler Controller Bridge
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Fine-Tuning Scheduler Tuning Scheduler Bridge
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Running :class:`~finetuning_scheduler.core.controller.FTSController` under the Lightning callback, host-driven (see
-:meth:`~finetuning_scheduler.core.controller.FTSController.attach`): Lightning owns the loop, checkpointing and early
-stopping, the callback decides when a phase ends, and the controller sequences each transition.
+Running :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` under the Lightning callback, externally
+driven (see :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.attach`): Lightning owns the loop,
+checkpointing and early stopping, the callback decides when a phase ends, and the tuning scheduler sequences each
+transition.
 
 The bridges keep what strategy adapters and callback subclasses observe unchanged: :class:`LightningPhaseExecutor`
 carries out phases through the callback's own ``step_pg``, ``thaw_to_depth`` and the strategy adapter's
@@ -27,9 +28,9 @@ carries out phases through the callback's own ``step_pg``, ``thaw_to_depth`` and
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from finetuning_scheduler.core.controller import FTSController
+from finetuning_scheduler.core.tuning_scheduler import TuningScheduler
 from finetuning_scheduler.core.views import CanonicalView
-from finetuning_scheduler.lightning.host import LightningHost
+from finetuning_scheduler.lightning.interface import LightningInterface
 
 if TYPE_CHECKING:
     from torch import Tensor
@@ -38,8 +39,8 @@ if TYPE_CHECKING:
 
 
 class LightningPhaseExecutor:
-    """Carries out a controller's phases through the callback's own phase execution, so the strategy adapter's
-    hooks are called as the callback calls them.
+    """Carries out a tuning scheduler's phases through the callback's own phase execution, so the strategy
+    adapter's hooks are called as the callback calls them.
 
     Args:
         fts: The callback.
@@ -68,7 +69,7 @@ class LightningPhaseExecutor:
 
 
 class FTSCheckpointPolicy:
-    """The Lightning checkpoint callback seen as a controller checkpoint policy: Lightning writes the checkpoints,
+    """The Lightning checkpoint callback seen as a tuning scheduler checkpoint policy: Lightning writes the checkpoints,
     so the policy only reports the best one and restores it through the callback.
 
     Args:
@@ -124,10 +125,10 @@ class FTSCheckpointPolicy:
         return {"monitor": self.monitor}
 
 
-def attach_controller(fts: "FinetuningScheduler", phase_hooks: Sequence[tuple] = (), *,
-                      run_start_hooks: bool = True) -> FTSController:
-    """A host-driven controller for the callback's fit, over its validated schedule (the callback's own optimizer,
-    lr schedulers and phase-0 thaw are adopted as they are).
+def attach_tuning_scheduler(fts: "FinetuningScheduler", phase_hooks: Sequence[tuple] = (), *,
+                            run_start_hooks: bool = True) -> TuningScheduler:
+    """An externally driven tuning scheduler for the callback's fit, over its validated schedule (the callback's
+    own optimizer, lr schedulers and phase-0 thaw are adopted as they are).
 
     Args:
         fts: The callback.
@@ -138,16 +139,16 @@ def attach_controller(fts: "FinetuningScheduler", phase_hooks: Sequence[tuple] =
     assert isinstance(fts.ft_schedule, dict)
     # the view the strategy adapter schedules through: an adapter that names parameters itself ignores an attached one
     view = fts.strategy_adapter.tunable_view or CanonicalView(pl_module)
-    controller = FTSController(
-        pl_module, optimizer=trainer.optimizers[0], host=LightningHost(trainer, pl_module), view=view,
+    tuning_scheduler = TuningScheduler(
+        pl_module, optimizer=trainer.optimizers[0], interface=LightningInterface(trainer, pl_module), view=view,
         checkpoint=FTSCheckpointPolicy(fts), restore_best=fts.restore_best, max_depth=fts.max_depth,
         reinit_optim_cfg=fts.reinit_optim_cfg, reinit_lr_cfg=fts.reinit_lr_cfg,
         compile_reset=False,  # the callback resets a compiled module itself, once its transition is complete
     )
     for fn, when, isolate_rng in phase_hooks:
-        controller.add_phase_hook(fn, when=when, isolate_rng=isolate_rng)
-    controller.attach(LightningPhaseExecutor(fts), fts.ft_schedule, run_start_hooks=run_start_hooks)
-    return controller
+        tuning_scheduler.add_phase_hook(fn, when=when, isolate_rng=isolate_rng)
+    tuning_scheduler.attach(LightningPhaseExecutor(fts), fts.ft_schedule, run_start_hooks=run_start_hooks)
+    return tuning_scheduler
 
 
-__all__ = ["attach_controller", "FTSCheckpointPolicy", "LightningPhaseExecutor"]
+__all__ = ["attach_tuning_scheduler", "FTSCheckpointPolicy", "LightningPhaseExecutor"]

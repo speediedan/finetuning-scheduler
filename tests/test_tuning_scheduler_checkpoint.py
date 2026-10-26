@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tests for ``FTSController``'s checkpoint policy, best-checkpoint restore, gates and resume (#51)."""
+"""Tests for ``TuningScheduler``'s checkpoint policy, best-checkpoint restore, gates and resume (#51)."""
 import os
 import random
 from functools import partial
@@ -18,10 +18,10 @@ import pytest
 import torch
 
 from finetuning_scheduler.core.checkpoint import BestCheckpoint, load_payload
-from finetuning_scheduler.core.controller import FTSController
+from finetuning_scheduler.core.tuning_scheduler import TuningScheduler
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.transitions import GateResult, PlateauTransition
-from tests.test_controller import _run, _train_epoch, Net, SCHEDULE
+from tests.test_tuning_scheduler import _run, _train_epoch, Net, SCHEDULE
 
 
 class Counter:
@@ -65,7 +65,7 @@ def test_restore_best_at_boundaries(tmp_path):
     torch.manual_seed(0)
     model = Net()
     cp = BestCheckpoint(tmp_path, "val_loss")
-    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp)
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp)
     fts.setup()
     seen_best = []
 
@@ -79,7 +79,7 @@ def test_restore_best_at_boundaries(tmp_path):
     _run(fts, model, 5, metrics_fn=lambda e: {"val_loss": losses[e]})
     assert seen_best == [True, True] and fts.restored_count == 2
     with pytest.raises(FTSConfigurationError, match="needs a `checkpoint` policy"):
-        FTSController(Net(), SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), restore_best=True).setup()
+        TuningScheduler(Net(), SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), restore_best=True).setup()
 
 
 @pytest.mark.parametrize("rank_zero_only", [False, True], ids=["all_ranks", "rank_zero"])
@@ -88,7 +88,7 @@ def test_gate_veto_rolls_back(tmp_path, rank_zero_only):
     torch.manual_seed(0)
     model = Net()
     cp = BestCheckpoint(tmp_path, "val_loss")
-    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp)
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp)
     fts.add_gate(lambda e: GateResult(accept=e.depth != 1, reason="phase 1 hurt the probe", record={"score": 0.3}),
                  rank_zero_only=rank_zero_only)
     fts.setup()
@@ -104,8 +104,8 @@ def test_gate_veto_rolls_back(tmp_path, rank_zero_only):
 
 def test_final_gate_and_bool_result(tmp_path):
     model = Net()
-    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1),
-                        checkpoint=BestCheckpoint(tmp_path, "val_loss"))
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1),
+                          checkpoint=BestCheckpoint(tmp_path, "val_loss"))
     events = []
     handle = fts.add_gate(lambda e: events.append((e.depth, e.final)) or True)
     fts.setup()
@@ -118,7 +118,8 @@ def test_statefuls_and_public_restore_best(tmp_path):
     model = Net()
     counter, on_best = Counter(), Counter()
     cp = BestCheckpoint(tmp_path, "val_loss")
-    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp, restore_best=False)
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp,
+                          restore_best=False)
     fts.register_stateful("plain", counter)
     fts.register_stateful("on_best", on_best, restore_on_best=True)
     with pytest.raises(FTSConfigurationError, match="needs `state_dict"):
@@ -139,7 +140,7 @@ def test_scheduled_only_checkpoints(tmp_path):
     model = Net()
     sched = {0: {"params": ["l2.weight", "l2.bias"], "max_transition_epoch": 1}, 1: {"params": ["l1.weight"]}}
     cp = BestCheckpoint(tmp_path, "val_loss", include="scheduled")
-    fts = FTSController(model, sched, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp)
+    fts = TuningScheduler(model, sched, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp)
     fts.setup()
     _train_epoch(fts, model)
     fts.epoch_end({"val_loss": 1.0})
@@ -147,14 +148,14 @@ def test_scheduled_only_checkpoints(tmp_path):
 
 
 def test_save_load_resumes_exactly(tmp_path):
-    """Saving mid-run (after an optimizer reinitialization and boundary restores) and loading into a fresh
-    controller continues exactly as the uninterrupted run, random streams included."""
+    """Saving mid-run (after an optimizer reinitialization and boundary restores) and loading into a fresh tuning
+    scheduler continues exactly as the uninterrupted run, random streams included."""
     reinit_schedule = {**SCHEDULE, 1: {**SCHEDULE[1], "new_optimizer": {"optimizer_init": {
         "class_path": "Adam", "init_args": {"lr": 0.01}}}}}
 
     def make(model, dirpath):
-        fts = FTSController(model, reinit_schedule, optimizer=partial(torch.optim.SGD, lr=0.1, momentum=0.9),
-                            checkpoint=BestCheckpoint(dirpath, "val_loss"), transition=None)
+        fts = TuningScheduler(model, reinit_schedule, optimizer=partial(torch.optim.SGD, lr=0.1, momentum=0.9),
+                              checkpoint=BestCheckpoint(dirpath, "val_loss"), transition=None)
         counter = Counter()
         fts.register_stateful("counter", counter)
         fts.setup()
@@ -218,9 +219,9 @@ def test_resume_keeps_the_metrics_a_pending_boundary_sees(tmp_path):
     def run(save_at=None, load_from=None):
         torch.manual_seed(0)
         model = Net()
-        fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1),
-                            transition=PlateauTransition("loss", patience=1),
-                            checkpoint=BestCheckpoint(tmp_path / "c", "loss"))
+        fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1),
+                              transition=PlateauTransition("loss", patience=1),
+                              checkpoint=BestCheckpoint(tmp_path / "c", "loss"))
         seen = []
         fts.add_gate(lambda e: seen.append(dict(e.metrics)) or True)
         fts.setup()
@@ -248,12 +249,12 @@ def test_resuming_a_finished_run_reopens_its_phase(tmp_path):
     ends = []
     torch.manual_seed(0)
     model = Net()
-    first = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1))
+    first = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1))
     first.setup()
     _run(first, model, 2)
     first.save(tmp_path / "ended.pt")
     model2 = Net()
-    fts = FTSController(model2, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1))
+    fts = TuningScheduler(model2, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1))
     fts.add_phase_hook(lambda e: ends.append(e.depth), when="end")
     fts.setup()
     fts.load(tmp_path / "ended.pt")
@@ -320,7 +321,7 @@ def test_only_needed_checkpoints_are_kept(tmp_path, save_top_k):
     torch.manual_seed(0)
     model = Net()
     cp = BestCheckpoint(tmp_path, "val_loss", save_top_k=save_top_k, save_initial=True)
-    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp)
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp)
     fts.setup()
     initial = cp.boundary_path(0)
     assert initial is not None and _ckpt_names(tmp_path) == [os.path.basename(initial)]
@@ -347,7 +348,7 @@ def _resumable_run(dirpath, save_top_k, init, gate=None, saves=None, stop_after=
     model = Net()
     model.load_state_dict(init)
     cp = BestCheckpoint(dirpath, "val_loss", save_top_k=save_top_k)
-    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp, transition=None)
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp, transition=None)
     if gate is not None:
         fts.add_gate(gate)
     fts.setup()
@@ -412,7 +413,7 @@ def test_resuming_a_save_whose_checkpoints_are_gone(tmp_path):
     _resumable_run(tmp_path / "run", 2, init, losses=losses, saves=saves)
     with pytest.raises(FileNotFoundError, match="best checkpoint this state refers to"):
         _resumable_run(tmp_path / "run", 2, init, losses=losses, load_from=saves[0])
-    saved = load_payload(saves[3])["controller"]["checkpoint"]
+    saved = load_payload(saves[3])["tuning_scheduler"]["checkpoint"]
     worst = max(saved["entries"], key=lambda e: float(e["score"]))["path"]
     assert worst not in {path for path, _ in saved["boundaries"].values()}
     os.remove(worst)
@@ -442,7 +443,7 @@ def test_loading_an_older_save_in_process_keeps_the_latest_saves_checkpoints(tmp
     model = Net()
     model.load_state_dict(init)
     cp = BestCheckpoint(tmp_path / "c", "val_loss", save_top_k=2)
-    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp, transition=None)
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp, transition=None)
     fts.setup()
     for epoch, loss in zip(fts.epochs(3), (1.0, 0.9, 0.8)):
         _train_epoch(fts, model, seed=epoch)
@@ -457,13 +458,13 @@ def test_loading_an_older_save_in_process_keeps_the_latest_saves_checkpoints(tmp
 
 def test_a_failed_best_write_keeps_the_previous_best(tmp_path, monkeypatch):
     """When writing a new best fails, the policy keeps the previous best (#52)."""
-    import finetuning_scheduler.core.controller as controller_module
+    import finetuning_scheduler.core.tuning_scheduler as tuning_scheduler_module
 
     torch.manual_seed(0)
     model = Net()
     cp = BestCheckpoint(tmp_path, "val_loss")
-    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp,
-                        restore_best=False)
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp,
+                          restore_best=False)
     fts.setup()
     _train_epoch(fts, model)
     fts.epoch_end({"val_loss": 1.0})
@@ -475,7 +476,7 @@ def test_a_failed_best_write_keeps_the_previous_best(tmp_path, monkeypatch):
 
     _train_epoch(fts, model, seed=1)
     with monkeypatch.context() as m:
-        m.setattr(controller_module, "save_payload", disk_full)
+        m.setattr(tuning_scheduler_module, "save_payload", disk_full)
         with pytest.raises(OSError, match="disk full"):
             fts.epoch_end({"val_loss": 0.5})
     assert cp.best_path == previous and float(cp.best_score) == 1.0
@@ -497,8 +498,8 @@ def test_a_policy_without_verify_resume_loads(tmp_path):
         verify_resume = None
 
     def make(model):
-        fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1),
-                            checkpoint=Unverified(tmp_path, "val_loss"))
+        fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1),
+                              checkpoint=Unverified(tmp_path, "val_loss"))
         fts.setup()
         return fts
 
@@ -514,16 +515,16 @@ def test_a_policy_without_verify_resume_loads(tmp_path):
 
 def test_restoring_a_best_saved_before_an_optimizer_reinitialization_keeps_the_new_optimizer(tmp_path, monkeypatch):
     """A best checkpoint saved under the optimizer a later phase replaced restores the model only."""
-    import finetuning_scheduler.core.controller as controller_module
+    import finetuning_scheduler.core.tuning_scheduler as tuning_scheduler_module
 
     infos = []
-    monkeypatch.setattr(controller_module, "rank_zero_info", lambda msg, *a, **k: infos.append(msg))
+    monkeypatch.setattr(tuning_scheduler_module, "rank_zero_info", lambda msg, *a, **k: infos.append(msg))
     reinit = {**SCHEDULE, 1: {**SCHEDULE[1], "new_optimizer": {"optimizer_init": {
         "class_path": "Adam", "init_args": {"lr": 0.01}}}}}
     torch.manual_seed(0)
     model = Net()
-    fts = FTSController(model, reinit, optimizer=partial(torch.optim.SGD, lr=0.1),
-                        checkpoint=BestCheckpoint(tmp_path, "val_loss"))
+    fts = TuningScheduler(model, reinit, optimizer=partial(torch.optim.SGD, lr=0.1),
+                          checkpoint=BestCheckpoint(tmp_path, "val_loss"))
     fts.setup()
     _run(fts, model, 4, metrics_fn=lambda e: {"val_loss": [0.5, 1.0, 1.0, 1.0][e]})  # the best is phase 0's
     assert fts.curr_depth == 2 and isinstance(fts.optimizer, torch.optim.Adam)

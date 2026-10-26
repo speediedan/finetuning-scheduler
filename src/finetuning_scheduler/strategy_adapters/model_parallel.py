@@ -106,7 +106,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
         In addition to all valid ``fully_shard`` API kwargs, ``fsdp_plan`` also supports an ``act_ckpt`` kwarg and
         a name-based ``ignored_params``. CPU offload is refused: Lightning's ``ModelParallelStrategy`` moves the model
         to the GPU after ``configure_model``, which CPU-offloaded FSDP2 shards cannot follow. The PyTorch API
-        (``FTSController``) supports it.
+        (``TuningScheduler``) supports it.
 
     For specified module/patterns (or ``fsdp_default_kwargs``), ``act_ckpt`` allows one
     to pass a string alias specifying the use of the desired activation checkpointing API (e.g. "composable",
@@ -273,7 +273,7 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
 
         Lightning's ``ModelParallelStrategy`` moves the whole model to the GPU once ``configure_model`` has run, and a
         module sharded with ``CPUOffloadPolicy`` keeps its shards on the CPU, so the move fails (``_apply(): Couldn't
-        swap ...``). CPU offload works with the PyTorch API (``FTSController``), where the training loop places the
+        swap ...``). CPU offload works with the PyTorch API (``TuningScheduler``), where the training loop places the
         model itself.
 
         Raises:
@@ -287,8 +287,8 @@ class ModelParallelStrategyAdapter(StrategyAdapter):
                 raise MisconfigurationException(
                     f"{where} asks for CPU offload, which Lightning's ModelParallelStrategy cannot run: it moves the "
                     "model to the GPU after `configure_model`, and FSDP2 keeps CPU-offloaded shards on the CPU. Use "
-                    "the PyTorch API (`FTSController`) with `fully_shard(..., offload_policy=CPUOffloadPolicy())` for "
-                    "CPU offload."
+                    "the PyTorch API (`TuningScheduler`) with `fully_shard(..., offload_policy=CPUOffloadPolicy())` "
+                    "for CPU offload."
                 )
 
     @staticmethod

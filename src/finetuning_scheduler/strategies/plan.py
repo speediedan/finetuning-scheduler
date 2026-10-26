@@ -26,7 +26,7 @@ expression (or a list of them).
 :func:`phase_feedback` reports the FSDP units (one per ``fully_shard`` call) that reshard after forward and whose
 parameters thaw in different phases. From the earliest of those phases on, such a unit's backward pass all-gathers all
 of its parameters again, those not yet trained included, so splitting it (or not resharding it after forward) saves that
-communication. :class:`~finetuning_scheduler.FTSController` and the Lightning
+communication. :class:`~finetuning_scheduler.TuningScheduler` and the Lightning
 :class:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter` report them when they validate a schedule
 against an FSDP2 model (:class:`~finetuning_scheduler.strategies.fsdp2.FSDP2Adapter`).
 

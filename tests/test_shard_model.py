@@ -11,7 +11,7 @@
 # limitations under the License.
 """``shard_model`` (#55): an FSDP2 plan applied to a plain PyTorch model, the root last, and the FSDP2 adapter's
 feedback on FSDP units whose parameters thaw in different phases. Run once per simulated rank on the fake process
-group, so on every hosted OS; the gloo and NCCL controller tests cover training through sharded models.
+group, so on every hosted OS; the gloo and NCCL tuning scheduler tests cover training through sharded models.
 
 The ``core-no-lightning`` CI job runs this module with ``--noconftest``, so it must not import Lightning or
 ``tests.helpers``.

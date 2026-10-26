@@ -54,7 +54,7 @@ LIGHTNING_PACKAGES = {
 # under [tool.fts.min-versions] (informational only).
 BASE_DEPENDENCIES = [
     "torch>=2.12.0",
-    # torch's object collectives (which a distributed `FTSController` uses) deserialize through `Tensor.numpy()`, but
+    # torch's object collectives (which a distributed `TuningScheduler` uses) deserialize through `Tensor.numpy()`, but
     # torch does not declare NumPy; 1.23.2 is the first release with Python 3.11 wheels
     "numpy>=1.23.2",
     "PyYAML>=6.0.2",

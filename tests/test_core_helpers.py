@@ -73,12 +73,12 @@ def test_reshard_without_torch_distributed_is_a_no_op(monkeypatch):
     assert reshard_fsdp_modules(nn.Linear(2, 2)) is None
 
 
-def test_torch_host_rng_devices_include_an_initialized_current_cuda_device(monkeypatch):
+def test_torch_interface_rng_devices_include_an_initialized_current_cuda_device(monkeypatch):
     """Once CUDA is initialized, the current device's generator is captured even when no parameter is on it (here a
     CPU module, with CUDA's state stubbed)."""
-    from finetuning_scheduler.core.host import TorchHost
+    from finetuning_scheduler.core.interface import TorchInterface
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "is_initialized", lambda: True)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 1)
-    assert TorchHost(nn.Linear(2, 2)).rng_devices() == [torch.device("cuda", 1)]
+    assert TorchInterface(nn.Linear(2, 2)).rng_devices() == [torch.device("cuda", 1)]

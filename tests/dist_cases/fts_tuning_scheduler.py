@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""``FTSController`` on FSDP2 (pool cases, gloo or NCCL).
+"""``TuningScheduler`` on FSDP2 (pool cases, gloo or NCCL).
 
 With equal per-rank shards of each batch, FSDP2's gradient averaging makes a sharded run mathematically identical to a
 single-process run on the full batch, so the phase path must match exactly and the parameters to float tolerance.
@@ -22,7 +22,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.distributed.fsdp import fully_shard
 
-from finetuning_scheduler import FTSController, GateResult, PlateauTransition, TorchHost
+from finetuning_scheduler import TuningScheduler, GateResult, PlateauTransition, TorchInterface
 from finetuning_scheduler.core.checkpoint import BestCheckpoint
 
 SCHEDULE = {0: {"params": ["4.weight", "4.bias"]}, 1: {"params": ["2.weight", "2.bias"], "lr": 0.05},
@@ -40,11 +40,11 @@ def _data(epochs: int, steps: int, batch: int, seed: int):
     return torch.randn(epochs, steps, batch, 8, generator=gen), torch.randn(epochs, steps, batch, 4, generator=gen)
 
 
-def _controller(model, ckpt_dir, restore_best, gate=None):
-    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1, momentum=0.9),
-                        transition=PlateauTransition("val_loss", patience=1), host=TorchHost(model),
-                        checkpoint=BestCheckpoint(ckpt_dir, "val_loss") if ckpt_dir else None,
-                        restore_best=restore_best if ckpt_dir else False)
+def _tuning_scheduler(model, ckpt_dir, restore_best, gate=None):
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1, momentum=0.9),
+                          transition=PlateauTransition("val_loss", patience=1), interface=TorchInterface(model),
+                          checkpoint=BestCheckpoint(ckpt_dir, "val_loss") if ckpt_dir else None,
+                          restore_best=restore_best if ckpt_dir else False)
     if gate is not None:
         fts.add_gate(gate)
     fts.setup()
@@ -80,7 +80,7 @@ def _sharded_model(ctx, seed):
 def phases(ctx, ckpt_dir: str, restore_best: bool = True, epochs: int = 7, steps: int = 2, batch: int = 8,
            seed: int = 7) -> dict:
     model = _sharded_model(ctx, seed)
-    fts = _controller(model, ckpt_dir, restore_best)
+    fts = _tuning_scheduler(model, ckpt_dir, restore_best)
     x, y = _data(epochs, steps, batch, seed)
     shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
     path = _train(fts, model, x, y, shard, ctx.device, epochs)
@@ -91,22 +91,22 @@ def phases(ctx, ckpt_dir: str, restore_best: bool = True, epochs: int = 7, steps
 def reference(ckpt_dir: str, restore_best: bool = True, epochs: int = 7, steps: int = 2, batch: int = 8,
               seed: int = 7) -> dict:
     model = _model(seed)
-    fts = _controller(model, ckpt_dir, restore_best)
+    fts = _tuning_scheduler(model, ckpt_dir, restore_best)
     x, y = _data(epochs, steps, batch, seed)
     path = _train(fts, model, x, y, slice(None), torch.device("cpu"), epochs)
     return {"path": path, "params": _params(model), "restored": fts.restored_count, "stop": fts.stop_reason}
 
 
 def resume(ctx, ckpt_dir: str, epochs: int = 7, split: int = 3, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
-    """Train ``split`` epochs, save, then load into a fresh model and controller and finish the run."""
+    """Train ``split`` epochs, save, then load into a fresh model and tuning scheduler and finish the run."""
     x, y = _data(epochs, steps, batch, seed)
     shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
     first_model = _sharded_model(ctx, seed)
-    first = _controller(first_model, os.path.join(ckpt_dir, "first"), True)
+    first = _tuning_scheduler(first_model, os.path.join(ckpt_dir, "first"), True)
     path = _train(first, first_model, x, y, shard, ctx.device, split)
     saved = first.save(os.path.join(ckpt_dir, "resume"))
     model = _sharded_model(ctx, seed + 100)  # different initial weights: the load must overwrite them
-    fts = _controller(model, os.path.join(ckpt_dir, "first"), True)
+    fts = _tuning_scheduler(model, os.path.join(ckpt_dir, "first"), True)
     fts.load(saved)
     path = _train(fts, model, x, y, shard, ctx.device, epochs, path=path)
     return {"path": path, "params": _params(model), "saved_is_dir": os.path.isdir(saved)}
@@ -117,7 +117,7 @@ def veto_on_rank(ctx, ckpt_dir: str, veto_rank: int = 1, epochs: int = 7, steps:
     """A gate that vetoes phase 1 on one rank only stops every rank and restores phase 1's boundary state."""
     model = _sharded_model(ctx, seed)
     gate = (lambda e: GateResult(accept=not (e.depth == 1 and ctx.rank == veto_rank), reason="probe regressed"))
-    fts = _controller(model, ckpt_dir, True, gate=gate)
+    fts = _tuning_scheduler(model, ckpt_dir, True, gate=gate)
     x, y = _data(epochs, steps, batch, seed)
     shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
     path = _train(fts, model, x, y, shard, ctx.device, epochs)
@@ -128,7 +128,7 @@ def unsynced_metrics(ctx, ckpt_dir: str, epochs: int = 5, steps: int = 2, batch:
     """Ranks report different metrics: the best-checkpoint decision (which gates collective saves) must still be
     agreed, so the run neither deadlocks nor diverges."""
     model = _model(seed).to(ctx.device)
-    fts = _controller(model, ckpt_dir, True)
+    fts = _tuning_scheduler(model, ckpt_dir, True)
     x, y = _data(epochs, steps, batch, seed)
     val = [1.0, 0.8, 0.7, 0.6, 0.5] if ctx.rank == 0 else [1.0, 1.1, 1.2, 1.3, 1.4]
     path = []
@@ -151,16 +151,16 @@ def optimizer_state_edges(ctx, ckpt_dir: str, epochs: int = 7, steps: int = 2, b
     out = {}
     for save_initial in (False, True):
         model = _sharded_model(ctx, seed)
-        fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.Adam, lr=0.01),
-                            transition=PlateauTransition("val_loss", patience=1), host=TorchHost(model),
-                            checkpoint=BestCheckpoint(os.path.join(ckpt_dir, f"adam_{save_initial}"), "val_loss",
+        fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.Adam, lr=0.01),
+                              transition=PlateauTransition("val_loss", patience=1), interface=TorchInterface(model),
+                              checkpoint=BestCheckpoint(os.path.join(ckpt_dir, f"adam_{save_initial}"), "val_loss",
                                                       save_initial=save_initial))
         fts.setup()
         _train(fts, model, x, y, shard, ctx.device, 2)
         out[f"adam_save_initial_{save_initial}"] = _params(model)
     for set_to_none in (True, False):
         model = _sharded_model(ctx, seed)
-        fts = _controller(model, os.path.join(ckpt_dir, f"stn_{set_to_none}"), True)
+        fts = _tuning_scheduler(model, os.path.join(ckpt_dir, f"stn_{set_to_none}"), True)
         for epoch in fts.epochs(epochs):
             for step in range(steps):
                 F.mse_loss(model(x[epoch, step, shard].to(ctx.device)),
@@ -178,7 +178,7 @@ def save_at_boundary(ctx, ckpt_dir: str, epochs: int = 7, steps: int = 2, batch:
     x, y = _data(epochs, steps, batch, seed)
     shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
     first_model = _sharded_model(ctx, seed)
-    first = _controller(first_model, os.path.join(ckpt_dir, "first"), True)
+    first = _tuning_scheduler(first_model, os.path.join(ckpt_dir, "first"), True)
     path, saved = [], None
     for epoch in first.epochs(epochs):
         path.append((epoch, first.curr_depth, len(first.optimizer.param_groups)))
@@ -192,9 +192,9 @@ def save_at_boundary(ctx, ckpt_dir: str, epochs: int = 7, steps: int = 2, batch:
             first.optimizer.zero_grad()
         first.epoch_end({"val_loss": VAL[epoch]})
     model = _sharded_model(ctx, seed + 100)
-    fts = _controller(model, os.path.join(ckpt_dir, "first"), True)
+    fts = _tuning_scheduler(model, os.path.join(ckpt_dir, "first"), True)
     fts.load(saved)
-    path.pop()  # the boundary epoch is run again by the resumed controller
+    path.pop()  # the boundary epoch is run again by the resumed tuning scheduler
     path = _train(fts, model, x, y, shard, ctx.device, epochs, path=path)
     return {"path": path, "params": _params(model)}
 
@@ -213,14 +213,14 @@ class _Position:
 def per_rank_state(ctx, ckpt_dir: str, sharded: bool, seed: int = 7) -> dict:
     """Registered state and random streams are per rank, and each rank gets its own back on load."""
     model = _sharded_model(ctx, seed) if sharded else _model(seed).to(ctx.device)
-    fts = _controller(model, os.path.join(ckpt_dir, "first"), True)
+    fts = _tuning_scheduler(model, os.path.join(ckpt_dir, "first"), True)
     position = _Position(100 + ctx.rank)
     fts.register_stateful("loader", position)
     torch.manual_seed(1000 + ctx.rank)
     saved = fts.save(os.path.join(ckpt_dir, "state" if sharded else "state.pt"))
     expected = torch.rand(3).tolist()
     model2 = _sharded_model(ctx, seed) if sharded else _model(seed).to(ctx.device)
-    fts2 = _controller(model2, os.path.join(ckpt_dir, "first"), True)
+    fts2 = _tuning_scheduler(model2, os.path.join(ckpt_dir, "first"), True)
     position2 = _Position(-1)
     fts2.register_stateful("loader", position2)
     fts2.load(saved)
@@ -233,9 +233,10 @@ def resave_and_partial_metrics(ctx, ckpt_dir: str, epochs: int = 4, steps: int =
     rank that reports no metrics for an epoch still joins the best-checkpoint agreement."""
     model = _sharded_model(ctx, seed)
     # a lenient plateau policy, so the rank without metrics reaches the checkpoint agreement this case is about
-    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1, momentum=0.9),
-                        transition=PlateauTransition("val_loss", patience=1, strict=False), host=TorchHost(model),
-                        checkpoint=BestCheckpoint(os.path.join(ckpt_dir, "best"), "val_loss"))
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1, momentum=0.9),
+                          transition=PlateauTransition("val_loss", patience=1, strict=False),
+                          interface=TorchInterface(model),
+                          checkpoint=BestCheckpoint(os.path.join(ckpt_dir, "best"), "val_loss"))
     fts.setup()
     x, y = _data(epochs, steps, batch, seed)
     shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)

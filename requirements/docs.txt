@@ -9,6 +9,7 @@ docutils>=0.16
 sphinx-autodoc-typehints>=1.16
 sphinx-paramlinks>=0.5.1
 sphinx-togglebutton>=0.2
+sphinx-design>=0.6.1  # synced PyTorch/Lightning tabs on the introduction page
 sphinx-copybutton>=0.3
 typing-extensions  # already in `base.txt` but the docs CI job does not install it
 pydata-sphinx-theme==0.23.0

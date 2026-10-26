@@ -15,8 +15,8 @@ Fine-Tuning Scheduler Core Schedules
 
 Framework-neutral fine-tuning schedule loading, saving, generation, parsing and validation.
 
-These functions operate on an explicit schedule dictionary (mutating it in place where noted) rather than on host
-state, so any training host can use them.
+These functions operate on an explicit schedule dictionary (mutating it in place where noted) rather than on interface
+state, so any training interface can use them.
 """
 import itertools
 import os
@@ -595,6 +595,6 @@ def refuse_direct_api_keys(schedule: dict, keys: Sequence[str] = LIGHTNING_UNSUP
     if used:
         detail = "; ".join(f"phase {depth}: {', '.join(keys)}" for depth, keys in used.items())
         raise FTSConfigurationError(
-            f"The schedule uses keys only the PyTorch API (`FTSController`) supports in this release ({detail})."
+            f"The schedule uses keys only the PyTorch API (`TuningScheduler`) supports in this release ({detail})."
             " Remove them to use the schedule with the Lightning callback."
         )

@@ -60,11 +60,11 @@ for md in glob.glob(os.path.join(PATH_ROOT, ".github", "*.md")):
 # copy also the changelog
 _transform_changelog(os.path.join(PATH_ROOT, "CHANGELOG.md"), os.path.join(PATH_HERE, FOLDER_GENERATED, "CHANGELOG.md"))
 
-# The tutorial notebooks, staged into `notebooks/` (gitignored): the executed docs artifact where one exists, the
+# The tutorial notebooks, staged into `examples/notebooks/` (gitignored): the executed docs artifact where one exists, the
 # published (output-free) copy otherwise, with the publisher's install cell removed (noise on a static page). The
 # helpers are the docs-artifact renderer vendored from interpretune, loaded by file path; see pyproject's
 # [tool.notebook-publishing] and scripts/render_notebook_docs.py.
-NOTEBOOK_STAGE_DIR = os.path.join(PATH_HERE, "notebooks")
+NOTEBOOK_STAGE_DIR = os.path.join(PATH_HERE, "examples", "notebooks")
 NOTEBOOK_SOURCES = [
     os.path.join(PATH_ROOT, "docs", "notebook_artifacts"),
     os.path.join(PATH_ROOT, "src", "fts_examples", "notebooks", "publish"),
@@ -137,6 +137,7 @@ extensions = [
     "sphinx_copybutton",
     "sphinx_paramlinks",
     "sphinx_togglebutton",
+    "sphinx_design",
 ]
 
 autodoc_typehints = "none"

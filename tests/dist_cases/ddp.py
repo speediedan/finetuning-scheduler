@@ -13,7 +13,7 @@
 
 ``DistributedDataParallel`` registers its reducer's parameters when it is constructed, from those that require grad
 at that moment. A parameter thawed later gets a gradient on every rank but is never all-reduced, so the ranks drift
-apart. Scheduled fine-tuning thaws parameters at every phase transition, so both of its hosts must rebuild the
+apart. Scheduled fine-tuning thaws parameters at every phase transition, so both of its interfaces must rebuild the
 wrapper when the trainable set changes. These cases pin that upstream behavior: if a release starts tracking late
 ``requires_grad`` changes, the "stale" case stops diverging and the test says so.
 """

@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tests for ``FTSController`` scheduling a model through a tunable view.
+"""Tests for ``TuningScheduler`` scheduling a model through a tunable view.
 
 These need only PyTorch and the scheduling core (the ``core-no-lightning`` job runs them with ``--noconftest``).
 """
@@ -19,7 +19,7 @@ import pytest
 import torch
 from torch import nn
 
-from finetuning_scheduler import CanonicalView, FTSController, PlateauTransition, TunableSupport
+from finetuning_scheduler import CanonicalView, TuningScheduler, PlateauTransition, TunableSupport
 from finetuning_scheduler.core.checkpoint import BestCheckpoint
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.testing.fixtures import InterventionModel, one_to_many_view, ROLES
@@ -57,8 +57,8 @@ def test_canonical_view_matches_no_view():
     runs, params, hashes = [], [], []
     for view in (None, "canonical"):
         model = _seq()
-        fts = FTSController(model, SEQ_SCHEDULE, optimizer=SGD,
-                            view=CanonicalView(model) if view else None)
+        fts = TuningScheduler(model, SEQ_SCHEDULE, optimizer=SGD,
+                              view=CanonicalView(model) if view else None)
         fts.setup()
         hashes.append(fts.config_hash)
         runs.append(_run(fts, 4))
@@ -74,7 +74,7 @@ def test_logical_view_thaws_physical_and_coupled():
     schedule = {0: {"params": ["unembed.W_U", "embed.W_E"], "max_transition_epoch": 1},
                 1: {"params": ["blocks.1.mlp.W_out", "blocks.1.mlp.W_in", "blocks.1.attn.W_QK"]}}
     events = []
-    fts = FTSController(model, schedule, optimizer=SGD, view=view)
+    fts = TuningScheduler(model, schedule, optimizer=SGD, view=view)
     fts.add_phase_hook(lambda e: events.append((e.depth, e.logical_params, e.physical_params)))
     fts.setup()
     seen = _run(fts, 3)
@@ -91,7 +91,7 @@ def test_logical_view_thaws_physical_and_coupled():
 
 def test_default_schedule_through_a_view():
     view = one_to_many_view()
-    fts = FTSController(view.root, None, optimizer=SGD, view=view, transition=PlateauTransition("loss"))
+    fts = TuningScheduler(view.root, None, optimizer=SGD, view=view, transition=PlateauTransition("loss"))
     fts.setup()
     assert len(fts.schedule) == 3  # the view's depth groups: the tied embedding, then one block at a time
     assert fts.schedule[0]["params"] == ["embed.weight", "ln_final.weight", "ln_final.bias"]
@@ -100,7 +100,7 @@ def test_default_schedule_through_a_view():
 def test_attached_view_is_discovered():
     view = one_to_many_view()
     view.root.fts_tunable_view = view
-    fts = FTSController(view.root, {0: {"params": ["embed.W_E"]}}, optimizer=SGD)
+    fts = TuningScheduler(view.root, {0: {"params": ["embed.W_E"]}}, optimizer=SGD)
     fts.setup()
     assert fts.view.view is view
 
@@ -116,7 +116,7 @@ ROLE_SCHEDULE = {0: {"params": ["role:latent"], "max_transition_epoch": 1}, 1: {
 
 def test_roles_select_and_frozen_roles_never_train():
     model, view = _roles_model()
-    fts = FTSController(model, ROLE_SCHEDULE, optimizer=SGD, view=view)
+    fts = TuningScheduler(model, ROLE_SCHEDULE, optimizer=SGD, view=view)
     fts.setup()
     seen = _run(fts, 2)
     assert seen[0][2] == ["transcoder.bias", "transcoder.weight"]
@@ -128,20 +128,20 @@ def test_roles_select_and_frozen_roles_never_train():
 def test_scheduling_a_frozen_role_refuses():
     model, view = _roles_model()
     with pytest.raises(FTSConfigurationError, match=r"never thawed.*lens.weight"):
-        FTSController(model, {0: {"params": [r"lens\..*"]}}, optimizer=SGD, view=view).setup()
+        TuningScheduler(model, {0: {"params": [r"lens\..*"]}}, optimizer=SGD, view=view).setup()
 
 
 def test_optimizer_instance_holding_a_frozen_role_refuses():
     model, view = _roles_model()
     optimizer = torch.optim.SGD([model.transcoder.weight, model.lens.weight], lr=0.1)
     with pytest.raises(FTSConfigurationError, match=r"never optimized.*lens.weight"):
-        FTSController(model, ROLE_SCHEDULE, optimizer=optimizer, view=view, enforce_phase0_params=False).setup()
+        TuningScheduler(model, ROLE_SCHEDULE, optimizer=optimizer, view=view, enforce_phase0_params=False).setup()
 
 
 def test_role_aware_checkpoints_and_resume(tmp_path):
     model, view = _roles_model()
-    fts = FTSController(model, ROLE_SCHEDULE, optimizer=SGD, view=view,
-                        checkpoint=BestCheckpoint(tmp_path / "ckpt", monitor="loss", include="scheduled"))
+    fts = TuningScheduler(model, ROLE_SCHEDULE, optimizer=SGD, view=view,
+                          checkpoint=BestCheckpoint(tmp_path / "ckpt", monitor="loss", include="scheduled"))
     fts.setup()
     _run(fts, 2, metrics=lambda e: {"loss": 1.0 - e})
     best = torch.load(fts._checkpoint.path_for("best"), weights_only=False)
@@ -149,13 +149,13 @@ def test_role_aware_checkpoints_and_resume(tmp_path):
     assert {"procrustes", "enforce_mean", "enforce_mask", "transcoder.weight"} <= set(best["model"])
     fts.save(tmp_path / "last.pt")
     saved = torch.load(tmp_path / "last.pt", weights_only=False)
-    assert saved["controller"]["view_digest"] == fts.compiled_schedule.digest
+    assert saved["tuning_scheduler"]["view_digest"] == fts.compiled_schedule.digest
     assert not {"lens.weight", "lens.bias"} & set(saved["model"])
     reference = {n: p.detach().clone() for n, p in model.named_parameters()}
 
     model2, view2 = _roles_model()
-    fts2 = FTSController(model2, ROLE_SCHEDULE, optimizer=SGD, view=view2,
-                         checkpoint=BestCheckpoint(tmp_path / "ckpt2", monitor="loss", include="scheduled"))
+    fts2 = TuningScheduler(model2, ROLE_SCHEDULE, optimizer=SGD, view=view2,
+                           checkpoint=BestCheckpoint(tmp_path / "ckpt2", monitor="loss", include="scheduled"))
     fts2.setup()
     fts2.load(tmp_path / "last.pt")
     restored = dict(model2.named_parameters())
@@ -163,7 +163,7 @@ def test_role_aware_checkpoints_and_resume(tmp_path):
 
     roles = {**ROLES, "adapter_backbone.weight": "adapter:other"}
     model3 = InterventionModel()
-    fts3 = FTSController(model3, ROLE_SCHEDULE, optimizer=SGD, view=CanonicalView(model3, roles=roles))
+    fts3 = TuningScheduler(model3, ROLE_SCHEDULE, optimizer=SGD, view=CanonicalView(model3, roles=roles))
     fts3.setup()
     with pytest.raises(FTSConfigurationError, match="compiled through a view that maps"):
         fts3.load(tmp_path / "last.pt")
@@ -171,15 +171,15 @@ def test_role_aware_checkpoints_and_resume(tmp_path):
 
 def test_view_refusals():
     model = _seq()
-    with pytest.raises(FTSConfigurationError, match="must be the module given to the controller"):
-        FTSController(model, SEQ_SCHEDULE, optimizer=SGD, view=CanonicalView(_seq())).setup()
+    with pytest.raises(FTSConfigurationError, match="must be the module given to the tuning scheduler"):
+        TuningScheduler(model, SEQ_SCHEDULE, optimizer=SGD, view=CanonicalView(_seq())).setup()
 
     class Remote(CanonicalView):
         def support(self):
             return TunableSupport(trainable=False, reason="remote execution")
 
     with pytest.raises(FTSConfigurationError, match="cannot be fine-tuned through Remote: remote execution"):
-        FTSController(model, SEQ_SCHEDULE, optimizer=SGD, view=Remote(model)).setup()
+        TuningScheduler(model, SEQ_SCHEDULE, optimizer=SGD, view=Remote(model)).setup()
 
 
 class MinimalView:
@@ -201,14 +201,14 @@ class MinimalView:
 def test_minimal_view_hashes_saves_and_loads(tmp_path):
     """Optional members default everywhere, including the configuration hash and checkpoints."""
     model = _seq()
-    fts = FTSController(model, SEQ_SCHEDULE, optimizer=SGD, view=MinimalView(model))
+    fts = TuningScheduler(model, SEQ_SCHEDULE, optimizer=SGD, view=MinimalView(model))
     before = fts.config_dict()["view"]  # before setup, the view is described the same way
     fts.setup()
     assert fts.config_dict()["view"] == before
     _run(fts, 2)
     fts.save(tmp_path / "last.pt")
     model2 = _seq()
-    fts2 = FTSController(model2, SEQ_SCHEDULE, optimizer=SGD, view=MinimalView(model2))
+    fts2 = TuningScheduler(model2, SEQ_SCHEDULE, optimizer=SGD, view=MinimalView(model2))
     fts2.setup()
     fts2.load(tmp_path / "last.pt")
     assert all(torch.equal(a, b) for a, b in zip(model.parameters(), model2.parameters()))
@@ -217,7 +217,7 @@ def test_minimal_view_hashes_saves_and_loads(tmp_path):
 def test_attached_view_is_described_before_setup():
     view = one_to_many_view()
     view.root.fts_tunable_view = view
-    fts = FTSController(view.root, {0: {"params": ["embed.W_E"]}}, optimizer=SGD)
+    fts = TuningScheduler(view.root, {0: {"params": ["embed.W_E"]}}, optimizer=SGD)
     before = fts.config_dict()["view"]
     fts.setup()
     assert fts.config_dict()["view"] == before
@@ -226,12 +226,12 @@ def test_attached_view_is_described_before_setup():
 def test_canonical_strict_load_mismatch_raises_runtime_error(tmp_path):
     """Without roles, a strict load behaves as ``load_state_dict`` does."""
     model = _seq()
-    fts = FTSController(model, SEQ_SCHEDULE, optimizer=SGD)
+    fts = TuningScheduler(model, SEQ_SCHEDULE, optimizer=SGD)
     fts.setup()
     fts.save(tmp_path / "last.pt")
     other = nn.Sequential(nn.Linear(4, 4), nn.LayerNorm(4), nn.Linear(4, 4), nn.LayerNorm(4), nn.Linear(4, 2),
                           nn.Linear(2, 2))
-    fts2 = FTSController(other, SEQ_SCHEDULE, optimizer=SGD)
+    fts2 = TuningScheduler(other, SEQ_SCHEDULE, optimizer=SGD)
     fts2.setup()
     with pytest.raises(RuntimeError, match="Missing key"):
         fts2._view.load_checkpoint_state_dict(torch.load(tmp_path / "last.pt", weights_only=False)["model"])
@@ -243,15 +243,15 @@ def test_the_setup_rank_agreement_check_covers_roles():
     schedule = {0: {"params": ["role:adapter"], "max_transition_epoch": 1}, 1: {"params": ["role:latent"]}}
     gathered = []
 
-    def controller(roles, other_rank=None):
+    def tuning_scheduler(roles, other_rank=None):
         model = InterventionModel()
-        fts = FTSController(model, {k: dict(v) for k, v in schedule.items()}, optimizer=SGD,
-                            view=CanonicalView(model, roles=roles))
-        fts._host.all_gather_object = lambda obj: gathered.append(obj) or [obj, other_rank or obj]
+        fts = TuningScheduler(model, {k: dict(v) for k, v in schedule.items()}, optimizer=SGD,
+                              view=CanonicalView(model, roles=roles))
+        fts._interface.all_gather_object = lambda obj: gathered.append(obj) or [obj, other_rank or obj]
         return fts
 
-    controller(ROLES).setup()
-    controller({**ROLES, "procrustes": "instrument"}).setup()
+    tuning_scheduler(ROLES).setup()
+    tuning_scheduler({**ROLES, "procrustes": "instrument"}).setup()
     assert gathered[0] != gathered[1]  # the same physical schedule, different roles
     with pytest.raises(FTSConfigurationError, match="different schedules or roles"):
-        controller(ROLES, other_rank=gathered[1]).setup()
+        tuning_scheduler(ROLES, other_rank=gathered[1]).setup()

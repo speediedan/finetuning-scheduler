@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""``FTSController.export_best`` (role-selected exports of the best checkpoint) and the ``artifacts`` metadata
+"""``TuningScheduler.export_best`` (role-selected exports of the best checkpoint) and the ``artifacts`` metadata
 (#52).
 
 These need only PyTorch and the scheduling core (the ``core-no-lightning`` job runs them with ``--noconftest``).
@@ -19,7 +19,7 @@ from functools import partial
 import pytest
 import torch
 
-from finetuning_scheduler import CanonicalView, FTSController
+from finetuning_scheduler import CanonicalView, TuningScheduler
 from finetuning_scheduler.core.checkpoint import BestCheckpoint, load_payload
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.views import canonical_fqn
@@ -35,9 +35,9 @@ def _run(tmp_path, losses=(1.0, 0.5, 0.9, 0.8), **kwargs):
     """Train with synthetic gradients; the best checkpoint is epoch 1's."""
     torch.manual_seed(0)
     model = InterventionModel()
-    fts = FTSController(model, {k: dict(v) for k, v in SCHEDULE.items()}, optimizer=SGD,
-                        view=CanonicalView(model, roles=ROLES), checkpoint=BestCheckpoint(tmp_path, "loss"),
-                        restore_best=False, **kwargs)
+    fts = TuningScheduler(model, {k: dict(v) for k, v in SCHEDULE.items()}, optimizer=SGD,
+                          view=CanonicalView(model, roles=ROLES), checkpoint=BestCheckpoint(tmp_path, "loss"),
+                          restore_best=False, **kwargs)
     fts.setup()
     at_best = None
     for epoch in fts.epochs(len(losses)):
@@ -93,9 +93,9 @@ def test_export_best_of_a_tensor_the_best_checkpoint_lacks_is_refused(tmp_path):
     """A role-selected tensor the best checkpoint does not hold (a non-persistent buffer) is refused."""
     model = InterventionModel()
     model.register_buffer("stat", torch.zeros(1), persistent=False)
-    fts = FTSController(model, {k: dict(v) for k, v in SCHEDULE.items()}, optimizer=SGD,
-                        view=CanonicalView(model, roles={**ROLES, "stat": "fitted"}),
-                        checkpoint=BestCheckpoint(tmp_path, "loss"), restore_best=False)
+    fts = TuningScheduler(model, {k: dict(v) for k, v in SCHEDULE.items()}, optimizer=SGD,
+                          view=CanonicalView(model, roles={**ROLES, "stat": "fitted"}),
+                          checkpoint=BestCheckpoint(tmp_path, "loss"), restore_best=False)
     fts.setup()
     for epoch in fts.epochs(1):
         _step(fts, epoch, {"loss": 1.0})
@@ -110,9 +110,9 @@ class TranslatingView(CanonicalView):
 
 def test_export_best_refuses_a_view_that_translates_checkpoint_keys(tmp_path):
     model = InterventionModel()
-    fts = FTSController(model, {k: dict(v) for k, v in SCHEDULE.items()}, optimizer=SGD,
-                        view=TranslatingView(model, roles=ROLES), checkpoint=BestCheckpoint(tmp_path, "loss"),
-                        restore_best=False)
+    fts = TuningScheduler(model, {k: dict(v) for k, v in SCHEDULE.items()}, optimizer=SGD,
+                          view=TranslatingView(model, roles=ROLES), checkpoint=BestCheckpoint(tmp_path, "loss"),
+                          restore_best=False)
     fts.setup()
     for epoch in fts.epochs(1):
         _step(fts, epoch, {"loss": 1.0})
@@ -121,19 +121,20 @@ def test_export_best_refuses_a_view_that_translates_checkpoint_keys(tmp_path):
 
 
 def test_export_best_raises_rank_zeros_configuration_error_on_other_ranks(tmp_path, monkeypatch):
-    """A rank other than global rank zero raises the configuration error rank zero reports (here, a host standing
-    in for rank one of a group)."""
+    """A rank other than global rank zero raises the configuration error rank zero reports (here, an interface
+    standing in for rank one of a group)."""
     _, fts, _ = _run(tmp_path)
-    monkeypatch.setattr(type(fts.host), "is_global_zero", property(lambda self: False))
-    monkeypatch.setattr(fts.host, "broadcast_object", lambda obj, src=0: ("FTSConfigurationError", "refused there"))
+    monkeypatch.setattr(type(fts.interface), "is_global_zero", property(lambda self: False))
+    monkeypatch.setattr(fts.interface, "broadcast_object",
+                        lambda obj, src=0: ("FTSConfigurationError", "refused there"))
     with pytest.raises(FTSConfigurationError, match="refused there"):
         fts.export_best()
 
 
 def test_export_best_needs_a_best_checkpoint(tmp_path):
     model = InterventionModel()
-    fts = FTSController(model, {k: dict(v) for k, v in SCHEDULE.items()}, optimizer=SGD,
-                        view=CanonicalView(model, roles=ROLES), checkpoint=BestCheckpoint(tmp_path, "loss"))
+    fts = TuningScheduler(model, {k: dict(v) for k, v in SCHEDULE.items()}, optimizer=SGD,
+                          view=CanonicalView(model, roles=ROLES), checkpoint=BestCheckpoint(tmp_path, "loss"))
     fts.setup()
     with pytest.raises(FTSConfigurationError, match="no best checkpoint"):
         fts.export_best()
@@ -150,7 +151,7 @@ def test_export_best_needs_a_best_checkpoint(tmp_path):
 ])
 def test_artifacts_are_validated(artifacts, match):
     with pytest.raises(FTSConfigurationError, match=match):
-        FTSController(InterventionModel(), SCHEDULE, optimizer=SGD, artifacts=artifacts)
+        TuningScheduler(InterventionModel(), SCHEDULE, optimizer=SGD, artifacts=artifacts)
 
 
 def _step(fts, epoch, metrics):
@@ -179,8 +180,8 @@ def test_export_best_keys_wrapped_tensors_by_their_wrapper_free_names(tmp_path, 
     roles = {n: "adapter:head" for n, _ in model.named_parameters() if canonical_fqn(n).startswith("2.")}
     first = [n for n, _ in model.named_parameters() if canonical_fqn(n).startswith("0.")]
     sched = {0: {"params": ["role:adapter"], "max_transition_epoch": 1}, 1: {"params": first}}
-    fts = FTSController(model, sched, optimizer=SGD, view=CanonicalView(model, roles=roles),
-                        checkpoint=BestCheckpoint(tmp_path, "loss"), restore_best=False)
+    fts = TuningScheduler(model, sched, optimizer=SGD, view=CanonicalView(model, roles=roles),
+                          checkpoint=BestCheckpoint(tmp_path, "loss"), restore_best=False)
     fts.setup()
     for epoch, loss in zip(fts.epochs(2), (0.1, 1.0)):
         _step(fts, epoch, {"loss": loss})
@@ -196,8 +197,8 @@ def test_export_best_takes_a_tensor_promoted_after_the_best_at_its_promotion_val
     torch.manual_seed(0)
     model = InterventionModel()
     lens = model.lens.weight.detach().clone()
-    fts = FTSController(model, promote, optimizer=SGD, view=CanonicalView(model, roles=ROLES),
-                        checkpoint=BestCheckpoint(tmp_path, "loss"), restore_best=False)
+    fts = TuningScheduler(model, promote, optimizer=SGD, view=CanonicalView(model, roles=ROLES),
+                          checkpoint=BestCheckpoint(tmp_path, "loss"), restore_best=False)
     fts.setup()
     for epoch, loss in zip(fts.epochs(3), (0.1, 1.0, 1.0)):
         _step(fts, epoch, {"loss": loss})
@@ -219,11 +220,12 @@ def test_export_best_defaults_beside_the_best_and_records_its_metadata(tmp_path)
 
 def test_artifacts_are_normalized():
     upper = {"lens": {"path": "x", "sha256": "AB" * 32}}
-    fts = FTSController(InterventionModel(), SCHEDULE, optimizer=SGD, artifacts=upper)
+    fts = TuningScheduler(InterventionModel(), SCHEDULE, optimizer=SGD, artifacts=upper)
     assert fts._artifacts["lens"]["sha256"] == "ab" * 32
     from pathlib import Path
 
-    assert FTSController(InterventionModel(), SCHEDULE, optimizer=SGD,
-                         artifacts={"lens": {"path": Path("x"), "sha256": "ab" * 32}})._artifacts["lens"]["path"] == "x"
+    fts = TuningScheduler(InterventionModel(), SCHEDULE, optimizer=SGD,
+                          artifacts={"lens": {"path": Path("x"), "sha256": "ab" * 32}})
+    assert fts._artifacts["lens"]["path"] == "x"
     with pytest.raises(FTSConfigurationError, match="non-empty strings"):
-        FTSController(InterventionModel(), SCHEDULE, optimizer=SGD, artifacts={1: {"path": "x", "sha256": "ab" * 32}})
+        TuningScheduler(InterventionModel(), SCHEDULE, optimizer=SGD, artifacts={1: {"path": "x", "sha256": "ab" * 32}})

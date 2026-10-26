@@ -12,7 +12,7 @@
 """Model-parallel scheduled fine-tuning in a plain PyTorch loop.
 
 The PyTorch API counterpart of ``mp_examples.py``: the same ``torchtitan`` Llama model, fine-tuning schedule and
-parallelism plans, driven by ``FTSController`` in a training loop with no Lightning ``Trainer`` (and no Lightning
+parallelism plans, driven by ``TuningScheduler`` in a training loop with no Lightning ``Trainer`` (and no Lightning
 import). Launch it with ``torchrun`` on two GPUs::
 
     torchrun --nproc_per_node=2 torch_mp_example.py --config config/torch_fsdp_plan.yaml
@@ -44,7 +44,7 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.parallel import loss_parallel
 from torch.utils.data import DataLoader, DistributedSampler
 
-from finetuning_scheduler import FTSController, PlateauTransition
+from finetuning_scheduler import TuningScheduler, PlateauTransition
 from finetuning_scheduler.core.checkpoint import BestCheckpoint
 from finetuning_scheduler.core.optim import resolve_class_path
 from finetuning_scheduler.strategies.plan import shard_model
@@ -117,8 +117,8 @@ def build_model(cfg: dict, mesh: DeviceMesh, device: torch.device) -> nn.Module:
     return model
 
 
-def build_controller(cfg: dict, model: nn.Module, checkpoint: BestCheckpoint, log_dir: str) -> FTSController:
-    """Build the controller from the configuration: the counterpart of the Lightning example's
+def build_tuning_scheduler(cfg: dict, model: nn.Module, checkpoint: BestCheckpoint, log_dir: str) -> TuningScheduler:
+    """Build the tuning scheduler from the configuration: the counterpart of the Lightning example's
     ``FinetuningScheduler``, ``FTSEarlyStopping`` and ``FTSCheckpoint`` callbacks and its optimizer and lr scheduler
     configuration."""
     optimizer_cls = resolve_class_path(cfg["optimizer"]["class_path"])
@@ -126,7 +126,7 @@ def build_controller(cfg: dict, model: nn.Module, checkpoint: BestCheckpoint, lo
     if cfg.get("lr_scheduler"):
         lr_scheduler_cls = resolve_class_path(cfg["lr_scheduler"]["class_path"])
         lr_scheduler = partial(lr_scheduler_cls, **cfg["lr_scheduler"].get("init_args", {}))
-    return FTSController(
+    return TuningScheduler(
         model,
         example_path(cfg["ft_schedule"]),
         optimizer=partial(optimizer_cls, **cfg["optimizer"].get("init_args", {})),
@@ -145,13 +145,13 @@ def local_value(t: torch.Tensor) -> torch.Tensor:
 
 
 def mean_across_ranks(total: torch.Tensor, count: int) -> float:
-    """Average a per-rank mean over every rank, so each rank reports the same metric to the controller."""
+    """Average a per-rank mean over every rank, so each rank reports the same metric to the tuning scheduler."""
     value = (total / max(count, 1)).reshape(1)
     dist.all_reduce(value, op=dist.ReduceOp.SUM)
     return value.item() / dist.get_world_size()
 
 
-def train(cfg: dict, fts: FTSController, model: nn.Module, mesh: DeviceMesh, device: torch.device,
+def train(cfg: dict, fts: TuningScheduler, model: nn.Module, mesh: DeviceMesh, device: torch.device,
           limit_train_batches: int | None = None, limit_val_batches: int | None = None) -> list[dict[str, Any]]:
     """Run the scheduled fine-tuning loop and return a record of each epoch."""
     dp_mesh, data_cfg = mesh["data_parallel"], cfg["data"]
@@ -228,7 +228,7 @@ def main(argv: list[str] | None = None) -> None:
     torch.cuda.set_device(device)
     dist.init_process_group(backend="nccl", device_id=device)
     try:
-        if dist.get_rank() == 0:  # the controller reports phase transitions through this logger, from rank zero
+        if dist.get_rank() == 0:  # the tuning scheduler reports phase transitions through this logger, from rank zero
             fts_log = logging.getLogger("finetuning_scheduler")
             fts_log.setLevel(logging.INFO)
             fts_log.addHandler(logging.StreamHandler(sys.stdout))
@@ -237,7 +237,7 @@ def main(argv: list[str] | None = None) -> None:
         model = build_model(cfg, mesh, device)
         log_dir = os.path.join(cfg["output_dir"], cfg["run_name"])
         best = BestCheckpoint(os.path.join(log_dir, "checkpoints"), **cfg["checkpoint"])
-        fts = build_controller(cfg, model, best, log_dir)
+        fts = build_tuning_scheduler(cfg, model, best, log_dir)
         history = train(cfg, fts, model, mesh, device, args.limit_train_batches, args.limit_val_batches)
         if dist.get_rank() == 0:
             summary = {"run_name": cfg["run_name"], "mesh": {"data_parallel": dp, "tensor_parallel": tp},

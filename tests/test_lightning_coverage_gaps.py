@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Lightning callback, host, bridge and strategy adapter paths the rest of the suite does not reach (#49)."""
+"""Lightning callback, interface, bridge and strategy adapter paths the rest of the suite does not reach (#49)."""
 from types import SimpleNamespace
 
 import pytest
@@ -22,9 +22,9 @@ from torch.nn.parallel import DistributedDataParallel
 from finetuning_scheduler import FinetuningScheduler
 from finetuning_scheduler.core.compile import compile_schedule
 from finetuning_scheduler.core.views import CanonicalView
-from finetuning_scheduler.lightning.controller_bridge import FTSCheckpointPolicy, LightningPhaseExecutor
+from finetuning_scheduler.lightning.tuning_scheduler_bridge import FTSCheckpointPolicy, LightningPhaseExecutor
 from finetuning_scheduler.lightning.fts import _optimizer_class_name
-from finetuning_scheduler.lightning.host import LightningHost
+from finetuning_scheduler.lightning.interface import LightningInterface
 from finetuning_scheduler.strategies.plan import _reshards_after_forward
 from finetuning_scheduler.strategy_adapters import (FSDPStrategyAdapter, ModelParallelStrategyAdapter,
                                                     StrategyAdapter)
@@ -37,9 +37,10 @@ THREE_PHASES = {0: {"params": ["model.2.weight", "model.2.bias"], "max_transitio
 
 
 class LegacyStepFTS(FinetuningScheduler):
-    """The callback with its own transitions rather than its host-driven controller's (``_use_fts_controller``)."""
+    """The callback with its own transitions rather than its externally driven tuning scheduler's
+    (``_use_tuning_scheduler``)."""
 
-    _use_fts_controller = False
+    _use_tuning_scheduler = False
 
 
 def test_legacy_step_without_restoring_best(tmp_path):
@@ -51,13 +52,13 @@ def test_legacy_step_without_restoring_best(tmp_path):
                       limit_train_batches=2, limit_val_batches=1, enable_progress_bar=False,
                       enable_model_summary=False, logger=False)
     trainer.fit(model)
-    assert fts._fts_controller is None and fts.curr_depth == 2
+    assert fts._tuning_scheduler is None and fts.curr_depth == 2
     assert all(p.requires_grad for p in model.parameters())
     assert len(trainer.optimizers[0].param_groups) == 3
 
 
-def test_phase_hooks_refused_without_the_controller():
-    with pytest.raises(MisconfigurationException, match="need the callback's controller"):
+def test_phase_hooks_refused_without_the_tuning_scheduler():
+    with pytest.raises(MisconfigurationException, match="need the callback's tuning scheduler"):
         LegacyStepFTS().add_phase_hook(lambda event: None)
 
 
@@ -124,14 +125,14 @@ def test_checkpoint_policy_reports_the_lightning_checkpoint_callback():
     assert empty.best_path is None and empty.best_score is None and empty.config() == {"monitor": None}
 
 
-def _host(world_size, pl_module=None):
+def _interface(world_size, pl_module=None):
     trainer = SimpleNamespace(world_size=world_size, strategy=SimpleNamespace(root_device=torch.device("cpu")))
-    return LightningHost(trainer, pl_module if pl_module is not None else nn.Linear(1, 1))
+    return LightningInterface(trainer, pl_module if pl_module is not None else nn.Linear(1, 1))
 
 
-def test_host_collectives_with_several_ranks(monkeypatch):
-    """With more than one rank the host reduces and gathers through ``torch.distributed`` (faked here: a CPU test
-    has no multi-rank process group)."""
+def test_interface_collectives_with_several_ranks(monkeypatch):
+    """With more than one rank the interface reduces and gathers through ``torch.distributed`` (faked here: a CPU
+    test has no multi-rank process group)."""
     calls = []
 
     def fake_all_reduce(t, op):
@@ -144,22 +145,22 @@ def test_host_collectives_with_several_ranks(monkeypatch):
 
     monkeypatch.setattr(torch.distributed, "all_reduce", fake_all_reduce)
     monkeypatch.setattr(torch.distributed, "all_gather_object", fake_all_gather_object)
-    host = _host(world_size=2)
-    assert host.reduce_max(3) == 7 and host.reduce_any(False) is True
-    assert host.all_gather_object("r0") == ["r0", "r0-peer"]
+    interface = _interface(world_size=2)
+    assert interface.reduce_max(3) == 7 and interface.reduce_any(False) is True
+    assert interface.all_gather_object("r0") == ["r0", "r0-peer"]
     assert calls == [("all_reduce", torch.distributed.ReduceOp.MAX)] * 2 + [("all_gather_object", 2)]
-    single = _host(world_size=1)
+    single = _interface(world_size=1)
     assert single.reduce_max(3) == 3 and single.all_gather_object("r0") == ["r0"]
 
 
 @pytest.mark.parametrize("compiler, resets", [("dynamo", 1), ("other", 0), (None, 0)])
-def test_host_compile_reset_follows_the_modules_compiler(monkeypatch, compiler, resets):
+def test_interface_compile_reset_follows_the_modules_compiler(monkeypatch, compiler, resets):
     calls = []
     monkeypatch.setattr(torch._dynamo, "reset", lambda: calls.append("reset"))
     module = nn.Linear(1, 1)
     if compiler is not None:
         module._compiler_ctx = {"compiler": compiler}
-    _host(world_size=1, pl_module=module).on_compile_reset()
+    _interface(world_size=1, pl_module=module).on_compile_reset()
     assert len(calls) == resets
 
 

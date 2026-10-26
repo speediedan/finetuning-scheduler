@@ -9,12 +9,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""``FTSController`` on a model-parallel toy transformer (pool cases, gloo or NCCL).
+"""``TuningScheduler`` on a model-parallel toy transformer (pool cases, gloo or NCCL).
 
 These mirror the Lightning callback's model-parallel tests (``tests/test_model_parallel.py``) on the same toy
-transformer and phase schedule, with the schedule's names unprefixed (the controller is given the transformer itself).
-Each rank trains on an equal shard of every batch, so FSDP2's gradient averaging makes a data-parallel run match a
-single-process run on the full batch; under tensor parallelism every rank sees the whole batch.
+transformer and phase schedule, with the schedule's names unprefixed (the tuning scheduler is given the transformer
+itself). Each rank trains on an equal shard of every batch, so FSDP2's gradient averaging makes a data-parallel run
+match a single-process run on the full batch; under tensor parallelism every rank sees the whole batch.
 """
 import contextlib
 import math
@@ -29,7 +29,7 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.parallel import loss_parallel
 from torch.nn.attention import SDPBackend
 
-from finetuning_scheduler import FTSController, TorchHost
+from finetuning_scheduler import TuningScheduler, TorchInterface
 from finetuning_scheduler.core.checkpoint import BestCheckpoint
 from tests.dist_cases._mp_models import FTSToyTransformer, gen_apply_transformer_tp_plan, TestModelArgs
 
@@ -88,11 +88,12 @@ def _loss(model: nn.Module, tokens: torch.Tensor, tp_loss_parallel: bool = False
     return loss.detach()
 
 
-def _controller(model, ckpt_dir=None, restore_best=False, callback=None):
+def _tuning_scheduler(model, ckpt_dir=None, restore_best=False, callback=None):
     """``callback`` is ``(where, fn)``: a gate (``"gate"``) or a phase hook (``"start"`` or ``"end"``)."""
     checkpoint = BestCheckpoint(ckpt_dir, "val_loss") if ckpt_dir else None
-    fts = FTSController(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), transition=None,
-                        host=TorchHost(model), checkpoint=checkpoint, restore_best=restore_best and bool(ckpt_dir))
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), transition=None,
+                          interface=TorchInterface(model), checkpoint=checkpoint,
+                          restore_best=restore_best and bool(ckpt_dir))
     if callback is not None:
         where, fn = callback
         if where == "gate":
@@ -206,7 +207,7 @@ def fsdp(ctx, epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, ch
     data, shard = _data(epochs, steps, batch, seed), _shard(ctx, batch)
     callback = None if callback_eval is None else (
         callback_eval, lambda event: _evaluate(model, data[0, 0, shard], ctx.device) or True)
-    fts = _controller(model, ckpt_dir, restore_best=ckpt_dir is not None, callback=callback)
+    fts = _tuning_scheduler(model, ckpt_dir, restore_best=ckpt_dir is not None, callback=callback)
     path = _train(fts, model, data, shard, ctx.device, epochs, val=val, evaluate=evaluate)
     return {"path": path, "layout": _fsdp_layout(model, planned, ctx.world_size), "params": _params(model),
             "unmoved": _unmoved(model, initial),
@@ -221,28 +222,29 @@ def reference(epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, ck
     """The single-process, full-batch run the parallel cases are compared against."""
     model = _model(seed, torch.device("cpu"))
     initial = _params(model)
-    fts = _controller(model, ckpt_dir, restore_best=ckpt_dir is not None)
+    fts = _tuning_scheduler(model, ckpt_dir, restore_best=ckpt_dir is not None)
     path = _train(fts, model, _data(epochs, steps, batch, seed), slice(None), torch.device("cpu"), epochs, val=val)
     return {"path": path, "params": _params(model), "restored": fts.restored_count, "unmoved": _unmoved(model, initial)}
 
 
 def fsdp_resume(ctx, ckpt_dir: str, epochs: int = 3, split: int = 2, steps: int = 2, batch: int = 4, seed: int = 7,
                 val: list | None = None, hook_eval: bool = False) -> dict:
-    """Train ``split`` epochs, save (a DCP directory), load into a fresh sharded model and controller, finish.
+    """Train ``split`` epochs, save (a DCP directory), load into a fresh sharded model and tuning scheduler,
+    finish.
 
     With
-    ``hook_eval``, the fresh controller's phase-0 start hook runs a forward-only pass before the load.
+    ``hook_eval``, the fresh tuning scheduler's phase-0 start hook runs a forward-only pass before the load.
     """
     data, shard = _data(epochs, steps, batch, seed), _shard(ctx, batch)
     first_model = _model(seed, ctx.device)
     _fsdp_plan(first_model, ctx.mesh())
-    first = _controller(first_model, os.path.join(ckpt_dir, "best"), restore_best=True)
+    first = _tuning_scheduler(first_model, os.path.join(ckpt_dir, "best"), restore_best=True)
     path = _train(first, first_model, data, shard, ctx.device, split, val=val)
     saved = first.save(os.path.join(ckpt_dir, "resume"))
     model = _model(seed + 100, ctx.device)  # different initial weights: the load must overwrite them
     _fsdp_plan(model, ctx.mesh())
     hook = ("start", lambda event: _evaluate(model, data[0, 0, shard], ctx.device)) if hook_eval else None
-    fts = _controller(model, os.path.join(ckpt_dir, "best"), restore_best=True, callback=hook)
+    fts = _tuning_scheduler(model, os.path.join(ckpt_dir, "best"), restore_best=True, callback=hook)
     fts.load(saved)
     path = _train(fts, model, data, shard, ctx.device, epochs, val=val, start_path=path)
     return {"path": path, "params": _params(model), "saved_is_dir": os.path.isdir(saved)}
@@ -254,7 +256,7 @@ def tp(ctx, epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, tp_l
     mesh = ctx.mesh((ctx.world_size,), ("tensor_parallel",))
     model = gen_apply_transformer_tp_plan(_model(seed, ctx.device, math_sdpa=True), mesh, tp_loss_parallel)
     initial = _params(model)
-    fts = _controller(model, ckpt_dir, restore_best=ckpt_dir is not None)
+    fts = _tuning_scheduler(model, ckpt_dir, restore_best=ckpt_dir is not None)
     path = _train(fts, model, _data(epochs, steps, batch, seed), slice(None), ctx.device, epochs, val=val,
                   tp_loss_parallel=tp_loss_parallel)
     return {"path": path, "params": _params(model), "restored": fts.restored_count, "unmoved": _unmoved(model, initial)}
@@ -264,8 +266,8 @@ def partial_plan(ctx, epochs: int = 3, steps: int = 2, batch: int = 4, seed: int
     """A plan that leaves the root unsharded (as ``fsdp_cm_only`` does).
 
     ``layers.1`` is then a root FSDP module whose parameters are all frozen in phase 0, so FSDP2 keeps its unsharded
-    parameters registered after its forward; the controller must reshard before thawing them in phase 1. The
-    embeddings stay plain tensors, whose gradients nothing synchronizes: the controller warns.
+    parameters registered after its forward; the tuning scheduler must reshard before thawing them in phase 1. The
+    embeddings stay plain tensors, whose gradients nothing synchronizes: the tuning scheduler warns.
     """
     import warnings
 
@@ -274,7 +276,7 @@ def partial_plan(ctx, epochs: int = 3, steps: int = 2, batch: int = 4, seed: int
     initial = _params(model)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        fts = _controller(model)
+        fts = _tuning_scheduler(model)
     path = _train(fts, model, _data(epochs, steps, batch, seed), _shard(ctx, batch), ctx.device, epochs)
     plain = {n: p.detach().float().cpu().flatten().tolist() for n, p in model.named_parameters()
              if not isinstance(p, DTensor)}
@@ -290,7 +292,7 @@ def refused_wrappers(ctx) -> dict:
 
     def attempt(model):
         try:
-            _controller(model)
+            _tuning_scheduler(model)
         except FTSConfigurationError as err:
             return str(err).split(",")[0]
         return None
@@ -315,6 +317,6 @@ def warn_2d(ctx, seed: int = 7) -> dict:
         fully_shard(model.get_submodule(name), mesh=mesh["data_parallel"])
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        _controller(model)
+        _tuning_scheduler(model)
     return {"warned": [str(w.message) for w in caught if "not synchronized" in str(w.message)],
             "tok_embeddings_is_dtensor": isinstance(model.tok_embeddings.weight, DTensor)}

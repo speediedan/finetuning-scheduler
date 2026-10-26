@@ -11,9 +11,9 @@ are not documented as public API.
     :toctree: api
     :nosignatures:
 
-    core.controller
+    core.tuning_scheduler
     core.transitions
-    core.host
+    core.interface
     core.checkpoint
     core.executor
     core.views
@@ -32,5 +32,5 @@ are not documented as public API.
     core.config
     core.fingerprint
     core.exceptions
-    lightning.host
-    lightning.controller_bridge
+    lightning.interface
+    lightning.tuning_scheduler_bridge
