@@ -99,7 +99,7 @@ def test_default_schedule_through_a_view():
 
 def test_attached_view_is_discovered():
     view = one_to_many_view()
-    view.root.fts_tunable_view = view
+    view.root.tunable_view = view
     fts = TuningScheduler(view.root, {0: {"params": ["embed.W_E"]}}, optimizer=SGD)
     fts.setup()
     assert fts.view.view is view
@@ -216,7 +216,7 @@ def test_minimal_view_hashes_saves_and_loads(tmp_path):
 
 def test_attached_view_is_described_before_setup():
     view = one_to_many_view()
-    view.root.fts_tunable_view = view
+    view.root.tunable_view = view
     fts = TuningScheduler(view.root, {0: {"params": ["embed.W_E"]}}, optimizer=SGD)
     before = fts.config_dict()["view"]
     fts.setup()

@@ -195,7 +195,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
         scheme = as_view(attached).support().naming_scheme
         if scheme != "physical":
             raise MisconfigurationException(
-                f"{type(self.pl_module).__name__} carries a `fts_tunable_view` ({type(attached).__qualname__}) whose"
+                f"{type(self.pl_module).__name__} carries a `tunable_view` ({type(attached).__qualname__}) whose"
                 f" naming scheme is {scheme!r}, which the FSDP (FSDP1) strategy does not support: it schedules through"
                 " the module's own parameter names, so only a view with the 'physical' naming scheme can be attached."
                 " Use `ModelParallelStrategy` (FSDP2) to fine-tune through logical names."

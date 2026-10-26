@@ -19,13 +19,20 @@ through the view's *logical* names, and Fine-Tuning Scheduler thaws, optimizes a
 they stand for. One logical name may stand for several physical tensors, and a view may thaw related tensors (a block's
 normalization layer, for example) together with the ones a phase names.
 
+The protocol is independent of Fine-Tuning Scheduler, which is one consumer of it. It lives in
+:mod:`finetuning_scheduler.tunable_view`, a package that imports only ``torch`` and the standard library, and is to be
+published as a distribution of its own in a later release; :mod:`finetuning_scheduler.core.views` and
+:mod:`finetuning_scheduler.core.roles` re-export it for Fine-Tuning Scheduler's users. A view can therefore be written
+against the protocol alone.
+
 Views work with both interfaces: :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` (pass ``view=``)
 and the Lightning callback (attach the view to the ``LightningModule``). A model without a view is scheduled through
 :class:`~finetuning_scheduler.core.views.CanonicalView`, the identity view, so nothing changes for existing schedules.
 
 Writing a View
 **************
-A view needs four members; Fine-Tuning Scheduler supplies the rest when a view does not define them.
+A view needs four members; the protocol defines a default for each of the rest, applied when a view does not define
+it.
 
 - ``root``: the module whose parameters the optimizer and checkpoints see (the ``LightningModule`` under Lightning).
 - ``support()``: a :class:`~finetuning_scheduler.core.views.TunableSupport` record. It says whether the model can be
@@ -37,8 +44,16 @@ A view needs four members; Fine-Tuning Scheduler supplies the rest when a view d
 The optional members (:class:`~finetuning_scheduler.core.views.TunableViewExtras`) are ``logical_named_parameters``
 (required when the naming scheme is not ``"physical"``), ``coupled``, ``depth_groups``, ``roles``, the checkpoint pair
 and ``promote``. :class:`~finetuning_scheduler.core.views.ViewDefaults` implements every default, for implementers who
-prefer to inherit. A view need not inherit from any Fine-Tuning Scheduler class. Members are methods: a view whose
-``roles`` (for example) is a dictionary rather than a method returning one is refused.
+prefer to inherit. A view need not inherit from any class. Members are methods: a view whose ``roles`` (for example) is
+a dictionary rather than a method returning one is refused.
+
+A view that does not satisfy the protocol (one lacking a required member, or whose ``support()`` returns something
+other than a :class:`~finetuning_scheduler.core.views.TunableSupport`) raises
+:class:`~finetuning_scheduler.tunable_view.errors.TunableViewError`, as does a view's ``to_physical`` given a name it
+cannot resolve (:class:`~finetuning_scheduler.tunable_view.errors.Unresolvable`, a subclass). A schedule or
+configuration that is invalid, including one whose names a view cannot resolve, raises
+:class:`~finetuning_scheduler.core.exceptions.FTSConfigurationError` (under Lightning, also a
+``MisconfigurationException``).
 
 .. code-block:: python
 
@@ -142,12 +157,12 @@ every checkpoint's and export's metadata.
 
 Views With the Lightning Callback
 *********************************
-Attach the view to the ``LightningModule`` as ``fts_tunable_view``, rooted at the module itself:
+Attach the view to the ``LightningModule`` as ``tunable_view``, rooted at the module itself:
 
 .. code-block:: python
 
     module = MyLightningModule()
-    module.fts_tunable_view = MyView(module)
+    module.tunable_view = MyView(module)
     trainer = Trainer(callbacks=[FinetuningScheduler(ft_schedule="schedule.yaml")])
     trainer.fit(module)
 
@@ -167,9 +182,10 @@ through views and selectors as the built-in adapters do.
 
 Testing a View
 **************
-:class:`~finetuning_scheduler.testing.conformance.TunableViewConformance` checks a view implementation against the
-contract: the name mapping, thawing, an optimizer step, the checkpoint round trip, refusals, roles and promotion. Which
-cases apply is decided by the view's own support record, and a run in which no case applies fails, so a view cannot
+:class:`~finetuning_scheduler.tunable_view.conformance.ViewConformance` checks a view implementation against the
+protocol: the name mapping, the checkpoint round trip, roles and promotion, which hold whatever consumes the view.
+:class:`~finetuning_scheduler.testing.conformance.TunableViewConformance` adds the cases Fine-Tuning Scheduler relies on:
+schedule compilation, thawing, an optimizer step and refusals. In both, which cases apply is decided by the view's own support record, and a run in which no case applies fails, so a view cannot
 pass vacuously. It needs neither pytest nor Lightning:
 
 .. code-block:: python

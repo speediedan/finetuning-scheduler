@@ -26,6 +26,7 @@ from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.schedule import refuse_direct_api_keys
 from finetuning_scheduler.core.transitions import GateResult
 from finetuning_scheduler.testing.fixtures import InterventionModel, ROLES
+from finetuning_scheduler.tunable_view import TunableViewError
 
 SGD = partial(torch.optim.SGD, lr=0.1)
 LENS = ["lens.bias", "lens.weight"]
@@ -173,7 +174,7 @@ def test_a_view_that_renames_on_promotion_refuses():
             return {n: f"{n}_promoted" for n in physical}
 
     fts = _tuning_scheduler(model, Renaming(model, roles=ROLES))
-    with pytest.raises(FTSConfigurationError, match="must keep each tensor's name"):
+    with pytest.raises(TunableViewError, match="must keep each tensor's name"):
         for epoch in fts.epochs(2):
             _epoch(fts, epoch)
 

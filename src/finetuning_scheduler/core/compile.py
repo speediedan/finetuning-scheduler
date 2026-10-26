@@ -37,7 +37,7 @@ from finetuning_scheduler.core.dist import rank_zero_debug, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.roles import is_frozen_role, is_role_selector, role_kind, select
 from finetuning_scheduler.core.schedule import parse_promote, resolve_param_entries, shared_params_ref
-from finetuning_scheduler.core.views import as_view, BoundView, Unresolvable
+from finetuning_scheduler.core.views import as_view, BoundView, ScheduleUnresolvable, Unresolvable
 
 
 @dataclass(frozen=True)
@@ -105,7 +105,7 @@ class CompiledSchedule:
         """The physical parameters compiled logical names stand for, in order and without duplicates."""
         unknown = [n for n in logical if n not in self.logical_to_physical]
         if unknown:
-            raise Unresolvable(unknown, "They are not names this compiled schedule resolved.")
+            raise ScheduleUnresolvable(unknown, "They are not names this compiled schedule resolved.")
         return list(dict.fromkeys(p for n in logical for p in self.logical_to_physical[n]))
 
     def module_map(self) -> dict[int, set[str]]:
@@ -335,9 +335,9 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
         try:
             mapped = dict(bound.to_physical(logical)) if logical else {}
         except Unresolvable as err:
-            raise Unresolvable(err.names, f"(phase {depth})") from err
+            raise ScheduleUnresolvable(err.names, f"(phase {depth})") from err
         except Exception as err:  # a view that does not raise `Unresolvable` itself: name what it failed on
-            raise Unresolvable(_unmapped(bound, logical),
+            raise ScheduleUnresolvable(_unmapped(bound, logical),
                                f"(phase {depth}; {type(bound.view).__name__}.to_physical raised"
                                f" {type(err).__name__}: {err})") from err
         logical_to_physical.update({k: tuple(v) for k, v in mapped.items()})
