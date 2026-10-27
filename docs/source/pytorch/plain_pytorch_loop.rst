@@ -185,6 +185,30 @@ checkpoints remain; if its best checkpoint or rollback point has been removed,
 :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load` raises ``FileNotFoundError`` rather than
 restoring the wrong state later.
 
+A training loop that writes its own checkpoint (the model, the optimizer and whatever else the loop owns) keeps the
+tuning scheduler's part of it with
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.resume_state` rather than writing a second file:
+everything :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save` writes beside the model and
+optimizer, which are left to the loop. It marks the resume point as a save does. To resume, call
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load_resume_state` after ``setup()`` and before
+loading the model and optimizer state, which go into the optimizer it rebuilt (``fts.optimizer``):
+
+.. code-block:: python
+
+    torch.save(
+        {"model": model.state_dict(), "optimizer": fts.optimizer.state_dict(), "fts": fts.resume_state()}, "run/last.pt"
+    )
+
+    # later, in a fresh process, after building the same model, schedule and tuning scheduler
+    fts.setup()
+    ckpt = torch.load("run/last.pt", weights_only=False)
+    fts.load_resume_state(ckpt["fts"])
+    model.load_state_dict(ckpt["model"])
+    fts.optimizer.load_state_dict(ckpt["optimizer"])
+
+Pass ``rng=False`` to :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.resume_state` when the loop's
+checkpoint already holds the random streams.
+
 Distributed Training
 ********************
 Shard the model yourself with FSDP2 (``torch.distributed.fsdp.fully_shard``), tensor parallelism

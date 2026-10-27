@@ -174,8 +174,8 @@ class TuningScheduler:
             state is saved whenever it reports a new best.
         restore_best: Restore the best checkpoint's model, optimizer and lr scheduler state at each phase boundary, as
             the Lightning callback does. Defaults to ``True`` when a ``checkpoint`` policy is given.
-        capture_rng: Include every random generator's state in :meth:`save`, so :meth:`load` resumes the random
-            streams exactly.
+        capture_rng: Include every random generator's state in :meth:`save` (and, by default, in
+            :meth:`resume_state`), so :meth:`load` resumes the random streams exactly.
         max_depth: The deepest phase to run; ``-1`` runs every phase.
         base_max_lr: The default learning rate of phases after phase 0 that do not set ``lr``.
         enforce_phase0_params: Reconfigure an optimizer instance whose parameters differ from phase 0's.
@@ -1123,7 +1123,7 @@ class TuningScheduler:
     # ------------------------------------------------------------------------------------------------------------------
     def register_stateful(self, name: str, obj: Any, *, restore_on_best: bool = False) -> None:
         """Include ``obj`` (anything with ``state_dict``/``load_state_dict``, such as a sampler or a data position)
-        in :meth:`save` and :meth:`load`, and in best checkpoints.
+        in :meth:`save` and :meth:`load` (and :meth:`resume_state`), and in best checkpoints.
 
         With ``restore_on_best``, it is also restored when the
         best checkpoint is (at a phase boundary or by :meth:`restore_best`).
@@ -1131,6 +1131,14 @@ class TuningScheduler:
         if not (hasattr(obj, "state_dict") and hasattr(obj, "load_state_dict")):
             raise FTSConfigurationError(f"`{name}` needs `state_dict()` and `load_state_dict()` to be registered.")
         self._statefuls[name] = (obj, restore_on_best)
+
+    def _stateful_states(self) -> dict[str, Any]:
+        return {name: obj.state_dict() for name, (obj, _) in self._statefuls.items()}
+
+    def _load_stateful_states(self, saved: Mapping[str, Any], which: Literal["all", "on_best"]) -> None:
+        for name, (obj, restore_on_best) in self._statefuls.items():
+            if name in saved and (which == "all" or restore_on_best):
+                obj.load_state_dict(saved[name])
 
     def add_gate(self, fn: Callable[[GateEvent], GateResult | bool], *, rank_zero_only: bool = False,
                  isolate_rng: bool | None = None) -> RemovableHandle:
@@ -1223,7 +1231,7 @@ class TuningScheduler:
             "optimizer_class": type(optimizer).__qualname__,
             "param_groups": core_phase.map_param_groups(optimizer.param_groups, {p: n for n, p in named.items()}),
             "lr_schedulers": [s.state_dict() for s in self.lr_schedulers],
-            "statefuls": {name: obj.state_dict() for name, (obj, _) in self._statefuls.items()},
+            "statefuls": self._stateful_states(),
             "schedule_hash": config_hash({"schedule": self._schedule}),
             "config_hash": self.config_hash,
             "versions": self.versions(),
@@ -1253,7 +1261,7 @@ class TuningScheduler:
         path = os.path.normpath(os.fspath(path))  # `ckpt/` and `ckpt` are one checkpoint
         core_phase.reshard_fsdp_modules(self.model)
         # registered state (a data-loader position, for example) and random streams are per rank
-        statefuls = {name: obj.state_dict() for name, (obj, _) in self._statefuls.items()}
+        statefuls = self._stateful_states()
         per_rank = (self._interface.all_gather_object({"statefuls": statefuls, "rng": rng_state})
                     if self._interface.world_size > 1 else None)
         if self._sharded:
@@ -1334,10 +1342,7 @@ class TuningScheduler:
         if with_optimizer:
             for sched, state_ in zip(self.lr_schedulers, meta["lr_schedulers"]):
                 sched.load_state_dict(state_)
-        saved_statefuls = self._for_this_rank(meta, "statefuls") or meta["statefuls"]
-        for name, (obj, restore_on_best) in self._statefuls.items():
-            if name in saved_statefuls and (statefuls == "all" or restore_on_best):
-                obj.load_state_dict(saved_statefuls[name])
+        self._load_stateful_states(self._for_this_rank(meta, "statefuls") or meta["statefuls"], statefuls)
         return meta
 
     def _for_this_rank(self, meta: Mapping[str, Any], key: str) -> Any:
@@ -1540,6 +1545,57 @@ class TuningScheduler:
             restore_rng_state(self._for_this_rank(meta, "rng"))
         elif "rng" in meta:
             restore_rng_state(meta["rng"])
+
+    def resume_state(self, *, rng: bool | None = None) -> dict[str, Any]:
+        """The state :meth:`save` writes beside the model and optimizer, for a training loop that checkpoints those
+        itself: the tuning scheduler's :meth:`state_dict`, its lr schedulers' state, the registered state and, with
+        ``rng`` (``capture_rng`` by default), every random generator's state.
+
+        Store it in the loop's own checkpoint and resume with :meth:`load_resume_state`. Like :meth:`save`, it marks
+        the resume point with the checkpoint policy, so the checkpoints the state refers to (the best checkpoint and
+        the rollback point) are kept until the next save. It is this process's state: registered state and random
+        streams are per rank, so under distributed training each rank keeps its own, as the loop keeps its own
+        per-rank state.
+
+        Args:
+            rng: Include every random generator's state; pass ``False`` when the loop's checkpoint holds the random
+                streams itself.
+        """
+        self._require_setup()
+        self._refuse_externally_driven("resume_state", resume=True)
+        capture = self.capture_rng if rng is None else rng
+        state = {
+            "version": STATE_VERSION,
+            "tuning_scheduler": self.state_dict(),
+            "lr_schedulers": [s.state_dict() for s in self.lr_schedulers],
+            "statefuls": self._stateful_states(),
+            "rng": capture_rng_state(self._interface.rng_devices()) if capture else None,
+        }
+        self._checkpoint_hook("mark_resume_point")  # keep the checkpoints this state refers to until the next save
+        return state
+
+    def load_resume_state(self, state: Mapping[str, Any]) -> None:
+        """Resume from :meth:`resume_state`. Call it after :meth:`setup` and before loading the model and optimizer
+        state from the loop's checkpoint.
+
+        It rebuilds the optimizer and lr schedulers phase by phase up to the saved depth (replaying any reinitialization
+        and promotion, which can change the model's checkpoint keys), then restores the lr schedulers', the registered
+        and (when saved) the random generators' state. Load the optimizer state into :attr:`optimizer` afterwards: a
+        reinitialization at an earlier phase replaces the optimizer object. Under distributed training, call it on
+        every rank with that rank's state.
+
+        Raises:
+            FTSConfigurationError: If the state belongs to a different fine-tuning schedule.
+            FileNotFoundError: If the checkpoint policy's best checkpoint or rollback point no longer exists.
+        """
+        self._require_setup()
+        self._refuse_externally_driven("load_resume_state", resume=True)
+        self.load_state_dict(state["tuning_scheduler"])
+        for sched, sched_state in zip(self.lr_schedulers, state["lr_schedulers"], strict=True):
+            sched.load_state_dict(sched_state)
+        self._load_stateful_states(state["statefuls"], "all")
+        if state.get("rng") is not None:
+            restore_rng_state(state["rng"])
 
     # ------------------------------------------------------------------------------------------------------------------
     # hooks, fingerprints and step counting
