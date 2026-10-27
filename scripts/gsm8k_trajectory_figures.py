@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LOGS = ROOT / "docs" / "notebook_artifacts" / "gsm8k" / "tensorboard_logs"
 OUT = ROOT / "src" / "fts_examples" / "notebooks" / "dev" / "gsm8k"
 PHASE_COLORS = ("#f4f1a3", "#c9b6e8", "#9db4f0", "#a6d8a6")
-PHASE_LABELS = ("phase 0:\nblocks 24 to 27", "phase 1:\n+ LoRA adapters", "phase 2:\n+ blocks 16 to 23",
+PHASE_LABELS = ("phase 0:\nLoRA adapters", "phase 1:\n+ blocks 24 to 27", "phase 2:\n+ blocks 16 to 23",
                 "phase 3:\n+ blocks 0 to 15")
 TASK_COLOR, RETENTION_COLOR, BASELINE_COLOR = "#e8603c", "#1f9bb5", "#7a7a7a"
 
