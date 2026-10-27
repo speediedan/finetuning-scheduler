@@ -60,6 +60,21 @@ the backend keeps them. The tuning scheduler builds its optimizer and lr schedul
 unless ``tuning_scheduler_kwargs`` passes them, and transition policies, checkpoint policies and ``max_depth`` pass
 through the same argument.
 
+A runnable example
+==================
+
+``fts_examples/interpretune_phased_tuning.py`` runs flexible fine-tuning through an interpretune training loop, on a CPU
+in seconds and with no downloads. A small, randomly initialized GPT-2 class model is tuned in three phases by
+``FTSCoreCallback``: the first phase thaws only a steering vector registered beside the model, selected by its role
+(``role:intervention:steer``) through the tunable view interpretune attaches, and later phases add the model's blocks.
+
+.. code-block:: bash
+
+    python src/fts_examples/interpretune_phased_tuning.py
+
+It needs an interpretune revision that is not yet released: the one pinned in ``requirements/ci/interpretune.txt``,
+which Fine-Tuning Scheduler's CI installs to test it.
+
 What each composition declares
 ==============================
 
