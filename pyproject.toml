@@ -276,6 +276,13 @@ install_cell = [
 docs_artifact_dir = "docs/notebook_artifacts"
 docs_render_command = "python scripts/render_notebook_docs.py"
 
+# The notebooks' defaults are sized for a Colab T4 (about an hour); the docs render tunes on more problems.
+[tool.notebook-publishing.docs_parameters."gsm8k/fts_gsm8k_pytorch"]
+TRAIN_SUBSET = 4000
+
+[tool.notebook-publishing.docs_parameters."gsm8k/fts_gsm8k_lightning"]
+TRAIN_SUBSET = 4000
+
 # Dependency groups for development (PEP 735)
 # These are NOT installed by default, only via uv pip install --group <name>
 [dependency-groups]
