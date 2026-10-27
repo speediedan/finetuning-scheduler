@@ -4,4 +4,4 @@
 # finetuning-scheduler>=2.15.0, so no interpretune release can carry it before 2.15.0 is published, and a git URL in
 # Fine-Tuning Scheduler's own metadata would block its upload. Move it to interpretune's main as its tuning work
 # lands, and to a released version once interpretune publishes one requiring finetuning-scheduler>=2.15.0.
-interpretune @ git+https://github.com/speediedan/interpretune@d548bd75e8605b325b394eb219d6867c27a1f4ce
+interpretune @ git+https://github.com/speediedan/interpretune@e2f5525a8b67661293888ce21b172f9d03993af0
