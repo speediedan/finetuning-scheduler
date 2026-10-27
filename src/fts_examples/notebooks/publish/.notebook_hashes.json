@@ -1,7 +1,7 @@
 {
   "src/fts_examples/notebooks/dev/gsm8k/fts_explicit_loss_anim.gif": "835fcb4f8f0d27f796c70e0a5225cf8c15d56e8b8fbe0d084f61e983a1298a1d",
-  "src/fts_examples/notebooks/dev/gsm8k/fts_gsm8k_lightning.ipynb": "02281b4d3012b51442a6720f75df808ab271f321d37151ba2418c96c30e89f18",
-  "src/fts_examples/notebooks/dev/gsm8k/fts_gsm8k_pytorch.ipynb": "4611d7dfce75b163c94e0b05333699ec14732b2bdbe0907ea6a62657fac441f5",
+  "src/fts_examples/notebooks/dev/gsm8k/fts_gsm8k_lightning.ipynb": "f6d08a5f1f69634e8d8e56c9b2a94e833f6ef32fdfaaa99d2888d5e546e94702",
+  "src/fts_examples/notebooks/dev/gsm8k/fts_gsm8k_pytorch.ipynb": "46ab3a297aab77822c682025f6d50b76596970bc18c9d8e2dfaaa15c9ba12c00",
   "src/fts_examples/notebooks/dev/gsm8k/logo_fts.png": "2ea31ac2b94dacb4301da51d2e3307fa9183bab5321fc51fa291c00fb2759664",
   "src/fts_examples/notebooks/dev/gsm8k/pytorch_fts_explicit_trajectory.png": "41409cc939cb76f3fd4d84b5a4fe3860849e17b58d919052ef7be6edb749edb3",
   "src/fts_examples/notebooks/dev/gsm8k/pytorch_retention_tradeoff.png": "352bc67eeae024edf81ccf38d0374f943e097840f1283dd14d7e153cf2f79e67"
