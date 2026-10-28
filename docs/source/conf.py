@@ -334,6 +334,8 @@ linkcheck_anchors_ignore_for_url = [
     # The Lightning docs are now a client-rendered app: every path, including a nonexistent one, returns the same
     # HTML shell, so no fragment on it can be resolved by ``linkcheck``.
     r"https://lightning\.ai/docs/.*",
+    # GitHub renders a source view's line anchors (``#L688``) client-side, so they never appear in the fetched HTML.
+    r"https://github\.com/[^/]+/[^/]+/blob/.*",
 ]
 
 # Stack Overflow answers ``linkcheck``'s requests with ``403 Forbidden`` (bot filtering) while the same URL redirects

@@ -99,7 +99,8 @@ def test_externally_driven_refusals():
     for loop_method in (lambda: next(fts.epochs(2)), fts.epoch_start, fts.epoch_end, fts.step_end):
         with pytest.raises(FTSConfigurationError, match="externally driven tuning scheduler refuses it"):
             loop_method()
-    for resume_method in (lambda: fts.save("x.pt"), lambda: fts.load("x.pt"), lambda: fts.load_state_dict({})):
+    for resume_method in (lambda: fts.save("x.pt"), lambda: fts.load("x.pt"), lambda: fts.load_state_dict({}),
+                          fts.resume_state, lambda: fts.load_resume_state({})):
         with pytest.raises(FTSConfigurationError, match="driving it saves and restores the training state"):
             resume_method()
     with pytest.raises(FTSConfigurationError, match="Gates are not supported"):
