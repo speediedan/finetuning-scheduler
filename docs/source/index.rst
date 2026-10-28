@@ -29,8 +29,8 @@ follows.
 .. note::
    If you're exploring Fine-Tuning Scheduler, this is a great place to start! :ref:`basic-usage` below walks through
    both interfaces, and the :ref:`examples<examples-overview>` include a tutorial notebook for each (the
-   :doc:`Lightning tutorial<examples/notebooks/superglue/fts_superglue_lightning>` and the :doc:`PyTorch API
-   tutorial<examples/notebooks/superglue/fts_superglue_pytorch>`) and, for those using the
+   :doc:`Lightning tutorial<examples/notebooks/gsm8k/fts_gsm8k_lightning>` and the :doc:`PyTorch API
+   tutorial<examples/notebooks/gsm8k/fts_gsm8k_pytorch>`) and, for those using the
    :py:class:`~lightning.pytorch.cli.LightningCLI`, a :ref:`CLI-based<scheduled-fine-tuning-superglue>` example.
 
 Setup
@@ -354,8 +354,8 @@ Where to Go Next
   logical parameter names.
 - **Either interface:** :doc:`lr scheduler<advanced/lr_scheduler_reinitialization>` and
   :doc:`optimizer<advanced/optimizer_reinitialization>` reinitialization at phase transitions.
-- **Examples:** the :ref:`examples<examples-overview>`, end to end: scheduled fine-tuning on SuperGLUE as a notebook
-  for each interface and through the ``LightningCLI``.
+- **Examples:** the :ref:`examples<examples-overview>`, end to end: scheduled fine-tuning for math reasoning (GSM8K) as
+  a notebook for each interface, and on SuperGLUE through the ``LightningCLI``.
 
 Footnotes
 *********
@@ -399,8 +399,8 @@ Footnotes
    :caption: Examples
 
    Overview <examples/index>
-   SuperGLUE notebook (Lightning) <examples/notebooks/superglue/fts_superglue_lightning>
-   SuperGLUE notebook (PyTorch API) <examples/notebooks/superglue/fts_superglue_pytorch>
+   GSM8K notebook (Lightning) <examples/notebooks/gsm8k/fts_gsm8k_lightning>
+   GSM8K notebook (PyTorch API) <examples/notebooks/gsm8k/fts_gsm8k_pytorch>
    SuperGLUE with the LightningCLI <examples/cli/superglue_cli>
 
 .. toctree::

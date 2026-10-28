@@ -98,7 +98,7 @@ details on that callback's configuration.
 For a practical end-to-end example of using
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` in implicit versus explicit modes,
 see :ref:`scheduled fine-tuning for SuperGLUE<scheduled-fine-tuning-superglue>` or the
-:doc:`notebook-based tutorial<../examples/notebooks/superglue/fts_superglue_lightning>`.
+:doc:`notebook-based tutorial<../examples/notebooks/gsm8k/fts_gsm8k_lightning>` (explicit mode).
 
 Resuming Scheduled Fine-Tuning Training Sessions
 ************************************************

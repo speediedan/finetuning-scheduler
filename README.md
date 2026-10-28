@@ -157,7 +157,7 @@ from finetuning_scheduler import FinetuningScheduler
 trainer = L.Trainer(callbacks=[FinetuningScheduler()])
 ```
 
-Get started by following [the Fine-Tuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/stable/index.html#example-scheduled-fine-tuning-for-superglue) or by following the [notebook-based](https://finetuning-scheduler.readthedocs.io/en/latest/examples/notebooks/superglue/fts_superglue_lightning.html) Fine-Tuning Scheduler tutorial.
+Get started by following [the Fine-Tuning Scheduler introduction](https://finetuning-scheduler.readthedocs.io/en/stable/index.html) which includes a [CLI-based example](https://finetuning-scheduler.readthedocs.io/en/stable/index.html#example-scheduled-fine-tuning-for-superglue) or by following the [notebook-based](https://finetuning-scheduler.readthedocs.io/en/latest/examples/notebooks/gsm8k/fts_gsm8k_lightning.html) Fine-Tuning Scheduler tutorial.
 
 ______________________________________________________________________
 
@@ -204,10 +204,13 @@ ______________________________________________________________________
 
 ## Examples
 
+### Scheduled Fine-Tuning for Math Reasoning
+
+- [Notebook-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/latest/examples/notebooks/gsm8k/fts_gsm8k_lightning.html)
+- [PyTorch API Notebook-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/latest/examples/notebooks/gsm8k/fts_gsm8k_pytorch.html) (experimental, new in 2.15)
+
 ### Scheduled Fine-Tuning For SuperGLUE
 
-- [Notebook-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/latest/examples/notebooks/superglue/fts_superglue_lightning.html)
-- [PyTorch API Notebook-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/latest/examples/notebooks/superglue/fts_superglue_pytorch.html) (experimental, new in 2.15)
 - [CLI-based Tutorial](https://finetuning-scheduler.readthedocs.io/en/stable/#example-scheduled-fine-tuning-for-superglue)
 - [FSDP Scheduled Fine-Tuning](https://finetuning-scheduler.readthedocs.io/en/stable/advanced/fsdp_scheduled_fine_tuning.html)
 - [LR Scheduler Reinitialization](https://finetuning-scheduler.readthedocs.io/en/stable/advanced/lr_scheduler_reinitialization.html) (advanced)

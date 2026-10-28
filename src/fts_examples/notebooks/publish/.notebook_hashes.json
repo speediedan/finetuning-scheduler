@@ -1,9 +1,8 @@
 {
-  "src/fts_examples/notebooks/dev/superglue/fts_explicit_loss_anim.gif": "835fcb4f8f0d27f796c70e0a5225cf8c15d56e8b8fbe0d084f61e983a1298a1d",
-  "src/fts_examples/notebooks/dev/superglue/fts_superglue_lightning.ipynb": "a5046ac9ea2c1a7fa8e6437fd0809c257e002a486edca21c8d1379ad61ead335",
-  "src/fts_examples/notebooks/dev/superglue/fts_superglue_pytorch.ipynb": "c2f710c25174ada6bc186c12822f6add58f84e0e6d0aa6816e1e1b245e40717a",
-  "src/fts_examples/notebooks/dev/superglue/logo_fts.png": "2ea31ac2b94dacb4301da51d2e3307fa9183bab5321fc51fa291c00fb2759664",
-  "src/fts_examples/notebooks/dev/superglue/pytorch_fts_explicit_trajectory.png": "c931840e257281161bd5c106e901bc4ea0de4e1b8277c018db34fe19db968d21",
-  "src/fts_examples/notebooks/dev/superglue/pytorch_fts_implicit_trajectory.png": "2be6d03da393c8f0fdf0628aaf86171a480d1fddc64b21e5cf8bd83c169d9547",
-  "src/fts_examples/notebooks/dev/superglue/side_by_side_yaml.png": "d190f0c9c0946347f77f109b4ff1e1d65bc2be70a1903defbf651b9bc75da281"
+  "src/fts_examples/notebooks/dev/gsm8k/fts_explicit_loss_anim.gif": "835fcb4f8f0d27f796c70e0a5225cf8c15d56e8b8fbe0d084f61e983a1298a1d",
+  "src/fts_examples/notebooks/dev/gsm8k/fts_gsm8k_lightning.ipynb": "32a9629c37963a425ce408d52924dd03f379bdc4421d5ee8593526aab99d1406",
+  "src/fts_examples/notebooks/dev/gsm8k/fts_gsm8k_pytorch.ipynb": "e7271ade0754ec5eef078faef37c739ff5d5b9d4652f3dd56ad7e6716f31a96f",
+  "src/fts_examples/notebooks/dev/gsm8k/logo_fts.png": "2ea31ac2b94dacb4301da51d2e3307fa9183bab5321fc51fa291c00fb2759664",
+  "src/fts_examples/notebooks/dev/gsm8k/pytorch_fts_explicit_trajectory.png": "cfa1597a28b612637b4da8e33ddc4643c1daff6dd99acb3b49769de26e2821e9",
+  "src/fts_examples/notebooks/dev/gsm8k/pytorch_retention_tradeoff.png": "6dc6c2941975e30b9081503bc8ddff45f915c8d9b52617dbe7ffcc84d2911602"
 }

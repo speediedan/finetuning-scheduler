@@ -270,15 +270,20 @@ colab_repo = "speediedan/finetuning-scheduler"
 colab_branch = "main"
 install_cell = [
     "# To run this notebook in a fresh environment (Colab, for example), uncomment the line below. The PyTorch API",
-    "# needs Fine-Tuning Scheduler 2.15, installed from main until 2.15 is released.",
-    "# %pip install 'finetuning-scheduler[examples] @ git+https://github.com/speediedan/finetuning-scheduler.git@main'",
+    "# needs Fine-Tuning Scheduler 2.15, installed from main until 2.15 is released. torchvision is named so it is",
+    "# upgraded with torch: a preinstalled torchvision built for an older torch (Colab's) fails to load, and",
+    "# transformers imports it.",
+    "# %pip install 'finetuning-scheduler[examples] @ git+https://github.com/speediedan/finetuning-scheduler.git@main' torchvision",
 ]
 docs_artifact_dir = "docs/notebook_artifacts"
 docs_render_command = "python scripts/render_notebook_docs.py"
 
-# the PyTorch tutorial's docs render runs every phase, so its fts_implicit run reaches the transition its review shows
-[tool.notebook-publishing.docs_parameters."superglue/fts_superglue_pytorch"]
-MAX_DEPTH = -1
+# The notebooks' defaults are sized for a Colab T4 (about an hour); the docs render tunes on more problems.
+[tool.notebook-publishing.docs_parameters."gsm8k/fts_gsm8k_pytorch"]
+TRAIN_SUBSET = 4000
+
+[tool.notebook-publishing.docs_parameters."gsm8k/fts_gsm8k_lightning"]
+TRAIN_SUBSET = 4000
 
 # Dependency groups for development (PEP 735)
 # These are NOT installed by default, only via uv pip install --group <name>
