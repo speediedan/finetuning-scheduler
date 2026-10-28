@@ -20,10 +20,10 @@ they stand for. One logical name may stand for several physical tensors, and a v
 normalization layer, for example) together with the ones a phase names.
 
 The protocol is independent of Fine-Tuning Scheduler, which is one consumer of it. It lives in
-:mod:`finetuning_scheduler.tunable_view`, a package that imports only ``torch`` and the standard library, and is to be
-published as a distribution of its own in a later release; :mod:`finetuning_scheduler.core.views` and
-:mod:`finetuning_scheduler.core.roles` re-export it for Fine-Tuning Scheduler's users. A view can therefore be written
-against the protocol alone.
+`venngram <https://github.com/speediedan/venngram>`_ (``venngram.tuning``, with the role vocabulary in
+``venngram.roles``), beside the address grammar schedules use, and Fine-Tuning Scheduler depends on it.
+``finetuning_scheduler.tunable_view``, :mod:`finetuning_scheduler.core.views` and :mod:`finetuning_scheduler.core.roles`
+re-export it for Fine-Tuning Scheduler's users. A view can therefore be written against the protocol alone.
 
 Views work with both interfaces: :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` (pass ``view=``)
 and the Lightning callback (attach the view to the ``LightningModule``). A model without a view is scheduled through
@@ -42,15 +42,16 @@ it.
 - ``to_logical(physical)``: physical names mapped back, for messages.
 
 The optional members (:class:`~finetuning_scheduler.core.views.TunableViewExtras`) are ``logical_named_parameters``
-(required when the naming scheme is not ``"physical"``), ``coupled``, ``depth_groups``, ``roles``, the checkpoint pair
-and ``promote``. :class:`~finetuning_scheduler.core.views.ViewDefaults` implements every default, for implementers who
+(required when the naming scheme is not ``"physical"``), ``coupled``, ``depth_groups``, ``roles``, the checkpoint pair,
+``promote`` and ``structure`` (where the root's tensors sit in its block structure, for addresses; the default finds the
+root's block list). :class:`~finetuning_scheduler.core.views.ViewDefaults` implements every default, for implementers who
 prefer to inherit. A view need not inherit from any class. Members are methods: a view whose ``roles`` (for example) is
 a dictionary rather than a method returning one is refused.
 
 A view that does not satisfy the protocol (one lacking a required member, or whose ``support()`` returns something
 other than a :class:`~finetuning_scheduler.core.views.TunableSupport`) raises
-:class:`~finetuning_scheduler.tunable_view.errors.TunableViewError`, as does a view's ``to_physical`` given a name it
-cannot resolve (:class:`~finetuning_scheduler.tunable_view.errors.Unresolvable`, a subclass). A schedule or
+:class:`~venngram.tuning.errors.TunableViewError`, as does a view's ``to_physical`` given a name it cannot resolve
+(:class:`~venngram.tuning.errors.Unresolvable`, a subclass). A schedule or
 configuration that is invalid, including one whose names a view cannot resolve, raises
 :class:`~finetuning_scheduler.core.exceptions.FTSConfigurationError` (under Lightning, also a
 ``MisconfigurationException``).
@@ -98,8 +99,8 @@ Compilation refuses a schedule whose phases share storage, a name the view canno
 tensor whose role is never thawed, naming the input. A digest of the compiled schedule is saved with every checkpoint,
 and resuming through a view that maps the schedule differently is refused.
 
-Roles and Selectors
-*******************
+Roles, Selectors and Addresses
+******************************
 A view may give tensors **roles** (``roles()``, physical parameter or buffer names to roles; anything unlisted is
 ``base``):
 
@@ -116,6 +117,66 @@ names parameters itself (see `Views With the Lightning Callback`_).
 .. code-block:: python
 
     schedule = {0: {"params": ["role:adapter"], "max_transition_epoch": 2}, 1: {"params": ["role:latent"]}}
+
+**Addresses (experimental).** A role selector is the simplest *address*:
+
+- **Fields.** An address is a record of fields that intersect: ``role``, ``layers``, ``module``, ``name``, ``leaf`` and
+  others.
+- **Algebra.** Addresses combine with ``&`` (intersection), ``-`` (difference) and ``|`` (union), with operators
+  delimited by spaces.
+- **Named sets.** ``@<set>`` references a set the schedule names.
+- **Grammar.** The grammar, the named-set documents (*address books*) and their resolution are
+  `venngram <https://github.com/speediedan/venngram>`_'s.
+
+An entry is an address only when it starts with a field prefix (``role:``, ``layers:``, ``module:`` and the others) or
+``@``, after any opening parentheses. Every parameter name and regex keeps its meaning.
+
+Thawing a subset of a role has three answers, and the third is the one that needs no change to the view:
+
+1. **Name the subsets as roles.** Give each group its own named role (``adapter:top``, ``adapter:mid``,
+   ``adapter:low``) in the view's ``roles``. ``role:adapter`` still selects every adapter and ``role:adapter:top`` one
+   group. A tensor has one role, so groups cannot overlap: the adapters of the top blocks and, separately, every
+   ``q_proj`` adapter cannot both be roles.
+2. **Fall back to a regex over names** (``model\.layers\.2[4-7]\..*lora_.*``). This gives up what the role gave: the
+   schedule no longer reads as "the adapters", and it depends on the adapter's parameter names.
+3. **Address the subset.** ``role:adapter & layers:-4:`` is the adapters of the top four blocks, in any model whose
+   block list the view finds. Sets are selectors rather than roles, so they may overlap. For example,
+   ``role:adapter & module:q_proj`` selects every ``q_proj`` adapter, including those in the top four blocks.
+
+``layers`` takes an index, a list, ``odd``, ``even``, or a half-open slice whose negative indices count from the depth
+(``-4:``, ``8:-4``). It counts the blocks of the root's block list, which a view reports through ``structure()``. The
+default finds the root's one top-level ``nn.ModuleList`` and refuses, naming each, when there are several.
+
+``module`` matches tensors under a module whose path ends with the pattern, on whole segments. ``name`` is a regex over
+tensor names, quoted in an address (``name:"head\..*"``).
+
+A schedule names its sets in a top-level ``addresses`` key. The key holds an inline book (a mapping with ``sets``, and
+optionally ``imports``), the path of an address book relative to the schedule file, or a list of paths:
+
+.. code-block:: yaml
+
+    addresses:
+      sets:
+        top: {role: adapter, layers: "-4:"}
+        rest: {role: adapter, exclude: "@top"}
+    0:
+      params: ["@top"]
+      max_transition_epoch: 2
+    1:
+      params: ["@rest"]
+
+**Refusals.** An address that does not resolve is refused, with every reason named. Examples:
+
+- it matches nothing;
+- it references a set no book defines;
+- it names a layer outside the model;
+- it needs architecture knowledge the view does not supply (``component:`` needs a vocabulary-backed structure provider,
+  such as interpretune's);
+- it addresses an activation site rather than tensors (``point:``);
+- it addresses units of a tensor (``units:``), which are tuned through a unit adapter of their own.
+
+Both interfaces accept addresses, in ``params`` and as ``promote`` sources. A ``params`` entry is a string. An address
+written as a mapping goes in the ``addresses`` sets and is referenced by ``@<set>``.
 
 Promotion
 *********
@@ -174,7 +235,7 @@ coupled tensors; use ``ModelParallelStrategy`` (FSDP2) to fine-tune through logi
 A third-party :class:`~finetuning_scheduler.strategy_adapters.StrategyAdapter` that renames parameters (it overrides
 ``logical_param_translation``, ``get_named_params_for_schedule_validation`` or ``gen_ft_schedule``, usually together
 with ``fts_optim_transform`` and ``validate_ft_sched``) keeps naming parameters itself, and takes precedence over an
-attached view, with a ``FutureWarning`` naming both; ``role:`` selectors are refused under it. Renaming through those
+attached view, with a ``FutureWarning`` naming both; addresses (``role:`` selectors among them) are refused under it. Renaming through those
 methods is deprecated in favor of a view and will be unsupported no earlier than 2.17. Sharding customization through
 ``StrategyAdapter`` subclasses is unaffected: an adapter that overrides only ``fts_optim_transform`` (calling
 ``super()`` first, which resolves an attached view's names) or only adds checks in ``validate_ft_sched`` schedules
@@ -182,7 +243,7 @@ through views and selectors as the built-in adapters do.
 
 Testing a View
 **************
-:class:`~finetuning_scheduler.tunable_view.conformance.ViewConformance` checks a view implementation against the
+:class:`~venngram.tuning.conformance.ViewConformance` checks a view implementation against the
 protocol: the name mapping, the checkpoint round trip, roles and promotion, which hold whatever consumes the view.
 :class:`~finetuning_scheduler.testing.conformance.TunableViewConformance` adds the cases Fine-Tuning Scheduler relies on:
 schedule compilation, thawing, an optimizer step and refusals. In both, which cases apply is decided by the view's own support record, and a run in which no case applies fails, so a view cannot

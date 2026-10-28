@@ -13,43 +13,24 @@ r"""
 Tunable View Protocol
 ^^^^^^^^^^^^^^^^^^^^^
 
-The tunable view protocol: the contract between the logical parameter names a schedule uses and the physical
-parameters an optimizer, checkpoint and sharding see, with a lifecycle role for each tensor. It is independent of
-Fine-Tuning Scheduler, which is one consumer of it.
-
-- :mod:`~finetuning_scheduler.tunable_view.views`: the :class:`~finetuning_scheduler.tunable_view.views.TunableView`
-  protocol, its support record, the defaults of its optional members and the identity view;
-- :mod:`~finetuning_scheduler.tunable_view.roles`: the role vocabulary and the ``role:`` selector grammar;
-- :mod:`~finetuning_scheduler.tunable_view.errors`: the errors the protocol raises;
-- :mod:`~finetuning_scheduler.tunable_view.conformance`: the conformance cases every implementation passes, whatever
-  consumes it.
-
-The package imports only ``torch`` and the standard library, and nothing else from Fine-Tuning Scheduler, so it can be
-published as a distribution of its own.
+The tunable view protocol now lives in `venngram <https://github.com/speediedan/venngram>`_ (``venngram.tuning``),
+beside the address grammar that schedules use, so both projects that consume it (Fine-Tuning Scheduler and
+interpretune) depend on one neutral package. This package re-exports it: ``finetuning_scheduler.tunable_view`` and its
+submodules ``views``, ``roles``, ``errors`` and ``conformance`` are venngram's own modules, so every name and every
+object is identical.
 
 .. warning:: This is an experimental API and may change in a future release.
 """
-from .conformance import ConformanceCase, ConformanceError, ConformanceReport, ViewConformance
-from .errors import TunableViewError, Unresolvable
-from .roles import ROLE_KINDS
-from .views import (as_view, BoundView, CanonicalView, resolve_view, TunableSupport, TunableView, TunableViewExtras,
-                    VIEW_ATTR, ViewDefaults)
+import sys
 
-__all__ = [
-    "as_view",
-    "BoundView",
-    "CanonicalView",
-    "ConformanceCase",
-    "ConformanceError",
-    "ConformanceReport",
-    "resolve_view",
-    "ROLE_KINDS",
-    "TunableSupport",
-    "TunableView",
-    "TunableViewError",
-    "TunableViewExtras",
-    "Unresolvable",
-    "VIEW_ATTR",
-    "ViewConformance",
-    "ViewDefaults",
-]
+import venngram.roles as roles
+from venngram.tuning import conformance, errors, views
+from venngram.tuning import *  # noqa: F401, F403
+from venngram.tuning import __all__ as _protocol_all
+
+# the submodules are venngram's modules themselves, so `finetuning_scheduler.tunable_view.roles` and
+# `venngram.roles` are one object (patching one patches the other)
+for _name, _module in {"roles": roles, "views": views, "errors": errors, "conformance": conformance}.items():
+    sys.modules[f"{__name__}.{_name}"] = _module
+
+__all__ = list(_protocol_all)

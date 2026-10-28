@@ -59,6 +59,8 @@ BASE_DEPENDENCIES = [
     "numpy>=1.23.2",
     "PyYAML>=6.0.2",
     "fsspec>=2023.5.0",
+    # the tunable view protocol and the address grammar schedules use (#140, #153)
+    "venngram>=0.1.0,<0.2.0",
 ]
 
 # Files to exclude from modification to prevent self-modification

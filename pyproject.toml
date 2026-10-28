@@ -141,6 +141,7 @@ numpy = ">=1.23.2"
 lightning = ">=2.6.0,<2.7.0"
 pyyaml = ">=6.0.2"
 fsspec = ">=2023.5.0"
+venngram = ">=0.1.0,<0.2.0"
 python = "3.11"  # Defined in pyproject.toml requires-python
 
 [project.urls]

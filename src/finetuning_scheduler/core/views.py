@@ -20,7 +20,7 @@ except :class:`ScheduleUnresolvable`, which Fine-Tuning Scheduler raises when a 
 resolve.
 
 A view that does not satisfy the protocol (one lacking a required member, say) raises
-:class:`~finetuning_scheduler.tunable_view.errors.TunableViewError`, while a schedule or configuration that is invalid
+:class:`~venngram.tuning.errors.TunableViewError`, while a schedule or configuration that is invalid
 raises :class:`~finetuning_scheduler.core.exceptions.FTSConfigurationError`.
 
 Views are discovered, in order, from an explicit ``view`` argument, then a view attached to the model as its
@@ -39,7 +39,7 @@ from finetuning_scheduler.tunable_view.views import (as_view, BoundView, canonic
 class ScheduleUnresolvable(Unresolvable, FTSConfigurationError):
     """Raised when a schedule's names cannot be resolved to physical parameters; names every unresolved input.
 
-    It is both the protocol's :class:`~finetuning_scheduler.tunable_view.errors.Unresolvable` (so catching that
+    It is both the protocol's :class:`~venngram.tuning.errors.Unresolvable` (so catching that
     catches this) and an :class:`~finetuning_scheduler.core.exceptions.FTSConfigurationError`.
     """
 

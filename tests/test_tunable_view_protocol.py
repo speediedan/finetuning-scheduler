@@ -9,21 +9,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""The tunable view protocol package stands on its own (#135).
+"""The tunable view protocol lives in venngram (``venngram.tuning``, with the roles in ``venngram.roles``); Fine-
+Tuning Scheduler re-exports it as ``finetuning_scheduler.tunable_view`` (#140).
 
-``finetuning_scheduler.tunable_view`` is shaped as the distribution it is to become: its modules import only ``torch``,
-the standard library and each other (relatively), so a copy of the directory imports as a top-level ``tunable_view``
-package without Fine-Tuning Scheduler. This module must itself stay importable without Lightning: the
+That the protocol imports nothing but torch, the
+standard library and itself is venngram's own test. This module must itself stay importable without Lightning: the
 ``core-no-lightning`` CI job runs it with ``--noconftest``.
 """
-import ast
-import shutil
-import subprocess
-import sys
-from pathlib import Path
+import importlib
 
 import pytest
 import torch
+import venngram.roles
+import venngram.tuning
 
 import finetuning_scheduler.tunable_view as tv
 from finetuning_scheduler.core import roles as fts_roles
@@ -33,72 +31,18 @@ from finetuning_scheduler.core.views import ScheduleUnresolvable, Unresolvable
 from finetuning_scheduler.testing import TunableViewConformance
 from finetuning_scheduler.testing.fixtures import ALL_FIXTURES
 
-PKG_DIR = Path(tv.__file__).parent
-ALLOWED_TOP_LEVEL = {"torch"}
 
-STANDALONE_SCRIPT = r'''
-import importlib.abc
-import sys
-
-
-class BlockFineTuningScheduler(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname.split(".")[0] == "finetuning_scheduler":
-            raise ModuleNotFoundError(f"No module named {fullname!r} (blocked by the standalone test)", name=fullname)
-        return None
+@pytest.mark.parametrize("module, protocol", [("roles", venngram.roles), ("views", venngram.tuning.views),
+                                              ("errors", venngram.tuning.errors),
+                                              ("conformance", venngram.tuning.conformance)])
+def test_the_reexported_submodules_are_venngrams_own(module, protocol):
+    assert importlib.import_module(f"finetuning_scheduler.tunable_view.{module}") is protocol
+    assert getattr(tv, module) is protocol
 
 
-sys.meta_path.insert(0, BlockFineTuningScheduler())
-sys.path.insert(0, sys.argv[1])
-
-import torch
-
-import tunable_view
-from tunable_view import CanonicalView, resolve_view, TunableViewError, Unresolvable, VIEW_ATTR, ViewConformance
-
-assert tunable_view.__file__.startswith(sys.argv[1]), tunable_view.__file__
-assert VIEW_ATTR == "tunable_view"
-model = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 2))
-setattr(model, VIEW_ATTR, CanonicalView(model, roles={"1.bias": "fitted"}))
-bound = resolve_view(model)
-assert bound.roles() == {"1.bias": "fitted"}
-try:
-    bound.to_physical(["nope"])
-except Unresolvable as err:
-    assert isinstance(err, TunableViewError) and err.names == ["nope"]
-else:
-    raise AssertionError("an unknown name resolved")
-report = ViewConformance(lambda: CanonicalView(torch.nn.Linear(2, 2), roles={"bias": "instrument"})).run()
-assert report.ok and "promotion" in report.ran, report
-assert not [m for m in sys.modules if m.split(".")[0] == "finetuning_scheduler"]
-print("STANDALONE-OK")
-'''
-
-
-def _imports(path: Path) -> list[tuple[int, str]]:
-    """Each absolute import in ``path`` as ``(level, top-level module)``; relative imports have ``level > 0``."""
-    found = []
-    for node in ast.walk(ast.parse(path.read_text())):
-        if isinstance(node, ast.Import):
-            found.extend((0, alias.name.split(".")[0]) for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            found.append((node.level, (node.module or "").split(".")[0]))
-    return found
-
-
-@pytest.mark.parametrize("module", sorted(p.name for p in PKG_DIR.glob("*.py")))
-def test_protocol_imports_only_torch_and_itself(module):
-    outside = sorted({top for level, top in _imports(PKG_DIR / module)
-                      if level == 0 and top not in ALLOWED_TOP_LEVEL and top not in sys.stdlib_module_names})
-    assert not outside, f"{module} imports {outside}; the protocol package may import only torch and the stdlib"
-
-
-def test_protocol_imports_standalone(tmp_path):
-    """A copy of the package imports as ``tunable_view`` with Fine-Tuning Scheduler unimportable, and works."""
-    shutil.copytree(PKG_DIR, tmp_path / "tunable_view", ignore=shutil.ignore_patterns("__pycache__"))
-    proc = subprocess.run([sys.executable, "-I", "-c", STANDALONE_SCRIPT, str(tmp_path)], capture_output=True,
-                          text=True, timeout=300)
-    assert proc.returncode == 0 and "STANDALONE-OK" in proc.stdout, proc.stderr
+def test_the_reexported_names_are_venngrams_own():
+    assert tv.__all__ == venngram.tuning.__all__
+    assert all(getattr(tv, name) is getattr(venngram.tuning, name) for name in tv.__all__)
 
 
 @pytest.mark.parametrize("name", sorted(ALL_FIXTURES))
@@ -124,7 +68,7 @@ def test_schedule_errors_are_configuration_errors_and_view_errors_are_not():
     assert Unresolvable is tv.Unresolvable
     with pytest.raises(FTSConfigurationError, match="unknown role kind"):
         fts_roles.parse_selector("role:weights")
-    with pytest.raises(tv.TunableViewError, match="unknown role kind") as excinfo:
+    with pytest.raises(venngram.errors.RoleError, match="unknown role kind") as excinfo:
         tv.roles.parse_selector("role:weights")
     assert not isinstance(excinfo.value, FTSConfigurationError)
     with pytest.raises(tv.TunableViewError, match="is not a tunable view") as excinfo:

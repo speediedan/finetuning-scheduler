@@ -16,10 +16,12 @@ Fine-Tuning Scheduler Schedule Compilation
 Compile a schedule's logical names, once, into the physical parameters each phase thaws.
 
 :func:`compile_schedule` resolves each phase's entries through a :class:`~finetuning_scheduler.core.views.TunableView`:
-``role:`` selectors expand through the view's roles; names and regexes resolve against the view's logical names and
-then map to physical names; and the view's coupled tensors (for example a block's norms) join the first phase that
-pulls them. It refuses a schedule whose phases share storage, that schedules a ``fitted`` or ``instrument`` tensor, or
-that names anything the view cannot resolve, naming the offending input. The schedule itself keeps its logical names.
+addresses (`venngram <https://github.com/speediedan/venngram>`_ addresses, ``role:`` selectors among them) select
+physical tensors through the view's roles, its structure and the schedule's named sets; names and regexes resolve
+against the view's logical names and then map to physical names; and the view's coupled tensors (for example a block's
+norms) join the first phase that pulls them. It refuses a schedule whose phases share storage, that schedules a
+``fitted`` or ``instrument`` tensor, or that names anything the view cannot resolve, naming the offending input. The
+schedule itself keeps its logical names.
 
 .. warning:: This is an experimental API and may change in a future release.
 """
@@ -35,7 +37,10 @@ from torch import Tensor
 
 from finetuning_scheduler.core.dist import rank_zero_debug, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.core.roles import is_frozen_role, is_role_selector, role_kind, select
+from venngram import is_address, ParamSpace, select
+from venngram.errors import VenngramError
+
+from finetuning_scheduler.core.roles import is_frozen_role, role_kind
 from finetuning_scheduler.core.schedule import parse_promote, resolve_param_entries, shared_params_ref
 from finetuning_scheduler.core.views import as_view, BoundView, ScheduleUnresolvable, Unresolvable
 
@@ -186,22 +191,50 @@ def _unmapped(bound: BoundView, logical: Sequence[str]) -> list[str]:
     return failed or list(logical)
 
 
-def _expand(entries: Sequence[str], depth: int, bound: BoundView, logical_names: Sequence[str],
-            all_physical: Sequence[str], roles: Mapping[str, str], shared: tuple) -> list[tuple[bool, list[str]]]:
-    """Resolve a phase's entries in order: each becomes ``(True, physical names)`` for a role selector or ``(False,
-    logical names)`` for a name or regex.
+@dataclass
+class _Addressing:
+    """What addresses resolve against: the view's physical tensors (known by their logical names too), its structure,
+    and the schedule's named sets. The roles change as phases promote tensors, so the space is built per call."""
+
+    bound: BoundView
+    physical: Sequence[str]
+    sets: Mapping[str, Any]
+    _aliases: dict[str, tuple[str, ...]] | None = None
+    _structure: Any = None
+
+    def space(self, roles: Mapping[str, str]) -> ParamSpace:
+        if self._aliases is None:
+            self._aliases = {}
+            if self.bound.support().naming_scheme != "physical":
+                names = [n for n, _ in self.bound.logical_named_parameters()]
+                for name, physical in self.bound.to_physical(names).items():
+                    for p in physical:
+                        self._aliases[p] = self._aliases.get(p, ()) + (name,)
+            self._structure = self.bound.structure()
+        return ParamSpace(self.physical, roles=roles, aliases=self._aliases, structure=self._structure)
+
+    def select(self, entry: Any, depth: int, roles: Mapping[str, str]) -> list[str]:
+        try:
+            return select(entry, self.space(roles), self.sets)
+        except VenngramError as err:
+            detail = str(err).partition(" does not resolve: ")[2] or str(err)
+            raise FTSConfigurationError(f"The address '{entry}' in phase {depth} does not resolve: {detail}") from err
+
+
+def _expand(entries: Sequence[Any], depth: int, bound: BoundView, logical_names: Sequence[str],
+            roles: Mapping[str, str], shared: tuple, addressing: _Addressing) -> list[tuple[bool, list[str]]]:
+    """Resolve a phase's entries in order: each becomes ``(True, physical names)`` for an address (a ``role:``
+    selector is one) or ``(False, logical names)`` for a name or regex.
 
     A name the view lists resolves to itself; a name the view does not list but resolves exactly is kept as is; anything
     else is a regex over the listed names.
     """
     listed = set(logical_names)
+    all_physical = addressing.physical
     resolved: list[tuple[bool, list[str]]] = []
     for entry in entries:
-        if is_role_selector(entry):
-            matched = select(entry, all_physical, roles)
-            if not matched:
-                raise FTSConfigurationError(f"The role selector '{entry}' in phase {depth} matched no parameter.")
-            resolved.append((True, matched))
+        if is_address(entry):
+            resolved.append((True, addressing.select(entry, depth, roles)))
         elif entry not in listed and resolves_exactly(bound, entry, all_physical):
             resolved.append((False, [entry]))
         else:
@@ -261,13 +294,13 @@ def _digest(phases: Sequence[CompiledPhase], roles: Mapping[str, str],
 
 
 def _compile_promotions(depth: int, promote: Mapping[str, str], bound: BoundView, logical_names: Sequence[str],
-                        all_physical: Sequence[str], roles: Mapping[str, str], shared: tuple) -> dict[str, str]:
+                        roles: Mapping[str, str], shared: tuple, addressing: _Addressing) -> dict[str, str]:
     """Resolve phase ``depth``'s ``promote`` mapping to physical tensors and their new roles, checking each is an
     ``instrument`` tensor promoted once."""
     parse_promote(depth, promote)
     promoted: dict[str, str] = {}
     for source, target in promote.items():
-        ((is_sel, names),) = _expand([source], depth, bound, logical_names, all_physical, roles, shared)
+        ((is_sel, names),) = _expand([source], depth, bound, logical_names, roles, shared, addressing)
         physical = list(dict.fromkeys(names if is_sel else (q for qs in bound.to_physical(names).values() for q in qs)))
         not_instrument = {p: roles.get(p, "base") for p in physical if role_kind(roles.get(p, "base")) != "instrument"}
         if not_instrument:
@@ -282,11 +315,13 @@ def _compile_promotions(depth: int, promote: Mapping[str, str], bound: BoundView
     return promoted
 
 
-def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, legacy: bool = False) -> CompiledSchedule:
+def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, legacy: bool = False,
+                     addresses: Mapping[str, Any] | None = None) -> CompiledSchedule:
     """Compile ``schedule`` through ``view`` into the physical parameters each phase thaws.
 
     Per phase, in depth order: the phase's ``promote`` mapping changes the roles of the ``instrument`` tensors it names
-    (to ``latent:<name>`` roles, from then on); ``role:`` selectors expand through the roles in effect; names and
+    (to ``latent:<name>`` roles, from then on); addresses (``role:`` selectors among them) select through the roles in
+    effect, the view's ``structure()`` and the named sets in ``addresses``; names and
     regexes resolve against the view's logical names (shared-parameter copies are pruned, as for the Lightning
     callback) and map to physical names through one ``to_physical`` call; the view's coupled tensors join the phase
     unless an earlier phase claimed them (first come, first served, as the runtime thaw behaves). A physical name an
@@ -297,14 +332,16 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
         view: A tunable view (bound or not).
         legacy: Warn instead of refusing where the legacy adapter path tolerated it: storage shared across phases, and
             coupled tensors whose role is never thawed.
+        addresses: The named sets ``@<set>`` references resolve against (see :func:`load_address_sets`).
 
     Returns:
         The compiled schedule.
 
     Raises:
-        FTSConfigurationError: If an entry resolves to nothing; phases share storage (unless ``legacy``); a phase
-            schedules a ``fitted`` or ``instrument`` tensor; a phase promotes a tensor that is not an ``instrument``
-            one; or a phase schedules quantized or packed tensors through logical names that are views of them.
+        FTSConfigurationError: If an entry resolves to nothing or an address does not resolve; phases share storage
+            (unless ``legacy``); a phase schedules a ``fitted`` or ``instrument`` tensor; a phase promotes a tensor
+            that is not an ``instrument`` one; or a phase schedules quantized or packed tensors through logical names
+            that are views of them.
     """
     bound: BoundView = as_view(view)
     support = bound.support()
@@ -324,13 +361,14 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     overlaps: list[tuple[str, str]] = []
     roles_now = dict(roles)  # the view's roles plus the promotions so far
     promotions: dict[int, dict[str, str]] = {}
+    addressing = _Addressing(bound, list(tensors), addresses or {})
     for depth in sorted(schedule):
         if schedule[depth].get("promote"):
-            promotions[depth] = _compile_promotions(depth, schedule[depth]["promote"], bound, logical_names,
-                                                    list(tensors), roles_now, shared)
+            promotions[depth] = _compile_promotions(depth, schedule[depth]["promote"], bound, logical_names, roles_now,
+                                                    shared, addressing)
             roles_now.update(promotions[depth])
-        resolved = _expand(schedule[depth].get("params", []), depth, bound, logical_names, list(tensors), roles_now,
-                           shared)
+        resolved = _expand(schedule[depth].get("params", []), depth, bound, logical_names, roles_now, shared,
+                           addressing)
         logical = list(dict.fromkeys(n for is_sel, names in resolved if not is_sel for n in names))
         try:
             mapped = dict(bound.to_physical(logical)) if logical else {}

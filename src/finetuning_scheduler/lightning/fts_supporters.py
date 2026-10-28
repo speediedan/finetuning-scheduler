@@ -41,12 +41,12 @@ from lightning.pytorch.trainer.states import TrainerFn
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_debug
 from lightning.pytorch.utilities.types import LRSchedulerConfig
+from venngram import is_address
 
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import schedule as core_schedule
 from finetuning_scheduler.core import transitions as core_transitions
 from finetuning_scheduler.core.compile import compile_schedule, resolves_exactly
-from finetuning_scheduler.core.roles import is_role_selector
 from finetuning_scheduler.core.views import BoundView
 from finetuning_scheduler.core.state import FTSState
 from finetuning_scheduler.strategy_adapters import StrategyAdapter, FSDPStrategyAdapter, ModelParallelStrategyAdapter
@@ -594,10 +594,12 @@ class ScheduleParsingMixin(ABC):
         # adapter with parameter-naming overrides keeps naming them itself
         view = adapter.tunable_view
         assert isinstance(self.ft_schedule, dict)
-        selectors = any(is_role_selector(p) for phase in self.ft_schedule.values() for p in phase.get("params", []))
+        core_schedule.check_param_entries(self.ft_schedule)
+        selectors = any(is_address(p) for phase in self.ft_schedule.values() for p in phase.get("params", []))
         if selectors and view is None:
             raise MisconfigurationException(
-                f"`role:` selectors are not supported under {type(adapter).__qualname__}, which overrides"
+                f"Addresses (`role:` selectors among them) are not supported under {type(adapter).__qualname__}, which"
+                " overrides"
                 f" StrategyAdapter's parameter-naming methods ({', '.join(sorted(adapter.naming_overrides()))}) and so"
                 " names parameters itself. List the parameters by name, or attach a `TunableView` instead.")
         compiling = view is not None and (adapter.attached_view or selectors)
@@ -617,7 +619,8 @@ class ScheduleParsingMixin(ABC):
         if compiling:
             assert view is not None
             # the implicit canonical view (selectors only) warns where an attached view refuses
-            adapter.compiled_schedule = compile_schedule(self.ft_schedule, view, legacy=not adapter.attached_view)
+            adapter.compiled_schedule = compile_schedule(self.ft_schedule, view, legacy=not adapter.attached_view,
+                                                         addresses=getattr(self, "_address_sets", None))
             if adapter.compiled_schedule.naming_scheme != "physical" and \
                     adapter.exec_ft_phase is StrategyAdapter.base_ft_phase:
                 # thaw messages name parameters through the view's logical names
@@ -840,6 +843,8 @@ class ScheduleParsingMixin(ABC):
         assert self.trainer is not None
         assert self.log_dir is not None
         assert isinstance(self.ft_schedule, dict)
+        self.ft_schedule, raw_addresses = core_schedule.split_addresses(self.ft_schedule)
+        self._address_sets = core_schedule.load_address_sets(raw_addresses, getattr(self, "_schedule_dir", None))
         self._convert_phase_keys()
         if not core_schedule.ensure_contiguous_phase_keys(self.ft_schedule):
             self._rewrite_schedule(err_msg=core_schedule.NON_CONTIGUOUS_KEYS_MSG)
@@ -876,10 +881,11 @@ class ScheduleParsingMixin(ABC):
         core_schedule.parse_phase_lr(self.ft_schedule, depth, self.base_max_lr)  # type: ignore[attr-defined]
 
     def _compiled_entries(self, view: BoundView) -> Callable[[str], bool]:
-        """Whether a schedule entry is left for the compiled schedule to resolve: a ``role:`` selector, or a name
-        the view resolves without listing it (a parametrized tensor's unparametrized name, for example)."""
+        """Whether a schedule entry is left for the compiled schedule to resolve: an address (a ``role:`` selector
+        is one), or a name the view resolves without listing it (a parametrized tensor's unparametrized name, for
+        example)."""
         physical = {n for n, _ in self.pl_module.named_parameters()}
-        return lambda entry: is_role_selector(entry) or resolves_exactly(view, entry, physical)
+        return lambda entry: is_address(entry) or resolves_exactly(view, entry, physical)
 
     def _parse_phase(self, depth: int, named_params: KeysView, shared_params: tuple,
                      passthrough: Callable[[str], bool] | None = None) -> None:
@@ -1210,6 +1216,8 @@ class ScheduleImplMixin(ABC):
         assert self.log_dir is not None
         core_schedule.check_schedule_vs_reinit_lr(bool(self.ft_schedule), self.reinit_lr_cfg)
         if self.ft_schedule:  # thaw according to an explicit schedule
+            if not isinstance(self.ft_schedule, dict):  # relative address book paths resolve against its directory
+                self._schedule_dir = pathlib.Path(self.ft_schedule).parent
             self.ft_schedule = (
                 self.load_yaml_schedule(pathlib.Path(self.ft_schedule))
                 if not isinstance(self.ft_schedule, dict)

@@ -131,7 +131,7 @@ def test_role_selectors():
     assert compiled.phases[0].physical == ("4.weight",)
     assert compiled.phases[1].physical == ("2.weight", "2.bias")
     assert compiled.phases[2].physical == ("0.weight", "0.bias", "1.weight", "1.bias", "3.weight", "3.bias", "4.bias")
-    with pytest.raises(FTSConfigurationError, match="'role:intervention' in phase 0 matched no parameter"):
+    with pytest.raises(FTSConfigurationError, match="'role:intervention' in phase 0 does not resolve: it matches no"):
         compile_schedule({0: {"params": ["role:intervention"]}}, view)
 
 

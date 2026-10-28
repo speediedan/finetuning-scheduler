@@ -26,10 +26,6 @@ are not documented as public API.
     strategies.plan
     testing.conformance
     testing.fixtures
-    tunable_view.views
-    tunable_view.roles
-    tunable_view.errors
-    tunable_view.conformance
     core.schedule
     core.state
     core.rng
@@ -38,3 +34,24 @@ are not documented as public API.
     core.exceptions
     lightning.interface
     lightning.tuning_scheduler_bridge
+
+The tunable view protocol and the address grammar schedules use are
+`venngram <https://github.com/speediedan/venngram>`_'s, which Fine-Tuning Scheduler depends on and re-exports as
+``finetuning_scheduler.tunable_view`` (its submodules ``views``, ``roles``, ``errors`` and ``conformance`` are
+venngram's own modules).
+
+.. currentmodule:: venngram
+
+.. autosummary::
+    :toctree: api
+    :nosignatures:
+
+    address
+    book
+    resolve
+    physical
+    roles
+    errors
+    tuning.views
+    tuning.errors
+    tuning.conformance
