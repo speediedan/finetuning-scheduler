@@ -26,11 +26,10 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.tunable_view import roles as _roles
+import venngram.roles as _roles
 from venngram.errors import VenngramError
-from finetuning_scheduler.tunable_view.roles import (FROZEN_ROLE_KINDS, is_role_selector, NAMED_OPTIONAL,
-                                                     NAMED_REQUIRED, ROLE_KINDS, SELECTOR_PREFIX,
-                                                     UNCHECKPOINTED_ROLE_KINDS)
+from venngram.roles import (FROZEN_ROLE_KINDS, is_role_selector, NAMED_OPTIONAL, NAMED_REQUIRED, ROLE_KINDS,
+                            SELECTOR_PREFIX, UNCHECKPOINTED_ROLE_KINDS)
 
 
 @contextmanager

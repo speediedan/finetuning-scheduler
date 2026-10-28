@@ -57,7 +57,7 @@ from finetuning_scheduler.strategies.base import DistributedAdapter, select_dist
 from finetuning_scheduler.strategies.dtensor import DTensorAdapter
 from finetuning_scheduler.core.views import (BoundView, canonical_fqn, CanonicalView, instrument_state_keys,
                                              resolve_view)
-from finetuning_scheduler.tunable_view.errors import TunableViewError
+from venngram.tuning.errors import TunableViewError
 from finetuning_scheduler.core.transitions import (AnyOf, as_decision, Decision, epoch_transition_due, GateEvent,
                                                    GateResult, TransitionContext, TransitionPolicy)
 

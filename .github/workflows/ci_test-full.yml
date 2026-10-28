@@ -130,7 +130,9 @@ jobs:
       run: |
         python -c "import runpy; print('\n'.join(runpy.run_path('src/finetuning_scheduler/dynamic_versioning/utils.py')['BASE_DEPENDENCIES']))" > base-requirements.txt
         cat base-requirements.txt
-        uv pip install -r base-requirements.txt pytest --torch-backend=cpu
+        # the overrides apply only to packages already requested, so they pin unpublished first-party dependencies
+        # (venngram) without adding Lightning
+        uv pip install -r base-requirements.txt pytest --override requirements/ci/overrides.txt --torch-backend=cpu
         uv pip install --no-deps -e .
         uv pip list
 

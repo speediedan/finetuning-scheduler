@@ -47,8 +47,7 @@ from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.phase import thaw_params
 from finetuning_scheduler.core.roles import is_frozen_role
 from finetuning_scheduler.core.views import as_view, BoundView
-from finetuning_scheduler.tunable_view.conformance import (ConformanceCase, ConformanceError, ConformanceReport,
-                                                           ViewConformance)
+from venngram.tuning.conformance import ConformanceCase, ConformanceError, ConformanceReport, ViewConformance
 
 NO_SUCH_NAME = "__fts_conformance_no_such_name__"
 

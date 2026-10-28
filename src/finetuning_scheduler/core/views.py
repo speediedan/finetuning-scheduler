@@ -29,11 +29,12 @@ Views are discovered, in order, from an explicit ``view`` argument, then a view 
 .. warning:: This is an experimental API and may change in a future release.
 """
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.tunable_view.errors import TunableViewError, Unresolvable  # noqa: F401 (re-exported)
-from finetuning_scheduler.tunable_view.views import (as_view, BoundView, canonical_fqn, CanonicalView,
-                                                     instrument_state_keys, OPTIONAL_MEMBERS, pair_groups,
-                                                     REQUIRED_MEMBERS, resolve_view, TunableSupport, TunableView,
-                                                     TunableViewExtras, uncheckpointed_keys, VIEW_ATTR, ViewDefaults)
+# imported from venngram directly rather than through the `finetuning_scheduler.tunable_view` submodule aliases, which
+# exist only at runtime (`sys.modules`), so a static checker cannot resolve them
+from venngram.tuning.errors import TunableViewError, Unresolvable  # noqa: F401 (re-exported)
+from venngram.tuning.views import (as_view, BoundView, canonical_fqn, CanonicalView, instrument_state_keys,
+                                   OPTIONAL_MEMBERS, pair_groups, REQUIRED_MEMBERS, resolve_view, TunableSupport,
+                                   TunableView, TunableViewExtras, uncheckpointed_keys, VIEW_ATTR, ViewDefaults)
 
 
 class ScheduleUnresolvable(Unresolvable, FTSConfigurationError):
