@@ -99,8 +99,9 @@ def explicit_figure(logs: Path, out: Path) -> None:
     (_, start_task), *tuned = s["val_loss"]
     top = max(v for _, v in tuned)
     task_ax.set_ylim(min(v for _, v in tuned) - 0.03, top + 0.12)
-    task_ax.annotate(f"pretrained: {start_task:.2f}", xy=(0, top + 0.12), xytext=(6, -14), textcoords="offset points",
-                     fontsize=8, color=TASK_COLOR)
+    # in the lower left corner, clear of the phase labels along the top
+    task_ax.text(0.01, 0.03, f"pretrained val_loss: {start_task:.2f} (above the plot)", fontsize=8, color=TASK_COLOR,
+                 transform=task_ax.transAxes)
     start_retention = s["retention_loss"][0][1]
     ret_ax.axhline(start_retention, color=RETENTION_COLOR, ls=":", lw=1.2)
     ret_ax.text(0.01, start_retention, " pretrained", color=RETENTION_COLOR, fontsize=8, va="bottom",
@@ -129,9 +130,10 @@ def tradeoff_figure(logs: Path, out: Path) -> None:
                 ms=14, mec="black", mew=0.6,
                 label=f"{scenario}: {'each phase' if len(bests) > 1 else 'the run'}'s best epoch")
         if len(bests) > 1:
-            for phase, st in bests:
-                ax.annotate(f"phase {phase}", xy=(task[st], retention[st]), xytext=(8, -4), textcoords="offset points",
-                            fontsize=8.5)
+            for phase, st in bests:  # alternate sides, so neighbouring phases' labels do not overlap
+                left = phase % 2 == 0
+                ax.annotate(f"phase {phase}", xy=(task[st], retention[st]), xytext=(-9 if left else 9, -4),
+                            textcoords="offset points", fontsize=8.5, ha="right" if left else "left")
         start_task, start_retention = s["val_loss"][0][1], s["retention_loss"][0][1]
     ax.axhline(start_retention, color=RETENTION_COLOR, ls=":", lw=1.2)
     ax.text(0.01, start_retention, f" pretrained retention_loss (its val_loss: {start_task:.2f})", fontsize=8,
