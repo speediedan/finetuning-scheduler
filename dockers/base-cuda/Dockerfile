@@ -79,16 +79,16 @@ RUN \
         # NB: exactly ONE of the following must be uncommented. Prefer the stable line below unless
         # deliberately building against a prerelease; a hardcoded nightly goes stale quickly because
         # old nightlies are pruned from the index, and the build then fails to resolve.
-        # ... stable channel, pinned to the image's PYTORCH_VERSION
-        # CUDA_VERSION_MM=${CUDA_VERSION%.*}; \
-        # uv pip install torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cu${CUDA_VERSION_MM//'.'/''}; \
+        # ... stable channel, pinned to the image's PYTORCH_VERSION (active)
+        CUDA_VERSION_MM=${CUDA_VERSION%.*}; \
+        uv pip install torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cu${CUDA_VERSION_MM//'.'/''}; \
         # ... default channel
         # uv pip install torch --torch-backend=cu132; \
         # ... pytorch nightly dev version (keep in sync with requirements/ci/torch-pre.txt)
         # uv pip install --prerelease=allow torch==2.16.0.dev20261007 --index-url https://download.pytorch.org/whl/nightly/cu132; \
-        # ... test channel, pinned to the image's PYTORCH_VERSION (keep in sync with requirements/ci/torch-pre.txt) (active)
-        CUDA_VERSION_MM=${CUDA_VERSION%.*}; \
-        uv pip install --prerelease=allow torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/test/cu${CUDA_VERSION_MM//'.'/''}; \
+        # ... test channel, pinned to the image's PYTORCH_VERSION (keep in sync with requirements/ci/torch-pre.txt)
+        # CUDA_VERSION_MM=${CUDA_VERSION%.*}; \
+        # uv pip install --prerelease=allow torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/test/cu${CUDA_VERSION_MM//'.'/''}; \
     fi && \
     # We avoid installing Lightning and other dependencies here as they are usually upgraded anyway later in
     # CI but we may re-enable in the future.

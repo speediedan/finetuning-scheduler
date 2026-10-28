@@ -17,8 +17,8 @@ parameters:
   - name: images
     type: object
     default:
-      nvidia: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-azpl-init@sha256:7a3c80e93d8030b58b39d6c4db1e6db9510f2a161e3c8ae4c3fb62a06a97eacc"
-      amd: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-rocm10.0-azpl-init@sha256:9c735f177b231baabcfe608e85d32bec4823e105e26b5b797994dd1dcfd27c9e"
+      nvidia: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-azpl-init@sha256:b736deaecaa51b3a9de03186c8d81db050bc649a2d474d29cd9a216e61e2e3cb"
+      amd: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-rocm10.0-azpl-init@sha256:07bc4bb6f937e801b3289dfd5f83ae36dda3bdc5a56006f7e092e19143188b17"
 
 jobs:
   - template: templates/gpu-job.yml

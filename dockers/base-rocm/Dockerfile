@@ -24,7 +24,7 @@ ARG OS_VER=24.04
 
 FROM ubuntu:${OS_VER}
 
-# Names the wheel index (rocm10.0 for the 2.15 release candidate, read from download.pytorch.org/whl/test).
+# Names the wheel index (rocm10.0 for torch 2.15, read from download.pytorch.org/whl).
 ARG ROCM_VERSION=10.0
 ARG PYTHON_VERSION=3.13
 ARG PYTORCH_VERSION=2.15.0
