@@ -33,12 +33,11 @@ THIS_FILE = os.path.abspath(__file__)
 CORE_DIR = Path(finetuning_scheduler.__file__).parent / "core"
 # the torch-native distributed adapters live under the same allowlist as the core
 CORE_LIKE_DIRS = (CORE_DIR, CORE_DIR.parent / "strategies")
-CORE_IMPORT_ALLOWLIST = {"torch", "yaml", "fsspec", "typing_extensions"}
-# besides the core itself: the distributed adapters, the tunable view protocol, the build-time helpers and the package
-# metadata (version strings)
+# venngram is the tunable view protocol and the address grammar, a base dependency without Lightning
+CORE_IMPORT_ALLOWLIST = {"torch", "yaml", "fsspec", "typing_extensions", "venngram"}
+# besides the core itself: the distributed adapters, the build-time helpers and the package metadata (version strings)
 CORE_FTS_IMPORT_ALLOWLIST = ("finetuning_scheduler.core", "finetuning_scheduler.strategies",
-                             "finetuning_scheduler.tunable_view", "finetuning_scheduler.setup_tools",
-                             "finetuning_scheduler.__about__")
+                             "finetuning_scheduler.setup_tools", "finetuning_scheduler.__about__")
 
 
 @pytest.fixture

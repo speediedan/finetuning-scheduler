@@ -34,6 +34,23 @@ TORCH_OVERRIDE_FILE="${CI_DIR}/torch-override.txt"
 # Ensure output directory exists
 mkdir -p "${CI_DIR}"
 
+# First-party dependencies not yet published to PyPI. Locking resolves each from its commit pin in overrides.txt (that
+# pin alone: UV_OVERRIDE, and with it the Lightning pin, stays unset) and leaves it out of the lockfiles, since a git
+# URL in a lockfile is what unsetting UV_OVERRIDE exists to prevent. CI installs it through UV_OVERRIDE as before.
+# Empty this list once each package is published.
+UNPUBLISHED_PACKAGES=(venngram)
+# A fixed repo-relative path rather than mktemp: uv records the --override argument in the lockfile header, so a temp
+# path would differ on every checkout (see rel_output_file below). Removed on exit.
+UNPUBLISHED_OVERRIDE_FILE="requirements/ci/.unpublished-overrides.txt"
+rm -f "${REPO_ROOT}/${UNPUBLISHED_OVERRIDE_FILE}"
+trap 'rm -f "${REPO_ROOT}/${UNPUBLISHED_OVERRIDE_FILE}"' EXIT
+for pkg in "${UNPUBLISHED_PACKAGES[@]}"; do
+    if ! grep -E "^${pkg} @ " "${CI_DIR}/overrides.txt" >> "${REPO_ROOT}/${UNPUBLISHED_OVERRIDE_FILE}"; then
+        echo "Error: ${pkg} is listed as unpublished but has no commit pin in ${CI_DIR}/overrides.txt" >&2
+        exit 1
+    fi
+done
+
 echo "Generating locked CI requirements from pyproject.toml..."
 
 # Check if torch prerelease is configured
@@ -152,6 +169,12 @@ generate_lockfile() {
         --universal
         --python-version "${python_version}"
     )
+    for pkg in "${UNPUBLISHED_PACKAGES[@]}"; do
+        compile_cmd+=(--no-emit-package "${pkg}")
+    done
+    if [[ ${#UNPUBLISHED_PACKAGES[@]} -gt 0 ]]; then
+        compile_cmd+=(--override "${UNPUBLISHED_OVERRIDE_FILE}")
+    fi
 
     # When using torch prerelease (nightly or test):
     # 1. Create a temporary override file to pin torch to the prerelease version for dependency resolution

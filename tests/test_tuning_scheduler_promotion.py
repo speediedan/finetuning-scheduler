@@ -26,7 +26,7 @@ from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.schedule import refuse_direct_api_keys
 from finetuning_scheduler.core.transitions import GateResult
 from finetuning_scheduler.testing.fixtures import InterventionModel, ROLES
-from finetuning_scheduler.tunable_view import TunableViewError
+from venngram.tuning import TunableViewError
 
 SGD = partial(torch.optim.SGD, lr=0.1)
 LENS = ["lens.bias", "lens.weight"]
