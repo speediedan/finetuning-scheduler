@@ -13,8 +13,8 @@ r"""
 A Tunable View for Decoder Language Models
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The view of the :doc:`worked example</examples/tunable_views/worked_example>`. It keeps the model's own parameter names
-(so names and regexes keep working) and adds two things a schedule can address:
+The view of the tunable views worked example notebook (``notebooks/dev/tunable_views/lora_placement.ipynb``). It keeps
+the model's own parameter names (so names and regexes keep working) and adds two things a schedule can address:
 
 - **roles**: every LoRA tensor is an ``adapter``, everything else ``base``;
 - **components**: each tensor's architecture-neutral component (``attn.q``, ``mlp.down``, ``norm.attn``, ...), read
@@ -28,6 +28,7 @@ Layers come from the default structure (the model's one block list), which needs
 import re
 from collections.abc import Mapping
 
+import torch
 from torch import nn
 from venngram.physical import PhysicalStructure
 from venngram.resolve import Location
@@ -48,30 +49,40 @@ COMPONENTS: dict[str, tuple[tuple[str, str], ...]] = {
         (r"self_attn_layer_norm", "norm.attn"), (r"final_layer_norm", "norm.mlp"),
     ),
 }
+# Qwen3 is Llama-style, plus per-head query and key norms
+COMPONENTS["qwen3"] = COMPONENTS["llama"] + (
+    (r"self_attn\.q_norm", "attn.q_norm"), (r"self_attn\.k_norm", "attn.k_norm"),
+)
 
 
 class LoRALinear(nn.Module):
-    """A frozen-by-schedule ``base`` linear layer plus a low-rank update, ``lora_B(lora_A(x))``, that starts at
-    zero."""
+    """A ``base`` linear layer plus a low-rank update, ``(alpha / r) * lora_B(lora_A(x))``, that starts at zero.
 
-    def __init__(self, base: nn.Linear, r: int = 4) -> None:
+    The update's tensors are float32 on the base layer's device, whatever the base layer's dtype.
+    """
+
+    def __init__(self, base: nn.Linear, r: int = 4, alpha: float | None = None) -> None:
         super().__init__()
         self.base = base
-        self.lora_A = nn.Linear(base.in_features, r, bias=False)
-        self.lora_B = nn.Linear(r, base.out_features, bias=False)
+        self.scale = (alpha if alpha is not None else r) / r
+        kwargs = {"bias": False, "device": base.weight.device, "dtype": torch.float32}
+        self.lora_A = nn.Linear(base.in_features, r, **kwargs)
+        self.lora_B = nn.Linear(r, base.out_features, **kwargs)
         nn.init.zeros_(self.lora_B.weight)
 
     def forward(self, x):
-        return self.base(x) + self.lora_B(self.lora_A(x))
+        update = self.lora_B(self.lora_A(x.to(self.lora_A.weight.dtype))) * self.scale
+        return self.base(x) + update.to(x.dtype)
 
 
-def add_lora(model: nn.Module, targets: tuple[str, ...] = ("q_proj", "v_proj"), r: int = 4) -> nn.Module:
+def add_lora(model: nn.Module, targets: tuple[str, ...] = ("q_proj", "v_proj"), r: int = 4,
+             alpha: float | None = None) -> nn.Module:
     """Wrap every ``nn.Linear`` named in ``targets`` in a :class:`LoRALinear`, in place."""
     for module in list(model.modules()):
         for target in targets:
             child = getattr(module, target, None)
             if isinstance(child, nn.Linear):
-                setattr(module, target, LoRALinear(child, r))
+                setattr(module, target, LoRALinear(child, r, alpha))
     return model
 
 
@@ -100,7 +111,7 @@ class DecoderView(CanonicalView):
 
     Args:
         root: The model.
-        family: The key of its component table in :data:`COMPONENTS` (``"llama"`` or ``"opt"``).
+        family: The key of its component table in :data:`COMPONENTS` (``"llama"``, ``"qwen3"`` or ``"opt"``).
     """
 
     def __init__(self, root: nn.Module, family: str) -> None:

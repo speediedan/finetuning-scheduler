@@ -26,6 +26,11 @@ Notebooks
      - PyTorch (experimental)
      - The same experiment in a training loop you write yourself, with
        :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler`.
+   * - :doc:`Where should LoRA go? Probing LoRA Without Regret with addresses<notebooks/tunable_views/lora_placement>`
+     - PyTorch (experimental)
+     - The tunable views worked example: give Qwen3-0.6B one view (adapter roles, architecture-neutral components),
+       check it, and run attention-only, MLP-only, all-layer and phased LoRA as address schedules over the same model,
+       probing a 2025 result on where LoRA adapters belong.
 
 Command Line
 ************
@@ -41,19 +46,3 @@ Command Line
    * - :ref:`Scheduled fine-tuning on SuperGLUE<scheduled-fine-tuning-superglue>`
      - Lightning (``LightningCLI``)
      - Explicit, implicit and baseline scenarios for RTE and BoolQ, configured entirely in YAML.
-
-Tunable Views
-*************
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 18 52
-   :class: fts-examples-table
-
-   * - Example
-     - Interface
-     - What it shows
-   * - :ref:`From no view to address schedules<tunable-views-worked-example>`
-     - PyTorch (experimental)
-     - Give two decoder families (Llama- and OPT-style) one tunable view with roles and components, check it, and run
-       one address schedule on both. Runs on CPU in seconds.

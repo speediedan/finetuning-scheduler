@@ -21,7 +21,7 @@ Scheduling Through a Tunable View
      and reused, sliced and recombined;
    - **agent-orchestrated experiments**, where a model description of roles, layers and components is easier to
      compose over than regexes. If no view exists for a model, an agent can write one by following the
-     :ref:`worked example<tunable-views-worked-example>`, or with the ``tunable-view-generator`` agent skill that
+     :doc:`worked example</examples/notebooks/tunable_views/lora_placement>`, or with the ``tunable-view-generator`` agent skill that
      packages it (in the repository's ``.agents/skills/``, usable from any agent harness that reads skills).
 
    :ref:`fts-evolution` explains the direction, with a table of which approach fits which use.
@@ -50,7 +50,7 @@ and the Lightning callback (attach the view to the ``LightningModule``). A model
 Writing a View
 **************
 Writing a view by hand is more work than writing a regex, so write one only when names stop being enough (see the tip
-above). The :ref:`worked example<tunable-views-worked-example>` walks through one, and the ``tunable-view-generator``
+above). The :doc:`worked example</examples/notebooks/tunable_views/lora_placement>` walks through one, and the ``tunable-view-generator``
 agent skill (``.agents/skills/``) packages its steps for agents. Often you need not write a class at all: :class:`~finetuning_scheduler.core.views.CanonicalView` with
 ``roles=`` gives a plain model roles while keeping its own names.
 

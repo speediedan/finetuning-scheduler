@@ -4,14 +4,14 @@
 Why Fine-Tuning Scheduler Is Evolving
 ######################################
 
-Fine-Tuning Scheduler began in 2021 with one job: run a multi-phase fine-tuning schedule, thawing more of a model each
-phase. That served the transfer-learning practice of the time well. Gradual unfreezing, discriminative layer depths and
-exploratory fine-tuning of a single pretrained model on a downstream task were the common cases, and a schedule was a
-short list of parameter names or regexes per phase. That way of working is still fully supported, and for many uses it
-is still the simplest (see :ref:`still-the-simplest`).
+Fine-Tuning Scheduler was first released in 2022 to run multi-phase fine-tuning schedules over the transfer-learning
+practice of the time: phased fine-tuning of one pretrained model on a downstream task, such as gradual unfreezing. A
+schedule was a short list of parameter names or regexes per phase. That way of working is still fully supported, and
+for many uses it is still the simplest (see :ref:`still-the-simplest`).
 
-How people fine-tune and study models has changed a great deal since then. Fine-Tuning Scheduler's 2.15 release starts
-to change with it. This page explains why, what is new, and what stays the same. It is a first statement of the
+Usage patterns have broadened a great deal since then. Gradual unfreezing is now one pattern among many, and a less
+frequent one: adapters, interventions, latent models, individual units and agent-driven experiments all ask more of a
+schedule than a list of names. Fine-Tuning Scheduler's 2.15 release starts to evolve with them. This page explains why, what is new, and what stays the same. It is a first statement of the
 direction and will be revised as the work proceeds.
 
 What Changed
@@ -56,8 +56,8 @@ step, and each leaves existing schedules alone.
   supplies the views and site resolvers that make one address mean the same thing across interpretability backends, so
   Fine-Tuning Scheduler can tune and interpretune can steer and analyse the same named slices of a model.
 
-Interpretability-driven examples replace the gradual-unfreezing examples as the reference workloads, because they
-exercise what is new: tuning adapters, latent models and units, scheduled by role and address, through several
+Interpretability-driven examples are becoming the reference workloads, beside the phased fine-tuning examples, because
+they exercise what is new: tuning adapters, latent models and units, scheduled by role and address, through several
 backends.
 
 .. _still-the-simplest:
@@ -89,7 +89,7 @@ a schedule by hand:
      - a view and addresses (an agent can also :ref:`write the view<tunable-views>`)
 
 Writing a view by hand is more work than writing a regex. You need one only when names stop being enough. The
-:ref:`worked example<tunable-views-worked-example>` takes a model from no view to address schedules step by step.
+:doc:`worked example notebook</examples/notebooks/tunable_views/lora_placement>` takes a model from no view to address schedules step by step.
 When an agent drives the experiments, a missing view need not stop it: the agent can follow that example for a new
 model, or use the ``tunable-view-generator`` agent skill that packages it (in the repository's ``.agents/skills/``,
 usable from any agent harness that reads skills).

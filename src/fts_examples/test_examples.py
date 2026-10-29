@@ -285,3 +285,14 @@ def test_tunable_view_generator_skill_reference():
     assert "conformance: ok" in cp.stdout
     assert "phase 0: 4 tensors" in cp.stdout and "transformer.h.3.attn.c_attn.weight" in cp.stdout
     assert "phase 1: 4 tensors" in cp.stdout and "transformer.h.3.mlp.c_fc.weight" in cp.stdout
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+@RunIf(min_cuda_gpus=1, skip_windows=True)
+def test_tunable_views_lora_placement_nb(tmpdir):
+    # the tunable views worked example notebook, shortened through its parameters cell (#158)
+    out = _run_notebook("tunable_views/lora_placement.ipynb",
+                        {"MAX_STEPS": "4", "EVAL_EVERY": "2", "N_TRAIN": "64", "N_EVAL": "16"}, tmpdir.strpath)
+    assert "conformance: ok" in out
+    for condition in ("attention only", "MLP only", "all layers", "MLP, then attention"):
+        assert f"{condition}" in out and "final eval loss" in out

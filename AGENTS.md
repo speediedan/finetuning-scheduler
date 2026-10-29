@@ -258,6 +258,22 @@ The publisher, the renderer and the nbstripout hook are vendored unmodified from
 here: make the change in interpretune, then `python scripts/check_vendored_notebook_tooling.py --sync <commit>`. The
 pre-commit check refuses a local edit; `--upstream` reports whether interpretune has moved on.
 
+## Agent skills
+
+Skills live in `.agents/skills/` (the harness-neutral location, in the open skill format: a `SKILL.md` with `name` and
+`description` front matter, plus scripts and references), with a compatibility copy in `.claude/skills/` for harnesses
+that read only that path. Keep the two copies identical.
+
+- **Vendored skills** (listed in each tree's `.shared-skills.sha256`) come from https://github.com/speediedan/skills and
+  are not edited here: the pre-commit check refuses a local edit.
+- **Repo-local skills** are edited here, in both copies. `tunable-view-generator` is one: it writes and checks a
+  tunable view for a model that has none, and `src/fts_examples/test_examples.py` runs its checker on its reference
+  view, so a change to the view API that breaks the skill fails the suite.
+
+**When asked to write a tunable view, or to schedule a model by role, layer or component, load the
+`tunable-view-generator` skill first.** It starts by asking whether a view is needed at all: names and regexes remain
+the simplest schedule for many uses.
+
 ## Anything publicly visible is written for a public reader
 
 **The test is visibility, not file type.** `docs/`, `README.md`, docstrings, commit messages, PR bodies and

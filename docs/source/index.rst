@@ -26,9 +26,9 @@ FTS runs a schedule through either of two interfaces, which share one scheduling
 The examples on this page show both: choose **Lightning** or **PyTorch** on any of them and every example on the page
 follows.
 
-Fine-Tuning Scheduler is evolving beyond the gradual-unfreezing workloads it was built for in 2021, toward tuning
-adapters, latent models and units for interpretability research, addressed by role and structure and shareable across
-models. 2.15 begins that work with experimental tunable views and addresses. Explicit schedules of parameter names and
+Fine-Tuning Scheduler is evolving with its users' usage patterns. Phased fine-tuning such as gradual unfreezing is now
+one pattern among many, beside tuning adapters, latent models and units for interpretability research, addressed by
+role and structure and shareable across models. 2.15 begins that work with experimental tunable views and addresses. Explicit schedules of parameter names and
 regexes stay supported, and remain the simplest choice for many uses: :doc:`Why Fine-Tuning Scheduler Is
 Evolving<evolution>` explains the direction and when each approach fits.
 
@@ -69,7 +69,7 @@ by epoch limits for each phase (``max_transition_epoch``), by criteria on a moni
 loss, say), or by a composition of the two. A training session completes when the final phase of the schedule has its
 stopping criteria met.
 
-How Fine-Tuning Scheduler is used has since moved well beyond gradual unfreezing: most schedules now thaw adapters,
+Usage patterns have since broadened: gradual unfreezing is one of many, and schedules increasingly thaw adapters,
 latent models or chosen units rather than successive layers, often in interpretability experiments. Schedules can
 therefore also address a model through a :ref:`tunable view<tunable-views>`, by role and structure (experimental in
 2.15). :ref:`fts-evolution` says why, and when names and regexes are still the better tool.
@@ -415,7 +415,7 @@ Footnotes
    SuperGLUE notebook (Lightning) <examples/notebooks/superglue/fts_superglue_lightning>
    SuperGLUE notebook (PyTorch API) <examples/notebooks/superglue/fts_superglue_pytorch>
    SuperGLUE with the LightningCLI <examples/cli/superglue_cli>
-   Tunable views: a worked example <examples/tunable_views/worked_example>
+   LoRA placement by address (PyTorch API) <examples/notebooks/tunable_views/lora_placement>
 
 .. toctree::
    :maxdepth: 1

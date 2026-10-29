@@ -11,8 +11,9 @@ optionally what they are (architecture-neutral components such as `attn.q`, `mlp
 addresses such as `role:adapter & layers:-4:` or `component:mlp.* & layers:-1:`, which mean the same thing on every
 model the view describes.
 
-The reference for everything below is the worked example: `src/fts_examples/tunable_views/` (docs page
-`docs/source/examples/tunable_views/worked_example.rst`). Read its `decoder_view.py` before writing a view.
+The reference for everything below is the worked example: the notebook
+`src/fts_examples/notebooks/dev/tunable_views/lora_placement.ipynb` (rendered in the docs under Examples) and the view
+it uses, `src/fts_examples/tunable_views/decoder_view.py`. Read `decoder_view.py` before writing a view.
 
 ## First: do you need one?
 

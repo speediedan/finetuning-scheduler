@@ -9,8 +9,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""The tunable views worked example (#158): schedule LoRA tuning of two decoder families by address, through one
-view.
+"""The tunable views worked example's CPU companion (#158): schedule LoRA tuning of two decoder families by
+address, through one view. The worked example itself is the notebook
+``notebooks/dev/tunable_views/lora_placement.ipynb``.
 
 1. Build a small, randomly initialized decoder (Llama- or OPT-style, from a ``transformers`` config, so nothing is
    downloaded) and add LoRA adapters to its attention projections.
