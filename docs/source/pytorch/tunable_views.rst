@@ -20,10 +20,9 @@ Scheduling Through a Tunable View
    - **composable, shareable model components**: named sets of parameters or units, defined once for a model family
      and reused, sliced and recombined;
    - **agent-orchestrated experiments**, where a model description of roles, layers and components is easier to
-     compose over than regexes. If no view exists for a model, an agent can write one: a view-generator skill and a
-     worked example to follow are in progress
-     (`#157 <https://github.com/speediedan/finetuning-scheduler/issues/157>`_,
-     `#158 <https://github.com/speediedan/finetuning-scheduler/issues/158>`_).
+     compose over than regexes. If no view exists for a model, an agent can write one by following the
+     :ref:`worked example<tunable-views-worked-example>`, or with the ``tunable-view-generator`` agent skill that
+     packages it (in the repository's ``.agents/skills/``, usable from any agent harness that reads skills).
 
    :ref:`fts-evolution` explains the direction, with a table of which approach fits which use.
 
@@ -51,7 +50,8 @@ and the Lightning callback (attach the view to the ``LightningModule``). A model
 Writing a View
 **************
 Writing a view by hand is more work than writing a regex, so write one only when names stop being enough (see the tip
-above). Often you need not write a class at all: :class:`~finetuning_scheduler.core.views.CanonicalView` with
+above). The :ref:`worked example<tunable-views-worked-example>` walks through one, and the ``tunable-view-generator``
+agent skill (``.agents/skills/``) packages its steps for agents. Often you need not write a class at all: :class:`~finetuning_scheduler.core.views.CanonicalView` with
 ``roles=`` gives a plain model roles while keeping its own names.
 
 A view needs four members; the protocol defines a default for each of the rest, applied when a view does not define

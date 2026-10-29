@@ -415,6 +415,7 @@ Footnotes
    SuperGLUE notebook (Lightning) <examples/notebooks/superglue/fts_superglue_lightning>
    SuperGLUE notebook (PyTorch API) <examples/notebooks/superglue/fts_superglue_pytorch>
    SuperGLUE with the LightningCLI <examples/cli/superglue_cli>
+   Tunable views: a worked example <examples/tunable_views/worked_example>
 
 .. toctree::
    :maxdepth: 1

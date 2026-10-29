@@ -88,11 +88,11 @@ a schedule by hand:
    * - have an agent compose many schedules over one model
      - a view and addresses (an agent can also :ref:`write the view<tunable-views>`)
 
-Writing a view by hand is more work than writing a regex. You need one only when names stop being enough. When an
-agent drives the experiments, a missing view need not stop it: a view-generator skill and a worked example, which an
-agent can follow for a new model, are in progress
-(`#157 <https://github.com/speediedan/finetuning-scheduler/issues/157>`_,
-`#158 <https://github.com/speediedan/finetuning-scheduler/issues/158>`_).
+Writing a view by hand is more work than writing a regex. You need one only when names stop being enough. The
+:ref:`worked example<tunable-views-worked-example>` takes a model from no view to address schedules step by step.
+When an agent drives the experiments, a missing view need not stop it: the agent can follow that example for a new
+model, or use the ``tunable-view-generator`` agent skill that packages it (in the repository's ``.agents/skills/``,
+usable from any agent harness that reads skills).
 
 Experimental Status
 *******************

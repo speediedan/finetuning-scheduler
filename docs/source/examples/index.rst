@@ -41,3 +41,19 @@ Command Line
    * - :ref:`Scheduled fine-tuning on SuperGLUE<scheduled-fine-tuning-superglue>`
      - Lightning (``LightningCLI``)
      - Explicit, implicit and baseline scenarios for RTE and BoolQ, configured entirely in YAML.
+
+Tunable Views
+*************
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 18 52
+   :class: fts-examples-table
+
+   * - Example
+     - Interface
+     - What it shows
+   * - :ref:`From no view to address schedules<tunable-views-worked-example>`
+     - PyTorch (experimental)
+     - Give two decoder families (Llama- and OPT-style) one tunable view with roles and components, check it, and run
+       one address schedule on both. Runs on CPU in seconds.

@@ -250,3 +250,38 @@ def test_fts_superglue_pytorch_nb(tmpdir):
         assert re.search(rf"^{scenario}: finished at phase \d+ after \d+ epochs", stdout, flags=re.M), stdout
     generated = os.path.join(tmpdir, "fts_logs", "generated", "DebertaV2ForSequenceClassification_ft_schedule.yaml")
     assert os.path.exists(generated)
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+@pytest.mark.parametrize("family", ["llama", "opt"])
+def test_tunable_views_worked_example(family):
+    """The worked example's view conforms, and one address schedule tunes both families phase by phase (#158)."""
+    from fts_examples.tunable_views.worked_example import run
+
+    summary = run(family, max_epochs=3, steps_per_epoch=1)
+    assert summary["conformance_ok"], summary["conformance_failures"]
+    assert summary.get("regex_schedule_matches", True)
+    assert [e["depth"] for e in summary["epochs"]] == [0, 1, 2]
+    adapters = [[n for n in e["trainable"] if ".lora_" in n] for e in summary["epochs"]]
+    assert [len(a) for a in adapters] == [8, 16, 16]  # the top two blocks' adapters, then all of them
+    last_block = "model.layers.3." if family == "llama" else "model.decoder.layers.3."
+    added = sorted(set(summary["epochs"][2]["trainable"]) - set(summary["epochs"][1]["trainable"]))
+    assert added and all(n.startswith(last_block) and ".lora_" not in n for n in added)
+    assert all(math.isfinite(e["loss"]) for e in summary["epochs"])
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+def test_tunable_view_generator_skill_reference():
+    """The view-generator skill's reference view (GPT-2) passes its own checker, and its schedule thaws what it
+    says (#157)."""
+    skill = Path(__file__).parents[2] / ".agents" / "skills" / "tunable-view-generator"
+    if not skill.is_dir():
+        pytest.skip("the skill ships in the repository, not the distribution")
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(skill / "references"), os.environ.get("PYTHONPATH", "")])}
+    cp = subprocess.run([sys.executable, str(skill / "scripts" / "check_view.py"), "--view", "gpt2_view:make_view",
+                         "--schedule", str(skill / "references" / "gpt2_schedule.yaml")],
+                        capture_output=True, text=True, env=env)
+    assert cp.returncode == 0, cp.stdout[-3000:] + cp.stderr[-3000:]
+    assert "conformance: ok" in cp.stdout
+    assert "phase 0: 4 tensors" in cp.stdout and "transformer.h.3.attn.c_attn.weight" in cp.stdout
+    assert "phase 1: 4 tensors" in cp.stdout and "transformer.h.3.mlp.c_fc.weight" in cp.stdout

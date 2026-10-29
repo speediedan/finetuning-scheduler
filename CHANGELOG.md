@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Added a tunable views worked example (`fts_examples.tunable_views`): a Llama-style and an OPT-style decoder get one view (LoRA tensors as `adapter` roles, an architecture-neutral component vocabulary through `structure()`), pass the conformance suite, and run one address schedule and address book, checked against the equivalent regex schedule. It runs on CPU in seconds, with a docs page under Examples [#158](https://github.com/speediedan/finetuning-scheduler/issues/158).
+
+- Added the `tunable-view-generator` agent skill (`.agents/skills/`, vendor neutral): when a view is worth writing, how to inspect a model (`inspect_model.py`), which shape of view to choose, and how to check it and the schedule compiled through it (`check_view.py`), with a GPT-2 view made by following it as its reference output [#157](https://github.com/speediedan/finetuning-scheduler/issues/157).
+
+- Added "Why Fine-Tuning Scheduler Is Evolving", a docs page on how the project's use has moved beyond gradual unfreezing and what the experimental 2.15 interfaces begin, with when explicit name and regex schedules (still supported, and still the simplest choice for many uses) fit better than views and addresses. The introduction and the tunable views guide link it [#153](https://github.com/speediedan/finetuning-scheduler/issues/153).
+
 - Added experimental addresses to schedules, on both the PyTorch API and the Lightning callback.
   - **What an address is.** An address selects tensors by a record of intersecting fields: `role`, `layers` (an index, a list, `odd`, `even`, or a half-open slice counted from the depth), `module`, `name` and `leaf`. Addresses combine with `&`, `-` and `|`, and reference named sets with `@<set>`. For example, `role:adapter & layers:-4:` thaws the adapters of the top four blocks.
   - **Named sets.** A schedule's top-level `addresses` key names its sets: an inline address book, or the paths of address books relative to the schedule file. Sets may overlap, which roles cannot.

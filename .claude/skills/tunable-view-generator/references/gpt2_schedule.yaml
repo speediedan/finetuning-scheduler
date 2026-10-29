@@ -1,0 +1,9 @@
+# Compiled through gpt2_view.py by check_view.py: the last block's attention, then its MLP, then the rest.
+0:
+  params: ["component:attn.* & layers:-1:"]
+  max_transition_epoch: 1
+1:
+  params: ["component:mlp.* & layers:-1:"]
+  max_transition_epoch: 2
+2:
+  params: ["layers:0:3"]
