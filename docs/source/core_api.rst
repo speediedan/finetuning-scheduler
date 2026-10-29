@@ -50,6 +50,10 @@ Scheduler's users need.
     book
     resolve
     physical
+    maps.schema
+    maps.structure
+    maps.view
+    maps.check
     roles
     errors
     tuning.views
