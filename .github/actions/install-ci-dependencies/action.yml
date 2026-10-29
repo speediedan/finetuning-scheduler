@@ -104,14 +104,14 @@ runs:
         # - Linux/Windows with prerelease: torch already installed, no backend flag needed
         # - Linux/Windows with stable: use --torch-backend=cpu
         if [[ "${{ inputs.use_oldest }}" == "true" ]]; then
-          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=cpu"
+          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} -r requirements/ci/gpu-epsilon.txt --torch-backend=cpu"
         elif [[ "${{ runner.os }}" == "macOS" ]]; then
-          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=auto"
+          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} -r requirements/ci/gpu-epsilon.txt --torch-backend=auto"
         elif [[ "${TORCH_PRERELEASE}" == "true" ]]; then
           # Torch prerelease already installed, just install FTS and deps
-          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE}"
+          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} -r requirements/ci/gpu-epsilon.txt"
         else
-          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} --torch-backend=cpu"
+          INSTALL_CMD="uv pip install -e . -r ${REQ_FILE} -r requirements/ci/gpu-epsilon.txt --torch-backend=cpu"
         fi
 
         echo "Running: ${INSTALL_CMD}"

@@ -200,7 +200,9 @@ fts_install(){
         uv pip install ${uv_install_flags} torch --torch-backend=${torch_backend}
     fi
 
-    uv pip install ${uv_install_flags} -e . -r "${req_file}" ${torch_backend_flag}
+    # gpu-epsilon, the shared GPU CI tooling, is a CI dependency pinned apart from the locked requirements
+    uv pip install ${uv_install_flags} -e . -r "${req_file}" -r "${repo_home}/requirements/ci/gpu-epsilon.txt" \
+        ${torch_backend_flag}
     log_torch_version "after FTS install"
 
     # Install from source packages if specified

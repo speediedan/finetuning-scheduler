@@ -66,6 +66,8 @@ jobs:
   publish-package-testpypi:
     runs-on: ubuntu-22.04
     needs: build-package
+    # each index's trusted publisher can be scoped to its own environment
+    environment: testpypi
     permissions:
       id-token: write
     # only publish packages with new tags or release
@@ -86,10 +88,14 @@ jobs:
 
     - name: Publish to Test PyPI
       uses: pypa/gh-action-pypi-publish@v1.13.0
+      with:
+        # the action's default is PyPI itself, which made this the release's first PyPI upload
+        repository-url: https://test.pypi.org/legacy/
 
   publish-package-pypi:
     runs-on: ubuntu-22.04
     needs: publish-package-testpypi
+    environment: pypi
     permissions:
       id-token: write
     # only publish packages with new tags or release

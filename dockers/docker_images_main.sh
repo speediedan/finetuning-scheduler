@@ -57,7 +57,7 @@ build_eval(){
 	export latest_azpl="py${iv["python"]}-pt${iv["pytorch"]}-pl${iv["lightning"]}-azpl-init"
 	maybe_build iv "${latest_pt}" "${latest_azpl}"
 	# the AMD agent's images: the same Python, PyTorch and Lightning, with PyTorch's own ROCm wheel (dockers/base-rocm)
-	declare -A rv=(["rocm"]="10.0" ["python"]="${iv["python"]}" ["pytorch"]="${iv["pytorch"]}" ["lightning"]="${iv["lightning"]}" ["channel"]="test")
+	declare -A rv=(["rocm"]="10.0" ["python"]="${iv["python"]}" ["pytorch"]="${iv["pytorch"]}" ["lightning"]="${iv["lightning"]}" ["channel"]="")
 	export latest_rocm_pt="base-rocm${rv["rocm"]}-py${rv["python"]}-pt${rv["pytorch"]}-pl${rv["lightning"]}"
 	export latest_rocm_azpl="py${rv["python"]}-pt${rv["pytorch"]}-pl${rv["lightning"]}-rocm${rv["rocm"]}-azpl-init"
 	if [[ $build_new -ne 0 && $build_rocm -ne 0 ]]; then

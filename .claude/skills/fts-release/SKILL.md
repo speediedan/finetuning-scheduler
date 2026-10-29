@@ -117,6 +117,9 @@ Report readiness with: branch head SHA, CI results, coverage, build metadata, an
 
 1. **`release-pypi.yml`** fires on `release: published`. All four jobs must succeed: `build-package`,
    `upload-package`, `publish-package-testpypi`, `publish-package-pypi` (trusted publishing; no local credential).
+   The TestPyPI job uploads to TestPyPI (environment `testpypi`) and the PyPI job needs it, so a missing TestPyPI
+   trusted publisher stops the release before PyPI: register it, then re-run the failed jobs. Check that the version
+   reached `https://test.pypi.org/project/finetuning-scheduler/` before the PyPI job's delay ends.
    ```bash
    gh run list --workflow release-pypi.yml --limit 1 && gh run watch <id> --exit-status
    ```

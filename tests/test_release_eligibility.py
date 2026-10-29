@@ -9,14 +9,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""CPU tests for the release eligibility checker (``tests/gpu_ci/release_eligibility.py``)."""
+"""CPU tests for the release eligibility check: the shared checker (``gpu_epsilon.release_eligibility``) over this
+project's own evidence, as ``tests/gpu_ci/phase_manifest.py`` writes it, with this project's configuration
+(``tests/gpu_ci/release.json``).
+
+The shared checker's rules are tested in gpu-epsilon. These cases are the contract: they run it over reports built by
+this project's report writer, and check that the configuration agrees with the phases and the pipelines.
+"""
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
+from gpu_epsilon import release_eligibility as re_
 
 from tests.gpu_ci import phase_manifest as pm
-from tests.gpu_ci import release_eligibility as re_
+
+CONFIG_PATH = Path(__file__).parent / "gpu_ci" / "release.json"
+CONFIG = re_.ReleaseConfig.load(CONFIG_PATH)
 
 REVISION = "0" * 40
 IMAGES = {"nvidia": "fts:cuda@sha256:" + "a" * 64, "amd": "fts:rocm@sha256:" + "b" * 64}
@@ -69,7 +79,7 @@ def _leg(vendor, outcomes=None, reviewed=None):
         "finetuning_scheduler": "2.15.0",
     }
     leg = {}
-    for phase in re_.REQUIRED_PHASES:
+    for phase in CONFIG.phases:
         manifest = _manifest(phase)
         report = pm.build_report(
             manifest,
@@ -92,7 +102,7 @@ def _legs():
 
 
 def _check(legs, results=None):
-    return re_.check_release(legs, results or {"nvidia": "Succeeded", "amd": "Succeeded"}, REVISION)
+    return re_.check_release(CONFIG, legs, results or {"nvidia": "Succeeded", "amd": "Succeeded"}, REVISION)
 
 
 def _write(root, vendor, leg, attempt=1):
@@ -108,14 +118,35 @@ def _write(root, vendor, leg, attempt=1):
 
 
 def test_required_phases_are_the_release_phases():
-    assert re_.REQUIRED_PHASES == ("gpu-nonstandalone", "standalone", "examples", "examples-multigpu")
+    assert CONFIG.phases == ("gpu-nonstandalone", "standalone", "examples", "examples-multigpu")
+    assert CONFIG.phases == tuple(name for name, phase in pm.PHASES.items() if phase.release)
+
+
+def test_config_agrees_with_the_phase_manifest():
+    assert CONFIG.repository == pm.REPOSITORY
+    assert CONFIG.vendors == pm.VENDORS
+    assert set(CONFIG.measured_phases) == {p for p in CONFIG.phases if pm.PHASES[p].measured}
+    # the counts phase_manifest.classify fails a phase on, beyond the outcome counts
+    report = pm.build_report(_manifest("standalone"), [], vendor="nvidia", evidence_class="pipeline")
+    assert set(CONFIG.failure_counts) == {"rank_failures", "missing_rank_completions"} <= set(report)
+
+
+def test_config_agrees_with_the_pipelines():
+    root = Path(__file__).resolve().parents[1]
+    job = (root / ".azure-pipelines" / "templates" / "gpu-job.yml").read_text()
+    release = (root / ".azure-pipelines" / "gpu-release.yml").read_text()
+    container = (root / ".azure-pipelines" / "scripts" / "gpu_job_container.sh").read_text()
+    assert f"artifact: {CONFIG.artifact_prefix}-${{{{ parameters.vendor }}}}-$(System.JobAttempt)" in job
+    assert f"out=/evidence/{CONFIG.phases_dir}" in container
+    assert "--config tests/gpu_ci/release.json" in release
+    assert all(f"--{vendor}-result" in release for vendor in CONFIG.vendors)
 
 
 def test_two_clean_full_legs_are_eligible():
     verdict = _check(_legs())
     assert verdict["eligible"] and verdict["revision"] == REVISION
     assert {v: e["image"] for v, e in verdict["evidence"].items()} == IMAGES
-    assert set(verdict["evidence"]["amd"]["phases"]) == set(re_.REQUIRED_PHASES)
+    assert set(verdict["evidence"]["amd"]["phases"]) == set(CONFIG.phases)
 
 
 def _set(vendor, phase, key, value, doc="report"):
@@ -269,7 +300,8 @@ def test_cli_writes_verdict_from_latest_attempt(tmp_path, capsys):
     _write(artifacts, "nvidia", legs["nvidia"])
     _write(artifacts, "amd", _leg("amd", {**dict.fromkeys(NODES, "passed"), NODES[0]: "failed"}), attempt=1)
     _write(artifacts, "amd", legs["amd"], attempt=2)
-    argv = ["--artifacts", str(artifacts), "--revision", REVISION, "--output", str(output)]
+    argv = ["--config", str(CONFIG_PATH), "--artifacts", str(artifacts), "--revision", REVISION]
+    argv += ["--output", str(output)]
     assert re_.main(argv + ["--nvidia-result", "Succeeded", "--amd-result", "Succeeded"]) == 0
     assert json.loads(output.read_text())["eligible"] is True
     assert "ELIGIBLE" in capsys.readouterr().out
@@ -279,7 +311,8 @@ def test_cli_removes_a_stale_verdict_when_ineligible(tmp_path, capsys):
     artifacts, output = tmp_path / "artifacts", tmp_path / "eligibility.json"
     _write(artifacts, "nvidia", _legs()["nvidia"])
     output.write_text('{"eligible": true}')
-    argv = ["--artifacts", str(artifacts), "--revision", REVISION, "--output", str(output)]
+    argv = ["--config", str(CONFIG_PATH), "--artifacts", str(artifacts), "--revision", REVISION]
+    argv += ["--output", str(output)]
     assert re_.main(argv + ["--nvidia-result", "Succeeded", "--amd-result", "Failed"]) == 1
     assert not output.exists()
     assert "INELIGIBLE: amd leg result is 'Failed'" in capsys.readouterr().err
@@ -290,7 +323,8 @@ def test_cli_reports_a_report_of_the_wrong_shape(tmp_path, capsys):
     _write(artifacts, "nvidia", _legs()["nvidia"])
     _write(artifacts, "amd", _legs()["amd"])
     (artifacts / "fts-release-amd-1" / "fts-phases" / "reports" / "examples.json").write_text("[]")
-    argv = ["--artifacts", str(artifacts), "--revision", REVISION, "--output", str(tmp_path / "e.json")]
+    argv = ["--config", str(CONFIG_PATH), "--artifacts", str(artifacts), "--revision", REVISION]
+    argv += ["--output", str(tmp_path / "e.json")]
     assert re_.main(argv + ["--nvidia-result", "Succeeded", "--amd-result", "Succeeded"]) == 1
     assert "INELIGIBLE" in capsys.readouterr().err
 
@@ -300,6 +334,7 @@ def test_cli_reports_unreadable_evidence(tmp_path, capsys):
     _write(artifacts, "nvidia", _legs()["nvidia"])
     _write(artifacts, "amd", _legs()["amd"])
     (artifacts / "fts-release-amd-1" / "fts-phases" / "reports" / "standalone.json").write_text("{")
-    argv = ["--artifacts", str(artifacts), "--revision", REVISION, "--output", str(tmp_path / "e.json")]
+    argv = ["--config", str(CONFIG_PATH), "--artifacts", str(artifacts), "--revision", REVISION]
+    argv += ["--output", str(tmp_path / "e.json")]
     assert re_.main(argv + ["--nvidia-result", "Succeeded", "--amd-result", "Succeeded"]) == 1
     assert "INELIGIBLE" in capsys.readouterr().err
