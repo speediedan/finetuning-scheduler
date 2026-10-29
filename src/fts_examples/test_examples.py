@@ -250,3 +250,32 @@ def test_fts_superglue_pytorch_nb(tmpdir):
         assert re.search(rf"^{scenario}: finished at phase \d+ after \d+ epochs", stdout, flags=re.M), stdout
     generated = os.path.join(tmpdir, "fts_logs", "generated", "DebertaV2ForSequenceClassification_ft_schedule.yaml")
     assert os.path.exists(generated)
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+@pytest.mark.parametrize("family", ["llama", "opt"])
+def test_tunable_views_worked_example(family):
+    """The worked example's view conforms, and one address schedule tunes both families phase by phase (#158)."""
+    from fts_examples.tunable_views.worked_example import run
+
+    summary = run(family, max_epochs=3, steps_per_epoch=1)
+    assert summary["conformance_ok"], summary["conformance_failures"]
+    assert summary.get("regex_schedule_matches", True)
+    assert [e["depth"] for e in summary["epochs"]] == [0, 1, 2]
+    adapters = [[n for n in e["trainable"] if ".lora_" in n] for e in summary["epochs"]]
+    assert [len(a) for a in adapters] == [8, 16, 16]  # the top two blocks' adapters, then all of them
+    last_block = "model.layers.3." if family == "llama" else "model.decoder.layers.3."
+    added = sorted(set(summary["epochs"][2]["trainable"]) - set(summary["epochs"][1]["trainable"]))
+    assert added and all(n.startswith(last_block) and ".lora_" not in n for n in added)
+    assert all(math.isfinite(e["loss"]) for e in summary["epochs"])
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+@RunIf(min_cuda_gpus=1, skip_windows=True)
+def test_tunable_views_lora_placement_nb(tmpdir):
+    # the tunable views worked example notebook, shortened through its parameters cell (#158)
+    out = _run_notebook("tunable_views/lora_placement.ipynb",
+                        {"MAX_STEPS": "4", "EVAL_EVERY": "2", "N_TRAIN": "64", "N_EVAL": "16"}, tmpdir.strpath)
+    assert "conformance: ok" in out
+    for condition in ("attention only", "MLP only", "all layers", "MLP + norms", "MLP, then attention"):
+        assert f"{condition}" in out and "final eval loss" in out

@@ -15,4 +15,4 @@ typing-extensions  # already in `base.txt` but the docs CI job does not install 
 pydata-sphinx-theme==0.23.0
 # venngram is not on PyPI yet: Read the Docs installs without UV_OVERRIDE, so it takes the same commit pin as
 # requirements/ci/overrides.txt (keep the two in step). Remove once venngram 0.1.0 is published.
-venngram @ git+https://github.com/speediedan/venngram.git@f4132a86a194a9f53e01b985a0a09a202d4fbeea
+venngram @ git+https://github.com/speediedan/venngram.git@a97921ba96747543d10c9e6d020c63433cdfdfe2

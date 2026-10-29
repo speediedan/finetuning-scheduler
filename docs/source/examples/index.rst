@@ -26,6 +26,12 @@ Notebooks
      - PyTorch (experimental)
      - The same experiment in a training loop you write yourself, with
        :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler`.
+   * - :doc:`Where should LoRA go? Probing LoRA Without Regret with addresses<notebooks/tunable_views/lora_placement>`
+     - PyTorch (experimental)
+     - The tunable views worked example: give Qwen3-0.6B one view with no view code (venngram's ``MappedView``:
+       adapter roles, layers and architecture-neutral components from the model's component map), check it, and run
+       attention-only, MLP-only, all-layer, MLP-plus-norms and phased LoRA as address schedules over the same model,
+       probing a 2025 result on where LoRA adapters belong.
 
 Command Line
 ************

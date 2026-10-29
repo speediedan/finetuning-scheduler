@@ -402,6 +402,7 @@ Footnotes
    SuperGLUE notebook (Lightning) <examples/notebooks/superglue/fts_superglue_lightning>
    SuperGLUE notebook (PyTorch API) <examples/notebooks/superglue/fts_superglue_pytorch>
    SuperGLUE with the LightningCLI <examples/cli/superglue_cli>
+   LoRA placement by address (PyTorch API) <examples/notebooks/tunable_views/lora_placement>
 
 .. toctree::
    :maxdepth: 1
