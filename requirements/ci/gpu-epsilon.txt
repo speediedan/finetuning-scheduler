@@ -1,0 +1,7 @@
+# The shared GPU CI tooling (https://github.com/speediedan/gpu-epsilon), pinned by commit.
+#
+# A CI dependency only: it is installed beside the locked requirements in every CI and development environment, and
+# by the release pipeline's eligibility check, but it is never a package dependency, so no git URL reaches the
+# published Requires-Dist. Standard library only, so it adds nothing to the resolution. Hand-maintained (not generated
+# by lock_ci_requirements.sh); bump the commit to take a new gpu-epsilon.
+gpu-epsilon @ git+https://github.com/speediedan/gpu-epsilon@14db1b502a872faff4a0f2e8429b0ec66e72b0d5
