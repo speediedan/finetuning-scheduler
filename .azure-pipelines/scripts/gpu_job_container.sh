@@ -30,7 +30,8 @@ case "${1:?command}" in
     python -c "import torch; print(f'torch: {torch.__version__} cuda: {torch.version.cuda} hip: {torch.version.hip}')"
     export UV_OVERRIDE="${PWD}/requirements/ci/overrides.txt"
     # torch-excludes.txt keeps the image's own torch build (CUDA or ROCm) from being replaced by a PyPI wheel
-    uv pip install -e . -r requirements/ci/requirements.txt --excludes /tmp/venvs/fts_dev/torch-excludes.txt
+    uv pip install -e . -r requirements/ci/requirements.txt -r requirements/ci/gpu-epsilon.txt \
+      --excludes /tmp/venvs/fts_dev/torch-excludes.txt
     uv pip list
     ;;
   collect)

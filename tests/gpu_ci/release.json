@@ -1,0 +1,12 @@
+{
+  "description": "Release eligibility configuration for gpu_epsilon.release_eligibility, run by .azure-pipelines/gpu-release.yml. tests/test_release_eligibility.py checks it against phase_manifest.py and the pipeline's artifact names.",
+  "repository": "speediedan/finetuning-scheduler",
+  "artifact_prefix": "fts-release",
+  "phases_dir": "fts-phases",
+  "phases": ["gpu-nonstandalone", "standalone", "examples", "examples-multigpu"],
+  "measured_phases": ["gpu-nonstandalone", "standalone", "examples-multigpu"],
+  "failure_counts": ["rank_failures", "missing_rank_completions"],
+  "required_versions": ["finetuning_scheduler", "lightning", "torch"],
+  "shared_builds": ["torch_git_version", "lightning_commit"],
+  "vendors": {"nvidia": "cuda", "amd": "hip"}
+}

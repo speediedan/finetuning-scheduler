@@ -342,7 +342,8 @@ the `fts-development-branch-version-upgrade` skill.
     label (see "Checks required before a change is done").
   - **Release validation** (`.azure-pipelines/gpu-release.yml`, queued by hand, never triggered): one full leg per
     vendor under the `ci-release` class, then a CPU job checks both legs' phase evidence
-    (`tests/gpu_ci/release_eligibility.py`) and publishes `fts-release-eligibility`. The AMD agent takes release work
+    (gpu-epsilon's shared checker at the commit `requirements/ci/gpu-epsilon.txt` pins, configured by
+    `tests/gpu_ci/release.json`) and publishes `fts-release-eligibility`. The AMD agent takes release work
     only in its release mode, and a vendor-demanded job queued while no agent matches fails at once, so the agent is
     switched to release mode BEFORE the run is queued.
   - **Nightly** (`schedules:`, 06:00 UTC, only when `main` changed since the last scheduled run): the full standalone
