@@ -8,6 +8,25 @@ Scheduling Through a Tunable View
    Tunable views are **experimental** in 2.15 (see the :ref:`API stability classifications<versioning>`): the protocol
    may still change.
 
+.. tip::
+   **You may not need a view.** A schedule of parameter names and regexes, or the generated default schedule, needs
+   none, and stays the simplest choice for many uses, above all when you write or edit a schedule by hand. That way of
+   scheduling remains fully supported.
+
+   Views and addresses exist for what names do badly:
+
+   - **interpretability experiments**, which tune, freeze and promote adapters, interventions, latent models and
+     instruments by role, often through several wrappers of one model;
+   - **composable, shareable model components**: named sets of parameters or units, defined once for a model family
+     and reused, sliced and recombined;
+   - **agent-orchestrated experiments**, where a model description of roles, layers and components is easier to
+     compose over than regexes. If no view exists for a model, an agent can write one: a view-generator skill and a
+     worked example to follow are in progress
+     (`#157 <https://github.com/speediedan/finetuning-scheduler/issues/157>`_,
+     `#158 <https://github.com/speediedan/finetuning-scheduler/issues/158>`_).
+
+   :ref:`fts-evolution` explains the direction, with a table of which approach fits which use.
+
 Overview
 ********
 A fine-tuning schedule names parameters. By default those are the names ``named_parameters()`` reports, but a wrapped
@@ -31,6 +50,10 @@ and the Lightning callback (attach the view to the ``LightningModule``). A model
 
 Writing a View
 **************
+Writing a view by hand is more work than writing a regex, so write one only when names stop being enough (see the tip
+above). Often you need not write a class at all: :class:`~finetuning_scheduler.core.views.CanonicalView` with
+``roles=`` gives a plain model roles while keeping its own names.
+
 A view needs four members; the protocol defines a default for each of the rest, applied when a view does not define
 it.
 
