@@ -28,6 +28,8 @@ from typing import Any
 
 import yaml
 from torch import nn
+from venngram import AddressBook
+from venngram.errors import VenngramError
 
 from finetuning_scheduler.core._io import get_filesystem
 from finetuning_scheduler.core.dist import rank_zero_info, rank_zero_only, rank_zero_warn
@@ -182,6 +184,81 @@ def load_yaml_schedule(schedule_yaml_file: str | os.PathLike) -> dict:
         rank_zero_warn(error_msg)
         raise FTSConfigurationError(error_msg)
     return schedule_dict
+
+
+ADDRESSES_KEY = "addresses"
+
+
+def split_addresses(schedule: Mapping) -> tuple[dict, Any]:
+    """Separate a schedule's top-level ``addresses`` key (its named sets) from its phases.
+
+    Returns:
+        The schedule without the key (a new dictionary), and the key's value (``None`` when absent).
+    """
+    phases = {k: v for k, v in schedule.items() if k != ADDRESSES_KEY}
+    return phases, schedule.get(ADDRESSES_KEY)
+
+
+class AddressSets(dict):
+    """The named sets of a schedule's address books (set name mapped to its address), with the books they came
+    from, so a consumer can check what the books require (:meth:`venngram.AddressBook.check_requires`)."""
+
+    def __init__(self, sets: Mapping[str, Any] | None = None, books: Sequence[AddressBook] = ()) -> None:
+        super().__init__(sets or {})
+        self.books = tuple(books)
+
+
+def load_address_sets(raw: Any, base_dir: str | os.PathLike | None = None) -> AddressSets:
+    """The named sets a schedule's ``addresses`` key provides, for ``@<set>`` references.
+
+    Args:
+        raw: The key's value: a path to an address book (or a list of paths, whose sets must not share a name), or an
+            inline book (a mapping with ``sets`` and optionally ``imports``; ``schema_version`` may be omitted).
+        base_dir: The directory relative paths resolve against (the schedule file's directory, when it came from one).
+
+    Raises:
+        FTSConfigurationError: If a book cannot be loaded, two books define the same set, or ``raw`` has another type.
+    """
+    if raw is None:
+        return AddressSets()
+    base = pathlib.Path(base_dir) if base_dir is not None else pathlib.Path(".")
+    try:
+        if isinstance(raw, Mapping):
+            book = AddressBook.from_mapping(raw, source="the schedule's `addresses`", base_dir=base, inline=True)
+            return AddressSets(book.sets(), (book,))
+        paths = [raw] if isinstance(raw, (str, os.PathLike)) else raw
+        if not isinstance(paths, list) or not all(isinstance(p, (str, os.PathLike)) for p in paths):
+            raise FTSConfigurationError(
+                f"A schedule's `addresses` is an address book's path, a list of paths, or an inline book (a mapping"
+                f" with `sets`), got {raw!r}.")
+        sets = AddressSets()
+        for path in paths:
+            book = AddressBook.from_file(base / path)
+            clash = sorted(set(sets) & set(book.sets()))
+            if clash:
+                raise FTSConfigurationError(f"The address books in `addresses` both define {clash}; import one of them "
+                                            "under a namespace instead.")
+            sets.update(book.sets())
+            sets.books += (book,)
+        return sets
+    except VenngramError as err:
+        raise FTSConfigurationError(f"The schedule's `addresses` cannot be loaded: {err}") from err
+
+
+def check_param_entries(schedule: Mapping[int, Mapping[str, Any]]) -> None:
+    """Refuse a ``params`` entry that is not a string: an address written as a mapping belongs in the schedule's
+    ``addresses`` sets, where an entry references it by ``@<set>``.
+
+    Raises:
+        FTSConfigurationError: Naming the phase and the entry.
+    """
+    for depth, phase in schedule.items():
+        for entry in phase.get("params", []) or []:
+            if not isinstance(entry, str):
+                raise FTSConfigurationError(
+                    f"Phase {depth}'s `params` entry {entry!r} is not a string. Write a parameter name, a regex or an "
+                    "address in its string form (`role:adapter & layers:-4:`); an address in mapping form goes in the "
+                    "schedule's `addresses` sets and is referenced as `@<set>`.")
 
 
 def convert_phase_keys(schedule: dict) -> tuple[dict, bool]:

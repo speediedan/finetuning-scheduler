@@ -24,6 +24,7 @@ itself.
 """
 import itertools
 import os
+import pathlib
 import sys
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -56,7 +57,7 @@ from finetuning_scheduler.strategies.base import DistributedAdapter, select_dist
 from finetuning_scheduler.strategies.dtensor import DTensorAdapter
 from finetuning_scheduler.core.views import (BoundView, canonical_fqn, CanonicalView, instrument_state_keys,
                                              resolve_view)
-from finetuning_scheduler.tunable_view.errors import TunableViewError
+from venngram.tuning.errors import TunableViewError
 from finetuning_scheduler.core.transitions import (AnyOf, as_decision, Decision, epoch_transition_due, GateEvent,
                                                    GateResult, TransitionContext, TransitionPolicy)
 
@@ -482,13 +483,17 @@ class TuningScheduler:
         if isinstance(src, (str, os.PathLike)):
             return core_schedule.load_yaml_schedule(src)
         if isinstance(src, Mapping):
-            return {k: dict(deepcopy(v)) for k, v in src.items()}
+            return {k: deepcopy(v) if k == core_schedule.ADDRESSES_KEY else dict(deepcopy(v)) for k, v in src.items()}
         raise FTSConfigurationError(
             f"`schedule` must be a mapping, a path to a schedule YAML file or None, got {type(src).__name__}."
         )
 
     def _validate_schedule(self) -> None:
-        schedule, _ = core_schedule.convert_phase_keys(self._schedule)
+        schedule, raw_addresses = core_schedule.split_addresses(self._schedule)
+        src = self._schedule_src
+        base_dir = pathlib.Path(src).parent if isinstance(src, (str, os.PathLike)) else None
+        address_sets = core_schedule.load_address_sets(raw_addresses, base_dir)
+        schedule, _ = core_schedule.convert_phase_keys(schedule)
         if not core_schedule.ensure_contiguous_phase_keys(schedule):
             raise FTSConfigurationError(
                 core_schedule.NON_CONTIGUOUS_KEYS_MSG + "(phases must be numbered 0, 1, 2, ...)."
@@ -518,7 +523,8 @@ class TuningScheduler:
         # compile once through the view: each phase's `params` become the physical parameters it thaws, and the
         # logical names it resolved are kept for display
         assert self._view is not None
-        self._compiled = compile_schedule(schedule, self._view)
+        core_schedule.check_param_entries(schedule)
+        self._compiled = compile_schedule(schedule, self._view, addresses=address_sets)
         for cp in self._compiled.phases:
             self._logical_params[cp.depth] = cp.logical
             schedule[cp.depth]["params"] = list(cp.thawed)

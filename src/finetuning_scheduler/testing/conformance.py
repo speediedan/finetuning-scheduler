@@ -17,7 +17,7 @@ Conformance cases for :class:`~finetuning_scheduler.core.views.TunableView` impl
 Scheduler.
 
 :class:`TunableViewConformance` extends the protocol's suite
-(:class:`~finetuning_scheduler.tunable_view.conformance.ViewConformance`, whose cases hold for any consumer) with the
+(:class:`~venngram.tuning.conformance.ViewConformance`, whose cases hold for any consumer) with the
 cases Fine-Tuning Scheduler's use of a view relies on: the view's default schedule compiles, thawing a compiled name
 flips exactly its tensors, an optimizer step changes only thawed tensors, and schedules that name nothing, schedule a
 frozen role, or use a view declaring ``trainable=False`` are refused. Which cases apply is decided by the view's own
@@ -47,8 +47,7 @@ from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.phase import thaw_params
 from finetuning_scheduler.core.roles import is_frozen_role
 from finetuning_scheduler.core.views import as_view, BoundView
-from finetuning_scheduler.tunable_view.conformance import (ConformanceCase, ConformanceError, ConformanceReport,
-                                                           ViewConformance)
+from venngram.tuning.conformance import ConformanceCase, ConformanceError, ConformanceReport, ViewConformance
 
 NO_SUCH_NAME = "__fts_conformance_no_such_name__"
 

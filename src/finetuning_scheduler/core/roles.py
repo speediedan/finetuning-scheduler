@@ -14,10 +14,10 @@ Fine-Tuning Scheduler Parameter Roles
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The role vocabulary and ``role:`` selector grammar of the tunable view protocol
-(:mod:`~finetuning_scheduler.tunable_view.roles`), as Fine-Tuning Scheduler applies them to schedules. The constants
+(:mod:`~venngram.roles`), as Fine-Tuning Scheduler applies them to schedules. The constants
 are the protocol's; each function is the protocol's, raising
 :class:`~finetuning_scheduler.core.exceptions.FTSConfigurationError` where the protocol raises
-:class:`~finetuning_scheduler.tunable_view.errors.TunableViewError`, because here a role or selector comes from a
+:class:`~venngram.errors.VenngramError`, because here a role or selector comes from a
 schedule or a configuration.
 
 .. warning:: This is an experimental API and may change in a future release.
@@ -26,23 +26,22 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.tunable_view import roles as _roles
-from finetuning_scheduler.tunable_view.errors import TunableViewError
-from finetuning_scheduler.tunable_view.roles import (FROZEN_ROLE_KINDS, is_role_selector, NAMED_OPTIONAL,
-                                                     NAMED_REQUIRED, ROLE_KINDS, SELECTOR_PREFIX,
-                                                     UNCHECKPOINTED_ROLE_KINDS)
+import venngram.roles as _roles
+from venngram.errors import VenngramError
+from venngram.roles import (FROZEN_ROLE_KINDS, is_role_selector, NAMED_OPTIONAL, NAMED_REQUIRED, ROLE_KINDS,
+                            SELECTOR_PREFIX, UNCHECKPOINTED_ROLE_KINDS)
 
 
 @contextmanager
 def _configuration_errors() -> Iterator[None]:
     try:
         yield
-    except TunableViewError as err:
+    except VenngramError as err:
         raise FTSConfigurationError(str(err)) from err
 
 
 def parse_role(role: str) -> tuple[str, str | None]:
-    """Split a role into its kind and optional name (:func:`~finetuning_scheduler.tunable_view.roles.parse_role`).
+    """Split a role into its kind and optional name (:func:`~venngram.roles.parse_role`).
 
     Raises:
         FTSConfigurationError: If the role is invalid.
@@ -72,7 +71,7 @@ def is_frozen_role(role: str) -> bool:
 
 
 def parse_selector(selector: str) -> tuple[str, str | None]:
-    """Parse a ``role:<kind>[:<name>]`` selector (:func:`~finetuning_scheduler.tunable_view.roles.parse_selector`).
+    """Parse a ``role:<kind>[:<name>]`` selector (:func:`~venngram.roles.parse_selector`).
 
     Raises:
         FTSConfigurationError: If ``selector`` is not a valid selector.
@@ -82,7 +81,7 @@ def parse_selector(selector: str) -> tuple[str, str | None]:
 
 
 def selector_matches(selector: str, role: str) -> bool:
-    """Whether ``role`` matches ``selector`` (:func:`~finetuning_scheduler.tunable_view.roles.selector_matches`).
+    """Whether ``role`` matches ``selector`` (:func:`~venngram.roles.selector_matches`).
 
     Raises:
         FTSConfigurationError: If the selector or the role is invalid.
@@ -92,8 +91,7 @@ def selector_matches(selector: str, role: str) -> bool:
 
 
 def select(selector: str, names: Iterable[str], roles: Mapping[str, str]) -> list[str]:
-    """The ``names`` whose role matches ``selector``, in order
-    (:func:`~finetuning_scheduler.tunable_view.roles.select`).
+    """The ``names`` whose role matches ``selector``, in order (:func:`~venngram.roles.select`).
 
     Raises:
         FTSConfigurationError: If the selector or a role is invalid.
@@ -104,7 +102,7 @@ def select(selector: str, names: Iterable[str], roles: Mapping[str, str]) -> lis
 
 def validate_roles(roles: Mapping[str, str], parameters: Iterable[str], buffers: Iterable[str]) -> dict[str, str]:
     """Validate a role mapping against a module's parameter and buffer names
-    (:func:`~finetuning_scheduler.tunable_view.roles.validate_roles`).
+    (:func:`~venngram.roles.validate_roles`).
 
     Raises:
         FTSConfigurationError: If a role is invalid or a key names neither a parameter nor a buffer.

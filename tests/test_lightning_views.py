@@ -367,7 +367,7 @@ def test_fsdp1_validates_the_schedules_own_names_under_naming_overrides():
 
 def test_role_selectors_under_a_naming_override_adapter_refuse_by_name(tmp_path):
     schedule = {0: {"params": ["role:base"], "max_transition_epoch": 1}}
-    with pytest.raises(MisconfigurationException, match="selectors are not supported under LegacyNamingAdapter"):
+    with pytest.raises(MisconfigurationException, match="are not supported under LegacyNamingAdapter"):
         _trainer(tmp_path, [_fts(ft_schedule=schedule, epoch_transitions_only=True)]).fit(LogicalNamesBoringModel())
 
 

@@ -17,10 +17,11 @@ import pytest
 import torch
 from torch import nn
 from torch.nn.utils import parametrize
+from venngram.errors import RoleError, VenngramError
 
 from finetuning_scheduler import CanonicalView, TunableSupport, TunableView, TunableViewExtras, ViewDefaults
 from finetuning_scheduler.core import roles as R
-from finetuning_scheduler.tunable_view import roles as protocol_roles
+from venngram import roles as protocol_roles
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.views import (as_view, BoundView, pair_groups, resolve_view, TunableViewError,
                                              Unresolvable, VIEW_ATTR)
@@ -93,7 +94,7 @@ def test_parse_role_refuses(role, match):
     with pytest.raises(FTSConfigurationError, match=match):
         R.parse_role(role)
     # the protocol raises its own error; Fine-Tuning Scheduler's re-export raises a configuration error
-    with pytest.raises(TunableViewError, match=match) as excinfo:
+    with pytest.raises(RoleError, match=match) as excinfo:
         protocol_roles.parse_role(role)
     assert not isinstance(excinfo.value, FTSConfigurationError)
 
@@ -172,7 +173,7 @@ def test_canonical_view_roles():
     view = CanonicalView(net, roles={"1.running_mean": "fitted", "1.running_var": "fitted", "2.weight": "adapter:x"})
     assert view.support().declared_roles == frozenset({"base", "fitted", "adapter"})
     assert view.roles()["1.running_mean"] == "fitted"
-    with pytest.raises(TunableViewError, match="neither a parameter nor a buffer"):
+    with pytest.raises(RoleError, match="neither a parameter nor a buffer"):
         CanonicalView(net, roles={"0.missing": "fitted"})
 
 
@@ -305,6 +306,6 @@ def test_a_member_set_on_the_instance_is_used_and_counts_as_an_override():
 @pytest.mark.parametrize("role", ["adapter", "bogus-role", "latent", "instrument"])
 def test_promote_refuses_a_target_that_is_not_a_named_latent_role(role):
     bound = BoundView(CanonicalView(_net(), roles={"0.weight": "instrument"}))
-    with pytest.raises(TunableViewError):
+    with pytest.raises(VenngramError):  # a role error for an invalid role, a view error for a valid non-latent one
         bound.promote(["0.weight"], role)
     assert bound.promoted == {}

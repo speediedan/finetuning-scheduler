@@ -13,14 +13,14 @@ r"""
 Fine-Tuning Scheduler Tunable Views
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The tunable view protocol (:mod:`finetuning_scheduler.tunable_view`) as Fine-Tuning Scheduler consumes it. A
+The tunable view protocol (venngram's :mod:`venngram.tuning`) as Fine-Tuning Scheduler consumes it. A
 :class:`TunableView` is the contract between a model's *logical* parameter names (the names a schedule uses) and its
 *physical* parameters (the tensors the optimizer, checkpoints and sharding see). Every name here is the protocol's
 except :class:`ScheduleUnresolvable`, which Fine-Tuning Scheduler raises when a schedule names something a view does not
 resolve.
 
 A view that does not satisfy the protocol (one lacking a required member, say) raises
-:class:`~finetuning_scheduler.tunable_view.errors.TunableViewError`, while a schedule or configuration that is invalid
+:class:`~venngram.tuning.errors.TunableViewError`, while a schedule or configuration that is invalid
 raises :class:`~finetuning_scheduler.core.exceptions.FTSConfigurationError`.
 
 Views are discovered, in order, from an explicit ``view`` argument, then a view attached to the model as its
@@ -29,17 +29,16 @@ Views are discovered, in order, from an explicit ``view`` argument, then a view 
 .. warning:: This is an experimental API and may change in a future release.
 """
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.tunable_view.errors import TunableViewError, Unresolvable  # noqa: F401 (re-exported)
-from finetuning_scheduler.tunable_view.views import (as_view, BoundView, canonical_fqn, CanonicalView,
-                                                     instrument_state_keys, OPTIONAL_MEMBERS, pair_groups,
-                                                     REQUIRED_MEMBERS, resolve_view, TunableSupport, TunableView,
-                                                     TunableViewExtras, uncheckpointed_keys, VIEW_ATTR, ViewDefaults)
+from venngram.tuning.errors import TunableViewError, Unresolvable  # noqa: F401 (re-exported)
+from venngram.tuning.views import (as_view, BoundView, canonical_fqn, CanonicalView, instrument_state_keys,
+                                   OPTIONAL_MEMBERS, pair_groups, REQUIRED_MEMBERS, resolve_view, TunableSupport,
+                                   TunableView, TunableViewExtras, uncheckpointed_keys, VIEW_ATTR, ViewDefaults)
 
 
 class ScheduleUnresolvable(Unresolvable, FTSConfigurationError):
     """Raised when a schedule's names cannot be resolved to physical parameters; names every unresolved input.
 
-    It is both the protocol's :class:`~finetuning_scheduler.tunable_view.errors.Unresolvable` (so catching that
+    It is both the protocol's :class:`~venngram.tuning.errors.Unresolvable` (so catching that
     catches this) and an :class:`~finetuning_scheduler.core.exceptions.FTSConfigurationError`.
     """
 
