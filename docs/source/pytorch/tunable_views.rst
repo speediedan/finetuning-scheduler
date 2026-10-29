@@ -22,8 +22,8 @@ normalization layer, for example) together with the ones a phase names.
 The protocol is independent of Fine-Tuning Scheduler, which is one consumer of it. It lives in
 `venngram <https://github.com/speediedan/venngram>`_ (``venngram.tuning``, with the role vocabulary in
 ``venngram.roles``), beside the address grammar schedules use, and Fine-Tuning Scheduler depends on it.
-``finetuning_scheduler.tunable_view``, :mod:`finetuning_scheduler.core.views` and :mod:`finetuning_scheduler.core.roles`
-re-export it for Fine-Tuning Scheduler's users. A view can therefore be written against the protocol alone.
+:mod:`finetuning_scheduler.core.views` and :mod:`finetuning_scheduler.core.roles` re-export it for Fine-Tuning
+Scheduler's users. A view can therefore be written against the protocol alone.
 
 Views work with both interfaces: :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` (pass ``view=``)
 and the Lightning callback (attach the view to the ``LightningModule``). A model without a view is scheduled through

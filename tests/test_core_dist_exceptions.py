@@ -35,11 +35,9 @@ CORE_DIR = Path(finetuning_scheduler.__file__).parent / "core"
 CORE_LIKE_DIRS = (CORE_DIR, CORE_DIR.parent / "strategies")
 # venngram is the tunable view protocol and the address grammar, a base dependency without Lightning
 CORE_IMPORT_ALLOWLIST = {"torch", "yaml", "fsspec", "typing_extensions", "venngram"}
-# besides the core itself: the distributed adapters, the tunable view protocol, the build-time helpers and the package
-# metadata (version strings)
+# besides the core itself: the distributed adapters, the build-time helpers and the package metadata (version strings)
 CORE_FTS_IMPORT_ALLOWLIST = ("finetuning_scheduler.core", "finetuning_scheduler.strategies",
-                             "finetuning_scheduler.tunable_view", "finetuning_scheduler.setup_tools",
-                             "finetuning_scheduler.__about__")
+                             "finetuning_scheduler.setup_tools", "finetuning_scheduler.__about__")
 
 
 @pytest.fixture

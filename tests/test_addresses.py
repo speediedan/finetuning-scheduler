@@ -192,3 +192,17 @@ def test_the_lightning_callback_refuses_an_unresolvable_address(tmp_path):
                               epoch_transitions_only=True)
     with pytest.raises((FTSConfigurationError, MisconfigurationException), match="outside a stack of 4"):
         _trainer(tmp_path, [fts], max_epochs=1).fit(_lightning_module())
+
+
+def test_addresses_warn_once_that_they_are_experimental_and_names_never_do(monkeypatch, recwarn):
+    import finetuning_scheduler.core.compile as compile_mod
+
+    monkeypatch.setattr(compile_mod, "_ADDRESSES_WARNED", False)
+    model = Blocks()
+    _compiled(model, {0: {"params": ["head.weight", r"blocks\.[0-3]\.proj\..*"]}})
+    assert not [w for w in recwarn if "experimental" in str(w.message)]
+    with pytest.warns(UserWarning, match=r"uses addresses \(`role:adapter & layers:-2:`\), which are experimental"):
+        _compiled(model, {0: {"params": ["role:adapter & layers:-2:"]}})
+    recwarn.clear()
+    _compiled(model, {0: {"params": ["role:adapter & layers:-1:"]}})
+    assert not [w for w in recwarn if "experimental" in str(w.message)]

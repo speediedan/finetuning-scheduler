@@ -36,9 +36,9 @@ are not documented as public API.
     lightning.tuning_scheduler_bridge
 
 The tunable view protocol and the address grammar schedules use are
-`venngram <https://github.com/speediedan/venngram>`_'s, which Fine-Tuning Scheduler depends on and re-exports as
-``finetuning_scheduler.tunable_view`` (its submodules ``views``, ``roles``, ``errors`` and ``conformance`` are
-venngram's own modules).
+`venngram <https://github.com/speediedan/venngram>`_'s, which Fine-Tuning Scheduler depends on.
+:mod:`finetuning_scheduler.core.views` and :mod:`finetuning_scheduler.core.roles` re-export the parts Fine-Tuning
+Scheduler's users need.
 
 .. currentmodule:: venngram
 

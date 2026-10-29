@@ -37,6 +37,7 @@ from torch import Tensor
 
 from finetuning_scheduler.core.dist import rank_zero_debug, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
+import venngram
 from venngram import is_address, ParamSpace, select
 from venngram.errors import VenngramError
 
@@ -315,6 +316,27 @@ def _compile_promotions(depth: int, promote: Mapping[str, str], bound: BoundView
     return promoted
 
 
+_ADDRESSES_WARNED = False
+
+
+def _warn_addresses_experimental(schedule: Mapping[int, Mapping[str, Any]],
+                                 addresses: Mapping[str, Any] | None) -> None:
+    """Warn once per process the first time a schedule uses an address or named sets: the grammar is venngram's and
+    experimental. Names and regexes never warn."""
+    global _ADDRESSES_WARNED
+    if _ADDRESSES_WARNED:
+        return
+    used = [e for phase in schedule.values() for e in [*phase.get("params", []), *(phase.get("promote") or {})]
+            if is_address(e)]
+    if not used and not addresses:
+        return
+    _ADDRESSES_WARNED = True
+    example = f" (`{used[0]}`)" if used else ""
+    rank_zero_warn(f"This schedule uses addresses{example}, which are experimental: their grammar and address books"
+                   f" come from venngram {venngram.__version__} and may change in a future release. Parameter names"
+                   " and regexes are unaffected.", stacklevel=3)
+
+
 def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, legacy: bool = False,
                      addresses: Mapping[str, Any] | None = None) -> CompiledSchedule:
     """Compile ``schedule`` through ``view`` into the physical parameters each phase thaws.
@@ -343,6 +365,7 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
             that is not an ``instrument`` one; or a phase schedules quantized or packed tensors through logical names
             that are views of them.
     """
+    _warn_addresses_experimental(schedule, addresses)
     bound: BoundView = as_view(view)
     support = bound.support()
     if not support.trainable:

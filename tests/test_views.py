@@ -21,7 +21,7 @@ from venngram.errors import RoleError, VenngramError
 
 from finetuning_scheduler import CanonicalView, TunableSupport, TunableView, TunableViewExtras, ViewDefaults
 from finetuning_scheduler.core import roles as R
-from finetuning_scheduler.tunable_view import roles as protocol_roles
+from venngram import roles as protocol_roles
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.views import (as_view, BoundView, pair_groups, resolve_view, TunableViewError,
                                              Unresolvable, VIEW_ATTR)
