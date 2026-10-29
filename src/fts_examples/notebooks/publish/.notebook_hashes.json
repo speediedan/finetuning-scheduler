@@ -6,5 +6,5 @@
   "src/fts_examples/notebooks/dev/superglue/pytorch_fts_explicit_trajectory.png": "c931840e257281161bd5c106e901bc4ea0de4e1b8277c018db34fe19db968d21",
   "src/fts_examples/notebooks/dev/superglue/pytorch_fts_implicit_trajectory.png": "2be6d03da393c8f0fdf0628aaf86171a480d1fddc64b21e5cf8bd83c169d9547",
   "src/fts_examples/notebooks/dev/superglue/side_by_side_yaml.png": "d190f0c9c0946347f77f109b4ff1e1d65bc2be70a1903defbf651b9bc75da281",
-  "src/fts_examples/notebooks/dev/tunable_views/lora_placement.ipynb": "4c804a9e9d138c034b68ac8c9e43b16c49ef7e0dfac40fa3c7992684eaab7722"
+  "src/fts_examples/notebooks/dev/tunable_views/lora_placement.ipynb": "7093c9a44c23909a51fc43b6f569ce1da6d9cbd5e59476da8f73f0d4123b8063"
 }
