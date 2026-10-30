@@ -85,11 +85,12 @@ def test_a_module_the_caller_sharded_is_left_alone():
 @pytest.mark.parametrize("plan, default_kwargs, match", [
     ({"class:NoSuchBlock": {}}, None, "The class 'class:NoSuchBlock' specified in `fsdp_plan`"),
     ({"output": {"ignored_params": "norm.weight"}}, None, "'norm.weight' in the `ignored_params`"),
-    ({"output": {}}, {"act_ckpt": ["wrapped"]}, "`act_ckpt` mode 'wrapped' is not supported"),
+    ({"output": {"act_ckpt": ["selective"]}}, None, "`act_ckpt` mode 'selective' for 'output' is not supported"),
+    ({"": {"act_ckpt": ["wrapped"]}}, None, "cannot wrap the root module itself"),
     ({"output": {"act_ckpt": {"mode": "composable"}}}, None, "must be a mode or a [mode, kwargs] list"),
-    ({"layers.0": {}, "layers.0.attention": {}}, None, "its ancestor 'layers.0' is already sharded"),
-], ids=["unmatched_class", "ignored_outside_module", "non_composable_act_ckpt", "act_ckpt_mapping",
-        "parent_before_child"])
+    ({"output": {"mp_policy": {"param_dtype": "float99"}}}, None, "names no torch dtype"),
+], ids=["unmatched_class", "ignored_outside_module", "unknown_act_ckpt_mode", "wrapped_root", "act_ckpt_mapping",
+        "mp_policy_bad_dtype"])
 def test_refusals(plan, default_kwargs, match):
     out = _agreed(plan=plan, default_kwargs=default_kwargs)
     assert match in out["error"]
@@ -99,6 +100,56 @@ def test_composable_activation_checkpointing():
     """``act_ckpt: composable`` checkpoints a module before sharding it."""
     out = _agreed(plan={"class:TransformerBlock": {"act_ckpt": ["composable"]}, "norm": {}, "output": {}})
     assert out["fsdp_modules"] == ["", *BLOCKS, "norm", "output"] and out["plain"] == []
+
+
+@pytest.mark.parametrize("mode", ["wrapped", "wrapped_offload"])
+def test_wrapped_activation_checkpointing_thaws_under_wrapper_names(mode):
+    """``act_ckpt``'s wrapped modes (#149) replace each block with a checkpoint wrapper before sharding: its
+    parameters carry the wrapper's prefix, and a phased schedule naming them by those names thaws exactly phase 0's
+    (block 0 under the wrapper, the norm outside it)."""
+    out = _agreed(cases.shard_wrapped_schedule, mode=mode)
+    assert out["wrapped"] == BLOCKS and out["plain"] == []
+    assert out["wrapped_params"] and all(n.startswith(tuple(f"{b}." for b in BLOCKS)) for n in out["wrapped_params"])
+    assert out["thawed"] == sorted(
+        [n for n in out["wrapped_params"] if n.startswith("layers.0.")] + ["norm.bias", "norm.weight"])
+
+
+def test_plan_entries_apply_deepest_first():
+    """A plan may list a module before its children: the children are sharded first whatever the plan order."""
+    out = _agreed(plan={"layers.0": {}, "layers.0.attention": {}, "class:TransformerBlock": {}, "norm": {},
+                        "output": {}})
+    assert "layers.0.attention" in out["fsdp_modules"] and "layers.0" in out["fsdp_modules"]
+    assert out["plain"] == [] and "error" not in out
+
+
+def test_mp_policy_alias_by_dtype_name(monkeypatch):
+    """An ``mp_policy`` mapping with dtype names becomes a ``MixedPrecisionPolicy`` (so a YAML plan can carry one),
+    checked with ``fully_shard`` stubbed, as the cpu-offload alias test does."""
+    import torch
+    from torch import nn
+    from torch.distributed.fsdp import MixedPrecisionPolicy
+
+    from finetuning_scheduler import shard_model as root_shard_model
+    from finetuning_scheduler.strategies import plan as plan_mod
+
+    assert root_shard_model is plan_mod.shard_model  # the package root exports it (#149)
+    calls = []
+    monkeypatch.setattr(plan_mod, "fully_shard", lambda module, mesh, **kw: calls.append(kw))
+    model = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+    plan_mod.shard_model(model, None, {"0": {"mp_policy": {"param_dtype": "bfloat16",
+                                                           "reduce_dtype": torch.float32}}})
+    (first, _root), = [calls]
+    assert isinstance(first["mp_policy"], MixedPrecisionPolicy)
+    assert first["mp_policy"].param_dtype is torch.bfloat16 and first["mp_policy"].reduce_dtype is torch.float32
+
+
+def test_plan_helpers_importable_from_package_root():
+    import finetuning_scheduler as fts
+    from finetuning_scheduler.strategies import plan as plan_mod
+
+    assert fts.shard_model is plan_mod.shard_model
+    assert fts.resolve_fsdp_plan is plan_mod.resolve_fsdp_plan
+    assert fts.phase_feedback is plan_mod.phase_feedback
 
 
 def test_cpu_offload_policy_alias(monkeypatch):

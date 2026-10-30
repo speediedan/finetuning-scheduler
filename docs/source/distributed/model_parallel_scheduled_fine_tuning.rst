@@ -74,9 +74,18 @@ FSDP2's ``CPUOffloadPolicy`` (shards kept on the CPU) cannot follow, so a plan t
 PyTorch API (:class:`~finetuning_scheduler.TuningScheduler`), where the training loop places the model itself: a plan
 applied with :func:`~finetuning_scheduler.strategies.plan.shard_model` (below) may ask for it.
 
-**The PyTorch API**: :func:`~finetuning_scheduler.strategies.plan.shard_model` applies a plan in this format (with the
-same ``fsdp_default_kwargs``, ``class:`` keys, ``ignored_params`` and the ``composable`` ``act_ckpt`` mode) to a plain
-PyTorch model, then shards the root module, so no parameter is left outside an FSDP unit.
+**The PyTorch API**: :func:`finetuning_scheduler.shard_model` applies a plan in this format (with the same
+``fsdp_default_kwargs``, ``class:`` keys, ``ignored_params`` and every ``act_ckpt`` mode below) to a plain PyTorch
+model, then shards the root module, so no parameter is left outside an FSDP unit. Its entries are applied deepest
+first, so a plan for ``shard_model`` may list a module before its children. Two differences from the Lightning
+adapter are worth knowing when a plan moves between them. Under Lightning, a non-composable (``wrapped``) module's
+parameters are presented without the wrapper's prefix (the NCAC adapter below); through ``shard_model`` they keep
+it, so a schedule names them as ``<module>._checkpoint_wrapped_module.<parameter>``. And where Lightning refuses CPU
+offload, the PyTorch API supports it, as ``cpu_offload_policy`` above says.
+
+**mp_policy**: a mapping of ``MixedPrecisionPolicy`` kwargs becomes the entry's mixed precision policy, its dtypes
+by name (``param_dtype: bfloat16``) or as ``torch.dtype`` objects, so a YAML plan can carry one. A
+``MixedPrecisionPolicy`` given directly is passed through.
 
 **Units spanning phases**: when FTS validates the schedule against an FSDP2 model (under Lightning or
 :class:`~finetuning_scheduler.TuningScheduler`), it warns about each FSDP unit that reshards after forward and holds
@@ -244,6 +253,38 @@ module manages would remain a plain tensor beside the DTensors in the optimizer'
 
 That's it! We've configured composable/distributed/multi-phase/scheduled fine-tuning training and didn't even need to
 override ``LightningModule.configure_model``!
+
+The same two examples through the PyTorch API need no strategy adapter at all: the plan is applied with
+:func:`finetuning_scheduler.shard_model` before :meth:`~finetuning_scheduler.TuningScheduler.setup`, on the model
+itself rather than on a ``LightningModule`` holding it (so its modules are named ``output``, ``layers.0`` and so
+on, without the ``model.`` prefix):
+
+.. code-block:: python
+
+    from finetuning_scheduler import TuningScheduler, shard_model
+
+    my_plan = {
+        "output": {"reshard_after_forward": True},  # any ``fully_shard`` API kwargs
+        r"layers.\d*$": {},  # default ``fully_shard`` kwargs used here
+    }
+
+    shard_model(model, mesh["data_parallel"], my_plan)
+    fts = TuningScheduler(model, "config/defaults/llama_ft_schedule.yaml", max_depth=2, ...)
+    fts.setup()
+
+And the YAML form, with the defaults as ``default_kwargs`` (``shard_model`` shards the root itself last, so the plan
+needs no entry for it):
+
+.. code-block:: yaml
+
+    fsdp_default_kwargs:
+        reshard_after_forward: True
+        act_ckpt: ['composable']
+    fsdp_plan: {'output': {}, 'layers.\d*$': {}}
+
+.. code-block:: python
+
+    shard_model(model, mesh["data_parallel"], cfg["fsdp_plan"], default_kwargs=cfg["fsdp_default_kwargs"])
 
 .. list-table:: Resulting Composition
    :widths: 50 50
