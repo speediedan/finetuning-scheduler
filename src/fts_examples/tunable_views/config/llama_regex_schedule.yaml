@@ -1,0 +1,11 @@
+# The same phases as decoder_address_schedule.yaml, written the classic way for the 4-block Llama-style model: names
+# and regexes need no view, and are the simplest choice for one model and a hand-written schedule. They depend on the
+# model's depth and its module names, so each family (and each depth) needs its own.
+0:
+  params: ['model\.layers\.[23]\..*\.lora_[AB]\.weight']
+  max_transition_epoch: 1
+1:
+  params: ['model\.layers\.[01]\..*\.lora_[AB]\.weight']
+  max_transition_epoch: 2
+2:
+  params: ['model\.layers\.3\.mlp\..*', 'model\.layers\.3\.post_attention_layernorm\.weight']

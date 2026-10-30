@@ -19,19 +19,31 @@ Scheduling Through a Tunable View
      instruments by role, often through several wrappers of one model;
    - **composable, shareable model components**: named sets of parameters or units, defined once for a model family
      and reused, sliced and recombined;
+   - **experiments defined once and run across models**: conditions written as addresses depend far less on any one
+     model's parameter names, so the same definition can be compiled, compared and orchestrated over several models;
    - **agent-orchestrated experiments**, where a model description of roles, layers and components is easier to
      compose over than regexes.
 
+   :ref:`fts-evolution` explains the direction, with a table of which approach fits which use. The
+   :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` shows a view and addresses at work in an experiment, and
+   :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` shows one set of addresses on four model families.
+
 Overview
 ********
-A fine-tuning schedule names parameters. By default those are the names ``named_parameters()`` reports, but a wrapped
-model often has better names of its own: an interpretability library may call a block's weights ``blocks.3.attn.W_Q``
-while the underlying module stores them, fused, as ``transformer.h.3.attn.c_attn.weight``.
+A schedule names parameters, by default with the names ``named_parameters()`` reports. A
+:class:`~finetuning_scheduler.core.views.TunableView` tells Fine-Tuning Scheduler more about a model's tensors than
+their names:
 
-A :class:`~finetuning_scheduler.core.views.TunableView` is the contract between the two: a schedule addresses a model
-through the view's *logical* names, and Fine-Tuning Scheduler thaws, optimizes and checkpoints the *physical* tensors
-they stand for. One logical name may stand for several physical tensors, and a view may thaw related tensors (a block's
-normalization layer, for example) together with the ones a phase names.
+- **what each tensor is** (its *role*: the model's own weights, an adapter, an intervention, a latent model, ...);
+- **where it sits** (its layer and an architecture-neutral component, such as ``attn.q`` or ``mlp.out``), so a
+  schedule can say "the MLP adapters of the top four blocks" in a way that means the same thing on every architecture;
+- optionally, **names of its own**: a wrapped model often has a vocabulary of its own (an interpretability library may
+  call a block's query weights ``blocks.3.attn.W_Q`` while the model stores them inside one fused projection), and a
+  view can let a schedule use it.
+
+A schedule addresses the model through the view, and Fine-Tuning Scheduler thaws, optimizes and checkpoints the
+*physical* tensors that result. One logical name may stand for several physical tensors, and a view may thaw related
+tensors (a block's normalization layer, for example) together with the ones a phase names.
 
 The protocol is independent of Fine-Tuning Scheduler, which is one consumer of it. It lives in
 `venngram <https://github.com/speediedan/venngram>`_ (``venngram.tuning``, with the role vocabulary in
@@ -43,19 +55,119 @@ Views work with both interfaces: :class:`~finetuning_scheduler.core.tuning_sched
 and the Lightning callback (attach the view to the ``LightningModule``). A model without a view is scheduled through
 :class:`~finetuning_scheduler.core.views.CanonicalView`, the identity view, so nothing changes for existing schedules.
 
+Giving a Model a View
+*********************
+For an architecture with a component map, venngram's :class:`~venngram.maps.view.MappedView` is the view: it keeps the model's own parameter names (so names and
+regexes still work through it), gives tensors roles from *role rules* (an adapter library's naming conventions), and
+places every tensor at its layer and component from the architecture's map. This is the view the
+:doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` checks with the conformance suite and trains, on Qwen3-0.6B with LoRA on all
+seven projections:
+
+.. code-block:: python
+
+    import torch
+    from transformers import AutoModelForCausalLM
+    from venngram.maps import MappedView, PEFT_LORA_RULES
+
+    from finetuning_scheduler import TuningScheduler
+    from fts_examples.tunable_views.lora import add_lora
+
+    model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B")
+    add_lora(model, ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"), r=16)
+    model.requires_grad_(False)
+    view = MappedView(model, role_rules=PEFT_LORA_RULES)
+
+    # the MLP adapters first, then the attention adapters as well
+    schedule = {
+        0: {"params": ["role:adapter & component:mlp.*"], "max_transition_epoch": 1},
+        1: {"params": ["role:adapter & component:attn.*"]},
+    }
+    fts = TuningScheduler(model, schedule, optimizer=lambda groups: torch.optim.AdamW(groups, lr=2e-4), view=view)
+
+Through this view, a LoRA tensor takes the component of the projection it adapts, and everything else is ``base``:
+
+.. list-table::
+   :header-rows: 1
+
+   * - tensor
+     - role
+     - layer
+     - component
+   * - ``model.layers.27.self_attn.q_proj.lora_A.weight``
+     - adapter
+     - 27
+     - ``attn.q``
+   * - ``model.layers.27.mlp.down_proj.base.weight``
+     - base
+     - 27
+     - ``mlp.out``
+   * - ``model.layers.0.post_attention_layernorm.weight``
+     - base
+     - 0
+     - ``ln2``
+   * - ``model.embed_tokens.weight``
+     - base
+     - (none)
+     - ``embed``
+
+The component vocabulary (``embed``, ``ln1``, ``attn.q``, ``attn.k``, ``attn.v``, ``attn.o``, ``ln2``, ``mlp.gate``,
+``mlp.in``, ``mlp.out``, ``ln_final``, ``unembed``) is the one TransformerLens and interpretune use. When only roles
+are wanted, :class:`~finetuning_scheduler.core.views.CanonicalView` with ``roles=`` gives a plain model roles (and
+layers, from its block list) while keeping its own names.
+
+.. _tunable-views-finding-maps:
+
+How a Map Is Found
+==================
+.. warning::
+   How maps are found is experimental, nascent and still evolving: expect the sources below to grow, and their order
+   and interface to change.
+
+``MappedView(model)`` asks venngram for the map of the model's architecture
+(:func:`~venngram.maps.structure.map_for`), trying the model's class name, then the architectures its configuration
+names (``config.architectures``). Maps come from two sources, in order:
+
+1. **maps registered in the running process** with :func:`~venngram.maps.schema.register` (a
+   :class:`~venngram.maps.schema.ComponentMap`, read from a YAML document with
+   :func:`~venngram.maps.schema.load_component_map`), which take precedence;
+2. **registries** of verified maps. A registry is an index whose rows point at maps (and their verification records) by
+   content-checked reference, wherever they are stored: a Hugging Face Hub model or dataset repository, a Hub storage
+   bucket, or a local directory. Consumers configure the registries they trust, in order (``VENNGRAM_REGISTRIES``), and
+   ``map_for`` reads them from a local cache: the first registry that lists the architecture wins.
+
+The registry lookup is being built. venngram can already fetch documents by content-checked reference
+(``venngram.store``, with a manifest per directory listing each document's kind and hash); the index and
+``VENNGRAM_REGISTRIES`` come next. Until they land, venngram ships seed maps for several common architectures, which
+``map_for`` reads in the registry's place; they move to the registry once the lookup exists
+(`venngram#33 <https://github.com/speediedan/venngram/issues/33>`_).
+:func:`~venngram.maps.schema.known_architectures` lists every architecture with a map today.
+
+Code that builds its view with ``MappedView(model)``, or that names the architecture with
+``MappedView(model, architecture=...)``, picks up new sources without changing. To use a particular map instead, pass
+it: ``MappedView(model, cmap)``.
+
+An architecture venngram has no map for needs one written: a short data document naming each component's module for
+each block, verified against the architecture with :func:`~venngram.maps.verification.verify` (which checks every row exists, that
+the components partition the parameters, their widths against the model's configuration, and their order in a forward
+pass) and then registered.
+
 Writing a View
 **************
-Writing a view by hand is more work than writing a regex, so write one only when names stop being enough (see the tip
-above). Often you need not write a class at all: :class:`~finetuning_scheduler.core.views.CanonicalView` with
-``roles=`` gives a plain model roles while keeping its own names.
+Write a view of your own when a schedule needs a vocabulary that differs from the model's own names, or behavior the
+data-driven views do not have. That is more work than writing a regex, so do it only when names stop being enough (see
+the tip above).
 
 A view needs four members; the protocol defines a default for each of the rest, applied when a view does not define
 it.
 
 - ``root``: the module whose parameters the optimizer and checkpoints see (the ``LightningModule`` under Lightning).
 - ``support()``: a :class:`~finetuning_scheduler.core.views.TunableSupport` record. It says whether the model can be
-  fine-tuned through the view (``trainable=False`` with a ``reason`` refuses it), its naming scheme (``"physical"``
-  when logical names are the root's own parameter names) and the role kinds it uses.
+  fine-tuned through the view (``trainable=False`` with a ``reason`` refuses it), its naming scheme and the role kinds
+  it uses. The naming scheme names the vocabulary of the view's logical names: ``"physical"`` when they are the root's
+  own parameter names, as for every data-driven view, or another label (interpretune's TransformerLens view uses
+  ``"tl"``) when they differ. A view with another scheme must define ``logical_named_parameters``; messages and the
+  generated schedule then use its names, and an address book written in one vocabulary declares it
+  (``requires: {naming_scheme: tl}``) so that it is refused, naming both schemes, through a view with another.
 - ``to_physical(logical)``: each logical name mapped to its physical parameter names.
 - ``to_logical(physical)``: physical names mapped back, for messages.
 
@@ -119,14 +231,53 @@ and resuming through a view that maps the schedule differently is refused.
 
 Roles, Selectors and Addresses
 ******************************
-A view may give tensors **roles** (``roles()``, physical parameter or buffer names to roles; anything unlisted is
-``base``):
+A view may give tensors **roles** (``roles()``, physical parameter or buffer names to roles). A role says what a tensor
+*is*, and so what Fine-Tuning Scheduler may do with it:
 
-- ``adapter`` or ``adapter:<name>``: parameter-efficient adapters;
-- ``intervention`` or ``intervention:<name>``: modules that intervene in the forward pass;
-- ``latent:<name>``: learned latent dictionaries;
-- ``fitted``: run-fitted state, never thawed or optimized but checkpointed;
-- ``instrument``: published, re-loadable artifacts, never thawed, optimized or checkpointed.
+.. list-table::
+   :header-rows: 1
+   :widths: 22 40 12 12 14
+
+   * - role
+     - what it is
+     - thawed by a schedule
+     - optimized
+     - checkpointed
+   * - ``base``
+     - the model's own weights: every tensor the view does not list
+     - when selected
+     - when thawed
+     - yes
+   * - ``adapter``, ``adapter:<name>``
+     - parameter-efficient adapters (LoRA and similar)
+     - when selected
+     - when thawed
+     - yes
+   * - ``intervention``, ``intervention:<name>``
+     - modules that intervene in the forward pass (steering, for example)
+     - when selected
+     - when thawed
+     - yes
+   * - ``latent:<name>``
+     - learned latent dictionaries (a spliced transcoder, for example)
+     - when selected
+     - when thawed
+     - yes
+   * - ``fitted``
+     - state computed during the run without gradients (a calibrated statistic, for example)
+     - never
+     - never
+     - yes
+   * - ``instrument``
+     - a published artifact loaded for analysis (a pretrained SAE, for example), reloaded from its source
+     - never (until promoted)
+     - never
+     - no
+
+``base`` takes no name: a subset of the model's own weights is an address, not a role. The LoRA placement notebook's
+"MLP + norms" condition trains ``role:base & (component:ln1 | component:ln2)`` beside the MLP adapters. ``fitted`` and
+``instrument`` exist for interpretability work, where interpretune's views use them; an ``instrument`` becomes
+trainable only by :ref:`promotion<tunable-views-promotion>`.
 
 A schedule can select tensors by role: ``role:adapter`` selects every adapter, ``role:adapter:char`` exactly that one.
 Selectors work without a view too, where every parameter is ``base``, except under a Lightning strategy adapter that
@@ -183,18 +334,24 @@ optionally ``imports``), the path of an address book relative to the schedule fi
     1:
       params: ["@rest"]
 
+venngram ships an agent skill for the grammar and address books, ``venngram-addressing`` (in the venngram
+repository's ``.agents/skills/``, usable from any agent harness that reads skills): when an address is worth using,
+every field and operator with an example, address books, and how to read a refusal.
+
 **Refusals.** An address that does not resolve is refused, with every reason named. Examples:
 
 - it matches nothing;
 - it references a set no book defines;
 - it names a layer outside the model;
-- it needs architecture knowledge the view does not supply (``component:`` needs a vocabulary-backed structure provider,
-  such as interpretune's);
+- it needs architecture knowledge the view does not supply (``component:`` needs a vocabulary-backed structure
+  provider, such as :class:`~venngram.maps.view.MappedView`'s);
 - it addresses an activation site rather than tensors (``point:``);
 - it addresses units of a tensor (``units:``), which are tuned through a unit adapter of their own.
 
 Both interfaces accept addresses, in ``params`` and as ``promote`` sources. A ``params`` entry is a string. An address
 written as a mapping goes in the ``addresses`` sets and is referenced by ``@<set>``.
+
+.. _tunable-views-promotion:
 
 Promotion
 *********

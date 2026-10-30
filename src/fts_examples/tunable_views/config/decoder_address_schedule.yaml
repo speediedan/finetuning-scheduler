@@ -1,0 +1,10 @@
+# The two-family example's schedule, by address: one file for every model family the view describes.
+addresses: decoder_lora_sets.yaml
+0:
+  params: ["@top_adapters"]
+  max_transition_epoch: 1
+1:
+  params: ["@rest_adapters"]
+  max_transition_epoch: 2
+2:
+  params: ["@last_mlp"]
