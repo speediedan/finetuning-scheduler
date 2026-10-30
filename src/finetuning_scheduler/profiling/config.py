@@ -86,6 +86,9 @@ class MemProfilerCfg:
     :param fsdp_mem_tracker_tabulate: Whether to print FSDP memory statistics in a tabular format.
     :param fsdp_mem_tracker_units: The units to use for FSDP memory statistics.
     :param fsdp_mem_tracker_root_module: The root module to use for FSDP memory statistics.
+    :param dump_fsdp_mem_json: Whether to also save the FSDP memory statistics as one JSON report per rank.
+    :param aggregate_fsdp_mem_reports: Whether rank 0 aggregates the ranks' JSON FSDP memory reports across ranks once
+        every rank has written its own (requires ``dump_fsdp_mem_json``).
     :param dump_memorystats_pickle: Whether to dump memory statistics to a pickle file.
     :param dump_memorystats_yaml: Whether to dump memory statistics to a yaml file.
     :param schedule: A MemProfilerSchedule instance specifying the schedule for memory collection.
@@ -107,6 +110,8 @@ class MemProfilerCfg:
     fsdp_mem_tracker_tabulate: bool = False
     fsdp_mem_tracker_units: str = "MiB"
     fsdp_mem_tracker_root_module: str = ""
+    dump_fsdp_mem_json: bool = True
+    aggregate_fsdp_mem_reports: bool = False
     dump_memorystats_pickle: bool = False
     dump_memorystats_yaml: bool = True
     schedule: MemProfilerSchedule = field(default_factory=MemProfilerSchedule)
@@ -133,6 +138,9 @@ class MemProfilerCfg:
                 self.allocator_history = self.cuda_allocator_history
             self.cuda_allocator_history = None
         self.allocator_history = bool(self.allocator_history)
+        if self.aggregate_fsdp_mem_reports and not self.dump_fsdp_mem_json:
+            raise configuration_error_cls()("`aggregate_fsdp_mem_reports` aggregates the per-rank JSON FSDP memory"
+                                            " reports, so it requires `dump_fsdp_mem_json`.")
         if not self.enabled:
             return
         has_hooks = any(getattr(self.memory_hooks, ht.name) for ht in fields(self.memory_hooks))

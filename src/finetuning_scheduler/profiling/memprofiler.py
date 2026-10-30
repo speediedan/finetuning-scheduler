@@ -17,6 +17,7 @@ A powerful memory profiling utility that synthesizes numerous complementary prof
 """
 from __future__ import annotations
 
+import json
 import os
 import pickle
 from typing import Any, DefaultDict
@@ -39,6 +40,8 @@ from finetuning_scheduler.core.exceptions import configuration_error_cls
 from finetuning_scheduler.profiling.accelerator import (accelerator_backend, accelerator_memory_stats,
                                                         accelerator_type, allocator_history_module)
 from finetuning_scheduler.profiling.config import MemProfilerCfg, resolve_funcs
+from finetuning_scheduler.profiling.fsdp_report import (aggregate_fsdp_mem_reports, fsdp_mem_entry,
+                                                        fsdp_mem_report, fsdp_mem_report_filename)
 
 
 class MemProfiler:
@@ -75,6 +78,9 @@ class MemProfiler:
         Attributes:
             memory_stats (DefaultDict): A dictionary of dictionaries containing memory statistics.
             fsdp_memory_stats (Dict): A dictionary containing FSDP memory statistics.
+            fsdp_peak_mem_stats (Dict): Each profiled call's ``FSDP2MemTracker`` peak snapshot, keyed as
+                ``fsdp_memory_stats`` is.
+            fsdp_mem_phases (Dict): The training phase each profiled call ran in, keyed as ``fsdp_memory_stats`` is.
             rank (int): The rank of the current process.
             module (Any): The module being profiled.
             memprof_log_dir (str): The directory where memory profiles are saved.
@@ -85,10 +91,14 @@ class MemProfiler:
         super().__init__()
         self.memory_stats = defaultdict(dict)
         self.fsdp_memory_stats = {}
+        self.fsdp_peak_mem_stats: dict[tuple[str, int], Any] = {}
+        self.fsdp_mem_phases: dict[tuple[str, int], int | None] = {}
         self.rank = global_rank()
         self.module: Any = None
         self._optimizer: Any = None
         self._log_dir: Any = None
+        self._phase: Any = None
+        self._fsdp_tracker_phase: int | None = None
         self.memprof_log_dir: Path | None = None
         self.fsdp_mem_tracker: FSDPMemTracker | None = None
         self.saved_tensors_funcs: list[Callable] = []
@@ -99,21 +109,27 @@ class MemProfiler:
         obj_ref: Any,
         optimizer: torch.optim.Optimizer | Callable[[], torch.optim.Optimizer | None] | None = None,
         log_dir: str | os.PathLike | Callable[[], str | os.PathLike | None] | None = None,
+        phase: int | Callable[[], int | None] | None = None,
     ) -> None:
         """Connects the MemProfiler to the given target module.
 
-        The profiler reads two things from the training loop that drives the module, each given as a value or as a
+        The profiler reads three things from the training loop that drives the module, each given as a value or as a
         callable returning it, since a loop often creates them after the module is built: the optimizer whose state
-        ``FSDP2MemTracker`` attributes, and the directory artifacts go in when ``memprofiler_cfg.save_dir`` is unset.
+        ``FSDP2MemTracker`` attributes, the directory artifacts go in when ``memprofiler_cfg.save_dir`` is unset, and
+        the current training phase.
 
         Args:
             obj_ref: The module to be profiled. It exposes its ``memprofiler_cfg``.
             optimizer: The optimizer (or a callable returning it) for ``FSDP2MemTracker``.
             log_dir: The base directory (or a callable returning it) under which a ``memprofiler`` directory holds the
                 artifacts when ``memprofiler_cfg.save_dir`` is unset.
+            phase: The current training phase (or a callable returning it), e.g. a fine-tuning schedule's depth. A
+                phase transition changes the trainable parameters and can replace the optimizer, so when it changes
+                the ``FSDP2MemTracker`` is rebuilt with the optimizer then current, and each FSDP2 report records the
+                phase its call ran in.
         """
         self.module = obj_ref
-        self._optimizer, self._log_dir = optimizer, log_dir
+        self._optimizer, self._log_dir, self._phase = optimizer, log_dir, phase
         self._state.curr_pid = _host_process()
         if self.memprofiler_cfg.enable_saved_tensors_hooks:
             self.saved_tensors_funcs = resolve_funcs(cfg_obj=self.memprofiler_cfg, func_type='saved_tensors_funcs')
@@ -178,6 +194,18 @@ class MemProfiler:
             root = self.fsdp_mem_tracker_root_module
             assert isinstance(root, torch.nn.Module)  # `track_fsdp_mem` is set, so the root was resolved
             self.fsdp_mem_tracker = FSDPMemTracker(root, optimizer)
+            self._fsdp_tracker_phase = _resolved(self._phase)
+
+    def _sync_fsdp_phase(self) -> None:
+        """Rebuilds the ``FSDP2MemTracker`` when the training phase has changed since it was built.
+
+        The tracker attributes optimizer state through the optimizer it was built with, and a phase transition can
+        replace that optimizer, so a tracker carried across the transition would misattribute or miss its state.
+        """
+        if (phase := _resolved(self._phase)) != self._fsdp_tracker_phase:
+            rank_zero_info(f"MemProfiler rebuilding `FSDP2MemTracker` for training phase {phase} (was"
+                           f" {self._fsdp_tracker_phase}).")
+            self.maybe_init_fsdp_mem_tracker()
 
     def add_memprofiler_hooks(self) -> None:
         """Adds all hooks registered for memory tracking.
@@ -412,8 +440,8 @@ class MemProfiler:
         If `dump_memorystats_yaml` is True, the memory statistics will be saved to a yaml file
         at `memprof_log_dir / f"rank_{self.rank}_memory_stats.yaml"`.
 
-        If `track_fsdp_mem` is True, the collected FSDP memory statistics will be saved to a yaml file
-        at `memprof_log_dir / f"rank_{self.rank}_fsdp_memory_stats.yaml"`.
+        If `track_fsdp_mem` is True, the collected FSDP memory statistics are saved as described in
+        :meth:`save_fsdp_mem_reports`.
         """
         if self.memory_stats:
             if self.memprofiler_cfg.dump_memorystats_pickle:
@@ -428,11 +456,11 @@ class MemProfiler:
             self.save_fsdp_mem_reports()
 
     def save_fsdp_mem_reports(self) -> None:
-        """Saves the collected FSDP memory statistics to a yaml file.
+        """Saves the collected FSDP memory statistics.
 
         For each function name and iteration in the collected FSDP memory statistics, a log file is created
-        at `memprof_log_dir / f"fsdp_mem_rank_{self.rank}_{fn_name}_{iter}.log"` containing the FSDP memory
-        statistics in both tabular and modulewise formats.
+        at `memprof_log_dir / f"fsdp_mem_rank_{self.rank}_{fn_name}_{iter}.log"` containing that call's peak FSDP memory
+        statistics and its modulewise statistics.
 
         The modulewise format is displayed up to the specified `fsdp_mem_track_module_depth`, and the units
         for the memory statistics are specified by `fsdp_mem_tracker_units`.
@@ -440,28 +468,58 @@ class MemProfiler:
         If `fsdp_mem_tracker_tabulate` is True, the FSDP memory statistics will be displayed in a tabular format.
         Otherwise, a plain text format will be used.
 
+        If `dump_fsdp_mem_json` is True, the same statistics (in bytes, to the same module depth, with the phase each
+        call ran in) are also saved as one JSON report per rank at
+        `memprof_log_dir / f"rank_{self.rank}_fsdp_memory_report.json"`. If `aggregate_fsdp_mem_reports` is also True,
+        every rank waits for the others to write theirs, then rank 0 aggregates them across ranks
+        (:func:`~finetuning_scheduler.profiling.fsdp_report.aggregate_fsdp_mem_reports`).
+
         :return: None
         """
-        for (fn_name, iter) in self.fsdp_memory_stats.keys():
-            tracker = self.fsdp_mem_tracker
-            assert tracker is not None, "FSDP memory statistics are collected only through the tracker"
-            tracker.memory_tracking = self.fsdp_memory_stats[(fn_name, iter)]
-            target_fsdp_depth = self.memprofiler_cfg.fsdp_mem_track_module_depth
-            tabulate_mode = self.memprofiler_cfg.fsdp_mem_tracker_tabulate
-            report_units = self.memprofiler_cfg.fsdp_mem_tracker_units
-            memory_report = self._artifact_dir / f"fsdp_mem_rank_{self.rank}_{fn_name}_{iter}.log"
-            fs = get_filesystem(memory_report)
-            with fs.open(memory_report, "w", newline="") as fp:
-                with redirect_stdout(fp):
-                    fp.write(f"Iteration {iter} {fn_name} Peak FSDP memory stats: {os.linesep}")
-                    fp.write("-" * 80 + os.linesep)
-                    tracker.display_snapshot("peak", tabulate=tabulate_mode)
-                    fp.write("-" * 80 + os.linesep)
-                    fp.write(f"Iteration {iter} {fn_name} Modulewise FSDP memory stats: {os.linesep}")
-                    fp.write("-" * 80 + os.linesep)
-                    tracker.display_modulewise_snapshots(depth=target_fsdp_depth, units=report_units,
-                                                         tabulate=tabulate_mode)
-                    fp.write("-" * 80 + os.linesep)
+        tracker = self.fsdp_mem_tracker
+        assert tracker is not None, "FSDP memory statistics are collected only through the tracker"
+        cfg = self.memprofiler_cfg
+        entries = []
+        # the tracker's peak snapshot is reset each time it is entered, so each call's peak is the one recorded on exit
+        latest_peak = tracker._peak_mem_snap
+        try:
+            for (fn_name, iter) in self.fsdp_memory_stats.keys():
+                tracker.memory_tracking = self.fsdp_memory_stats[(fn_name, iter)]
+                tracker._peak_mem_snap = self.fsdp_peak_mem_stats[(fn_name, iter)]
+                memory_report = self._artifact_dir / f"fsdp_mem_rank_{self.rank}_{fn_name}_{iter}.log"
+                fs = get_filesystem(memory_report)
+                with fs.open(memory_report, "w", newline="") as fp:
+                    with redirect_stdout(fp):
+                        fp.write(f"Iteration {iter} {fn_name} Peak FSDP memory stats: {os.linesep}")
+                        fp.write("-" * 80 + os.linesep)
+                        tracker.display_snapshot("peak", units=cfg.fsdp_mem_tracker_units,
+                                                 tabulate=cfg.fsdp_mem_tracker_tabulate)
+                        fp.write("-" * 80 + os.linesep)
+                        fp.write(f"Iteration {iter} {fn_name} Modulewise FSDP memory stats: {os.linesep}")
+                        fp.write("-" * 80 + os.linesep)
+                        tracker.display_modulewise_snapshots(depth=cfg.fsdp_mem_track_module_depth,
+                                                             units=cfg.fsdp_mem_tracker_units,
+                                                             tabulate=cfg.fsdp_mem_tracker_tabulate)
+                        fp.write("-" * 80 + os.linesep)
+                entries.append(fsdp_mem_entry(fn_name, iter, self.fsdp_mem_phases.get((fn_name, iter)),
+                                              self.fsdp_peak_mem_stats[(fn_name, iter)], tracker.memory_tracking,
+                                              depth=cfg.fsdp_mem_track_module_depth))
+        finally:
+            tracker._peak_mem_snap = latest_peak
+        if cfg.dump_fsdp_mem_json:
+            self._save_fsdp_mem_json(entries)
+
+    def _save_fsdp_mem_json(self, entries: list[dict[str, Any]]) -> None:
+        distributed = torch.distributed.is_available() and torch.distributed.is_initialized()
+        world_size = torch.distributed.get_world_size() if distributed else 1
+        report = self._artifact_dir / fsdp_mem_report_filename(self.rank)
+        with open(report, "w") as f:
+            json.dump(fsdp_mem_report(self.rank, world_size, entries), f, indent=2)
+        if self.memprofiler_cfg.aggregate_fsdp_mem_reports:
+            if distributed:
+                torch.distributed.barrier()
+            if self.rank == 0:
+                aggregate_fsdp_mem_reports(self._artifact_dir)
 
     def _in_collect_range(self) -> bool:
         return self._state._iter_idx > self.schedule.warmup_iters and self._state._iter_idx <= self.schedule.max_iter
@@ -534,15 +592,19 @@ class MemProfiler:
             if not memprofiler._should_collect_fsdp(fn_name):
                 yield
             else:
+                memprofiler._sync_fsdp_phase()
                 fsdp_state_collected = True
                 with memprofiler.fsdp_mem_tracker:
                     yield
         finally:
             memprofiler.update_collect_state(fn_name=fn_name, iter_ctx="end")
             if fsdp_state_collected:
-                memprofiler.fsdp_memory_stats[(fn_name, memprofiler._state._iter_idx)] = \
-                    deepcopy(memprofiler.fsdp_mem_tracker.memory_tracking)
-                memprofiler.fsdp_mem_tracker.reset_mod_stats()
+                call_key = (fn_name, memprofiler._state._iter_idx)
+                tracker = memprofiler.fsdp_mem_tracker
+                memprofiler.fsdp_memory_stats[call_key] = deepcopy(tracker.memory_tracking)
+                memprofiler.fsdp_peak_mem_stats[call_key] = tracker.get_tracker_snapshot("peak")
+                memprofiler.fsdp_mem_phases[call_key] = memprofiler._fsdp_tracker_phase
+                tracker.reset_mod_stats()
 
     @contextmanager
     @staticmethod

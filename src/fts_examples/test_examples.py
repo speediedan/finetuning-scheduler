@@ -177,6 +177,13 @@ def _check_memprofiler_artifacts(root: Path) -> None:
         memprof_dir = stats_files[0].parent
         assert len(list(memprof_dir.glob(f"cuda_alloc_rank_{rank}.training_step.2.*.pickle"))) == 2
         assert (memprof_dir / f"fsdp_mem_rank_{rank}_training_step_2.log").exists()
+        with open(memprof_dir / f"rank_{rank}_fsdp_memory_report.json") as f:
+            report = json.load(f)
+        assert (report["rank"], report["world_size"], report["backend"]) == (rank, 2, accelerator_backend())
+        assert report["collectors"]["fsdp_mem_tracker"] and report["collectors"]["accelerator_memory_stats"]
+        (entry,) = report["entries"]
+        assert (entry["fn_name"], entry["iter"], entry["phase"]) == ("training_step", 2, 0)
+        assert entry["peak"] and entry["modules"]
 
 
 @RunIf(min_cuda_gpus=2, standalone=True)

@@ -10,3 +10,4 @@ MemProfiler
     memprofiler
     config
     accelerator
+    fsdp_report

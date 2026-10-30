@@ -19,6 +19,7 @@ training loop connects a :class:`MemProfiler` to the module it profiles; the Lig
 """
 from finetuning_scheduler.profiling.config import (MemProfilerCfg, MemProfilerFuncs, MemProfilerHooks,
                                                    MemProfilerSchedule)
+from finetuning_scheduler.profiling.fsdp_report import aggregate_fsdp_mem_reports, collector_availability
 from finetuning_scheduler.profiling.memprofiler import MemProfiler
 
 __all__ = [
@@ -27,4 +28,6 @@ __all__ = [
     'MemProfilerSchedule',
     'MemProfilerFuncs',
     'MemProfilerCfg',
+    'aggregate_fsdp_mem_reports',
+    'collector_availability',
 ]

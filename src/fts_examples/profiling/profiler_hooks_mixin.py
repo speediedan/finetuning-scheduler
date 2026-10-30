@@ -1,5 +1,6 @@
 from lightning.fabric.utilities import rank_zero_warn
 
+from finetuning_scheduler import FinetuningScheduler
 from finetuning_scheduler.profiling import MemProfiler, MemProfilerCfg
 from finetuning_scheduler.profiling.accelerator import record_allocator_history
 
@@ -18,6 +19,7 @@ class ProfilerHooksMixin:
                 self,
                 optimizer=lambda: self.trainer.optimizers[0],
                 log_dir=lambda: self._trainer.log_dir or self._trainer.default_root_dir,
+                phase=self._fts_phase,
             )
             if self.allocator_history:
                 record_allocator_history()
@@ -36,6 +38,13 @@ class ProfilerHooksMixin:
         if self.memprofiler:
             self.memprofiler.dump_memory_stats()
         super().on_train_end()
+
+    def _fts_phase(self) -> int | None:
+        """The current fine-tuning phase (the ``FinetuningScheduler`` callback's depth), if one is scheduling."""
+        if self._trainer is None:
+            return None
+        fts = next((cb for cb in self._trainer.callbacks if isinstance(cb, FinetuningScheduler)), None)
+        return None if fts is None else fts.curr_depth
 
     @property
     def allocator_history(self) -> bool:
