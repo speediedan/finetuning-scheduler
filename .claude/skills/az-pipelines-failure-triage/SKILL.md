@@ -144,7 +144,9 @@ Check for orphaned processes from an interrupted standalone run before re-queuin
 `PL_RUN_CUDA_TESTS=1`, on two GPUs for most of that phase's tests (`min_cuda_gpus=2`) and on one for the single-GPU
 cases; CPU-only tests do not run in this pipeline, since the hosted matrix runs them. A `standalone multi-gpu` or
 `Multi-GPU Examples` failure needs a host with two GPUs. Under the `ddp` launcher every rank prints its own verdict,
-and `special_tests.sh` fails the test on any rank's failure, so read every rank's traceback in the raw log.
+and `special_tests.sh` fails the test on any rank's failure (it reads each rank's recorded outcome, not the log), so
+read every rank's traceback in the raw log. The run's results file (`special_tests_<mark>_<time>.json`, beside its
+session log) names each node's verdict and why it failed.
 
 ## Step 2: Reproduce Locally
 
@@ -190,10 +192,10 @@ PL_RUN_CUDA_TESTS=1 PL_RUN_STANDALONE_TESTS=1 python -m pytest tests/test_model_
 bash ./tests/special_tests.sh --mark_type=standalone
 ```
 
-`special_tests.sh` runs `set -e`; to see every failure in one pass rather than stopping at the first:
+`special_tests.sh` stops at the first failing test; to see every failure in one pass (the run still exits 1):
 
 ```bash
-sed -i 's/set -e/set +e/g' ./tests/special_tests.sh   # revert before committing
+bash ./tests/special_tests.sh --mark_type=standalone --allow-failures
 ```
 
 ## Step 3: Narrowing Multi-GPU Failures
@@ -222,7 +224,6 @@ FTS's heavy GPU surface is FSDP and model-parallel, and both assert against reco
   dispatches a heavy job immediately, so releasing another project's gate waives a precondition
   protecting the host rather than just that run. List and identify first: `az-pipelines-ops` Step 2.
 - Don't edit expected-path modules to make a test green without establishing which side actually changed.
-- Don't commit the `set +e` patch to `special_tests.sh`.
 
 ## Expected Outcome
 

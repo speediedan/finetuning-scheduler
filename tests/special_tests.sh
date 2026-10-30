@@ -11,156 +11,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -eo pipefail  # only disable this when debugging to allow more context
+# Run the special tests (those that need a process of their own) through gpu-epsilon's shared runner, configured by
+# [tool.gpu-epsilon.special-tests] in pyproject.toml: one process per node id, each outcome read from per-rank records.
+# `python -m gpu_epsilon.special_tests --help` lists the options. Examples, from the repository root:
+#   ./tests/special_tests.sh                                   # every standalone test (--mark_type defaults to standalone)
+#   ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
+#   ./tests/special_tests.sh --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'
+#   ./tests/special_tests.sh --mark_type=standalone --select_file=tests/.standalone_smoke   # the pull request gate's set
+#   ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0 1"
+#   ./tests/special_tests.sh --mark_type=standalone --allow-failures   # every test, even after a failure (still exits 1)
 
-unset mark_type
-unset log_file
-unset log_dir
-unset filter_pattern
-unset experiments_list
-unset experiment_patch_mask
-unset collect_dir
-unset allow_failures
-unset select_file
-unset PL_RUN_STANDALONE_TESTS
-unset FTS_RUN_STANDALONE_TESTS
-unset FTS_EXPERIMENTAL_PATCH_TESTS
+set -eo pipefail
 
-source $(dirname "$0")/test_utils.sh
+config="$(dirname "$0")/../pyproject.toml"
+_gpu_lease_wrap="$(dirname "$0")/../scripts/gpu_lease_wrap.sh"
+# shellcheck source=../scripts/gpu_lease_wrap.sh
+[[ -r "${_gpu_lease_wrap}" ]] && source "${_gpu_lease_wrap}"
+type gpu_lease_reexec &>/dev/null || gpu_lease_reexec() { :; }
 
-orig_args=("$@")
-
-usage(){
->&2 cat << EOF
-Usage: $0
-   [ --mark_type input]
-   [ --log_file input]
-   [ --log-dir input]            # Directory for all test logs (default: /tmp)
-   [ --filter_pattern input]
-   [ --experiments_list input]
-   [ --experiment_patch_mask input]
-   [ --collect_dir input]
-   [ --allow-failures ]          # Continue running tests after failures
-   [ --select_file input]        # Run only the collected tests listed in this file (one node id per line)
-   [ --help ]
-   Examples:
-	# run all standalone tests (but not experimental ones, note --mark_type defaults to 'standalone' ):
-	#   ./tests/special_tests.sh
-	# run all standalone tests following a pattern:
-	#   ./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
-	# run all standalone tests following a pattern using a non-default test collection directory:
-	#   ./tests/special_tests.sh --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'
-  # run all standalone tests passing a parent process log file to use:
-  #   ./tests/special_tests.sh --mark_type=standalone --log_file=/tmp/some_parent_process_file_to_append_to.log
-  # run all experimental tests following a pattern that are supported by a given experimental patch mask using the
-  # default `tests/.experiments` experiments definition location:
-	#   ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0 1"
-  # same as above, but use a custom experiments definition location:
-  #   ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='model_parallel' --experiments_list=tests/.my_experiments --experiment_patch_mask="1 0 0 1"
-  # run only the standalone smoke set (the pull request gate's default):
-  #   ./tests/special_tests.sh --mark_type=standalone --select_file=tests/.standalone_smoke
-EOF
-exit 1
-}
-
-args=$(getopt -o '' --long mark_type:,log_file:,log-dir:,filter_pattern:,experiments_list:,experiment_patch_mask:,collect_dir:,allow-failures,select_file:,help -- "$@")
-if [[ $? -gt 0 ]]; then
-  usage
+if ! python -c "import gpu_epsilon.special_tests" 2>/dev/null; then
+  >&2 echo "gpu-epsilon is not installed: python -m pip install -r requirements/ci/gpu-epsilon.txt"
+  exit 1
 fi
-
-
-eval set -- ${args}
-while :
-do
-  case $1 in
-    --mark_type)  mark_type=$2    ; shift 2  ;;
-    --log_file)  log_file=$2    ; shift 2  ;;
-    --log-dir)  log_dir=$2    ; shift 2  ;;
-    --filter_pattern)  filter_pattern=$2    ; shift 2  ;;
-    --experiments_list)  experiments_list=$2    ; shift 2  ;;
-    --experiment_patch_mask) experiment_patch_mask+=($2) ; shift 2  ;;
-    --collect_dir)  collect_dir=$2    ; shift 2  ;;
-    --allow-failures)  allow_failures=1    ; shift  ;;
-    --select_file)  select_file=$2    ; shift 2  ;;
-    --help)    usage      ; shift   ;;
-    --) shift; break ;;
-    *) >&2 echo Unsupported option: $1
-       usage ;;
-  esac
-done
-
-# Serialize this run against other GPU work on the host (no-op unless GPU_LEASE_CMD is set). Done after argument
-# parsing, so a bad flag is reported at once rather than after waiting for the lease, and before any GPU work, so the
-# whole suite is covered by a single lease acquisition.
-gpu_lease_reexec "$0" "${orig_args[@]}"
-
-d=`date +%Y%m%d%H%M%S`
-tmp_log_dir="${log_dir:-/tmp}"
-mkdir -p "${tmp_log_dir}"
-mark_type=${mark_type:-"standalone"}
-experiments_list=${experiments_list:-$(dirname "$0")/.experiments}
-if [ -s "${experiments_list}" ]; then
-  if [ -z "${experiment_patch_mask:-}" ]; then
-    experiment_patch_mask=($(awk '{for(i=1;i<=NF;i++) print "0"}' "${experiments_list}"))
-  fi
-fi
-collect_dir=${collect_dir:-"tests"}
-special_test_session_log=${log_file:-"${tmp_log_dir}/special_tests_${mark_type}_${d}.log"}
-mkdir -p "$(dirname "${special_test_session_log}")"
-test_session_tmp_log="${tmp_log_dir}/special_tests_raw_${mark_type}_${d}.log"
-
-# default python coverage arguments
-exec_defaults='-m coverage run --source src/finetuning_scheduler --append -m pytest --capture=no --no-header -v -s -rA'
-collect_defaults="-m pytest ${collect_dir} -q --collect-only --pythonwarnings ignore"
-start_time=$(date +%s)
-echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $special_test_session_log
-printf "FTS special tests beginning execution at ${d} PT \n" | tee -a $special_test_session_log
-echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $special_test_session_log
-printf "\n" | tee -a $special_test_session_log
-
-define_configuration(){
-  echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $special_test_session_log
-  printf "Run configuration: \n" | tee -a $special_test_session_log
-  echo `printf "%0.s-" {1..120} && printf "\n"` | tee -a $special_test_session_log
-  # special tests use the GPUs, and this run holds the GPU lease (when the host uses one), so it opts in
-  export PL_RUN_CUDA_TESTS=1
-  case ${mark_type} in
-    standalone)
-      echo "Collecting and running standalone tests." | tee -a $special_test_session_log
-      export PL_RUN_STANDALONE_TESTS=1
-      ;;
-    exp_patch)
-      echo "Collecting and running only experimental patch tests that currently require the provided patch mask (${experiment_patch_mask[@]})." | tee -a $special_test_session_log
-      export FTS_EXPERIMENTAL_PATCH_TESTS=1
-      ;;
-    *)
-      echo "no matching `mark_type` found, exiting..." | tee -a $special_test_session_log
-      exit 1
-      ;;
-  esac
-
-  if [ -s "${experiments_list}" ]; then
-    # toggle optional experimental patches if requested
-    toggle_experimental_patches ${experiments_list} "${experiment_patch_mask[@]}"
-  else
-    echo "No experimental patches were found in the environment." | tee -a $special_test_session_log
-  fi
-  printf "${patch_report}" | tee -a $special_test_session_log
-
-  if [[ -n ${filter_pattern} ]]; then
-    echo "Using filter pattern: ${filter_pattern}" | tee -a $special_test_session_log
-    exec_defaults+=" -k ${filter_pattern}"
-    collect_defaults+=" -k ${filter_pattern}"
-  fi
-  printf '\n' | tee -a  $special_test_session_log
-}
-
-trap 'show_test_results "$special_test_session_log" "$test_session_tmp_log"' EXIT  # show the output on exit
-
-## Special coverage collection flow
-define_configuration
-collect_tests "$collect_defaults" "$special_test_session_log"
-if [[ -n "${select_file:-}" ]]; then
-  select_tests "$select_file" "$special_test_session_log"
-fi
-execute_tests "$exec_defaults" "$special_test_session_log" "$test_session_tmp_log" "${allow_failures:-0}"
+# Validate the arguments first, so a bad flag is reported at once rather than after waiting for the GPU lease, then
+# serialize the whole run against other GPU work on the host (no-op unless GPU_LEASE_CMD is set).
+python -m gpu_epsilon.special_tests --config "${config}" --check-args "$@"
+gpu_lease_reexec "$0" "$@"
+exec python -m gpu_epsilon.special_tests --config "${config}" "$@"
