@@ -19,6 +19,8 @@ Scheduling Through a Tunable View
      instruments by role, often through several wrappers of one model;
    - **composable, shareable model components**: named sets of parameters or units, defined once for a model family
      and reused, sliced and recombined;
+   - **experiments defined once and run across models**: conditions written as addresses depend far less on any one
+     model's parameter names, so the same definition can be compiled, compared and orchestrated over several models;
    - **agent-orchestrated experiments**, where a model description of roles, layers and components is easier to
      compose over than regexes.
 
@@ -132,8 +134,15 @@ venngram knows. Today those come from two sources:
 
 :func:`~venngram.maps.schema.known_architectures` lists every architecture with a map.
 
-A shared registry of maps, published on the Hugging Face Hub and verified before it is listed, is planned as a third
-source. Code that builds its view with ``MappedView(model)``, or that names the architecture with
+A third source is planned: **registries** of verified maps. A registry is an index whose rows point at maps (and
+their verification records) by content-checked reference, wherever they are stored: a Hugging Face Hub model or dataset
+repository, a Hub storage bucket, or a local directory. Consumers will configure the registries they trust, in order
+(``VENNGRAM_REGISTRIES``), and ``map_for`` will consult them after the two sources above, from a local cache: the first
+registry that lists the architecture wins. The fetching half exists in venngram already (``venngram.store``, with a
+manifest per directory listing each document's kind and hash); the index that lets ``map_for`` find a map through it
+is the next step.
+
+Code that builds its view with ``MappedView(model)``, or that names the architecture with
 ``MappedView(model, architecture=...)``, picks up new sources without changing. To use a particular map instead, pass
 it: ``MappedView(model, cmap)``.
 

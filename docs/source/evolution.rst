@@ -55,6 +55,12 @@ step, and each leaves existing schedules alone.
 - **Addresses.** An address selects tensors by what they are rather than what they are called:
   ``role:adapter & layers:-4:`` is the adapters of the top four blocks, on any model whose view reports its structure.
   Addresses combine by set algebra, and named sets live in address books, plain data files meant to be shared.
+- **Experiments defined less by the model they run on.** Together, a view and addresses separate what an experiment
+  does (its conditions, phases and the sets they train) from how a given model names its tensors. The definition is
+  written once, largely model independent, and each model it runs on needs only a view. Orchestrating an experiment
+  across models, by hand, by a sweep or by an agent, becomes a loop over models and conditions rather than a rewrite
+  per model; :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` shows one set of schedules compiling on four model
+  families.
 - **A neutral protocol package.** The tunable view protocol and the address grammar live in
   `venngram <https://github.com/speediedan/venngram>`_, which knows no training loop and no interpretability package.
   Fine-Tuning Scheduler is one consumer. `interpretune <https://github.com/speediedan/interpretune>`_ is another: it
