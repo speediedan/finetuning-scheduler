@@ -116,6 +116,15 @@ repos:
         language: python
         always_run: true
         pass_filenames: false
+      # This repo's own skills: `.agents/skills/<name>/` is canonical and `.claude/skills/<name>/` a byte-identical
+      # copy, written by `python scripts/check_skill_mirrors.py --sync`. `always_run: true` because both trees are
+      # excluded above.
+      - id: check-skill-mirrors
+        name: Repo-native skills identical in .agents and .claude
+        entry: python scripts/check_skill_mirrors.py
+        language: python
+        always_run: true
+        pass_filenames: false
       # `always_run: true` for the same reason as the skills check: `scripts/vendored/` is excluded above.
       - id: check-vendored-notebook-tooling
         name: Vendored notebook tooling unmodified
