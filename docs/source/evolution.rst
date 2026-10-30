@@ -99,8 +99,8 @@ a schedule by hand:
    * - have an agent compose many schedules over one model
      - a view and addresses (an agent can also :ref:`write the view<tunable-views>`)
 
-For an architecture with a component map (venngram bundles maps for several common ones, and a map for any other is
-a short data document), venngram's ``MappedView`` keeps the model's own names and adds roles, layers and
+For an architecture with a component map (a short data document, found in process or through a registry; see
+:ref:`how a map is found<tunable-views-finding-maps>`), venngram's ``MappedView`` keeps the model's own names and adds roles, layers and
 architecture-neutral components. The :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` uses it to run several LoRA placements on
 one model as address schedules, and :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` resolves the same addresses
 on four model families.

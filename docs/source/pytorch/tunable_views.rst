@@ -123,24 +123,24 @@ How a Map Is Found
    How maps are found is experimental, nascent and still evolving: expect the sources below to grow, and their order
    and interface to change.
 
-``MappedView(model)`` asks venngram for the map of the model's architecture (:func:`~venngram.maps.structure.map_for`), trying
-the model's class name, then the architectures its configuration names (``config.architectures``), among the maps
-venngram knows. Today those come from two sources:
+``MappedView(model)`` asks venngram for the map of the model's architecture
+(:func:`~venngram.maps.structure.map_for`), trying the model's class name, then the architectures its configuration
+names (``config.architectures``). Maps come from two sources, in order:
 
-1. maps registered in the running process with :func:`~venngram.maps.schema.register` (a
-   :class:`~venngram.maps.schema.ComponentMap`, read from a YAML document with :func:`~venngram.maps.schema.load_component_map`),
-   which take precedence;
-2. the maps bundled with venngram, for several common architectures.
+1. **maps registered in the running process** with :func:`~venngram.maps.schema.register` (a
+   :class:`~venngram.maps.schema.ComponentMap`, read from a YAML document with
+   :func:`~venngram.maps.schema.load_component_map`), which take precedence;
+2. **registries** of verified maps. A registry is an index whose rows point at maps (and their verification records) by
+   content-checked reference, wherever they are stored: a Hugging Face Hub model or dataset repository, a Hub storage
+   bucket, or a local directory. Consumers configure the registries they trust, in order (``VENNGRAM_REGISTRIES``), and
+   ``map_for`` reads them from a local cache: the first registry that lists the architecture wins.
 
-:func:`~venngram.maps.schema.known_architectures` lists every architecture with a map.
-
-A third source is planned: **registries** of verified maps. A registry is an index whose rows point at maps (and
-their verification records) by content-checked reference, wherever they are stored: a Hugging Face Hub model or dataset
-repository, a Hub storage bucket, or a local directory. Consumers will configure the registries they trust, in order
-(``VENNGRAM_REGISTRIES``), and ``map_for`` will consult them after the two sources above, from a local cache: the first
-registry that lists the architecture wins. The fetching half exists in venngram already (``venngram.store``, with a
-manifest per directory listing each document's kind and hash); the index that lets ``map_for`` find a map through it
-is the next step.
+The registry lookup is being built. venngram can already fetch documents by content-checked reference
+(``venngram.store``, with a manifest per directory listing each document's kind and hash); the index and
+``VENNGRAM_REGISTRIES`` come next. Until they land, venngram ships seed maps for several common architectures, which
+``map_for`` reads in the registry's place; they move to the registry once the lookup exists
+(`venngram#33 <https://github.com/speediedan/venngram/issues/33>`_).
+:func:`~venngram.maps.schema.known_architectures` lists every architecture with a map today.
 
 Code that builds its view with ``MappedView(model)``, or that names the architecture with
 ``MappedView(model, architecture=...)``, picks up new sources without changing. To use a particular map instead, pass
