@@ -1,0 +1,20 @@
+# The map of references/synthetic_decoder.py, a model no registry covers: drafted by draft_map.py, completed by hand
+# where the draft could not place a module from its name (each such row is marked), and verified by find_view.py.
+schema_version: 2
+architecture: SyntheticDecoder
+components:
+  embed:              {module: "trunk.glyphs", kind: embed}
+  blocks.{i}:         {module: "trunk.cells.{i}", kind: block}
+  ln_final:           {module: "trunk.settle", kind: norm}
+  unembed:            {module: "readout", kind: unembed}         # by hand
+  blocks.{i}.ln1:     {module: "trunk.cells.{i}.pre_mix", kind: norm}    # by hand
+  blocks.{i}.attn:    {module: "trunk.cells.{i}.mix", kind: attn}        # by hand
+  blocks.{i}.attn.q:  {module: "trunk.cells.{i}.mix.wq", kind: linear}
+  blocks.{i}.attn.k:  {module: "trunk.cells.{i}.mix.wk", kind: linear}
+  blocks.{i}.attn.v:  {module: "trunk.cells.{i}.mix.wv", kind: linear}
+  blocks.{i}.attn.o:  {module: "trunk.cells.{i}.mix.wo", kind: linear}  # by hand
+  blocks.{i}.ln2:     {module: "trunk.cells.{i}.pre_feed", kind: norm}   # by hand
+  blocks.{i}.mlp:     {module: "trunk.cells.{i}.feed", kind: mlp}        # by hand
+  blocks.{i}.mlp.gate: {module: "trunk.cells.{i}.feed.w_gate", kind: linear}  # by hand
+  blocks.{i}.mlp.in:  {module: "trunk.cells.{i}.feed.w_lift", kind: linear}   # by hand
+  blocks.{i}.mlp.out: {module: "trunk.cells.{i}.feed.w_drop", kind: linear}   # by hand

@@ -283,27 +283,36 @@ def test_tunable_views_lora_placement_nb(tmpdir):
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 def test_tunable_view_generator_skill_reference(tmp_path):
-    """The view-generator skill's reference map (Phi-3, drafted and verified by the skill) still verifies, its
-    drafter still produces it, and verification still refuses the map with two labels swapped (#157)."""
+    """The view-generator skill's reference (a synthetic decoder no map covers, and its map) still verifies, every
+    row its drafter places agrees with the map, and verification refuses the map with two labels swapped (#157)."""
+    from venngram.maps import known_architectures
+
     skill = Path(__file__).parents[2] / ".agents" / "skills" / "tunable-view-generator"
     if not skill.is_dir():
         pytest.skip("the skill ships in the repository, not the distribution")
-    reference = skill / "references" / "phi3_map.yaml"
+    reference = skill / "references" / "synthetic_map.yaml"
+    model = f"{skill / 'references' / 'synthetic_decoder.py'}:make"
+    # the reference exists to exercise drafting, so it must stay an architecture no map covers
+    assert "SyntheticDecoder" not in known_architectures()
 
     def script(name, *args):
         return subprocess.run([sys.executable, str(skill / "scripts" / name), *map(str, args)], capture_output=True,
                               text=True)
 
-    cp = script("find_view.py", "--hf-arch", "Phi3ForCausalLM", "--map", reference)
+    def rows(text):
+        return {line.split(":", 1)[0].strip(): line.split("#", 1)[0].split(":", 1)[1].strip()
+                for line in text.splitlines() if line.startswith("  ") and not line.lstrip().startswith("#")}
+
+    cp = script("find_view.py", "--model", model, "--map", reference)
     assert cp.returncode == 0, cp.stdout[-3000:] + cp.stderr[-3000:]
-    assert "Phi3ForCausalLM: verified" in cp.stdout and "order: passed" in cp.stdout
+    assert "SyntheticDecoder: verified" in cp.stdout and "order: passed" in cp.stdout
     draft = tmp_path / "draft.yaml"
-    cp = script("draft_map.py", "--hf-arch", "Phi3ForCausalLM", "-o", draft)
+    cp = script("draft_map.py", "--model", model, "-o", draft)
     assert cp.returncode == 0, cp.stderr[-3000:]
-    rows = [line for line in reference.read_text().splitlines() if not line.startswith("#")]
-    assert [line for line in draft.read_text().splitlines() if not line.startswith("#")] == rows
+    drafted, expected = rows(draft.read_text()), rows(reference.read_text())
+    assert drafted and all(expected.get(component) == row for component, row in drafted.items()), drafted
     swapped = tmp_path / "swapped.yaml"
     swapped.write_text(reference.read_text().replace("blocks.{i}.ln1:", "blocks.{i}.lnX:")
                        .replace("blocks.{i}.ln2:", "blocks.{i}.ln1:").replace("blocks.{i}.lnX:", "blocks.{i}.ln2:"))
-    cp = script("find_view.py", "--hf-arch", "Phi3ForCausalLM", "--map", swapped)
+    cp = script("find_view.py", "--model", model, "--map", swapped)
     assert cp.returncode == 1 and "order chain" in cp.stdout, cp.stdout[-3000:]

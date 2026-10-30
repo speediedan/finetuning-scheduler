@@ -1,6 +1,6 @@
 ---
 name: tunable-view-generator
-description: Find, verify or create the tunable view a finetuning-scheduler schedule needs to address a model by role, layer and component (venngram addresses) rather than by parameter names and regexes. Most models need no view code, only a verified venngram component map, so this looks up the architecture's map, verifies it deterministically, and drafts and verifies one when none exists. Use when an experiment needs a schedule over adapters, latent models or architecture-neutral components, when one schedule must run on several model families, or when asked to "make a view", "generate a TunableView" or "map a model". Do NOT use when a schedule of names or regexes already says what is meant.
+description: Find, verify or create the tunable view a finetuning-scheduler schedule needs to address a model by role, layer and component (venngram addresses) rather than by parameter names and regexes. For most models the view is venngram's MappedView over a verified component map, so this looks up the architecture's map, verifies it deterministically, and drafts and verifies one when none exists. Use when an experiment needs a schedule over adapters, latent models or architecture-neutral components, when one schedule must run on several model families, or when asked to "make a view", "generate a TunableView" or "map a model". Do NOT use when a schedule of names or regexes already says what is meant.
 ---
 
 # Finding or generating a tunable view
@@ -10,13 +10,14 @@ A tunable view (protocol in `venngram.tuning`) tells finetuning-scheduler what a
 `mlp.out`, `ln2`, ...). Schedules can then use addresses such as `role:adapter & layers:-4:` or
 `component:mlp.* & layers:-1:`, which mean the same tensors on every architecture the view describes.
 
-**Most models need no view code.** For an architecture with a component map, venngram's
-`MappedView(model, role_rules=...)` is the whole view. So the work is almost always: find the map, verify it, and only
-if there is none, draft one and verify that. A map is data (a short YAML document), so it is safe to share.
+For an architecture with a component map, venngram's `MappedView(model, role_rules=...)` is the view. So the work is
+almost always: find the map, verify it, and only if there is none, draft one and verify that. A map is data (a short
+YAML document), so it is safe to share.
 
-Reference: the worked example notebook `src/fts_examples/notebooks/dev/tunable_views/lora_placement.ipynb` (under
-Examples in the docs) runs `MappedView` on Qwen3-0.6B with LoRA, and `references/phi3_map.yaml` is a map this skill
-drafted and verified for an architecture venngram bundles none for.
+References: the LoRA placement notebook `src/fts_examples/notebooks/dev/tunable_views/lora_placement.ipynb` (under
+Examples in the docs) runs `MappedView` on Qwen3-0.6B with LoRA. `references/synthetic_decoder.py` is a small decoder
+with deliberately unusual module names, so no map covers it, and `references/synthetic_map.yaml` is its map: drafted
+by this skill, completed by hand where the draft could not place a module (those rows are marked), and verified.
 
 ## First: do you need one?
 
@@ -25,8 +26,8 @@ drafted and verified for an architecture venngram bundles none for.
 - **`CanonicalView(model, roles={name: role})`** when only roles or layers are wanted: it keeps the model's names and
   finds layers from its one top-level block list.
 - **`MappedView`** (this skill) for components, or to run one schedule over several model families.
-- **A view class** only for a vocabulary that differs from the model's own names (a wrapper's names, say). That is
-  rare; see "Writing a View" in `docs/source/pytorch/tunable_views.rst`.
+- **A view of your own** for a vocabulary that differs from the model's own names (a wrapper's names, say); see
+  "Writing a View" in `docs/source/pytorch/tunable_views.rst`.
 
 ## Steps
 
@@ -46,8 +47,18 @@ drafted and verified for an architecture venngram bundles none for.
 2. **No map: draft one, then verify it.**
 
    ```bash
-   python .agents/skills/tunable-view-generator/scripts/draft_map.py --hf-arch Phi3ForCausalLM -o phi3_map.yaml
-   python .agents/skills/tunable-view-generator/scripts/find_view.py --hf-arch Phi3ForCausalLM --map phi3_map.yaml
+   python .agents/skills/tunable-view-generator/scripts/draft_map.py --hf-arch MyArchForCausalLM -o my_map.yaml
+   python .agents/skills/tunable-view-generator/scripts/find_view.py --hf-arch MyArchForCausalLM --map my_map.yaml
+   ```
+
+   For a model that is not a `transformers` one, pass a factory instead (`--model path/to/file.py:make`); for
+   `find_view.py` its module also supplies `CONFIG` (the widths) and `inputs(model)` (one forward, for the order
+   check), as `references/synthetic_decoder.py` does:
+
+   ```bash
+   python .agents/skills/tunable-view-generator/scripts/find_view.py \
+     --model .agents/skills/tunable-view-generator/references/synthetic_decoder.py:make \
+     --map .agents/skills/tunable-view-generator/references/synthetic_map.yaml
    ```
 
    The draft guesses each row from module names and lists the modules it could not place as `# UNMAPPED`. **Treat
@@ -66,7 +77,7 @@ drafted and verified for an architecture venngram bundles none for.
    ```python
    from venngram.maps import MappedView, PEFT_LORA_RULES, load_component_map, register
 
-   register(load_component_map("phi3_map.yaml"))  # only for a map venngram does not bundle
+   register(load_component_map("my_map.yaml"))  # only for a map venngram does not bundle
    view = MappedView(model, role_rules=PEFT_LORA_RULES)
    ```
 

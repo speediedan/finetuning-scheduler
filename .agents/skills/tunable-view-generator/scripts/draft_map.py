@@ -8,12 +8,14 @@ module is called, not what it computes.
 
 The model is built on the meta device (nothing is downloaded but a configuration), from a ``transformers`` architecture
 with its default configuration (``--hf-arch``), from a Hugging Face model id (``--hf``, only its configuration is
-fetched), or from a factory (``--model pkg.module:make_model``).
+fetched), or from a factory (``--model pkg.module:make_model`` or ``--model path/to/file.py:make_model``).
 """
 import argparse
 import importlib
+import importlib.util
 import re
 import sys
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -41,10 +43,21 @@ KIND_BY_COMPONENT = {"attn": "attn", "mlp": "mlp", "ln1": "norm", "ln2": "norm",
                      "attn.q_norm": "norm", "attn.k_norm": "norm"}
 
 
+def load_factory(spec: str):
+    """``pkg.module:attr`` or ``path/to/file.py:attr``: the module (imported or loaded from the file) and the attribute."""
+    where, _, attr = spec.partition(":")
+    if where.endswith(".py"):
+        loader = importlib.util.spec_from_file_location(Path(where).stem, where)
+        module = importlib.util.module_from_spec(loader)
+        loader.loader.exec_module(module)
+    else:
+        module = importlib.import_module(where)
+    return module, getattr(module, attr)
+
+
 def build(args) -> nn.Module:
     if args.model:
-        module, _, attr = args.model.partition(":")
-        return getattr(importlib.import_module(module), attr)()
+        return load_factory(args.model)[1]()
     import transformers
 
     if args.hf:
@@ -70,7 +83,7 @@ def main() -> int:
     src = parser.add_mutually_exclusive_group(required=True)
     src.add_argument("--hf-arch", help="a transformers architecture class, built from its default configuration")
     src.add_argument("--hf", help="a Hugging Face model id (only its configuration is fetched)")
-    src.add_argument("--model", help="pkg.module:factory returning the model")
+    src.add_argument("--model", help="pkg.module:factory or path/to/file.py:factory returning the model")
     parser.add_argument("-o", "--output", help="write the draft here (default: stdout)")
     args = parser.parse_args()
     model = build(args)
