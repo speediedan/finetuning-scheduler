@@ -64,7 +64,7 @@ Fundamentally, Fine-Tuning Scheduler enables multi-phase, scheduled fine-tuning 
 unfreezing (i.e. thawing) can help maximize foundation model knowledge retention while allowing (typically upper layers
 of) the model to optimally adapt to new tasks during transfer learning [#]_ [#]_ [#]_ .
 
-FTS orchestrates the gradual unfreezing of models via a fine-tuning schedule that is either implicitly generated (the
+FTS orchestrates the gradual unfreezing of models via a schedule that is either implicitly generated (the
 default) or explicitly provided by the user (more computationally efficient). Fine-tuning phase transitions are driven
 by epoch limits for each phase (``max_transition_epoch``), by criteria on a monitored metric (a plateau in validation
 loss, say), or by a composition of the two. A training session completes when the final phase of the schedule has its
@@ -162,11 +162,11 @@ Basic Usage
 
 .. _default schedule:
 
-The Default Fine-Tuning Schedule
-********************************
+The Default Schedule
+********************
 The default schedule thaws parameters in pairs, starting from the last registered parameter (a naive, two-parameters
 per level heuristic). Using the default/implicitly generated schedule will often be less computationally efficient than
-a user-defined fine-tuning schedule but can often serve as a good baseline for subsequent explicit schedule refinement
+a user-defined schedule but can often serve as a good baseline for subsequent explicit schedule refinement
 and will marginally outperform many explicit schedules.
 
 .. tab-set::
@@ -205,10 +205,10 @@ and will marginally outperform many explicit schedules.
 
 .. _specifying schedule:
 
-Specifying a Fine-Tuning Schedule
-*********************************
+Specifying a Schedule
+*********************
 
-To specify a fine-tuning schedule, it's convenient to first generate the default schedule and then alter the
+To specify a schedule, it's convenient to first generate the default schedule and then alter the
 thawed/unfrozen parameter groups associated with each fine-tuning phase as desired. Fine-tuning phases are zero-indexed
 and executed in ascending order. In addition to being zero-indexed, fine-tuning phase keys should be contiguous and
 either integers or convertible to integers via ``int()``.
@@ -267,7 +267,7 @@ either integers or convertible to integers via ``int()``.
             params:
             - layer.0.*
 
-3. Once the fine-tuning schedule has been altered as desired, pass it to commence scheduled training:
+3. Once the schedule has been altered as desired, pass it to commence scheduled training:
 
 .. tab-set::
     :sync-group: interface
