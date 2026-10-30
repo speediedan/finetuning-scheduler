@@ -81,9 +81,9 @@ PY
       standalone)
         echo "standalone scope: ${FTS_STANDALONE_SCOPE}"
         if [[ "$FTS_STANDALONE_SCOPE" == smoke ]]; then
-          bash ./tests/special_tests.sh --mark_type=standalone --select_file=tests/.standalone_smoke
+          python -m gpu_epsilon.special_tests --mark_type=standalone --select_file=tests/.standalone_smoke
         else
-          bash ./tests/special_tests.sh --mark_type=standalone
+          python -m gpu_epsilon.special_tests --mark_type=standalone
         fi
         ;;
       examples)
@@ -92,7 +92,7 @@ PY
         ;;
       examples-multigpu)
         mkdir -p /tmp/kernel_cache
-        PYTORCH_KERNEL_CACHE_PATH=/tmp/kernel_cache bash ./tests/special_tests.sh --mark_type=standalone \
+        PYTORCH_KERNEL_CACHE_PATH=/tmp/kernel_cache python -m gpu_epsilon.special_tests --mark_type=standalone \
           --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'
         ;;
       pool-reverse)

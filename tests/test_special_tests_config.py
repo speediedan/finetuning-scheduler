@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """CPU tests for this project's special-test and coverage-phase configuration (``[tool.gpu-epsilon.special-tests]``
-and ``[tool.gpu-epsilon.phases]`` in ``pyproject.toml``), which ``tests/special_tests.sh`` and
+and ``[tool.gpu-epsilon.phases]`` in ``pyproject.toml``), which ``python -m gpu_epsilon.special_tests`` and
 ``scripts/gen_fts_coverage.sh`` run through gpu-epsilon's shared runner and phase driver.
 
 The runner's and the driver's own rules are tested in gpu-epsilon. These cases check that this project's tables agree

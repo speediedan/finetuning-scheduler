@@ -260,7 +260,7 @@ addopts = """--strict-markers --doctest-modules --color=yes \
 
 junit_duration_report = "call"
 
-# The special-test runner (gpu-epsilon, pinned in requirements/ci/gpu-epsilon.txt), which tests/special_tests.sh runs:
+# The special-test runner (`python -m gpu_epsilon.special_tests`, pinned in requirements/ci/gpu-epsilon.txt):
 # the tests that need a process of their own, one process per node id. See gpu_epsilon.special_tests for every key.
 [tool.gpu-epsilon.special-tests]
 name = "FTS"

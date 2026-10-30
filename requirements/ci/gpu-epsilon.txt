@@ -4,4 +4,4 @@
 # by the release pipeline's eligibility check, but it is never a package dependency, so no git URL reaches the
 # published Requires-Dist. Standard library only, so it adds nothing to the resolution. Hand-maintained (not generated
 # by lock_ci_requirements.sh); bump the commit to take a new gpu-epsilon.
-gpu-epsilon @ git+https://github.com/speediedan/gpu-epsilon@959a920729aceea471f910f98ff4fe1413cf4f1e
+gpu-epsilon @ git+https://github.com/speediedan/gpu-epsilon@84737beb674f5481719a28e92ea8d03aeb3bf31f
