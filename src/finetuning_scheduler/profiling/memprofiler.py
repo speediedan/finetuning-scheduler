@@ -86,11 +86,11 @@ class MemProfiler:
         self.memory_stats = defaultdict(dict)
         self.fsdp_memory_stats = {}
         self.rank = global_rank()
-        self.module = None
+        self.module: Any = None
         self._optimizer: Any = None
         self._log_dir: Any = None
-        self.memprof_log_dir = None
-        self.fsdp_mem_tracker = None
+        self.memprof_log_dir: Path | None = None
+        self.fsdp_mem_tracker: FSDPMemTracker | None = None
         self.saved_tensors_funcs: list[Callable] = []
         self._state = _MemProfInternalState()
 
@@ -171,11 +171,13 @@ class MemProfiler:
     def maybe_init_fsdp_mem_tracker(self) -> None:
         """Initializes FSDP2 memory tracker if ``track_fsdp_mem`` is ``True``."""
         if self.memprofiler_cfg.track_fsdp_mem:
-            optimizer = self._optimizer() if callable(self._optimizer) else self._optimizer
+            optimizer: torch.optim.Optimizer | None = _resolved(self._optimizer)
             if optimizer is None:
                 rank_zero_warn("MemProfiler was connected without an optimizer, so `FSDP2MemTracker` will not attribute"
                                " optimizer state; pass one to `MemProfiler.connect` to track it.")
-            self.fsdp_mem_tracker = FSDPMemTracker(self.fsdp_mem_tracker_root_module, optimizer)
+            root = self.fsdp_mem_tracker_root_module
+            assert isinstance(root, torch.nn.Module)  # `track_fsdp_mem` is set, so the root was resolved
+            self.fsdp_mem_tracker = FSDPMemTracker(root, optimizer)
 
     def add_memprofiler_hooks(self) -> None:
         """Adds all hooks registered for memory tracking.
@@ -213,19 +215,26 @@ class MemProfiler:
             FTSConfigurationError: If neither is set.
         """
         if self.memprofiler_cfg.save_dir:
-            self.memprof_log_dir = self.memprofiler_cfg.save_dir
+            log_dir: str | os.PathLike = self.memprofiler_cfg.save_dir
         else:
-            base_log_dir = self._log_dir() if callable(self._log_dir) else self._log_dir
+            base_log_dir: str | os.PathLike | None = _resolved(self._log_dir)
             if base_log_dir is None:
                 raise configuration_error_cls()(
                     "MemProfiler has nowhere to save its artifacts: set `memprofiler_cfg.save_dir`, or pass `log_dir`"
                     " to `MemProfiler.connect`."
                 )
-            self.memprof_log_dir = Path(base_log_dir) / "memprofiler"
-        self.memprof_log_dir = Path(self.memprof_log_dir)  # ensure the dir is a Path
+            log_dir = Path(base_log_dir) / "memprofiler"
+        self.memprof_log_dir = Path(log_dir)
         self.memprof_log_dir.mkdir(exist_ok=True, parents=True)
 
-    def allocator_history_snap(self, snap_key: tuple) -> None:
+    @property
+    def _artifact_dir(self) -> Path:
+        if self.memprof_log_dir is None:
+            raise configuration_error_cls()("MemProfiler has no artifact directory yet; call"
+                                            " `init_memprof_log_dir` before collecting.")
+        return self.memprof_log_dir
+
+    def allocator_history_snap(self, snap_key: str) -> None:
         """Dumps a snapshot of the accelerator memory allocator history.
 
         The snapshot is saved to a file named ``<device type>_alloc_rank_<snap_key>.pickle`` (``cuda_alloc_rank_...``
@@ -240,10 +249,10 @@ class MemProfiler:
             rank_zero_warn(f"Skipping the allocator history snapshot `{snap_key}` since the `{accelerator_backend()}`"
                            " backend does not support allocator history recording.")
             return
-        snapshot_file = (self.memprof_log_dir / f"{device_type}_alloc_rank_{snap_key}.pickle")
+        snapshot_file = (self._artifact_dir / f"{device_type}_alloc_rank_{snap_key}.pickle")
         memory_mod._dump_snapshot(str(snapshot_file))
 
-    def cuda_allocator_history_snap(self, snap_key: tuple) -> None:
+    def cuda_allocator_history_snap(self, snap_key: str) -> None:
         """Deprecated alias of :meth:`allocator_history_snap`, unsupported no earlier than 2.17."""
         rank_zero_warn("`MemProfiler.cuda_allocator_history_snap` is deprecated in favor of"
                        " `MemProfiler.allocator_history_snap` and will be unsupported no earlier than 2.17.",
@@ -331,7 +340,8 @@ class MemProfiler:
             self.remove_memprofiler_hooks()
             self.memprofiler_cfg.enable_memory_hooks = False
 
-    def gen_snap_keys(self, fn_name: str, iter_ctx: str, iter_idx: int | None = None) -> tuple[int, int, tuple]:
+    def gen_snap_keys(self, fn_name: str, iter_ctx: str,
+                      iter_idx: int | None = None) -> tuple[int, tuple[int, str, int, str]]:
         """Generates the MemProfiler snapshot key for a given function and iteration context.
 
         Args:
@@ -385,8 +395,10 @@ class MemProfiler:
             reset_mem_hooks (bool, optional): Whether to reset the memory hooks after collecting the snapshot.
                 Defaults to False.
         """
-        if self._state._iter_idx > self.schedule.warmup_iters:
-            if not self.done(self._state._iter_idx):
+        iter_idx = self._state._iter_idx
+        assert iter_idx is not None, "`update_collect_state` sets the iteration before a snapshot is taken"
+        if iter_idx > self.schedule.warmup_iters:
+            if not self.done(iter_idx):
                 self._collect_snap(self._state._snap_key, reset_mem_hooks)
             else:
                 self.teardown_prof(fn_name, iter_ctx)
@@ -405,11 +417,11 @@ class MemProfiler:
         """
         if self.memory_stats:
             if self.memprofiler_cfg.dump_memorystats_pickle:
-                filename = self.memprof_log_dir / f"rank_{self.rank}_memory_stats.pickle"
+                filename = self._artifact_dir / f"rank_{self.rank}_memory_stats.pickle"
                 with open(filename, "wb") as f:
                     pickle.dump(self.memory_stats, f)
             if self.memprofiler_cfg.dump_memorystats_yaml:
-                filename = self.memprof_log_dir / f"rank_{self.rank}_memory_stats.yaml"
+                filename = self._artifact_dir / f"rank_{self.rank}_memory_stats.yaml"
                 with open(filename, "w", newline="") as f:
                     yaml.dump(dict(self.memory_stats), f)  # a plain outer mapping, without a `defaultdict` tag
         if self.fsdp_memory_stats:
@@ -431,22 +443,24 @@ class MemProfiler:
         :return: None
         """
         for (fn_name, iter) in self.fsdp_memory_stats.keys():
-            self.fsdp_mem_tracker.memory_tracking = self.fsdp_memory_stats[(fn_name, iter)]
+            tracker = self.fsdp_mem_tracker
+            assert tracker is not None, "FSDP memory statistics are collected only through the tracker"
+            tracker.memory_tracking = self.fsdp_memory_stats[(fn_name, iter)]
             target_fsdp_depth = self.memprofiler_cfg.fsdp_mem_track_module_depth
             tabulate_mode = self.memprofiler_cfg.fsdp_mem_tracker_tabulate
             report_units = self.memprofiler_cfg.fsdp_mem_tracker_units
-            memory_report = self.memprof_log_dir / f"fsdp_mem_rank_{self.rank}_{fn_name}_{iter}.log"
+            memory_report = self._artifact_dir / f"fsdp_mem_rank_{self.rank}_{fn_name}_{iter}.log"
             fs = get_filesystem(memory_report)
             with fs.open(memory_report, "w", newline="") as fp:
                 with redirect_stdout(fp):
                     fp.write(f"Iteration {iter} {fn_name} Peak FSDP memory stats: {os.linesep}")
                     fp.write("-" * 80 + os.linesep)
-                    self.fsdp_mem_tracker.display_snapshot("peak", tabulate=tabulate_mode)
+                    tracker.display_snapshot("peak", tabulate=tabulate_mode)
                     fp.write("-" * 80 + os.linesep)
                     fp.write(f"Iteration {iter} {fn_name} Modulewise FSDP memory stats: {os.linesep}")
                     fp.write("-" * 80 + os.linesep)
-                    self.fsdp_mem_tracker.display_modulewise_snapshots(depth=target_fsdp_depth, units=report_units,
-                                                                       tabulate=tabulate_mode)
+                    tracker.display_modulewise_snapshots(depth=target_fsdp_depth, units=report_units,
+                                                         tabulate=tabulate_mode)
                     fp.write("-" * 80 + os.linesep)
 
     def _in_collect_range(self) -> bool:
@@ -611,6 +625,11 @@ def _memprofiler_cfg_mapping_representer(dumper, data):
 yaml.SafeDumper.add_representer(MemProfilerCfg, _memprofiler_cfg_mapping_representer)
 
 
+def _resolved(value: Any) -> Any:
+    """``value``, or what it returns when it is a callable (a value :meth:`MemProfiler.connect` reads lazily)."""
+    return value() if callable(value) else value
+
+
 def _host_process() -> Any:
     """This process as a ``psutil.Process``, for host memory tracking.
 
@@ -626,16 +645,16 @@ def _host_process() -> Any:
 
 @dataclass
 class _MemProfInternalState:
-    can_collect: dict[str, bool] = field(default_factory=dict)
+    can_collect: dict[tuple[str, str], bool] = field(default_factory=dict)
     curr_pid: Any = None  # the host process (`psutil.Process`)
-    snap_indices: dict[str, int] = field(default_factory=dict)
+    snap_indices: dict[tuple[str, str], int] = field(default_factory=dict)
     configured_hooks: dict[str, Any] = field(default_factory=dict)
-    hook_handles: DefaultDict[str, list[Any]] = field(default_factory=lambda: defaultdict(list))
+    hook_handles: DefaultDict[Any, list[Any]] = field(default_factory=lambda: defaultdict(list))
     done_prof_funcs: list[str] = field(default_factory=list)
     base_collect_func_set: set | None = None
     _iter_idx: int | None = None
     _snap_key: tuple | None = None
-    _iter_incremented: dict[str, int] = field(default_factory=dict)
+    _iter_incremented: dict[tuple[str, str], bool] = field(default_factory=dict)
     accelerator_stats_logged: bool = False
 
     def maybe_init_iter_state(self, fn_name: str, iter_ctx: str) -> None:

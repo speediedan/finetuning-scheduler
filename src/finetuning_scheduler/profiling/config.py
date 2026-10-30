@@ -182,8 +182,10 @@ def resolve_funcs(cfg_obj: Any, func_type: str) -> list:
         elif func_or_qualname == 'identity_lambda':  # special case often used e.g. w/ saved_tensors_hooks
             resolved_funcs.append(lambda x: x)
         else:
+            module, _, func = str(func_or_qualname).rpartition(".")
+            if not module:
+                raise configuration_error_cls()(f"`{func_or_qualname}` is not a qualified function name (module.func).")
             try:
-                module, func = func_or_qualname.rsplit(".", 1)
                 mod = importlib.import_module(module)
                 resolved_func = getattr(mod, func, None)
                 if callable(resolved_func):
