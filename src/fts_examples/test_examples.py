@@ -295,8 +295,9 @@ def test_tunable_views_cross_architecture_nb(tmpdir):
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 def test_tunable_view_generator_skill_reference(tmp_path):
-    """The view-generator skill's reference (a synthetic decoder no map covers, and its map) still verifies, every
-    row its drafter places agrees with the map, and verification refuses the map with two labels swapped (#157)."""
+    """The view-generator skill's reference (a synthetic decoder no map covers, and its map) still verifies, the
+    drafter's named rows agree with it and its unnamed ones are left for review, and a label swap is refused
+    (#157)."""
     from venngram.maps import known_architectures
 
     skill = Path(__file__).parents[2] / ".agents" / "skills" / "tunable-view-generator"
@@ -322,7 +323,12 @@ def test_tunable_view_generator_skill_reference(tmp_path):
     cp = script("draft_map.py", "--model", model, "-o", draft)
     assert cp.returncode == 0, cp.stderr[-3000:]
     drafted, expected = rows(draft.read_text()), rows(reference.read_text())
-    assert drafted and all(expected.get(component) == row for component, row in drafted.items()), drafted
+    named = {component: row for component, row in drafted.items() if "draft." not in component}
+    # every row the drafter names agrees with the map; every module it cannot name is left for review, not guessed
+    assert named and all(expected.get(component) == row for component, row in named.items()), named
+    modules = {row.split('"')[1] for row in expected.values()}
+    unconfirmed = [row.split('"')[1] for component, row in drafted.items() if "draft." in component]
+    assert unconfirmed and set(unconfirmed) <= modules and "UNCONFIRMED" in draft.read_text(), drafted
     swapped = tmp_path / "swapped.yaml"
     swapped.write_text(reference.read_text().replace("blocks.{i}.ln1:", "blocks.{i}.lnX:")
                        .replace("blocks.{i}.ln2:", "blocks.{i}.ln1:").replace("blocks.{i}.lnX:", "blocks.{i}.ln2:"))

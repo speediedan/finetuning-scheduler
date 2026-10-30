@@ -30,10 +30,6 @@ Scheduling Through a Tunable View
    :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` shows a view and addresses at work in an experiment, and
    :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` shows one set of addresses on four model families.
 
-   :ref:`fts-evolution` explains the direction, with a table of which approach fits which use. The
-   :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` shows a view and addresses at work in an experiment, and
-   :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` shows one set of addresses on four model families.
-
 Overview
 ********
 A schedule names parameters, by default with the names ``named_parameters()`` reports. A

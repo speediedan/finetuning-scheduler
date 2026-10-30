@@ -61,9 +61,14 @@ by this skill, completed by hand where the draft could not place a module (those
      --map .agents/skills/tunable-view-generator/references/synthetic_map.yaml
    ```
 
-   The draft guesses each row from module names and lists the modules it could not place as `# UNMAPPED`. **Treat
-   every row as a guess**: read the model's `forward` for anything unusual. Fix what verification names, and re-run
-   until it passes. Conventions:
+   `draft_map.py` is a thin command line over venngram's drafter (`venngram.maps.drafter`), which names modules by
+   rules mined from every map venngram knows, so it improves as maps are added, then by bundled rule documents. Each
+   row it names carries a **confidence** (the share of known maps that agree on that name) and, where they disagreed,
+   the **alternatives**; a module no rule names becomes a `draft.<path>` row marked `UNCONFIRMED`. Review the least
+   certain rows first, give every unconfirmed row its component (or confirm it has none), and **treat every row as a
+   guess**: read the model's `forward` for anything unusual. Fix what verification names, and re-run until it passes.
+   `references/synthetic_decoder.py` is the extreme case: its names are novel, so only the block stack is drafted and
+   every other row is named by hand (`references/synthetic_map.yaml`). Conventions:
    - use the core vocabulary (`embed`, `pos_embed`, `ln1`, `attn`, `attn.q`, `attn.k`, `attn.v`, `attn.qkv`, `attn.o`,
      `attn.q_norm`, `attn.k_norm`, `ln1_post`, `ln2`, `mlp`, `mlp.gate`, `mlp.in`, `mlp.out`, `ln2_post`, `ln_final`,
      `unembed`) wherever a module plays that part;
@@ -72,19 +77,33 @@ by this skill, completed by hand where the draft could not place a module (those
    - a map may state its own widths and orders in a `verification:` section where the core rules do not fit (venngram's
      `gpt2.yaml` does, for a null `n_inner`).
 
-3. **Build the view.** `role_rules` names the adapter library's tensors (`PEFT_LORA_RULES` covers PEFT's LoRA names):
+3. **Register the verified map, and share it.** A map is data, so a verified one is worth keeping and sharing:
+   - **In this process:** `register(load_component_map("my_map.yaml"))`, then `MappedView(model)` finds it (registered
+     maps take precedence over venngram's own).
+   - **Keep the evidence:** `find_view.py ... --record my_arch.json` writes the verification record (see "Recording a
+     trial" below). A shared map should travel with its record.
+   - **Share it:** put the map (kind `component_map`) and its record (kind `verification_record`) in a directory and
+     publish them with `venngram.store.publish(store, ref, root, documents=[(kind, path), ...])` to a local directory
+     or a Hub repository or bucket; it writes a manifest listing each document's hash. Check the result the way a
+     reader meets it: `python -m venngram.conformance <store>:<ref>`. Publishing to a remote store is an outward act:
+     **an agent asks before it publishes**, and names the store and reference it will write.
+   - **Propose it to a registry:** registries index verified maps by content-checked reference, and the registry
+     lookup is being built (venngram#33). Until it lands, share the pinned reference (`venngram.store.pin(...)`) with
+     whoever maintains the registry; once it does, the proposal is a new index row pointing at that reference.
+
+4. **Build the view.** `role_rules` names the adapter library's tensors (`PEFT_LORA_RULES` covers PEFT's LoRA names):
 
    ```python
    from venngram.maps import MappedView, PEFT_LORA_RULES, load_component_map, register
 
-   register(load_component_map("my_map.yaml"))  # only for a map venngram does not bundle
+   register(load_component_map("my_map.yaml"))  # only for a map venngram does not already know
    view = MappedView(model, role_rules=PEFT_LORA_RULES)
    ```
 
    Prefer one role plus addresses over many named sub-roles: a subset of a role is an address
    (`role:adapter & layers:-4:`), not a new role.
 
-4. **Check the view with a schedule.** `make_view` returns a fresh view over a fresh model each call:
+5. **Check the view with a schedule.** `make_view` returns a fresh view over a fresh model each call:
 
    ```bash
    python .agents/skills/tunable-view-generator/scripts/check_view.py --view pkg.module:make_view --schedule my_schedule.yaml
@@ -93,11 +112,11 @@ by this skill, completed by hand where the draft could not place a module (those
    It runs `TunableViewConformance`, compiles the schedule and prints each phase's tensors. **Read them**: a schedule
    that compiles can still select the wrong tensors.
 
-5. **Write the schedule's sets once**, in an address book (`schema_version: 1`, `portability: family`, `sets:`), and
+6. **Write the schedule's sets once**, in an address book (`schema_version: 1`, `portability: family`, `sets:`), and
    reference them from the schedule (`addresses: <book>.yaml`, entries `@<set>`). See
    `src/fts_examples/tunable_views/config/`. venngram's `venngram-addressing` skill covers the grammar.
 
-6. **Use it.** PyTorch API: `TuningScheduler(model, schedule, optimizer=..., view=view)`. Lightning: attach it as
+7. **Use it.** PyTorch API: `TuningScheduler(model, schedule, optimizer=..., view=view)`. Lightning: attach it as
    `pl_module.tunable_view = view` (rooted at the `LightningModule`).
 
 ## Recording a trial
@@ -111,6 +130,7 @@ date). A record lets a later run be compared against this one, and is what a reg
 - The first schedule in a process that uses an address warns once that addresses are experimental. That is expected.
 - A view's members are methods: `roles` as a dictionary attribute, rather than a method returning one, is refused.
 - A model with several top-level block lists (an encoder and a decoder, a vision tower beside a language model) needs
-  its other stacks declared in the map (`stacks:`); `draft_map.py` stops and says so.
+  its other stacks declared in the map (`stacks:`); `draft_map.py` drafts the primary stack and lists the others
+  as `UNMAPPED STACK` for you to map.
 - Do not put doses, learning rates or other run parameters in a map or an address book. They name structure and sets,
   nothing else.
