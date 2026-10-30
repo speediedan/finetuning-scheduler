@@ -36,8 +36,9 @@ import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
+import torch
 from torch import nn
-from torch.distributed.fsdp import CPUOffloadPolicy, FSDPModule, fully_shard
+from torch.distributed.fsdp import CPUOffloadPolicy, FSDPModule, MixedPrecisionPolicy, fully_shard
 from torch.distributed.tensor import DTensor
 
 from finetuning_scheduler.core.dist import rank_zero_warn
@@ -145,27 +146,89 @@ def resolve_ignored_params(model: nn.Module, n: str, kwargs: Mapping[str, Any]) 
     return kwargs
 
 
+# the_dtype-valued kwargs of `MixedPrecisionPolicy`, which a plan may give by name so a YAML plan can use them
+_MP_DTYPES = ("param_dtype", "reduce_dtype", "output_dtype")
+_ACT_CKPT_MODES = ("composable", "wrapped", "wrapped_offload")
+
+
+def _resolve_mp_policy(n: str, kwargs: dict[str, Any]) -> None:
+    """Resolve an ``mp_policy`` given as a mapping into a ``MixedPrecisionPolicy`` in place.
+
+    The dtype-valued entries may be ``torch.dtype`` objects or their names (``"bfloat16"``), so a plan written in
+    YAML can carry a mixed precision policy. A ``MixedPrecisionPolicy`` is passed through.
+    """
+    mp = kwargs.get("mp_policy")
+    if mp is None or isinstance(mp, MixedPrecisionPolicy):
+        return
+    if not isinstance(mp, Mapping):
+        raise FTSConfigurationError(
+            f"The `mp_policy` of the `fsdp_plan` entry for '{n or '<root>'}' must be a mapping of"
+            " `MixedPrecisionPolicy` kwargs (or a `MixedPrecisionPolicy`)."
+        )
+    mp = dict(mp)
+    for k in _MP_DTYPES:
+        if isinstance(mp.get(k), str):
+            try:
+                mp[k] = getattr(torch, mp[k])
+            except AttributeError:
+                raise FTSConfigurationError(
+                    f"The `mp_policy` of the `fsdp_plan` entry for '{n or '<root>'}' names no torch dtype:"
+                    f" {k}={mp[k]!r}."
+                ) from None
+    kwargs["mp_policy"] = MixedPrecisionPolicy(**mp)
+
+
+def _apply_act_ckpt(model: nn.Module, n: str, act_ckpt: Any) -> None:
+    """Apply the activation checkpointing a plan entry asks for to the module ``n``, before it is sharded.
+
+    ``wrapped`` and ``wrapped_offload`` replace the module in its parent with a ``checkpoint_wrapper`` /
+    ``offload_wrapper``, as the Lightning adapter does: the wrapped parameters then carry the wrapper's
+    ``_checkpoint_wrapped_module.`` prefix, which a fine-tuning schedule must use to name them. The root has no
+    parent to replace it in, so the wrapped modes refuse it.
+    """
+    if isinstance(act_ckpt, Mapping) or not act_ckpt:
+        raise FTSConfigurationError(f"`act_ckpt` for '{n or '<root>'}' must be a mode or a [mode, kwargs] list.")
+    mode, ac_kwargs = (act_ckpt, None) if isinstance(act_ckpt, str) else (act_ckpt[0], _second(act_ckpt))
+    ac_kwargs = dict(ac_kwargs or {})
+    if mode not in _ACT_CKPT_MODES:
+        raise FTSConfigurationError(
+            f"`act_ckpt` mode '{mode}' for '{n or '<root>'}' is not supported; use one of"
+            f" {', '.join(repr(m) for m in _ACT_CKPT_MODES)}."
+        )
+    if mode == "composable":
+        from torch.distributed._composable import checkpoint
+
+        checkpoint(model.get_submodule(n), **ac_kwargs)
+        return
+    if not n:
+        raise FTSConfigurationError(
+            f"`act_ckpt` mode '{mode}' wraps a module in its parent, so it cannot wrap the root module itself;"
+            " name the modules to checkpoint in the plan (or use 'composable')."
+        )
+    from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper, offload_wrapper
+
+    wrap = checkpoint_wrapper if mode == "wrapped" else offload_wrapper
+    prefix, _, name = n.rpartition(".")
+    parent = model.get_submodule(prefix) if prefix else model
+    setattr(parent, name, wrap(model.get_submodule(n), **ac_kwargs))
+
+
 def _apply(model: nn.Module, n: str, mesh: Any, kwargs: Mapping[str, Any]) -> None:
-    """``fully_shard`` the module ``n`` with ``kwargs``, applying composable activation checkpointing first if
-    asked and resolving the ``cpu_offload_policy`` alias."""
+    """``fully_shard`` the module ``n`` with ``kwargs``, applying activation checkpointing first if asked and
+    resolving the ``cpu_offload_policy`` and ``mp_policy`` aliases.
+
+    ``ignored_params`` are resolved first, by the
+    names the parameters have before any checkpoint wrapper renames them.
+    """
     kwargs = resolve_ignored_params(model, n, kwargs)
     act_ckpt = kwargs.pop("act_ckpt", None)
     offload = kwargs.pop("cpu_offload_policy", None)
     if offload is not None:
         kwargs["offload_policy"] = CPUOffloadPolicy(**offload)
-    module = model.get_submodule(n)
+    _resolve_mp_policy(n, kwargs)
     if act_ckpt is not None:
-        if isinstance(act_ckpt, Mapping) or not act_ckpt:
-            raise FTSConfigurationError(f"`act_ckpt` for '{n or '<root>'}' must be a mode or a [mode, kwargs] list.")
-        mode, ac_kwargs = (act_ckpt, None) if isinstance(act_ckpt, str) else (act_ckpt[0], _second(act_ckpt))
-        if mode != "composable":
-            raise FTSConfigurationError(
-                f"`act_ckpt` mode '{mode}' is not supported by `shard_model`; use 'composable'."
-            )
-        from torch.distributed._composable import checkpoint
-
-        checkpoint(module, **dict(ac_kwargs or {}))
-    fully_shard(module, mesh=mesh, **kwargs)
+        _apply_act_ckpt(model, n, act_ckpt)
+    fully_shard(model.get_submodule(n), mesh=mesh, **kwargs)
 
 
 def _second(seq: Sequence[Any]) -> Any:
@@ -253,13 +316,17 @@ def shard_model(model: nn.Module, mesh: Any, plan: Mapping[str, Mapping[str, Any
                 default_kwargs: Mapping[str, Any] | None = None, shard_root: bool = True) -> nn.Module:
     """Apply ``fully_shard`` to the modules an FSDP2 plan selects, then to ``model`` itself.
 
-    Modules are sharded in plan order (see :func:`resolve_fsdp_plan`), so list children before their parents; a module
-    already sharded (by the caller, say) is left as it is. An ``ignored_params`` given by name belongs in a plan entry:
-    in ``default_kwargs`` it would have to name a parameter of every planned module. With ``shard_root``, ``model`` is
-    sharded last, so every parameter becomes a ``DTensor``: a parameter outside every FSDP unit would be neither
-    sharded nor gradient-synchronized across data-parallel ranks. An entry's ``act_ckpt`` applies composable activation
-    checkpointing (``"composable"``, optionally with its kwargs) to the module before it is sharded, and
-    ``cpu_offload_policy`` (a mapping of ``CPUOffloadPolicy`` kwargs) becomes its ``offload_policy``.
+    Modules are sharded deepest first, so a plan may list a module before its children; entries at the same depth keep
+    plan order (see :func:`resolve_fsdp_plan`). A module already sharded (by the caller, say) is left as it is. An
+    ``ignored_params`` given by name belongs in a plan entry: in ``default_kwargs`` it would have to name a parameter
+    of every planned module. With ``shard_root``, ``model`` is sharded last, so every parameter becomes a ``DTensor``:
+    a parameter outside every FSDP unit would be neither sharded nor gradient-synchronized across data-parallel
+    ranks. An entry's ``act_ckpt`` applies activation checkpointing to the module before it is sharded:
+    ``"composable"`` (composable checkpointing, optionally with its kwargs), or ``"wrapped"`` / ``"wrapped_offload"``
+    (a ``checkpoint_wrapper`` / ``offload_wrapper`` replacing the module in its parent, whose parameters then carry
+    the wrapper's ``_checkpoint_wrapped_module.`` prefix, which a fine-tuning schedule must use to name them).
+    ``cpu_offload_policy`` (a mapping of ``CPUOffloadPolicy`` kwargs) becomes its ``offload_policy``, and an
+    ``mp_policy`` given as a mapping becomes a ``MixedPrecisionPolicy``, its dtypes by name or as ``torch.dtype``.
 
     Args:
         model: The model to shard (on the meta device or materialized), after any tensor-parallel plan.
@@ -273,17 +340,20 @@ def shard_model(model: nn.Module, mesh: Any, plan: Mapping[str, Mapping[str, Any
         ``model``, sharded.
 
     Raises:
-        FTSConfigurationError: If a plan key selects no module, a planned module's ancestor is already sharded, an
-            ``ignored_params`` name matches no parameter of its module, or ``act_ckpt`` names a mode other than
-            ``composable``.
+        FTSConfigurationError: If a plan key selects no module, a planned module's ancestor was already sharded by
+            the caller, an ``ignored_params`` name matches no parameter of its module, ``act_ckpt`` names an
+            unsupported mode (or a wrapped mode for the root), or an ``mp_policy`` mapping names no torch dtype.
     """
-    for n, kwargs in resolve_fsdp_plan(model, plan or {}, default_kwargs).items():
+    resolved = resolve_fsdp_plan(model, plan or {}, default_kwargs)
+    # deepest first, so children shard before their parents however the plan lists them; the sort is stable, so
+    # entries at one depth keep plan order
+    for n, kwargs in sorted(resolved.items(), key=lambda kv: -kv[0].count(".")):
         if isinstance(model.get_submodule(n), FSDPModule):
             continue
         if (ancestor := _sharded_ancestor(model, n)) is not None:
             raise FTSConfigurationError(
-                f"`shard_model` cannot shard '{n}': its ancestor '{ancestor or '<root>'}' is already sharded. List a "
-                "module's children before the module itself in the plan (and shard them before any ancestor)."
+                f"`shard_model` cannot shard '{n}': its ancestor '{ancestor or '<root>'}' is already sharded. Shard a "
+                "module's children before any ancestor of theirs (the plan's own entries are applied deepest first)."
             )
         _apply(model, n, mesh, kwargs)
     if shard_root and not isinstance(model, FSDPModule):

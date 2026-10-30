@@ -30,8 +30,33 @@ def phases(model: torch.nn.Module) -> dict[int, list[str]]:
 
 
 def _layout(model: torch.nn.Module) -> dict:
+    from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import ActivationWrapper
+
     return {"fsdp_modules": sorted(n for n, m in model.named_modules() if isinstance(m, FSDPModule)),
-            "plain": sorted(n for n, p in model.named_parameters() if not isinstance(p, DTensor))}
+            "plain": sorted(n for n, p in model.named_parameters() if not isinstance(p, DTensor)),
+            "wrapped": sorted(n for n, m in model.named_modules() if isinstance(m, ActivationWrapper)),
+            "wrapped_params": sorted(n for n, _ in model.named_parameters() if "_checkpoint_wrapped_module." in n),
+            "thawed": sorted(n for n, p in model.named_parameters() if p.requires_grad)}
+
+
+def shard_wrapped_schedule(ctx, mode: str = "wrapped") -> dict:
+    """Shard with ``mode`` activation checkpointing on the blocks, then set a tuning scheduler up over a schedule
+    naming the wrapped parameters, and report the layout and which parameters phase 0 thaws."""
+    from functools import partial
+
+    from finetuning_scheduler import TorchInterface, TuningScheduler
+
+    model = _model(7, ctx.device)
+    shard_model(model, ctx.mesh(),
+                {"class:TransformerBlock": {"act_ckpt": [mode]}, "norm": {}, "output": {}})
+    wrapped_schedule = {
+        0: {"params": [r"layers\.0\._checkpoint_wrapped_module\..*", r"norm.*"], "max_transition_epoch": 1},
+        1: {"params": [r"layers\.1\._checkpoint_wrapped_module\..*"]},
+    }
+    fts = TuningScheduler(model, wrapped_schedule, optimizer=partial(torch.optim.SGD, lr=0.1), transition=None,
+                          interface=TorchInterface(model))
+    fts.setup()
+    return _layout(model)
 
 
 def shard(ctx, plan: dict, default_kwargs: dict | None = None, pre_shard: str | None = None) -> dict:
