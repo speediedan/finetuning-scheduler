@@ -1,0 +1,13 @@
+# Named sets for LoRA tuning of decoder language models, shared by every model family whose view reports roles,
+# layers and components (venngram's `MappedView` does for any architecture with a component map, Llama- and OPT-style
+# models among them).
+schema_version: 1
+name: decoder-lora-sets
+portability: family
+requires: {structure: vocabulary}
+sets:
+  # the adapters of the top two blocks, then the rest
+  top_adapters: {role: adapter, layers: "-2:"}
+  rest_adapters: {role: adapter, exclude: "@top_adapters"}
+  # the last block's MLP and its norm, whatever the family calls them
+  last_mlp: "role:base & layers:-1: & (component:mlp.* | component:ln2)"

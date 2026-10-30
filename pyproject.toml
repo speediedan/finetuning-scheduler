@@ -170,6 +170,7 @@ namespaces = true
 "fts_examples.model_parallel.config" = ["*.yaml"]
 "fts_examples.model_parallel.config.defaults" = ["*.yaml"]
 "fts_examples.model_parallel.config.profiling" = ["*.yaml"]
+"fts_examples.tunable_views.config" = ["*.yaml"]
 
 [tool.ruff]
 line-length = 120
