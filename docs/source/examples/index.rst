@@ -34,9 +34,10 @@ Notebooks
        result on where LoRA adapters belong.
    * - :doc:`Addressing across architectures<notebooks/tunable_views/cross_architecture_addresses>`
      - PyTorch (experimental)
-     - One set of addresses on four model families (Qwen3, Llama, OPT, GPT-2), built on the meta device from their
-       configurations alone: what each address resolves to per family, the refusal of an address a family cannot
-       provide, and the LoRA placement conditions' parameter counts side by side. No training; runs on a CPU.
+     - Portable addresses and schedules: the LoRA placement conditions, unchanged, compiled on four model families
+       (Qwen3, Llama, OPT, GPT-2) built on the meta device from their configurations alone, showing what each address
+       resolves to per family, the refusal of an address a family cannot provide, and each condition's parameter counts
+       side by side: an experiment defined once and orchestrated across models. No training; runs on a CPU.
 
 Command Line
 ************
