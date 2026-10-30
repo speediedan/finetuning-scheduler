@@ -19,10 +19,16 @@ Scheduling Through a Tunable View
      instruments by role, often through several wrappers of one model;
    - **composable, shareable model components**: named sets of parameters or units, defined once for a model family
      and reused, sliced and recombined;
+   - **experiments defined once and run across models**: conditions written as addresses depend far less on any one
+     model's parameter names, so the same definition can be compiled, compared and orchestrated over several models;
    - **agent-orchestrated experiments**, where a model description of roles, layers and components is easier to
      compose over than regexes. If an architecture has no component map, an agent can draft and verify one with the
      ``tunable-view-generator`` agent skill (in the repository's ``.agents/skills/``, usable from any agent harness
      that reads skills).
+
+   :ref:`fts-evolution` explains the direction, with a table of which approach fits which use. The
+   :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` shows a view and addresses at work in an experiment, and
+   :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` shows one set of addresses on four model families.
 
    :ref:`fts-evolution` explains the direction, with a table of which approach fits which use. The
    :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` shows a view and addresses at work in an experiment, and
@@ -123,19 +129,26 @@ How a Map Is Found
    How maps are found is experimental, nascent and still evolving: expect the sources below to grow, and their order
    and interface to change.
 
-``MappedView(model)`` asks venngram for the map of the model's architecture (:func:`~venngram.maps.structure.map_for`), trying
-the model's class name, then the architectures its configuration names (``config.architectures``), among the maps
-venngram knows. Today those come from two sources:
+``MappedView(model)`` asks venngram for the map of the model's architecture
+(:func:`~venngram.maps.structure.map_for`), trying the model's class name, then the architectures its configuration
+names (``config.architectures``). Maps come from two sources, in order:
 
-1. maps registered in the running process with :func:`~venngram.maps.schema.register` (a
-   :class:`~venngram.maps.schema.ComponentMap`, read from a YAML document with :func:`~venngram.maps.schema.load_component_map`),
-   which take precedence;
-2. the maps bundled with venngram, for several common architectures.
+1. **maps registered in the running process** with :func:`~venngram.maps.schema.register` (a
+   :class:`~venngram.maps.schema.ComponentMap`, read from a YAML document with
+   :func:`~venngram.maps.schema.load_component_map`), which take precedence;
+2. **registries** of verified maps. A registry is an index whose rows point at maps (and their verification records) by
+   content-checked reference, wherever they are stored: a Hugging Face Hub model or dataset repository, a Hub storage
+   bucket, or a local directory. Consumers configure the registries they trust, in order (``VENNGRAM_REGISTRIES``), and
+   ``map_for`` reads them from a local cache: the first registry that lists the architecture wins.
 
-:func:`~venngram.maps.schema.known_architectures` lists every architecture with a map.
+The registry lookup is being built. venngram can already fetch documents by content-checked reference
+(``venngram.store``, with a manifest per directory listing each document's kind and hash); the index and
+``VENNGRAM_REGISTRIES`` come next. Until they land, venngram ships seed maps for several common architectures, which
+``map_for`` reads in the registry's place; they move to the registry once the lookup exists
+(`venngram#33 <https://github.com/speediedan/venngram/issues/33>`_).
+:func:`~venngram.maps.schema.known_architectures` lists every architecture with a map today.
 
-A shared registry of maps, published on the Hugging Face Hub and verified before it is listed, is planned as a third
-source. Code that builds its view with ``MappedView(model)``, or that names the architecture with
+Code that builds its view with ``MappedView(model)``, or that names the architecture with
 ``MappedView(model, architecture=...)``, picks up new sources without changing. To use a particular map instead, pass
 it: ``MappedView(model, cmap)``.
 

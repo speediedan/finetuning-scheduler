@@ -6,6 +6,6 @@
   "src/fts_examples/notebooks/dev/superglue/pytorch_fts_explicit_trajectory.png": "c931840e257281161bd5c106e901bc4ea0de4e1b8277c018db34fe19db968d21",
   "src/fts_examples/notebooks/dev/superglue/pytorch_fts_implicit_trajectory.png": "2be6d03da393c8f0fdf0628aaf86171a480d1fddc64b21e5cf8bd83c169d9547",
   "src/fts_examples/notebooks/dev/superglue/side_by_side_yaml.png": "d190f0c9c0946347f77f109b4ff1e1d65bc2be70a1903defbf651b9bc75da281",
-  "src/fts_examples/notebooks/dev/tunable_views/cross_architecture_addresses.ipynb": "c08fdafe028748357367edd4e7053a53b4e76521c9ec70ca8b12e78fd4f1a8c5",
-  "src/fts_examples/notebooks/dev/tunable_views/lora_placement.ipynb": "067808d516ee99783641102f6d53c219f3f87140bbad781bd600192ef10c2a88"
+  "src/fts_examples/notebooks/dev/tunable_views/cross_architecture_addresses.ipynb": "a7731051caedded01151e263068529a090031458623e12b419d06e80aa2d92ad",
+  "src/fts_examples/notebooks/dev/tunable_views/lora_placement.ipynb": "8d88a4d28832ff53d153d118af4c6afbaa8a48ae71cecfcab12e4fa014568ca9"
 }

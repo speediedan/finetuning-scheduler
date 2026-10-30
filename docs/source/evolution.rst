@@ -55,6 +55,12 @@ step, and each leaves existing schedules alone.
 - **Addresses.** An address selects tensors by what they are rather than what they are called:
   ``role:adapter & layers:-4:`` is the adapters of the top four blocks, on any model whose view reports its structure.
   Addresses combine by set algebra, and named sets live in address books, plain data files meant to be shared.
+- **Experiments defined less by the model they run on.** Together, a view and addresses separate what an experiment
+  does (its conditions, phases and the sets they train) from how a given model names its tensors. The definition is
+  written once, largely model independent, and each model it runs on needs only a view. Orchestrating an experiment
+  across models, by hand, by a sweep or by an agent, becomes a loop over models and conditions rather than a rewrite
+  per model; :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` shows one set of schedules compiling on four model
+  families.
 - **A neutral protocol package.** The tunable view protocol and the address grammar live in
   `venngram <https://github.com/speediedan/venngram>`_, which knows no training loop and no interpretability package.
   Fine-Tuning Scheduler is one consumer. `interpretune <https://github.com/speediedan/interpretune>`_ is another: it
@@ -93,8 +99,8 @@ a schedule by hand:
    * - have an agent compose many schedules over one model
      - a view and addresses (an agent can also :ref:`write the view<tunable-views>`)
 
-For an architecture with a component map (venngram bundles maps for several common ones, and a map for any other is
-a short data document), venngram's ``MappedView`` keeps the model's own names and adds roles, layers and
+For an architecture with a component map (a short data document, found in process or through a registry; see
+:ref:`how a map is found<tunable-views-finding-maps>`), venngram's ``MappedView`` keeps the model's own names and adds roles, layers and
 architecture-neutral components. The :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` uses it to run several LoRA placements on
 one model as address schedules, and :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` resolves the same addresses
 on four model families. When an agent drives the experiments, a missing map need not

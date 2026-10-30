@@ -29,8 +29,9 @@ follows.
 Fine-Tuning Scheduler is evolving with its users' usage patterns. Phased fine-tuning patterns (gradual unfreezing,
 for example) now play a smaller role in modern experimentation than tuning adapters, latent models and units for
 interpretability research, addressed by role and structure and shared across models. 2.15 begins that work with
-experimental tunable views and addresses. Explicit schedules of parameter names and regexes stay supported, and remain
-the simplest choice for many uses: :doc:`Why Fine-Tuning Scheduler Is Evolving<evolution>` explains the direction and
+experimental tunable views and addresses, which let an experiment be defined by roles and architecture-neutral
+components rather than one model's parameter names, so the same definition can be run and orchestrated across models.
+Explicit schedules of parameter names and regexes stay supported, and remain the simplest choice for many uses: :doc:`Why Fine-Tuning Scheduler Is Evolving<evolution>` explains the direction and
 when each approach fits.
 
 .. note::
