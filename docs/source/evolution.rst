@@ -103,7 +103,9 @@ For an architecture with a component map (a short data document, found in proces
 :ref:`how a map is found<tunable-views-finding-maps>`), venngram's ``MappedView`` keeps the model's own names and adds roles, layers and
 architecture-neutral components. The :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` uses it to run several LoRA placements on
 one model as address schedules, and :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` resolves the same addresses
-on four model families.
+on four model families. When an agent drives the experiments, a missing map need not
+stop it: the ``tunable-view-generator`` agent skill (in the repository's ``.agents/skills/``) drafts a
+map for a new architecture and verifies it.
 
 Experimental Status
 *******************
