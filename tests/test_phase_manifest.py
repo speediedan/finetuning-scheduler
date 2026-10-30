@@ -136,9 +136,9 @@ def test_phase_table_matches_pipeline_and_release_scope():
     # this module must not join the reverse-order leg by naming the fixture itself
     assert "tests/test_phase_manifest.py" not in modules
     assert [n for n, p in pm.PHASES.items() if not p.measured] == ["examples", "pool-reverse"]
-    # a measured phase's command must write coverage (special_tests.sh runs every test under ``coverage run``)
+    # a measured phase's command must write coverage (the special-test runner runs every test under ``coverage run``)
     for name, phase in pm.PHASES.items():
-        measures = "coverage run" in phase.command or "special_tests.sh" in phase.command
+        measures = "coverage run" in phase.command or "gpu_epsilon.special_tests" in phase.command
         assert measures == phase.measured, name
     selector = pm.selector_string(pm.PHASES["pool-reverse"], "full")
     assert selector.startswith("FTS_REVERSE_ORDER=1 PL_RUN_CUDA_TESTS=1; pytest ")

@@ -16,6 +16,7 @@ unset no_special
 unset run_all_and_examples
 unset allow_failures
 unset torch_backend
+unset phase_status
 declare -a from_source_specs=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,7 +34,7 @@ Usage: $0
    [ --no-rebuild-base ]
    [ --no-special ]                 # Skip special tests (standalone/experimental), run only main test suite
    [ --run-all-and-examples ]       # Run all FTS example tests (both standalone and non-standalone)
-   [ --allow-failures ]             # Continue running special tests after failures
+   [ --allow-failures ]             # Run every phase after a failure (the run still exits 1)
    [ --include-experimental ]
    [ --uv-install-flags "flags" ]
    [ --no-commit-pin ]
@@ -94,7 +95,7 @@ do
 done
 
 # Serialize the whole coverage run against other GPU work on the host (no-op unless GPU_LEASE_CMD
-# is set). Held once for the entire run; the nested special_tests.sh calls inherit it. Taken after
+# is set). Held once for the entire run; every phase the driver runs inherits it. Taken after
 # argument parsing, so a bad flag is reported at once rather than after waiting for the lease.
 gpu_lease_reexec "$0" "${orig_args[@]}"
 # this run holds the GPU lease (when the host uses one), so it opts in to the CUDA tests (see tests/helpers/runif.py)
@@ -225,50 +226,44 @@ collect_env_coverage(){
             log_msg "Experimental patch tests that would run:"
             FTS_EXPERIMENTAL_PATCH_TESTS=1 python -m pytest tests --collect-only -q -k 'test_f' >> $coverage_session_log 2>&1 || true
         fi
-        log_msg "=== DRY-RUN COMPLETE ==="
-        return 0
+    fi
+
+    if ! python -c "import gpu_epsilon.phases" 2>/dev/null; then
+        log_msg "ERROR: gpu-epsilon's phase driver is not installed: uv pip install -r requirements/ci/gpu-epsilon.txt"
+        exit 1
     fi
 
     case $1 in
 	    fts_latest|fts_oldest|fts_release|$all_supported_pattern)
-            log_msg "Erasing previous coverage data"
-			python -m coverage erase
-            log_msg "Running main test suite with coverage"
-			python -m coverage run --append --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v >> $coverage_session_log 2>&1
-            # Skip special tests if --no-special flag is set
-            if [[ $no_special -eq 1 ]]; then
-                log_msg "Skipping special tests (--no-special flag set)"
-            else
-                # Prepare allow_failures flag for special_tests.sh
-                local failures_flag=""
-                if [[ $allow_failures -eq 1 ]]; then
-                    failures_flag="--allow-failures"
-                fi
-
-                log_msg "Running standalone tests"
-                (./tests/special_tests.sh --mark_type=standalone --log_file=${coverage_session_log} ${failures_flag} >> ${temp_special_log} 2>&1) > /dev/null
-
-                if [[ $run_all_and_examples -eq 1 ]]; then
-                    log_msg "Running all FTS example tests (non-standalone)"
-                    python -m coverage run --append --source src/finetuning_scheduler -m pytest src/fts_examples/test_examples.py -v >> $coverage_session_log 2>&1
-
-                    log_msg "Running all FTS example tests (standalone)"
-                    (./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_examples' --collect_dir=src/fts_examples --log_file=${coverage_session_log} ${failures_flag} >> ${temp_special_log} 2>&1) > /dev/null
-                fi
-
-                if [[ $include_experimental -eq 1 ]]; then
-                    log_msg "Running tests that require experimental patches using $1"
-                    (./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --log_file=${coverage_session_log} --experiment_patch_mask="1 0 0 1" ${failures_flag} >> ${temp_special_log} 2>&1) > /dev/null
-                else
-                    log_msg "Skipping tests that require experimental patches."
-                fi
-            fi
 	        ;;
 	    *)
 	        log_msg "ERROR: No matching environment found, exiting..."
 	        exit 1
 	        ;;
 	esac
+
+    # The phases run in pyproject.toml order. The driver erases the coverage data first and writes the report last,
+    # even after a failed phase. Without --allow-failures it stops at the first failed phase; with it every phase runs
+    # and the run still fails, naming each failed phase. Its JSON record of the run lands beside the session log.
+    local -a driver_args=(--phases "$(selected_phases)" --log_file "${coverage_session_log}" --log-dir "${tmp_coverage_dir}")
+    [[ $allow_failures -eq 1 ]] && driver_args+=(--allow-failures)
+    [[ $dry_run -eq 1 ]] && driver_args+=(--dry-run)
+    log_msg "Running phases $(selected_phases) through gpu-epsilon's phase driver"
+    # each special-test phase's console output goes to the temp log; the session log carries every phase
+    python -m gpu_epsilon.phases "${driver_args[@]}" > "${temp_special_log}" 2>&1 || phase_status=$?
+    [[ $dry_run -eq 1 ]] && log_msg "=== DRY-RUN COMPLETE ==="
+    return 0
+}
+
+# The phases this run selects, for gpu-epsilon's phase driver ([tool.gpu-epsilon.phases] in pyproject.toml)
+selected_phases(){
+    local phases="main"
+    if [[ $no_special -ne 1 ]]; then
+        phases+=",standalone"
+        [[ $run_all_and_examples -eq 1 ]] && phases+=",examples,examples-standalone"
+        [[ $include_experimental -eq 1 ]] && phases+=",exp_patch"
+    fi
+    echo "${phases}"
 }
 
 env_rebuild_collect(){
@@ -312,8 +307,8 @@ case ${target_env_name} in
 esac
 if [[ $dry_run -eq 1 ]]; then
     log_msg "Dry-run complete. No tests were executed."
-else
-    log_msg "Writing collected coverage stats for FTS env ${target_env_name}"
-    python -m coverage report -m >> $coverage_session_log
+elif [[ ${phase_status:-0} -ne 0 ]]; then
+    log_msg "Coverage phases failed (exit ${phase_status}); the phase summary above names each failed phase."
 fi
 show_elapsed_time $coverage_session_log "FTS coverage collection"
+exit ${phase_status:-0}

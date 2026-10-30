@@ -29,7 +29,7 @@ The warnings cleanup automation replaces the manual process previously documente
 - `build_fts_env.sh` - Environment creation
 - `gen_fts_coverage.sh` - Test execution framework
 - `manage_standalone_processes.sh` - Background process management
-- `tests/special_tests.sh` - Standalone test execution
+- `python -m gpu_epsilon.special_tests` - Standalone test execution (gpu-epsilon's special-test runner)
 
 ## Usage
 
