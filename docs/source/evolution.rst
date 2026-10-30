@@ -9,10 +9,11 @@ practice of the time: phased fine-tuning of one pretrained model on a downstream
 schedule was a short list of parameter names or regexes per phase. That way of working is still fully supported, and
 for many uses it is still the simplest (see :ref:`still-the-simplest`).
 
-Usage patterns have broadened a great deal since then. Gradual unfreezing is now one pattern among many, and a less
-frequent one: adapters, interventions, latent models, individual units and agent-driven experiments all ask more of a
-schedule than a list of names. Fine-Tuning Scheduler's 2.15 release starts to evolve with them. This page explains why, what is new, and what stays the same. It is a first statement of the
-direction and will be revised as the work proceeds.
+Usage patterns have broadened a great deal since then. Phased fine-tuning patterns such as gradual unfreezing now
+play a smaller role in modern experimentation than adapters, interventions, latent models, individual units and
+agent-driven experiments, all of which ask more of a schedule than a list of names. Fine-Tuning Scheduler's 2.15
+release starts to evolve with them. This page explains why, what is new, and what stays the same. It is a first
+statement of the direction and will be revised as the work proceeds.
 
 What Changed
 ************
@@ -34,6 +35,10 @@ What Changed
   it can reason over, roles, layers and components, more than from regexes over parameter names.
 - **Training loops vary.** Many training loops are written directly in PyTorch, often distributed with FSDP2 or tensor
   parallelism, rather than in a framework.
+- **A schedule is no longer only a fine-tuning schedule.** It may train adapters, fit or freeze a latent model, or
+  promote an instrument, as steps of an experiment. These docs therefore say *schedule*, or *experiment schedule* where
+  a qualifier helps, rather than *fine-tuning schedule*, which remains only in the names of existing APIs
+  (``ft_schedule``, :class:`~finetuning_scheduler.fts.FinetuningScheduler`).
 
 What 2.15 Begins
 ****************
@@ -88,13 +93,13 @@ a schedule by hand:
    * - have an agent compose many schedules over one model
      - a view and addresses (an agent can also :ref:`write the view<tunable-views>`)
 
-Most models need no view code at all. For an architecture with a component map (venngram bundles maps for several
-common ones, and a map for any other is a short data document), venngram's ``MappedView`` is the whole view: it keeps
-the model's own names and adds roles, layers and architecture-neutral components. The
-:doc:`worked example notebook</examples/notebooks/tunable_views/lora_placement>` uses it to run several LoRA placements
-on one model as address schedules. Writing a view class by hand is needed only for a vocabulary that differs from the
-model's own names. When an agent drives the experiments, a missing map need not stop it: the ``tunable-view-generator``
-agent skill (in the repository's ``.agents/skills/``) drafts a map for a new architecture and verifies it.
+For an architecture with a component map (venngram bundles maps for several common ones, and a map for any other is
+a short data document), venngram's ``MappedView`` keeps the model's own names and adds roles, layers and
+architecture-neutral components. The :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` uses it to run several LoRA placements on
+one model as address schedules, and :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` resolves the same addresses
+on four model families. When an agent drives the experiments, a missing map need not
+stop it: the ``tunable-view-generator`` agent skill (in the repository's ``.agents/skills/``) drafts a
+map for a new architecture and verifies it.
 
 Experimental Status
 *******************

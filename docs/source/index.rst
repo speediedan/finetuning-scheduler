@@ -9,7 +9,7 @@ Introduction to the Fine-Tuning Scheduler
 =========================================
 
 Fine-Tuning Scheduler (FTS) accelerates and enhances foundation model experimentation with flexible, multi-phase
-fine-tuning schedules. A schedule says which parameters to thaw in each phase; FTS thaws them, adds them to the
+schedules. A schedule says which parameters to thaw in each phase; FTS thaws them, adds them to the
 optimizer's parameter groups (optionally reinitializing the optimizer or lr scheduler) and decides when each phase ends.
 Training with FTS is simple and brings several benefits:
 
@@ -26,11 +26,12 @@ FTS runs a schedule through either of two interfaces, which share one scheduling
 The examples on this page show both: choose **Lightning** or **PyTorch** on any of them and every example on the page
 follows.
 
-Fine-Tuning Scheduler is evolving with its users' usage patterns. Phased fine-tuning such as gradual unfreezing is now
-one pattern among many, beside tuning adapters, latent models and units for interpretability research, addressed by
-role and structure and shareable across models. 2.15 begins that work with experimental tunable views and addresses. Explicit schedules of parameter names and
-regexes stay supported, and remain the simplest choice for many uses: :doc:`Why Fine-Tuning Scheduler Is
-Evolving<evolution>` explains the direction and when each approach fits.
+Fine-Tuning Scheduler is evolving with its users' usage patterns. Phased fine-tuning patterns (gradual unfreezing,
+for example) now play a smaller role in modern experimentation than tuning adapters, latent models and units for
+interpretability research, addressed by role and structure and shared across models. 2.15 begins that work with
+experimental tunable views and addresses. Explicit schedules of parameter names and regexes stay supported, and remain
+the simplest choice for many uses: :doc:`Why Fine-Tuning Scheduler Is Evolving<evolution>` explains the direction and
+when each approach fits.
 
 .. note::
    If you're exploring Fine-Tuning Scheduler, this is a great place to start! :ref:`basic-usage` below walks through
@@ -63,7 +64,7 @@ Fundamentally, Fine-Tuning Scheduler enables multi-phase, scheduled fine-tuning 
 unfreezing (i.e. thawing) can help maximize foundation model knowledge retention while allowing (typically upper layers
 of) the model to optimally adapt to new tasks during transfer learning [#]_ [#]_ [#]_ .
 
-FTS orchestrates the gradual unfreezing of models via a fine-tuning schedule that is either implicitly generated (the
+FTS orchestrates the gradual unfreezing of models via a schedule that is either implicitly generated (the
 default) or explicitly provided by the user (more computationally efficient). Fine-tuning phase transitions are driven
 by epoch limits for each phase (``max_transition_epoch``), by criteria on a monitored metric (a plateau in validation
 loss, say), or by a composition of the two. A training session completes when the final phase of the schedule has its
@@ -165,7 +166,7 @@ The Default Fine-Tuning Schedule
 ********************************
 The default schedule thaws parameters in pairs, starting from the last registered parameter (a naive, two-parameters
 per level heuristic). Using the default/implicitly generated schedule will often be less computationally efficient than
-a user-defined fine-tuning schedule but can often serve as a good baseline for subsequent explicit schedule refinement
+a user-defined schedule but can often serve as a good baseline for subsequent explicit schedule refinement
 and will marginally outperform many explicit schedules.
 
 .. tab-set::
@@ -207,7 +208,7 @@ and will marginally outperform many explicit schedules.
 Specifying a Fine-Tuning Schedule
 *********************************
 
-To specify a fine-tuning schedule, it's convenient to first generate the default schedule and then alter the
+To specify a schedule, it's convenient to first generate the default schedule and then alter the
 thawed/unfrozen parameter groups associated with each fine-tuning phase as desired. Fine-tuning phases are zero-indexed
 and executed in ascending order. In addition to being zero-indexed, fine-tuning phase keys should be contiguous and
 either integers or convertible to integers via ``int()``.
@@ -266,7 +267,7 @@ either integers or convertible to integers via ``int()``.
             params:
             - layer.0.*
 
-3. Once the fine-tuning schedule has been altered as desired, pass it to commence scheduled training:
+3. Once the schedule has been altered as desired, pass it to commence scheduled training:
 
 .. tab-set::
     :sync-group: interface
@@ -416,6 +417,7 @@ Footnotes
    SuperGLUE notebook (PyTorch API) <examples/notebooks/superglue/fts_superglue_pytorch>
    SuperGLUE with the LightningCLI <examples/cli/superglue_cli>
    LoRA placement by address (PyTorch API) <examples/notebooks/tunable_views/lora_placement>
+   Addressing across architectures (PyTorch API) <examples/notebooks/tunable_views/cross_architecture_addresses>
 
 .. toctree::
    :maxdepth: 1

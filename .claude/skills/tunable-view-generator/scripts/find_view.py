@@ -7,14 +7,31 @@ prints that. With ``--map`` it verifies a map document instead, such as one ``dr
 venngram's (``venngram.maps.verify``): every row's module exists, every parameter has exactly one component, widths
 match the configuration, and components run in the expected order. It needs no weights: the model is built on the meta
 device from a configuration (``--hf-arch`` uses an architecture's default configuration; ``--hf`` fetches only a
-model's configuration). Exits non-zero unless verification passes (``partial`` counts as passing, with what it did not
+model's configuration). ``--model path/to/file.py:make`` verifies a model that is not a ``transformers`` one: its
+module's ``CONFIG`` supplies the widths and its ``inputs(model)`` runs the forward the order check observes. Exits
+non-zero unless verification passes (``partial`` counts as passing, with what it did not
 cover printed). ``--record`` writes the verification record as JSON, for a trial log.
 """
 import argparse
+import importlib
+import importlib.util
 import json
 import sys
+from pathlib import Path
 
 from venngram.maps import known_architectures, load_component_map, verify
+
+
+def load_factory(spec: str):
+    """``pkg.module:attr`` or ``path/to/file.py:attr``: the module (imported or loaded from the file) and the attribute."""
+    where, _, attr = spec.partition(":")
+    if where.endswith(".py"):
+        loader = importlib.util.spec_from_file_location(Path(where).stem, where)
+        module = importlib.util.module_from_spec(loader)
+        loader.loader.exec_module(module)
+    else:
+        module = importlib.import_module(where)
+    return module, getattr(module, attr)
 
 
 def main() -> int:
@@ -22,11 +39,18 @@ def main() -> int:
     src = parser.add_mutually_exclusive_group(required=True)
     src.add_argument("--hf-arch", help="a transformers architecture class, with its default configuration")
     src.add_argument("--hf", help="a Hugging Face model id (only its configuration is fetched)")
+    src.add_argument("--model", help="pkg.module:factory or path/to/file.py:factory (with CONFIG and inputs beside it)")
     parser.add_argument("--map", help="a component map document to verify (default: the registered one)")
     parser.add_argument("--no-order", action="store_true", help="skip the forward-order check (no small model is run)")
     parser.add_argument("--record", help="write the verification record to this JSON file")
     args = parser.parse_args()
-    if args.hf:
+    extra = {}
+    if args.model:
+        module, factory = load_factory(args.model)
+        target = factory()
+        arch = type(target).__name__
+        extra = {"config": getattr(module, "CONFIG", None), "inputs": getattr(module, "inputs", None)}
+    elif args.hf:
         target, arch = args.hf, None
     else:
         import transformers
@@ -41,7 +65,7 @@ def main() -> int:
         if name not in known_architectures():
             print(f"no component map for {name}: draft one with draft_map.py, then verify it with --map.")
             return 2
-    report = verify(target, cmap, architecture=arch, order=not args.no_order)
+    report = verify(target, cmap, architecture=arch, order=not args.no_order, **extra)
     print(report)
     if args.record:
         with open(args.record, "w") as f:

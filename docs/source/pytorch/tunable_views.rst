@@ -24,12 +24,13 @@ Scheduling Through a Tunable View
      ``tunable-view-generator`` agent skill (in the repository's ``.agents/skills/``, usable from any agent harness
      that reads skills).
 
-   :ref:`fts-evolution` explains the direction, with a table of which approach fits which use, and the
-   :doc:`worked example</examples/notebooks/tunable_views/lora_placement>` shows a view and addresses at work.
+   :ref:`fts-evolution` explains the direction, with a table of which approach fits which use. The
+   :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` shows a view and addresses at work in an experiment, and
+   :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` shows one set of addresses on four model families.
 
 Overview
 ********
-A fine-tuning schedule names parameters, by default with the names ``named_parameters()`` reports. A
+A schedule names parameters, by default with the names ``named_parameters()`` reports. A
 :class:`~finetuning_scheduler.core.views.TunableView` tells Fine-Tuning Scheduler more about a model's tensors than
 their names:
 
@@ -56,12 +57,11 @@ and the Lightning callback (attach the view to the ``LightningModule``). A model
 
 Giving a Model a View
 *********************
-Most models need no view class. For an architecture with a component map, venngram's
-:class:`~venngram.maps.view.MappedView` is the whole view: it keeps the model's own parameter names (so names and
+For an architecture with a component map, venngram's :class:`~venngram.maps.view.MappedView` is the view: it keeps the model's own parameter names (so names and
 regexes still work through it), gives tensors roles from *role rules* (an adapter library's naming conventions), and
 places every tensor at its layer and component from the architecture's map. This is the view the
-:doc:`worked example</examples/notebooks/tunable_views/lora_placement>` checks with the conformance suite and trains,
-on Qwen3-0.6B with LoRA on all seven projections:
+:doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` checks with the conformance suite and trains, on Qwen3-0.6B with LoRA on all
+seven projections:
 
 .. code-block:: python
 
@@ -111,17 +111,44 @@ Through this view, a LoRA tensor takes the component of the projection it adapts
      - ``embed``
 
 The component vocabulary (``embed``, ``ln1``, ``attn.q``, ``attn.k``, ``attn.v``, ``attn.o``, ``ln2``, ``mlp.gate``,
-``mlp.in``, ``mlp.out``, ``ln_final``, ``unembed``) is the one TransformerLens and interpretune use. An architecture
-without a bundled map needs a map, a short data document naming each component's module, registered with venngram; it
-does not need a view class. The ``tunable-view-generator`` agent skill drafts one from the model's module tree and
-verifies it with venngram's deterministic checks (every parameter covered exactly once, widths from the configuration,
-forward order), without downloading weights. When only roles are wanted,
-:class:`~finetuning_scheduler.core.views.CanonicalView` with ``roles=`` gives a plain model roles (and layers, from its
-block list) while keeping its own names.
+``mlp.in``, ``mlp.out``, ``ln_final``, ``unembed``) is the one TransformerLens and interpretune use. When only roles
+are wanted, :class:`~finetuning_scheduler.core.views.CanonicalView` with ``roles=`` gives a plain model roles (and
+layers, from its block list) while keeping its own names.
+
+.. _tunable-views-finding-maps:
+
+How a Map Is Found
+==================
+.. warning::
+   How maps are found is experimental, nascent and still evolving: expect the sources below to grow, and their order
+   and interface to change.
+
+``MappedView(model)`` asks venngram for the map of the model's architecture (:func:`~venngram.maps.structure.map_for`), trying
+the model's class name, then the architectures its configuration names (``config.architectures``), among the maps
+venngram knows. Today those come from two sources:
+
+1. maps registered in the running process with :func:`~venngram.maps.schema.register` (a
+   :class:`~venngram.maps.schema.ComponentMap`, read from a YAML document with :func:`~venngram.maps.schema.load_component_map`),
+   which take precedence;
+2. the maps bundled with venngram, for several common architectures.
+
+:func:`~venngram.maps.schema.known_architectures` lists every architecture with a map.
+
+A shared registry of maps, published on the Hugging Face Hub and verified before it is listed, is planned as a third
+source. Code that builds its view with ``MappedView(model)``, or that names the architecture with
+``MappedView(model, architecture=...)``, picks up new sources without changing. To use a particular map instead, pass
+it: ``MappedView(model, cmap)``.
+
+An architecture venngram has no map for needs one written: a short data document naming each component's module for
+each block, verified against the architecture with :func:`~venngram.maps.verification.verify` (which checks every row exists, that
+the components partition the parameters, their widths against the model's configuration, and their order in a forward
+pass) and then registered. The ``tunable-view-generator`` agent skill (in the repository's
+``.agents/skills/``) drafts a map from the model's module tree and runs that verification, without downloading
+weights.
 
 Writing a View
 **************
-Write a view class only when a schedule needs a vocabulary that differs from the model's own names, or behavior the
+Write a view of your own when a schedule needs a vocabulary that differs from the model's own names, or behavior the
 data-driven views do not have. That is more work than writing a regex, so do it only when names stop being enough (see
 the tip above).
 
@@ -242,7 +269,7 @@ A view may give tensors **roles** (``roles()``, physical parameter or buffer nam
      - never
      - no
 
-``base`` takes no name: a subset of the model's own weights is an address, not a role. The worked example's
+``base`` takes no name: a subset of the model's own weights is an address, not a role. The LoRA placement notebook's
 "MLP + norms" condition trains ``role:base & (component:ln1 | component:ln2)`` beside the MLP adapters. ``fitted`` and
 ``instrument`` exist for interpretability work, where interpretune's views use them; an ``instrument`` becomes
 trainable only by :ref:`promotion<tunable-views-promotion>`.

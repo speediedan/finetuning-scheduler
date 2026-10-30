@@ -54,6 +54,8 @@ Scheduler's users need.
     maps.structure
     maps.view
     maps.check
+    maps.rules
+    maps.verification
     roles
     errors
     tuning.views

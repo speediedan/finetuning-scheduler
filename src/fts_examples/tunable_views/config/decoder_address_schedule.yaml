@@ -1,4 +1,4 @@
-# The worked example's schedule, by address: one file for every model family the view describes.
+# The two-family example's schedule, by address: one file for every model family the view describes.
 addresses: decoder_lora_sets.yaml
 0:
   params: ["@top_adapters"]
