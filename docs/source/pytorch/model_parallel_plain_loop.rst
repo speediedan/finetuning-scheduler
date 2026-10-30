@@ -80,7 +80,12 @@ FSDP2 plan; only then are the sharded weights allocated and initialized:
 
 ``shard_model`` shards the modules the plan selects (here the output layer, the final norm and every
 ``TransformerBlock``, the last by a ``class:`` key, with composable activation checkpointing), then the root module.
-Sharding the root matters in a plain loop:
+Plan entries are applied deepest first, so the configuration may list a module before its children. The plan takes
+every alias the Lightning adapter's ``fsdp_plan`` does: ``class:`` keys, a name-based ``ignored_params``,
+``cpu_offload_policy``, an ``mp_policy`` mapping with its dtypes by name (``param_dtype: bfloat16``), and every
+``act_ckpt`` mode. The ``wrapped`` and ``wrapped_offload`` modes replace the named module with a checkpoint wrapper
+before sharding, so its parameters are named ``<module>._checkpoint_wrapped_module.<parameter>`` and a schedule
+thaws them by those names. Sharding the root matters in a plain loop:
 
 - The tuning scheduler refuses ``DistributedDataParallel`` (see :ref:`plain-pytorch-loop`), so ``fully_shard`` is what
   synchronizes gradients across data-parallel ranks. A parameter outside every ``fully_shard`` call, such as the
