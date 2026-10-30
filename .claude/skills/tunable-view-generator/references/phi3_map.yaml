@@ -1,0 +1,19 @@
+# Phi-3 (transformers `Phi3ForCausalLM`), drafted by draft_map.py and verified by find_view.py, unchanged: a
+# reference for an architecture venngram bundles no map for. Its query, key and value share one fused projection
+# (`attn.qkv`), and its gate and up projections another (`mlp.gate_in`, a name outside the core vocabulary, which
+# the vocabulary allows: a fused tensor is one component, since a view cannot split a tensor).
+schema_version: 2
+architecture: Phi3ForCausalLM
+components:
+  embed:                  {module: "model.embed_tokens", kind: embed}
+  blocks.{i}:             {module: "model.layers.{i}", kind: block}
+  ln_final:               {module: "model.norm", kind: norm}
+  unembed:                {module: "lm_head", kind: unembed}
+  blocks.{i}.attn:        {module: "model.layers.{i}.self_attn", kind: attn}
+  blocks.{i}.attn.o:      {module: "model.layers.{i}.self_attn.o_proj", kind: linear}
+  blocks.{i}.attn.qkv:    {module: "model.layers.{i}.self_attn.qkv_proj", kind: linear}
+  blocks.{i}.mlp:         {module: "model.layers.{i}.mlp", kind: mlp}
+  blocks.{i}.mlp.gate_in: {module: "model.layers.{i}.mlp.gate_up_proj", kind: linear}
+  blocks.{i}.mlp.out:     {module: "model.layers.{i}.mlp.down_proj", kind: linear}
+  blocks.{i}.ln1:         {module: "model.layers.{i}.input_layernorm", kind: norm}
+  blocks.{i}.ln2:         {module: "model.layers.{i}.post_attention_layernorm", kind: norm}

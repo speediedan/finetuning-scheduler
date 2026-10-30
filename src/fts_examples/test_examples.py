@@ -279,3 +279,31 @@ def test_tunable_views_lora_placement_nb(tmpdir):
     assert "conformance: ok" in out
     for condition in ("attention only", "MLP only", "all layers", "MLP + norms", "MLP, then attention"):
         assert f"{condition}" in out and "final eval loss" in out
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+def test_tunable_view_generator_skill_reference(tmp_path):
+    """The view-generator skill's reference map (Phi-3, drafted and verified by the skill) still verifies, its
+    drafter still produces it, and verification still refuses the map with two labels swapped (#157)."""
+    skill = Path(__file__).parents[2] / ".agents" / "skills" / "tunable-view-generator"
+    if not skill.is_dir():
+        pytest.skip("the skill ships in the repository, not the distribution")
+    reference = skill / "references" / "phi3_map.yaml"
+
+    def script(name, *args):
+        return subprocess.run([sys.executable, str(skill / "scripts" / name), *map(str, args)], capture_output=True,
+                              text=True)
+
+    cp = script("find_view.py", "--hf-arch", "Phi3ForCausalLM", "--map", reference)
+    assert cp.returncode == 0, cp.stdout[-3000:] + cp.stderr[-3000:]
+    assert "Phi3ForCausalLM: verified" in cp.stdout and "order: passed" in cp.stdout
+    draft = tmp_path / "draft.yaml"
+    cp = script("draft_map.py", "--hf-arch", "Phi3ForCausalLM", "-o", draft)
+    assert cp.returncode == 0, cp.stderr[-3000:]
+    rows = [line for line in reference.read_text().splitlines() if not line.startswith("#")]
+    assert [line for line in draft.read_text().splitlines() if not line.startswith("#")] == rows
+    swapped = tmp_path / "swapped.yaml"
+    swapped.write_text(reference.read_text().replace("blocks.{i}.ln1:", "blocks.{i}.lnX:")
+                       .replace("blocks.{i}.ln2:", "blocks.{i}.ln1:").replace("blocks.{i}.lnX:", "blocks.{i}.ln2:"))
+    cp = script("find_view.py", "--hf-arch", "Phi3ForCausalLM", "--map", swapped)
+    assert cp.returncode == 1 and "order chain" in cp.stdout, cp.stdout[-3000:]

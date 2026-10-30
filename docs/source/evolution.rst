@@ -93,7 +93,8 @@ common ones, and a map for any other is a short data document), venngram's ``Map
 the model's own names and adds roles, layers and architecture-neutral components. The
 :doc:`worked example notebook</examples/notebooks/tunable_views/lora_placement>` uses it to run several LoRA placements
 on one model as address schedules. Writing a view class by hand is needed only for a vocabulary that differs from the
-model's own names.
+model's own names. When an agent drives the experiments, a missing map need not stop it: the ``tunable-view-generator``
+agent skill (in the repository's ``.agents/skills/``) drafts a map for a new architecture and verifies it.
 
 Experimental Status
 *******************

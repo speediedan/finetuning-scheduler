@@ -20,7 +20,9 @@ Scheduling Through a Tunable View
    - **composable, shareable model components**: named sets of parameters or units, defined once for a model family
      and reused, sliced and recombined;
    - **agent-orchestrated experiments**, where a model description of roles, layers and components is easier to
-     compose over than regexes.
+     compose over than regexes. If an architecture has no component map, an agent can draft and verify one with the
+     ``tunable-view-generator`` agent skill (in the repository's ``.agents/skills/``, usable from any agent harness
+     that reads skills).
 
    :ref:`fts-evolution` explains the direction, with a table of which approach fits which use, and the
    :doc:`worked example</examples/notebooks/tunable_views/lora_placement>` shows a view and addresses at work.
@@ -111,7 +113,9 @@ Through this view, a LoRA tensor takes the component of the projection it adapts
 The component vocabulary (``embed``, ``ln1``, ``attn.q``, ``attn.k``, ``attn.v``, ``attn.o``, ``ln2``, ``mlp.gate``,
 ``mlp.in``, ``mlp.out``, ``ln_final``, ``unembed``) is the one TransformerLens and interpretune use. An architecture
 without a bundled map needs a map, a short data document naming each component's module, registered with venngram; it
-does not need a view class. When only roles are wanted,
+does not need a view class. The ``tunable-view-generator`` agent skill drafts one from the model's module tree and
+verifies it with venngram's deterministic checks (every parameter covered exactly once, widths from the configuration,
+forward order), without downloading weights. When only roles are wanted,
 :class:`~finetuning_scheduler.core.views.CanonicalView` with ``roles=`` gives a plain model roles (and layers, from its
 block list) while keeping its own names.
 
