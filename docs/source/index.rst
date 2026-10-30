@@ -9,7 +9,7 @@ Introduction to the Fine-Tuning Scheduler
 =========================================
 
 Fine-Tuning Scheduler (FTS) accelerates and enhances foundation model experimentation with flexible, multi-phase
-fine-tuning schedules. A schedule says which parameters to thaw in each phase; FTS thaws them, adds them to the
+schedules. A schedule says which parameters to thaw in each phase; FTS thaws them, adds them to the
 optimizer's parameter groups (optionally reinitializing the optimizer or lr scheduler) and decides when each phase ends.
 Training with FTS is simple and brings several benefits:
 
@@ -26,11 +26,12 @@ FTS runs a schedule through either of two interfaces, which share one scheduling
 The examples on this page show both: choose **Lightning** or **PyTorch** on any of them and every example on the page
 follows.
 
-Fine-Tuning Scheduler is evolving with its users' usage patterns. Phased fine-tuning such as gradual unfreezing is now
-one pattern among many, beside tuning adapters, latent models and units for interpretability research, addressed by
-role and structure and shareable across models. 2.15 begins that work with experimental tunable views and addresses. Explicit schedules of parameter names and
-regexes stay supported, and remain the simplest choice for many uses: :doc:`Why Fine-Tuning Scheduler Is
-Evolving<evolution>` explains the direction and when each approach fits.
+Fine-Tuning Scheduler is evolving with its users' usage patterns. Phased fine-tuning patterns (gradual unfreezing,
+for example) now play a smaller role in modern experimentation than tuning adapters, latent models and units for
+interpretability research, addressed by role and structure and shared across models. 2.15 begins that work with
+experimental tunable views and addresses. Explicit schedules of parameter names and regexes stay supported, and remain
+the simplest choice for many uses: :doc:`Why Fine-Tuning Scheduler Is Evolving<evolution>` explains the direction and
+when each approach fits.
 
 .. note::
    If you're exploring Fine-Tuning Scheduler, this is a great place to start! :ref:`basic-usage` below walks through
