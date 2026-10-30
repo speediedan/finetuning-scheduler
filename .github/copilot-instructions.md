@@ -190,13 +190,13 @@ Some tests require special environment setup and are marked with `@pytest.mark.s
 
 ```bash
 # Run all standalone tests (default mark_type is 'standalone')
-./tests/special_tests.sh
+python -m gpu_epsilon.special_tests --lease
 
 # Run standalone tests following a pattern
-./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
+python -m gpu_epsilon.special_tests --lease --mark_type=standalone --filter_pattern='test_f'
 
 # Run experimental patch tests with a patch mask
-./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0 1"
+python -m gpu_epsilon.special_tests --lease --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0 1"
 ```
 
 **Manual execution:**
@@ -406,7 +406,7 @@ tail -f `ls -rt /tmp/gen_fts_coverage_fts_* | tail -1`
 **Flags:**
 
 - `--oldest`: Uses Python 3.10 and `requirements/ci/requirements-oldest.txt` (mirrors CI oldest matrix)
-- `--no-special`: Skips `special_tests.sh` standalone and experimental patch tests (faster iteration)
+- `--no-special`: Skips the standalone and experimental patch tests (faster iteration)
 - `--run-all-and-examples`: Runs all example tests (both non-standalone and standalone marked)
 - `--allow-failures`: Continues test execution after failures (useful for validation workflows)
 - `--venv-dir`: Base directory for venvs (recommended: `/mnt/cache/${USER}/.venvs` for hardlink performance)

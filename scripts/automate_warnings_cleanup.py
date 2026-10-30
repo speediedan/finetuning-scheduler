@@ -473,15 +473,11 @@ class WarningsCleanupOrchestrator:
         """Run special/standalone tests."""
         logger.info(f"Running special tests for {suite_name}...")
 
-        special_script = self.config.tests_dir / "special_tests.sh"
-        if not special_script.exists():
-            logger.warning(f"Special tests script not found: {special_script}")
-            return False
-
         venv_activate = self.config.venv_base / env_name / "bin" / "activate"
 
-        cmd_parts = ["source", str(venv_activate), "&&", str(special_script), "--mark_type=standalone",
-                     f"--log-dir={self.config.log_dir}"]
+        # gpu-epsilon's special-test runner, configured by [tool.gpu-epsilon.special-tests] in pyproject.toml
+        cmd_parts = ["source", str(venv_activate), "&&", "python", "-m", "gpu_epsilon.special_tests", "--lease",
+                     "--mark_type=standalone", f"--log-dir={self.config.log_dir}"]
 
         if "special_filter" in test_config:
             cmd_parts.extend(["--filter_pattern", test_config["special_filter"]])

@@ -12,7 +12,7 @@
 # it to opt in:
 #
 #   export GPU_LEASE_CMD=/path/to/gpu_lease.sh
-#   ./tests/special_tests.sh --mark_type=standalone
+#   ./scripts/gen_fts_coverage.sh --repo-home=${PWD} --target-env-name=fts_latest
 #
 # When `GPU_LEASE_CMD` is unset or not executable, `maybe_gpu_lease` runs the command directly, so the
 # default behavior for contributors and CI is completely unchanged. This file is kept byte-identical
@@ -26,7 +26,7 @@
 
 # Run "$@" under the GPU lease when one is configured, otherwise run it directly.
 #
-# Re-entrancy matters: a coverage run acquires the lease and then invokes special_tests.sh, which would
+# Re-entrancy matters: a coverage run acquires the lease and then runs the special tests, which would
 # also try to acquire it. flock is not re-entrant across processes, so a nested acquisition would block on
 # the lease the parent already holds -- a deadlock. The lease exports GPU_LEASE_HELD for exactly this
 # reason, and we honor it here.

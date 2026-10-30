@@ -183,11 +183,11 @@ Execute specific test subsets:
 
 ```bash
 # Run an individual special test
-./tests/special_tests.sh --mark_type=standalone --filter_pattern='model_parallel_integration[fsdp_autocm_tp]'
+python -m gpu_epsilon.special_tests --lease --mark_type=standalone --filter_pattern='model_parallel_integration[fsdp_autocm_tp]'
 
 # Collect new expected state for multiple tests
 export FTS_GLOBAL_STATE_LOG_MODE=1 && \
-./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='model_parallel' --experiment_patch_mask="1 0 0 1" && \
+python -m gpu_epsilon.special_tests --lease --mark_type=exp_patch --filter_pattern='model_parallel' --experiment_patch_mask="1 0 0 1" && \
 unset FTS_GLOBAL_STATE_LOG_MODE
 ```
 

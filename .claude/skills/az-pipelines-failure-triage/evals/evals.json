@@ -5,7 +5,7 @@
       "id": 0,
       "name": "gpu-only-test-failure",
       "prompt": "the 'Testing: standalone multi-gpu' step failed on the azure run but when I run pytest locally everything passes. why would that be and how do I reproduce it",
-      "expected_output": "Explains that plain pytest does not collect standalone tests at all — they are selected by tests/special_tests.sh via RunIf-generated skipif marker kwargs, not pytest markers. Gives the correct reproduction command (special_tests.sh --mark_type=standalone --filter_pattern='test_f' or PL_RUN_STANDALONE_TESTS=1 pytest for a single test), and notes the 2-GPU requirement.",
+      "expected_output": "Explains that plain pytest does not collect standalone tests at all — they are selected by the special-test runner (python -m gpu_epsilon.special_tests) via RunIf-generated skipif marker kwargs, not pytest markers. Gives the correct reproduction command (python -m gpu_epsilon.special_tests --lease --mark_type=standalone --filter_pattern='test_f' or PL_RUN_STANDALONE_TESTS=1 pytest for a single test), and notes the 2-GPU requirement.",
       "files": []
     },
     {

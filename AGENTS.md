@@ -47,36 +47,37 @@ python -m coverage run --source src/finetuning_scheduler -m pytest src/finetunin
 `src/finetuning_scheduler` must be passed alongside `tests` — `--doctest-modules` is in `addopts`, so
 docstring examples run as tests.
 
-**Plain pytest does not run the standalone or experimental-patch tests.** Those need
-`tests/special_tests.sh`, which selects on `@RunIf(...)`-generated `skipif` marker kwargs (there are no
-custom pytest markers despite `--strict-markers`):
+**Plain pytest does not run the standalone or experimental-patch tests.** Those need gpu-epsilon's special-test
+runner, which selects on `@RunIf(...)`-generated `skipif` marker kwargs (there are no custom pytest markers despite
+`--strict-markers`). Run it from the repository root:
 
 ```bash
-./tests/special_tests.sh                                                   # defaults to --mark_type=standalone
-./tests/special_tests.sh --mark_type=standalone --filter_pattern='test_f'
-./tests/special_tests.sh --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'
-./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0 1"
+python -m gpu_epsilon.special_tests --lease                     # defaults to --mark_type=standalone
+python -m gpu_epsilon.special_tests --lease --mark_type=standalone --filter_pattern='test_f'
+python -m gpu_epsilon.special_tests --lease --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'
+python -m gpu_epsilon.special_tests --lease --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0 1"
 ```
 
 Other flags: `--log_file`, `--log-dir`, `--experiments_list`, `--allow-failures`, `--select_file`. The
 `--experiment_patch_mask` bit order follows `tests/.experiments`. To run one standalone test directly:
 `PL_RUN_STANDALONE_TESTS=1 python -m pytest tests/test_x.py::test_y -v`.
 
-`special_tests.sh` is a short entry script for gpu-epsilon's shared runner (`gpu_epsilon.special_tests`, pinned in
-`requirements/ci/gpu-epsilon.txt`), configured by `[tool.gpu-epsilon.special-tests]` in `pyproject.toml`. Each node's
+The runner (`gpu_epsilon.special_tests`, pinned in `requirements/ci/gpu-epsilon.txt`) is configured by
+`[tool.gpu-epsilon.special-tests]` in `pyproject.toml`; change the mark table or the coverage command there. Each node's
 outcome is read from per-rank records, not from the log. Any rank's failure, a non-zero exit, or a session that never
-finished fails the node. A run writes a JSON results file beside its session log. Change the mark table or the
-coverage command in that table, not in the script.
+finished fails the node. A run writes a JSON results file beside its session log. `--lease` takes the host's GPU lease
+once for the whole run (a no-op unless `GPU_LEASE_CMD` is set, see below); CI runs it without, under the job's own
+leases.
 
 `RunIf` conditions live in `tests/helpers/runif.py` (`min_cuda_gpus`, `standalone`, `bf16_cuda`,
 `exp_patch`; aliases `alone`, `bf16_alone`). `min_cuda_gpus` and `bf16_cuda` tests run only with
-`PL_RUN_CUDA_TESTS=1`, an explicit opt-in so that a plain `pytest` never uses a host's GPUs. `special_tests.sh`,
+`PL_RUN_CUDA_TESTS=1`, an explicit opt-in so that a plain `pytest` never uses a host's GPUs. The special-test runner,
 `gen_fts_coverage.sh` and the Azure job set it, under the GPU lease. Set it yourself only for GPU work you have
 leased; a terminal-summary line counts the CUDA tests skipped for want of it.
 
 Distributed cases that need no Lightning run in a persistent worker pool (`tests/helpers/dist_pool.py`, cases in
 `tests/dist_cases/`): one process group per test module rather than one process per test. Its tests run in the
-ordinary suite (gloo on Linux, NCCL with `PL_RUN_CUDA_TESTS=1`), not through `special_tests.sh`, whose one process
+ordinary suite (gloo on Linux, NCCL with `PL_RUN_CUDA_TESTS=1`), not through the special-test runner, whose one process
 per node id would discard the saving. Under `coverage run`, the pool measures its workers with the same settings and
 merges their data into the run's own when it closes, so no `coverage combine` step is needed (under `parallel = true`
 it leaves their files beside the run's own, for the `coverage combine` that mode needs anyway).
@@ -85,7 +86,10 @@ When torch or Lightning leaks a new env var, add it to the allowlist in the `res
 autouse fixture in `tests/conftest.py` rather than working around the failure.
 
 Full local coverage (~30 min) is orchestrated by `scripts/gen_fts_coverage.sh`; wrap long multi-GPU runs
-in `scripts/manage_standalone_processes.sh --use-nohup` (VS Code kills plain nohup jobs).
+in `scripts/manage_standalone_processes.sh --use-nohup` (VS Code kills plain nohup jobs). The script builds or activates
+the environment, then runs its test phases through gpu-epsilon's phase driver (`python -m gpu_epsilon.phases`), which
+reads them from `[tool.gpu-epsilon.phases]` in `pyproject.toml`. `--dry-run` prints the phase plan, a failed phase fails
+the run (the report is still written), and the driver's JSON record of the run lands beside the session log.
 
 ## Serializing GPU work on a shared host
 
@@ -100,13 +104,13 @@ error — so it is easily misdiagnosed as a real test failure.
 here is required to work on this project.
 
 ```bash
-export GPU_LEASE_CMD=/path/to/gpu_lease.sh        # opt in for this shell
-./tests/special_tests.sh --mark_type=standalone   # now serialized
+export GPU_LEASE_CMD=/path/to/gpu_lease.sh                           # opt in for this shell
+python -m gpu_epsilon.special_tests --lease --mark_type=standalone   # now serialized
 ```
 
-`tests/special_tests.sh` and `scripts/gen_fts_coverage.sh` self re-exec under the lease, so one acquisition covers a
-whole suite. The Azure GPU pipeline participates too, by bind-mounting the lease directory into the job
-container (`flock` works on the inode, so container and host processes interlock). It tags its lease
+The special-test runner (with `--lease`) and `scripts/gen_fts_coverage.sh` self re-exec under the lease, so one
+acquisition covers a whole suite. The Azure GPU pipeline participates too, by bind-mounting the lease directory into
+the job container (`flock` works on the inode, so container and host processes interlock). It tags its lease
 `project=azure-<buildId>` with **no project infix** (`.azure-pipelines/gpu-tests.yml`, the "Acquire host GPU
 leases" step), so that is the shape to recognize in `--status` output. `interpretune` builds share this
 agent and tag `azure-it-<buildId>`, so the infix is how you tell whose build holds the lease.
@@ -129,8 +133,8 @@ instead.
 1. `pre-commit run --all-files`
 1. `pyright -p pyproject.toml` — the type checker (mypy was removed). Covers `src/finetuning_scheduler` only.
 1. A `CHANGELOG.md` entry under the unreleased section for anything non-trivial.
-1. `./tests/special_tests.sh` for changes touching FSDP, model-parallel, or strategy adapters. A pull request that
-   changes how a strategy is driven (how an adapter wraps, shards, checkpoints or reconfigures the module, or how the
+1. `python -m gpu_epsilon.special_tests --lease` for changes touching FSDP, model-parallel, or strategy adapters. A
+   pull request that changes how a strategy is driven (how an adapter wraps, shards, checkpoints or reconfigures the module, or how the
    callback drives a distributed strategy) also gets the `full-gpu-suite` label before its GPU gate is approved, so the
    gate runs every standalone test rather than the smoke set (see CI below).
 1. `python scripts/verify_version_consistency.py` for any change touching a torch/CUDA/Lightning/Python
