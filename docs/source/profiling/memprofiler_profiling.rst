@@ -12,7 +12,7 @@ Composable distributed training (especially at scale) can make profiling resourc
 challenging. To address this need, FTS includes a utility that enables quick, flexible orchestration of advanced
 profiling combining multiple complementary PyTorch profilers.
 
-The :class:`~fts_examples.profiling.memprofiler.MemProfiler` is a powerful memory profiling utility that synthesizes
+The :class:`~finetuning_scheduler.profiling.memprofiler.MemProfiler` is a powerful memory profiling utility that synthesizes
 numerous complementary profiling methods. As demonstrated in this example, the following profiling utilities are
 integrated and simultaneously configured:
 
@@ -32,7 +32,7 @@ complete view of distributed training resource utilization.
 .. note::
 
     While this example focuses on composable distributed training,
-    :class:`~fts_examples.profiling.memprofiler.MemProfiler` can be used with any type of training session.
+    :class:`~finetuning_scheduler.profiling.memprofiler.MemProfiler` can be used with any type of training session.
 
 Profiling Artifacts
 *******************

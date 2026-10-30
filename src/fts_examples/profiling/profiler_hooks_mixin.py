@@ -1,7 +1,7 @@
 from lightning.fabric.utilities import rank_zero_warn
 
-from fts_examples.profiling import MemProfiler, MemProfilerCfg
-from fts_examples.profiling.accelerator import record_allocator_history
+from finetuning_scheduler.profiling import MemProfiler, MemProfilerCfg
+from finetuning_scheduler.profiling.accelerator import record_allocator_history
 
 
 class ProfilerHooksMixin:
@@ -13,7 +13,12 @@ class ProfilerHooksMixin:
         self.memprofiler_cfg = memprofiler_cfg
         if self.memprofiler_cfg and self.memprofiler_cfg.enabled:
             self.memprofiler = MemProfiler()
-            self.memprofiler.connect(self)
+            # the trainer attaches after the module is built, so it is read when the profiler needs it
+            self.memprofiler.connect(
+                self,
+                optimizer=lambda: self.trainer.optimizers[0],
+                log_dir=lambda: self._trainer.log_dir or self._trainer.default_root_dir,
+            )
             if self.allocator_history:
                 record_allocator_history()
 

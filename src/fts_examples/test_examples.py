@@ -163,7 +163,7 @@ def _check_memprofiler_artifacts(root: Path) -> None:
     """Each rank of the profiling example records the required and the backend's measured accelerator statistics in
     every snapshot and writes its allocator history and ``FSDP2MemTracker`` reports (CUDA and ROCm both have device
     type ``cuda``, so the snapshot names match)."""
-    from fts_examples.profiling.accelerator import accelerator_backend
+    from finetuning_scheduler.profiling.accelerator import accelerator_backend
 
     expected = _MEMPROF_REQUIRED_KEYS | _MEMPROF_BACKEND_KEYS[accelerator_backend()]
     for rank in (0, 1):

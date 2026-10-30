@@ -26,7 +26,6 @@ from contextlib import redirect_stdout, contextmanager, ExitStack
 from collections import defaultdict
 from itertools import chain
 from functools import wraps
-from psutil import Process
 from copy import deepcopy
 from pathlib import Path
 
@@ -34,15 +33,12 @@ import yaml
 import torch
 from torch.distributed.fsdp import FSDPModule
 from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
-from lightning.fabric.utilities import rank_zero_info, rank_zero_warn
-from lightning.fabric.utilities.rank_zero import _get_rank
-from lightning.fabric.utilities.cloud_io import get_filesystem
-from lightning.pytorch.utilities.exceptions import MisconfigurationException
-
-from fts_examples.cfg_utils import resolve_funcs
-from fts_examples.profiling.accelerator import (accelerator_backend, accelerator_memory_stats, accelerator_type,
-                                               allocator_history_module)
-from fts_examples.profiling.config import MemProfilerCfg
+from finetuning_scheduler.core._io import get_filesystem
+from finetuning_scheduler.core.dist import global_rank, rank_zero_info, rank_zero_warn
+from finetuning_scheduler.core.exceptions import configuration_error_cls
+from finetuning_scheduler.profiling.accelerator import (accelerator_backend, accelerator_memory_stats,
+                                                        accelerator_type, allocator_history_module)
+from finetuning_scheduler.profiling.config import MemProfilerCfg, resolve_funcs
 
 
 class MemProfiler:
@@ -89,21 +85,36 @@ class MemProfiler:
         super().__init__()
         self.memory_stats = defaultdict(dict)
         self.fsdp_memory_stats = {}
-        self.rank = _get_rank() or 0
+        self.rank = global_rank()
         self.module = None
+        self._optimizer: Any = None
+        self._log_dir: Any = None
         self.memprof_log_dir = None
         self.fsdp_mem_tracker = None
         self.saved_tensors_funcs: list[Callable] = []
         self._state = _MemProfInternalState()
 
-    def connect(self, obj_ref: Any) -> None:
+    def connect(
+        self,
+        obj_ref: Any,
+        optimizer: torch.optim.Optimizer | Callable[[], torch.optim.Optimizer | None] | None = None,
+        log_dir: str | os.PathLike | Callable[[], str | os.PathLike | None] | None = None,
+    ) -> None:
         """Connects the MemProfiler to the given target module.
 
+        The profiler reads two things from the training loop that drives the module, each given as a value or as a
+        callable returning it, since a loop often creates them after the module is built: the optimizer whose state
+        ``FSDP2MemTracker`` attributes, and the directory artifacts go in when ``memprofiler_cfg.save_dir`` is unset.
+
         Args:
-            obj_ref: The module to be profiled.
+            obj_ref: The module to be profiled. It exposes its ``memprofiler_cfg``.
+            optimizer: The optimizer (or a callable returning it) for ``FSDP2MemTracker``.
+            log_dir: The base directory (or a callable returning it) under which a ``memprofiler`` directory holds the
+                artifacts when ``memprofiler_cfg.save_dir`` is unset.
         """
         self.module = obj_ref
-        self._state.curr_pid = Process(os.getpid())
+        self._optimizer, self._log_dir = optimizer, log_dir
+        self._state.curr_pid = _host_process()
         if self.memprofiler_cfg.enable_saved_tensors_hooks:
             self.saved_tensors_funcs = resolve_funcs(cfg_obj=self.memprofiler_cfg, func_type='saved_tensors_funcs')
         self._state.base_collect_func_set = self._all_base_collect_funcs()
@@ -136,7 +147,7 @@ class MemProfiler:
                 "MemProfiler requires the root FSDP module to have ``fully_shard`` applied for FSDP2 memory tracking."
             return fsdp_tracker_root
         except AttributeError:
-            raise MisconfigurationException(
+            raise configuration_error_cls()(
                 "Could not find the specified ``fsdp_mem_tracker_root_module``: "
                 f"{self.memprofiler_cfg.fsdp_mem_tracker_root_module}. MemProfiler needs to attach to a module that has"
                 " ``fully_shard`` applied for FSDP2 memory tracking."
@@ -160,7 +171,11 @@ class MemProfiler:
     def maybe_init_fsdp_mem_tracker(self) -> None:
         """Initializes FSDP2 memory tracker if ``track_fsdp_mem`` is ``True``."""
         if self.memprofiler_cfg.track_fsdp_mem:
-            self.fsdp_mem_tracker = FSDPMemTracker(self.fsdp_mem_tracker_root_module, self.module.trainer.optimizers[0])
+            optimizer = self._optimizer() if callable(self._optimizer) else self._optimizer
+            if optimizer is None:
+                rank_zero_warn("MemProfiler was connected without an optimizer, so `FSDP2MemTracker` will not attribute"
+                               " optimizer state; pass one to `MemProfiler.connect` to track it.")
+            self.fsdp_mem_tracker = FSDPMemTracker(self.fsdp_mem_tracker_root_module, optimizer)
 
     def add_memprofiler_hooks(self) -> None:
         """Adds all hooks registered for memory tracking.
@@ -192,11 +207,21 @@ class MemProfiler:
         The directory is determined by the following logic:
 
         1. If ``memprofiler_cfg.save_dir`` is set, use that directory.
-        2. Otherwise, use a directory named ``memprofiler`` in the current
-           Lightning ``log_dir``.
+        2. Otherwise, use a directory named ``memprofiler`` in the ``log_dir`` given to :meth:`connect`.
+
+        Raises:
+            FTSConfigurationError: If neither is set.
         """
-        base_log_dir = self.module._trainer.log_dir or self.module._trainer.default_root_dir
-        self.memprof_log_dir = self.memprofiler_cfg.save_dir or Path(base_log_dir) / "memprofiler"
+        if self.memprofiler_cfg.save_dir:
+            self.memprof_log_dir = self.memprofiler_cfg.save_dir
+        else:
+            base_log_dir = self._log_dir() if callable(self._log_dir) else self._log_dir
+            if base_log_dir is None:
+                raise configuration_error_cls()(
+                    "MemProfiler has nowhere to save its artifacts: set `memprofiler_cfg.save_dir`, or pass `log_dir`"
+                    " to `MemProfiler.connect`."
+                )
+            self.memprof_log_dir = Path(base_log_dir) / "memprofiler"
         self.memprof_log_dir = Path(self.memprof_log_dir)  # ensure the dir is a Path
         self.memprof_log_dir.mkdir(exist_ok=True, parents=True)
 
@@ -586,10 +611,23 @@ def _memprofiler_cfg_mapping_representer(dumper, data):
 yaml.SafeDumper.add_representer(MemProfilerCfg, _memprofiler_cfg_mapping_representer)
 
 
+def _host_process() -> Any:
+    """This process as a ``psutil.Process``, for host memory tracking.
+
+    Raises:
+        ModuleNotFoundError: If ``psutil`` is not installed, naming it.
+    """
+    try:
+        from psutil import Process
+    except ModuleNotFoundError as err:
+        raise ModuleNotFoundError("MemProfiler tracks host memory with `psutil`; install it to profile.") from err
+    return Process(os.getpid())
+
+
 @dataclass
 class _MemProfInternalState:
     can_collect: dict[str, bool] = field(default_factory=dict)
-    curr_pid: Process | None = None
+    curr_pid: Any = None  # the host process (`psutil.Process`)
     snap_indices: dict[str, int] = field(default_factory=dict)
     configured_hooks: dict[str, Any] = field(default_factory=dict)
     hook_handles: DefaultDict[str, list[Any]] = field(default_factory=lambda: defaultdict(list))
