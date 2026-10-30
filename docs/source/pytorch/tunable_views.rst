@@ -84,14 +84,29 @@ on Qwen3-0.6B with LoRA on all seven projections:
 
 Through this view, a LoRA tensor takes the component of the projection it adapts, and everything else is ``base``:
 
-=================================================  ========  =====  ==========
-tensor                                             role      layer  component
-=================================================  ========  =====  ==========
-``model.layers.27.self_attn.q_proj.lora_A.weight``  adapter   27     ``attn.q``
-``model.layers.27.mlp.down_proj.base.weight``       base      27     ``mlp.out``
-``model.layers.0.post_attention_layernorm.weight``  base      0      ``ln2``
-``model.embed_tokens.weight``                       base             ``embed``
-=================================================  ========  =====  ==========
+.. list-table::
+   :header-rows: 1
+
+   * - tensor
+     - role
+     - layer
+     - component
+   * - ``model.layers.27.self_attn.q_proj.lora_A.weight``
+     - adapter
+     - 27
+     - ``attn.q``
+   * - ``model.layers.27.mlp.down_proj.base.weight``
+     - base
+     - 27
+     - ``mlp.out``
+   * - ``model.layers.0.post_attention_layernorm.weight``
+     - base
+     - 0
+     - ``ln2``
+   * - ``model.embed_tokens.weight``
+     - base
+     - (none)
+     - ``embed``
 
 The component vocabulary (``embed``, ``ln1``, ``attn.q``, ``attn.k``, ``attn.v``, ``attn.o``, ``ln2``, ``mlp.gate``,
 ``mlp.in``, ``mlp.out``, ``ln_final``, ``unembed``) is the one TransformerLens and interpretune use. An architecture
