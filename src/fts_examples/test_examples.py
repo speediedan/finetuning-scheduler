@@ -254,9 +254,9 @@ def test_fts_superglue_pytorch_nb(tmpdir):
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 @pytest.mark.parametrize("family", ["llama", "opt"])
-def test_tunable_views_worked_example(family):
-    """The worked example's view conforms, and one address schedule tunes both families phase by phase (#158)."""
-    from fts_examples.tunable_views.worked_example import run
+def test_tunable_views_two_families(family):
+    """The two-family example's view conforms, and one address schedule tunes both families by phase (#158)."""
+    from fts_examples.tunable_views.two_families import run
 
     summary = run(family, max_epochs=3, steps_per_epoch=1)
     assert summary["conformance_ok"], summary["conformance_failures"]
@@ -273,9 +273,21 @@ def test_tunable_views_worked_example(family):
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 @RunIf(min_cuda_gpus=1, skip_windows=True)
 def test_tunable_views_lora_placement_nb(tmpdir):
-    # the tunable views worked example notebook, shortened through its parameters cell (#158)
+    # the tunable views LoRA placement notebook, shortened through its parameters cell (#158)
     out = _run_notebook("tunable_views/lora_placement.ipynb",
                         {"MAX_STEPS": "4", "EVAL_EVERY": "2", "N_TRAIN": "64", "N_EVAL": "16"}, tmpdir.strpath)
     assert "conformance: ok" in out
     for condition in ("attention only", "MLP only", "all layers", "MLP + norms", "MLP, then attention"):
         assert f"{condition}" in out and "final eval loss" in out
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+@RunIf(min_cuda_gpus=1, skip_windows=True)
+def test_tunable_views_cross_architecture_nb(tmpdir):
+    # runs on CPU (meta-device models), but downloads four model configurations from the Hub, so it runs with the
+    # other notebook tests rather than on every hosted matrix leg
+    out = _run_notebook("tunable_views/cross_architecture_addresses.ipynb", {}, tmpdir.strpath)
+    assert re.search(r"^  GPT-2  refused: it matches no tensor$", out, flags=re.M), out
+    assert re.search(r"^  OPT    \('model\.decoder\.layers\.0\.fc2\.weight'", out, flags=re.M), out
+    rows = [line for line in out.splitlines() if line.startswith(("attention only", "MLP only", "all layers"))]
+    assert len(rows) == 3 and all(line.count("M ") == 4 for line in rows), rows

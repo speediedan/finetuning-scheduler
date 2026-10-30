@@ -261,6 +261,32 @@ addopts = """--strict-markers --doctest-modules --color=yes \
 
 junit_duration_report = "call"
 
+# The special-test runner (gpu-epsilon, pinned in requirements/ci/gpu-epsilon.txt), which tests/special_tests.sh runs:
+# the tests that need a process of their own, one process per node id. See gpu_epsilon.special_tests for every key.
+[tool.gpu-epsilon.special-tests]
+name = "FTS"
+# special tests use the GPUs, and the run holds the GPU lease (when the host uses one), so it opts in
+env = { PL_RUN_CUDA_TESTS = "1" }
+unset = ["FTS_RUN_STANDALONE_TESTS"]
+exec = [
+    "-m", "coverage", "run", "--source", "src/finetuning_scheduler", "--append",
+    "-m", "pytest", "--capture=no", "--no-header", "-v", "-s", "-rA",
+]
+experiments-list = "tests/.experiments"
+# the experimental-patch partition is empty while no patch is enabled, which is not a failure
+allow-empty = true
+raw-log-copy-dir = "lightning_logs"
+# the raw log is uploaded to the Azure build (a logging command, inert elsewhere)
+publish = "azure"
+
+[tool.gpu-epsilon.special-tests.marks.standalone]
+env = { PL_RUN_STANDALONE_TESTS = "1" }
+description = "Collecting and running standalone tests."
+
+[tool.gpu-epsilon.special-tests.marks.exp_patch]
+env = { FTS_EXPERIMENTAL_PATCH_TESTS = "1" }
+description = "Collecting and running only the experimental patch tests the patch mask enables."
+
 [tool.notebook-publishing]
 # The tutorial notebooks, read by the publisher and docs-artifact renderer vendored from interpretune
 # (scripts/vendored/notebook_tooling; shims scripts/publish_notebooks.py and scripts/render_notebook_docs.py).

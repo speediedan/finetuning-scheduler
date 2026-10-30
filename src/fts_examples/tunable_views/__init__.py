@@ -9,4 +9,4 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""A worked example: giving a model a tunable view, then scheduling it by address (#158)."""
+"""Examples of tunable views and addresses: giving a model a view, then scheduling it by address (#158)."""

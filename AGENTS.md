@@ -58,9 +58,15 @@ custom pytest markers despite `--strict-markers`):
 ./tests/special_tests.sh --mark_type=exp_patch --filter_pattern='test_f' --experiment_patch_mask="1 0 0 1"
 ```
 
-Other flags: `--log_file`, `--log-dir`, `--experiments_list`, `--allow-failures`. The
+Other flags: `--log_file`, `--log-dir`, `--experiments_list`, `--allow-failures`, `--select_file`. The
 `--experiment_patch_mask` bit order follows `tests/.experiments`. To run one standalone test directly:
 `PL_RUN_STANDALONE_TESTS=1 python -m pytest tests/test_x.py::test_y -v`.
+
+`special_tests.sh` is a short entry script for gpu-epsilon's shared runner (`gpu_epsilon.special_tests`, pinned in
+`requirements/ci/gpu-epsilon.txt`), configured by `[tool.gpu-epsilon.special-tests]` in `pyproject.toml`. Each node's
+outcome is read from per-rank records, not from the log. Any rank's failure, a non-zero exit, or a session that never
+finished fails the node. A run writes a JSON results file beside its session log. Change the mark table or the
+coverage command in that table, not in the script.
 
 `RunIf` conditions live in `tests/helpers/runif.py` (`min_cuda_gpus`, `standalone`, `bf16_cuda`,
 `exp_patch`; aliases `alone`, `bf16_alone`). `min_cuda_gpus` and `bf16_cuda` tests run only with

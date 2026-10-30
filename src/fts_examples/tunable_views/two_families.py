@@ -9,14 +9,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""The tunable views worked example's CPU companion (#158): schedule LoRA tuning of two decoder families by
-address, through one view. The worked example itself is the notebook
-``notebooks/dev/tunable_views/lora_placement.ipynb``.
+"""Schedule LoRA tuning of two decoder families by address, through one view, on CPU (#158): the CPU companion of
+the tunable views notebook ``notebooks/dev/tunable_views/lora_placement.ipynb``.
 
 1. Build a small, randomly initialized decoder (Llama- or OPT-style, from a ``transformers`` config, so nothing is
    downloaded) and add LoRA adapters to its attention projections.
 2. Give it venngram's :class:`~venngram.maps.MappedView`: roles for the adapters (from PEFT's naming rules) and
-   architecture-neutral components (from the architecture's component map), with no view code of its own.
+   architecture-neutral components (from the architecture's component map).
 3. Check the view with :class:`~finetuning_scheduler.testing.conformance.TunableViewConformance`.
 4. Compile and run ``config/decoder_address_schedule.yaml`` with
    :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler`: the same schedule file for both families.
@@ -24,7 +23,7 @@ address, through one view. The worked example itself is the notebook
 For the Llama-style model it also compiles ``config/llama_regex_schedule.yaml``, the classic name-and-regex schedule
 for the same phases, and checks that both thaw the same tensors.
 
-Run it with ``python -m fts_examples.tunable_views.worked_example --family llama`` (or ``opt``). It prints a JSON
+Run it with ``python -m fts_examples.tunable_views.two_families --family llama`` (or ``opt``). It prints a JSON
 summary: the conformance result and, per epoch, the phase and the parameters it trains.
 """
 import argparse
@@ -73,7 +72,7 @@ def phases(schedule_path: Path, view: MappedView) -> list[tuple[str, ...]]:
 
 
 def run(family: str = "llama", max_epochs: int = 3, steps_per_epoch: int = 2) -> dict[str, Any]:
-    """Run the worked example for ``family`` and return its summary."""
+    """Run the example for ``family`` and return its summary."""
     model = build_model(family)
     view = MappedView(model, role_rules=PEFT_LORA_RULES)
     report = TunableViewConformance(lambda: MappedView(build_model(family), role_rules=PEFT_LORA_RULES)).run()
@@ -101,7 +100,7 @@ def run(family: str = "llama", max_epochs: int = 3, steps_per_epoch: int = 2) ->
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the tunable views worked example for one model family.")
+    parser = argparse.ArgumentParser(description="Schedule LoRA tuning of one model family by address.")
     parser.add_argument("--family", choices=("llama", "opt"), default="llama")
     parser.add_argument("--max-epochs", type=int, default=3)
     args = parser.parse_args()
