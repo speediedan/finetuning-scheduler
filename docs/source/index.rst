@@ -162,8 +162,8 @@ Basic Usage
 
 .. _default schedule:
 
-The Default Schedule
-********************
+The Default Fine-Tuning Schedule
+********************************
 The default schedule thaws parameters in pairs, starting from the last registered parameter (a naive, two-parameters
 per level heuristic). Using the default/implicitly generated schedule will often be less computationally efficient than
 a user-defined schedule but can often serve as a good baseline for subsequent explicit schedule refinement
@@ -205,8 +205,8 @@ and will marginally outperform many explicit schedules.
 
 .. _specifying schedule:
 
-Specifying a Schedule
-*********************
+Specifying a Fine-Tuning Schedule
+*********************************
 
 To specify a schedule, it's convenient to first generate the default schedule and then alter the
 thawed/unfrozen parameter groups associated with each fine-tuning phase as desired. Fine-tuning phases are zero-indexed

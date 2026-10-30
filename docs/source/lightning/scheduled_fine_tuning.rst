@@ -17,7 +17,7 @@ format as the :ref:`PyTorch API<plain-pytorch-loop>` (see :ref:`specifying sched
 Basic Usage
 ***********
 If no fine-tuning schedule is user-provided, :class:`~finetuning_scheduler.fts.FinetuningScheduler` will generate a
-:ref:`default schedule<index:The Default Schedule>` and proceed to fine-tune
+:ref:`default schedule<index:The Default Fine-Tuning Schedule>` and proceed to fine-tune
 according to the generated schedule, using default
 :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping`
 and :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks with
