@@ -46,7 +46,8 @@ def collector_availability() -> dict[str, bool]:
     Each entry is measured in this process rather than read from a table, so a report records what the backend it
     ran on actually provided:
 
-    - ``accelerator_memory_stats``: the allocator answered a memory statistics query;
+    - ``accelerator_memory_stats``: the allocator answered a memory statistics query (an allocator that has not
+      allocated yet answers with no statistics, which still counts);
     - ``allocator_history``: the backend provides allocator history recording and snapshots;
     - ``fsdp_mem_tracker``: ``torch.distributed`` is available, which ``FSDP2MemTracker`` needs;
     - ``host_memory``: ``psutil``, which host memory tracking uses, is importable.
@@ -54,10 +55,12 @@ def collector_availability() -> dict[str, bool]:
     Returns:
         dict[str, bool]: Each collector's availability.
     """
-    try:
-        accelerator_stats = accelerator_backend() is not None and bool(accelerator_memory_stats())
-    except RuntimeError:
-        accelerator_stats = False
+    accelerator_stats = accelerator_backend() is not None
+    if accelerator_stats:
+        try:
+            accelerator_memory_stats()
+        except RuntimeError:
+            accelerator_stats = False
     return {
         "accelerator_memory_stats": accelerator_stats,
         "allocator_history": allocator_history_module() is not None,
