@@ -286,6 +286,47 @@ description = "Collecting and running standalone tests."
 env = { FTS_EXPERIMENTAL_PATCH_TESTS = "1" }
 description = "Collecting and running only the experimental patch tests the patch mask enables."
 
+# The coverage run's phases, in order, for gpu-epsilon's phase driver (`python -m gpu_epsilon.phases`, which
+# scripts/gen_fts_coverage.sh calls after building or activating its environment). `--phases`, `--with` and `--skip`
+# select by name; the optional phases run only when named.
+[tool.gpu-epsilon.phases]
+name = "FTS"
+# the coverage run holds the GPU lease (when the host uses one), so it opts in to the CUDA tests
+env = { PL_RUN_CUDA_TESTS = "1" }
+setup = [["-m", "coverage", "erase"]]
+report = [["-m", "coverage", "report", "-m"]]
+
+[[tool.gpu-epsilon.phases.phase]]
+name = "main"
+description = "the main suite and the doctests, under coverage"
+run = [
+    "-m", "coverage", "run", "--append", "--source", "src/finetuning_scheduler",
+    "-m", "pytest", "src/finetuning_scheduler", "tests", "-v",
+]
+
+[[tool.gpu-epsilon.phases.phase]]
+name = "standalone"
+special-tests = ["--mark_type=standalone"]
+
+[[tool.gpu-epsilon.phases.phase]]
+name = "examples"
+description = "the example tests that share a process, under coverage"
+optional = true
+run = [
+    "-m", "coverage", "run", "--append", "--source", "src/finetuning_scheduler",
+    "-m", "pytest", "src/fts_examples/test_examples.py", "-v",
+]
+
+[[tool.gpu-epsilon.phases.phase]]
+name = "examples-standalone"
+optional = true
+special-tests = ["--mark_type=standalone", "--filter_pattern=test_examples", "--collect_dir=src/fts_examples"]
+
+[[tool.gpu-epsilon.phases.phase]]
+name = "exp_patch"
+optional = true
+special-tests = ["--mark_type=exp_patch", "--filter_pattern=test_f", "--experiment_patch_mask=1 0 0 1"]
+
 [tool.notebook-publishing]
 # The tutorial notebooks, read by the publisher and docs-artifact renderer vendored from interpretune
 # (scripts/vendored/notebook_tooling; shims scripts/publish_notebooks.py and scripts/render_notebook_docs.py).
