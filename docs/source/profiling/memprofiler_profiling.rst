@@ -93,6 +93,51 @@ Configuration
     replacement, and ``cuda_allocator_history`` sets ``allocator_history`` unless ``allocator_history`` is set too, in
     which case ``allocator_history`` wins.
 
+.. _memprofiler-without-lightning:
+
+Profiling Without Lightning
+***************************
+
+:class:`~finetuning_scheduler.profiling.memprofiler.MemProfiler` and its configuration live in
+:mod:`finetuning_scheduler.profiling`, which imports no Lightning module, so a plain PyTorch training loop can drive it.
+The module it profiles exposes its ``memprofiler_cfg`` and the ``memprofiler`` its profiled methods use; methods
+decorated with :meth:`~finetuning_scheduler.profiling.memprofiler.MemProfiler.memprofilable` are profiled on the
+configured schedule. The loop supplies the two things a trainer otherwise would, each as a value or as a callable read
+when it is needed: the optimizer whose state ``FSDP2MemTracker`` attributes, and the directory under which the
+artifacts are written (a ``memprofiler`` directory, unless ``memprofiler_cfg.save_dir`` is set).
+
+.. code-block:: python
+
+    import torch
+    from finetuning_scheduler.profiling import MemProfiler, MemProfilerCfg, MemProfilerFuncs
+
+
+    class Model(torch.nn.Module):
+        def __init__(self, memprofiler_cfg: MemProfilerCfg):
+            super().__init__()
+            self.layer = torch.nn.Linear(16, 16)
+            self.memprofiler_cfg = memprofiler_cfg
+            self.memprofiler = None
+
+        @MemProfiler.memprofilable
+        def training_step(self, batch):
+            return self.layer(batch).sum()
+
+
+    model = Model(MemProfilerCfg(enabled=True, collect_funcs=MemProfilerFuncs(cpu={"training_step"})))
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    model.memprofiler = MemProfiler()
+    model.memprofiler.connect(model, optimizer=optimizer, log_dir="./logs")
+    model.memprofiler.init_memprof_log_dir()
+    for batch in batches:
+        optimizer.zero_grad()
+        model.training_step(batch).backward()
+        optimizer.step()
+    model.memprofiler.dump_memory_stats()
+
+Host memory is tracked with ``psutil``, which is imported only when a profiler connects. The Lightning integration
+(``fts_examples.profiling.ProfilerHooksMixin``) connects the same profiler with callables that read its trainer.
+
 .. _memprofiler-backend-support:
 
 Backend Support
