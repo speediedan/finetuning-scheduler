@@ -1,6 +1,6 @@
 # The standalone smoke set a pull request's GPU gate runs by default: one test per family. Every standalone test runs on
 # release branches and tags, builds of main, manual runs, and a pull request that asks for the full suite (AGENTS.md).
-# One node id per line, in run order; tests/special_tests.sh --select_file fails if one of them is no longer collected.
+# One node id per line, in run order; the special-test runner's --select_file fails if one of them is no longer collected.
 tests/test_finetuning_scheduler_callback.py::test_fts_multi_ddp[explicit]
 tests/test_ddp_thaw_sync.py::test_ddp_syncs_parameters_thawed_after_wrapping_cuda
 tests/test_finetuning_scheduler_callback.py::test_fts_dynamo_intrafit[default]

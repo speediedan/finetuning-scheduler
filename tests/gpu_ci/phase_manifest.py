@@ -91,7 +91,7 @@ class Phase:
     args: tuple[str, ...] = ()
     command: str = ""
     release: bool = True
-    # whether the pipeline runs the phase under ``coverage run`` (``special_tests.sh`` always does)
+    # whether the pipeline runs the phase under ``coverage run`` (the special-test runner always does)
     measured: bool = True
 
     def resolved_paths(self, root: Path = ROOT) -> tuple[str, ...]:
@@ -116,7 +116,7 @@ PHASES = {
             "standalone",
             ("tests",),
             {"PL_RUN_STANDALONE_TESTS": "1"},
-            command="bash ./tests/special_tests.sh --mark_type=standalone",
+            command="python -m gpu_epsilon.special_tests --mark_type=standalone",
         ),
         Phase("examples", ("src/fts_examples",), command="python -m pytest src/fts_examples -v", measured=False),
         Phase(
@@ -125,7 +125,7 @@ PHASES = {
             {"PL_RUN_STANDALONE_TESTS": "1"},
             ("-k", "model_parallel_examples"),
             command=(
-                "bash ./tests/special_tests.sh --mark_type=standalone --collect_dir=src/fts_examples"
+                "python -m gpu_epsilon.special_tests --mark_type=standalone --collect_dir=src/fts_examples"
                 " --filter_pattern=model_parallel_examples"
             ),
         ),
@@ -438,7 +438,7 @@ def device_identity() -> dict:
 
 
 def coverage_file(out_dir: Path, phase_name: str) -> Path:
-    """The phase's coverage data file (``special_tests.sh`` appends every test's run to it)."""
+    """The phase's coverage data file (the special-test runner appends every test's run to it)."""
     return Path(out_dir).resolve() / "coverage" / phase_name / ".coverage"
 
 

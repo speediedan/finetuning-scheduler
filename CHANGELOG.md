@@ -142,6 +142,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- `scripts/gen_fts_coverage.sh` runs its test phases through gpu-epsilon's phase driver (`python -m gpu_epsilon.phases`), configured by `[tool.gpu-epsilon.phases]` in `pyproject.toml`. The coverage data is erased first and the report written last, even after a failed phase. A failed phase now fails the run and names itself, where the script previously stopped at `set -e` with no report; with `--allow-failures` every phase still runs. `--dry-run` prints the phase plan, and the driver's JSON record of the run lands beside the session log [#169](https://github.com/speediedan/finetuning-scheduler/issues/169).
+
+- Removed `tests/special_tests.sh`: run the special tests with `python -m gpu_epsilon.special_tests`, adding `--lease` to take the host's GPU lease for the whole run (a no-op unless `GPU_LEASE_CMD` is set). The options are unchanged. The GPU pipeline calls the runner directly under its own leases [#170](https://github.com/speediedan/finetuning-scheduler/issues/170).
+
 - CI: the macOS legs of "Test full" run on `macos-15`, since the `macOS-14` runner images are retired on 2026-11-02 and their scheduled brownouts cancel every macOS leg before it gets a runner ([#172](https://github.com/speediedan/finetuning-scheduler/issues/172))
 
 - `tests/special_tests.sh` now runs gpu-epsilon's shared special-test runner, configured by `[tool.gpu-epsilon.special-tests]` in `pyproject.toml`, in place of its shell implementation (`tests/test_utils.sh`, removed). The command line is unchanged. Each node's outcome is read from per-rank records rather than grepped from the log, so a node id with regex metacharacters is handled verbatim, and a failing or dying non-launching rank fails the node. Collection and execution use one interpreter. A bad flag or patch mask is reported before the GPU lease is taken, and each run writes a JSON results file beside its session log [#161](https://github.com/speediedan/finetuning-scheduler/issues/161).

@@ -85,11 +85,11 @@ step. The steps, in order:
 | `Env details`                     | `collect_env_details.py`, the `>= 2` GPU assertion and the `PL_RUN_CUDA_TESTS=1` assertion                                                                                      |
 | `Acquire host GPU leases`         | `ci_host_lease_hold ... --gpus all --cpu-heavy` from `scripts/gpu_lease_wrap.sh`: through the mounted host lease tool, else the plain locks                                     |
 | `Testing: CUDA`                   | `coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v` with `FTS_CUDA_TESTS_ONLY=1`                                                       |
-| `Testing: standalone multi-gpu`   | `special_tests.sh --mark_type=standalone`, plus `--select_file=tests/.standalone_smoke` when `standalone_scope.sh` picks the smoke set (see below)                              |
+| `Testing: standalone multi-gpu`   | `python -m gpu_epsilon.special_tests --mark_type=standalone`, plus `--select_file=tests/.standalone_smoke` when `standalone_scope.sh` picks the smoke set (see below)                              |
 | `Testing: Experimental Multi-GPU` | **currently commented out** (`--mark_type=exp_patch --experiment_patch_mask="1 0 0 1"`)                                                                                         |
 | `Statistics`                      | codecov CLI upload, flags `gpu,pytest`                                                                                                                                          |
 | `Testing: Examples`               | `python -m pytest src/fts_examples -v --maxfail=1 --durations=0`                                                                                                                |
-| `Testing: Multi-GPU Examples`     | `special_tests.sh --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'`, with `PYTORCH_KERNEL_CACHE_PATH=/__w/_temp/kernel_cache` |
+| `Testing: Multi-GPU Examples`     | `python -m gpu_epsilon.special_tests --mark_type=standalone --collect_dir='src/fts_examples' --filter_pattern='model_parallel_examples'`, with `PYTORCH_KERNEL_CACHE_PATH=/__w/_temp/kernel_cache` |
 | `Cleaning up agent workspace`     | `sudo chmod -R 775 /__w/1/s`, `ci_host_lease_release`, `condition: always()`                                                                                                    |
 
 `timeoutInMinutes: 120`. Marks are `standalone` and `exp_patch` only: there is no `profile_ci` mark, and
@@ -144,7 +144,7 @@ Check for orphaned processes from an interrupted standalone run before re-queuin
 `PL_RUN_CUDA_TESTS=1`, on two GPUs for most of that phase's tests (`min_cuda_gpus=2`) and on one for the single-GPU
 cases; CPU-only tests do not run in this pipeline, since the hosted matrix runs them. A `standalone multi-gpu` or
 `Multi-GPU Examples` failure needs a host with two GPUs. Under the `ddp` launcher every rank prints its own verdict,
-and `special_tests.sh` fails the test on any rank's failure (it reads each rank's recorded outcome, not the log), so
+and the special-test runner fails the test on any rank's failure (it reads each rank's recorded outcome, not the log), so
 read every rank's traceback in the raw log. The run's results file (`special_tests_<mark>_<time>.json`, beside its
 session log) names each node's verdict and why it failed.
 
@@ -189,13 +189,13 @@ source ${FTS_VENV_BASE}/${FTS_TARGET_VENV}/bin/activate
 # CUDA tests use the host's GPUs: on a shared host, run them under the GPU lease
 PL_RUN_CUDA_TESTS=1 FTS_CUDA_TESTS_ONLY=1 python -m pytest src/finetuning_scheduler tests -v
 PL_RUN_CUDA_TESTS=1 PL_RUN_STANDALONE_TESTS=1 python -m pytest tests/test_model_parallel.py::test_name -v
-bash ./tests/special_tests.sh --mark_type=standalone
+python -m gpu_epsilon.special_tests --lease --mark_type=standalone
 ```
 
-`special_tests.sh` stops at the first failing test; to see every failure in one pass (the run still exits 1):
+The special-test runner stops at the first failing test; to see every failure in one pass (the run still exits 1):
 
 ```bash
-bash ./tests/special_tests.sh --mark_type=standalone --allow-failures
+python -m gpu_epsilon.special_tests --lease --mark_type=standalone --allow-failures
 ```
 
 ## Step 3: Narrowing Multi-GPU Failures

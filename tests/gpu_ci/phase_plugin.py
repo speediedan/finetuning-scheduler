@@ -12,7 +12,7 @@
 """A pytest plugin recording what a GPU CI phase collected and how each node ended, per rank.
 
 Load it with ``-p tests.gpu_ci.phase_plugin`` (or through ``PYTEST_ADDOPTS``, which every rank's re-launched pytest
-session inherits, so ``tests/special_tests.sh`` needs no change). It does nothing unless ``FTS_PHASE_RECORD_DIR`` names
+session inherits, so the special-test runner needs no change). It does nothing unless ``FTS_PHASE_RECORD_DIR`` names
 a directory; then each pytest session (each rank's, under Lightning's ``ddp`` launcher) appends JSON lines to its own
 file there:
 

@@ -100,7 +100,7 @@ jobs:
           [[ -n "${ROCR_VISIBLE_DEVICES:-}" ]] && extra+=(-e "ROCR_VISIBLE_DEVICES=${ROCR_VISIBLE_DEVICES}")
           # sleep outlives the job timeout by 5 minutes, so a container leaked by an agent crash exits on its own and
           # the kernel drops its lease locks. The checkout is mounted at its host path, so a path a step prints for the
-          # agent (special_tests.sh's `##vso[task.uploadfile]` log) is valid on the host too.
+          # agent (the special-test runner's `##vso[task.uploadfile]` log) is valid on the host too.
           # shellcheck disable=SC2086
           docker run -d --rm --name "$(FTS_CTR)" $(FTS_DEVICE_OPTIONS) --shm-size=512m \
             -v /tmp/di_leases:/gpu_leases \
