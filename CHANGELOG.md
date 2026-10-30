@@ -142,6 +142,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- CI: the macOS legs of "Test full" run on `macos-15`, since the `macOS-14` runner images are retired on 2026-11-02 and their scheduled brownouts cancel every macOS leg before it gets a runner ([#172](https://github.com/speediedan/finetuning-scheduler/issues/172))
+
 - `tests/special_tests.sh` now runs gpu-epsilon's shared special-test runner, configured by `[tool.gpu-epsilon.special-tests]` in `pyproject.toml`, in place of its shell implementation (`tests/test_utils.sh`, removed). The command line is unchanged. Each node's outcome is read from per-rank records rather than grepped from the log, so a node id with regex metacharacters is handled verbatim, and a failing or dying non-launching rank fails the node. Collection and execution use one interpreter. A bad flag or patch mask is reported before the GPU lease is taken, and each run writes a JSON results file beside its session log [#161](https://github.com/speediedan/finetuning-scheduler/issues/161).
 
 - The GPU release check now runs gpu-epsilon's release eligibility checker, shared with interpretune, in place of this repository's copy (`tests/gpu_ci/release_eligibility.py`, removed): the same rules, with this project's evidence described by `tests/gpu_ci/release.json`. gpu-epsilon is a CI dependency pinned by commit in `requirements/ci/gpu-epsilon.txt`, installed by the CI action, `scripts/build_fts_env.sh` and the GPU job, and never a package dependency [interpretune#742](https://github.com/speediedan/interpretune/issues/742).

@@ -25,7 +25,7 @@ than ported. This version is deliberately thinner — extend it as real FTS inci
 `ci_test-full.yml` ("Test full") is **four-dimensional**, which matters for reading job and artifact names:
 
 ```
-os        ∈ {ubuntu-22.04, windows-2022, macOS-14}
+os        ∈ {ubuntu-22.04, windows-2022, macos-15}
 python    ∈ {3.10, 3.13}
 requires  ∈ {oldest, latest}        # 3.13 + oldest is excluded
 release   ∈ (matrix dimension; see the workflow)
