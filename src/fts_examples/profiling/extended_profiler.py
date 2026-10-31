@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 
 import torch
-from fts_examples.profiling.accelerator import accelerator_type
+from finetuning_scheduler.profiling.accelerator import accelerator_type
 from lightning.fabric.utilities import rank_zero_info
 from lightning.pytorch.profilers.pytorch import _KINETO_AVAILABLE, PyTorchProfiler
 from torch.profiler.profiler import ProfilerActivity

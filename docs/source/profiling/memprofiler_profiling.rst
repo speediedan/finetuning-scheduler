@@ -12,7 +12,7 @@ Composable distributed training (especially at scale) can make profiling resourc
 challenging. To address this need, FTS includes a utility that enables quick, flexible orchestration of advanced
 profiling combining multiple complementary PyTorch profilers.
 
-The :class:`~fts_examples.profiling.memprofiler.MemProfiler` is a powerful memory profiling utility that synthesizes
+The :class:`~finetuning_scheduler.profiling.memprofiler.MemProfiler` is a powerful memory profiling utility that synthesizes
 numerous complementary profiling methods. As demonstrated in this example, the following profiling utilities are
 integrated and simultaneously configured:
 
@@ -32,7 +32,7 @@ complete view of distributed training resource utilization.
 .. note::
 
     While this example focuses on composable distributed training,
-    :class:`~fts_examples.profiling.memprofiler.MemProfiler` can be used with any type of training session.
+    :class:`~finetuning_scheduler.profiling.memprofiler.MemProfiler` can be used with any type of training session.
 
 Profiling Artifacts
 *******************
@@ -45,7 +45,8 @@ For this ``model_parallel`` example, all artifacts should be nested in the tenso
 ``model_parallel`` / ``lightning_logs`` / ``fts_fsdp_profiling`` / ``version_{n}``.
 
 1. ``FSDP2MemTracker`` tracking for the collected iteration (per-rank), e.g.:
-   ``./memprofiler/fsdp_mem_rank_0_training_step_2.log``
+   ``./memprofiler/fsdp_mem_rank_0_training_step_2.log``, and the same statistics as one JSON report per rank, e.g.:
+   ``./memprofiler/rank_0_fsdp_memory_report.json`` (see :ref:`memprofiler-fsdp2-reports`)
 2. Consolidated memory snapshot collection entries, dumped to ``.yaml`` by default (can also be dumped to ``*.pickle``
    if preferred).
 
@@ -92,6 +93,104 @@ Configuration
     ``FutureWarning``, until no earlier than 2.17. A deprecated function set is merged into (added to) its
     replacement, and ``cuda_allocator_history`` sets ``allocator_history`` unless ``allocator_history`` is set too, in
     which case ``allocator_history`` wins.
+
+.. _memprofiler-without-lightning:
+
+Profiling Without Lightning
+***************************
+
+:class:`~finetuning_scheduler.profiling.memprofiler.MemProfiler` and its configuration live in
+:mod:`finetuning_scheduler.profiling`, which imports no Lightning module, so a plain PyTorch training loop can drive it.
+The module it profiles exposes its ``memprofiler_cfg`` and the ``memprofiler`` its profiled methods use; methods
+decorated with :meth:`~finetuning_scheduler.profiling.memprofiler.MemProfiler.memprofilable` are profiled on the
+configured schedule. The loop supplies what a trainer otherwise would, each as a value or as a callable read when it
+is needed: the optimizer whose state ``FSDP2MemTracker`` attributes, the directory under which the artifacts are
+written (a ``memprofiler`` directory, unless ``memprofiler_cfg.save_dir`` is set) and, optionally, the current training
+phase (see :ref:`memprofiler-fsdp2-reports`).
+
+.. code-block:: python
+
+    import torch
+    from finetuning_scheduler.profiling import MemProfiler, MemProfilerCfg, MemProfilerFuncs
+
+
+    class Model(torch.nn.Module):
+        def __init__(self, memprofiler_cfg: MemProfilerCfg):
+            super().__init__()
+            self.layer = torch.nn.Linear(16, 16)
+            self.memprofiler_cfg = memprofiler_cfg
+            self.memprofiler = None
+
+        @MemProfiler.memprofilable
+        def training_step(self, batch):
+            return self.layer(batch).sum()
+
+
+    model = Model(MemProfilerCfg(enabled=True, collect_funcs=MemProfilerFuncs(cpu={"training_step"})))
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    model.memprofiler = MemProfiler()
+    model.memprofiler.connect(model, optimizer=optimizer, log_dir="./logs")
+    model.memprofiler.init_memprof_log_dir()
+    for batch in batches:
+        optimizer.zero_grad()
+        model.training_step(batch).backward()
+        optimizer.step()
+    model.memprofiler.dump_memory_stats()
+
+Host memory is tracked with ``psutil``, which is imported only when a profiler connects. The Lightning integration
+(``fts_examples.profiling.ProfilerHooksMixin``) connects the same profiler with callables that read its trainer, and
+reports the ``FinetuningScheduler`` callback's current depth as the phase.
+
+.. _memprofiler-fsdp2-reports:
+
+FSDP2 Reports
+*************
+
+Beside each call's text report, every rank writes ``rank_<n>_fsdp_memory_report.json`` (``dump_fsdp_mem_json``,
+enabled by default). All values are bytes and modules are included to ``fsdp_mem_track_module_depth``:
+
+.. code-block:: python
+
+    {
+        "version": 1,
+        "rank": 0,
+        "world_size": 2,
+        "backend": "cuda",
+        "units": "B",
+        # measured in this process by `finetuning_scheduler.profiling.collector_availability()`
+        "collectors": {
+            "accelerator_memory_stats": True,
+            "allocator_history": True,
+            "fsdp_mem_tracker": True,
+            "host_memory": True,
+        },
+        "entries": [
+            {
+                "fn_name": "training_step",
+                "iter": 2,
+                "phase": 0,
+                # this call's peak, per device and category (e.g. "Sharded Param", "Activation", "Total")
+                "peak": {"cuda:0": {"Sharded Param": 1048576, "Total": 52428800}},
+                # each module's snapshots, per module state (e.g. "Peak-Forward", "Peak-Backward")
+                "modules": {"FSDPModel": {"Peak-Backward": [{"cuda:0": {"Total": 52428800}}]}},
+            }
+        ],
+    }
+
+Each entry's ``peak`` is that call's own peak: the tracker resets its peak each time it is entered, so it is recorded
+as each profiled call exits.
+
+**Phases.** A fine-tuning phase transition changes which parameters train and can replace the optimizer, whose state the
+tracker attributes. When the ``phase`` given to ``connect`` changes, the tracker is rebuilt with the optimizer then
+current, and each entry records the phase its call ran in.
+
+**Aggregating across ranks.** :func:`~finetuning_scheduler.profiling.fsdp_report.aggregate_fsdp_mem_reports` reads
+every rank's report in a directory and, for each profiled call, reports each peak category (summed over the devices a
+rank used) per rank with its maximum, minimum and mean, writing ``fsdp_memory_report_aggregate.json``. The maximum is
+the figure that decides whether a configuration fits, since the most loaded rank runs out first. Set
+``aggregate_fsdp_mem_reports`` to have rank 0 aggregate at the end of profiling, after every rank has written its report
+(each rank waits at a barrier), or call the function afterwards. It refuses, naming what it found, reports whose
+version it does not know, a missing or duplicated rank, and ranks that profiled different calls.
 
 .. _memprofiler-backend-support:
 

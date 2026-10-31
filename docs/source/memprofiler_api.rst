@@ -1,7 +1,7 @@
 MemProfiler
 ===========
 
-.. currentmodule:: fts_examples.profiling
+.. currentmodule:: finetuning_scheduler.profiling
 
 .. autosummary::
     :toctree: api
@@ -10,3 +10,4 @@ MemProfiler
     memprofiler
     config
     accelerator
+    fsdp_report

@@ -20,7 +20,7 @@ from lightning.pytorch import Trainer
 
 pytest.importorskip("psutil")
 
-from fts_examples.profiling import accelerator as accel  # noqa: E402
+from finetuning_scheduler.profiling import accelerator as accel  # noqa: E402
 from fts_examples.profiling import (ExtendedPyTorchProfiler, MemProfiler, MemProfilerCfg, MemProfilerFuncs,  # noqa: E402
                                     ProfilerHooksMixin)
 from tests.helpers.boring_models import BoringModel  # noqa: E402
@@ -38,9 +38,9 @@ def fake_accelerator(monkeypatch):
     monkeypatch.setattr(torch.accelerator, "is_available", lambda: True)
     monkeypatch.setattr(torch.accelerator, "current_accelerator", lambda: torch.device("cpu"))
     monkeypatch.setattr(accel, "accelerator_type", lambda: "fakeacc")
-    for mod in ("fts_examples.profiling.config", "fts_examples.profiling.memprofiler"):
+    for mod in ("finetuning_scheduler.profiling.config", "finetuning_scheduler.profiling.memprofiler"):
         monkeypatch.setattr(f"{mod}.accelerator_backend", lambda: "fakeacc")
-    monkeypatch.setattr("fts_examples.profiling.memprofiler.accelerator_type", lambda: "fakeacc")
+    monkeypatch.setattr("finetuning_scheduler.profiling.memprofiler.accelerator_type", lambda: "fakeacc")
 
 
 def test_deprecated_collect_funcs_keys_merge():
@@ -160,14 +160,15 @@ def test_accelerator_stats_collection(fake_accelerator, monkeypatch, tmp_path):
 def test_allocator_history_snap(fake_accelerator, monkeypatch, tmp_path):
     dumped = []
     fake_memory = SimpleNamespace(_record_memory_history=lambda: None, _dump_snapshot=dumped.append)
-    monkeypatch.setattr("fts_examples.profiling.memprofiler.allocator_history_module", lambda device_type: fake_memory)
+    monkeypatch.setattr("finetuning_scheduler.profiling.memprofiler.allocator_history_module",
+                        lambda device_type: fake_memory)
     memprofiler = _connected_profiler(MemProfilerCfg(), tmp_path)
     memprofiler.allocator_history_snap("0.training_step.2.end")
     with pytest.warns(FutureWarning, match="cuda_allocator_history_snap` is deprecated"):
         memprofiler.cuda_allocator_history_snap("0.training_step.2.start")
     assert dumped == [str(tmp_path / f"fakeacc_alloc_rank_0.training_step.2.{ctx}.pickle") for ctx in ("end", "start")]
     # a backend without allocator history skips the snapshot rather than failing
-    monkeypatch.setattr("fts_examples.profiling.memprofiler.allocator_history_module", lambda device_type: None)
+    monkeypatch.setattr("finetuning_scheduler.profiling.memprofiler.allocator_history_module", lambda device_type: None)
     with pytest.warns(UserWarning, match="`fakeacc` backend does not support allocator history"):
         memprofiler.allocator_history_snap("0.training_step.3.end")
     assert len(dumped) == 2

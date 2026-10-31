@@ -347,7 +347,7 @@ the `fts-development-branch-version-upgrade` skill.
 
 ## CI
 
-- `ci_test-full.yml` ("Test full") — CPU matrix: `{ubuntu-22.04, windows-2022, macOS-14}` x
+- `ci_test-full.yml` ("Test full") — CPU matrix: `{ubuntu-22.04, windows-2022, macos-15}` x
   `{3.11, 3.13}` x `{oldest, latest}`, excluding 3.13+oldest. Installs via the composite action
   `.github/actions/install-ci-dependencies`. Sets `DISABLE_MPS=1` on macOS. The `oldest` leg resolves
   through `requirements/ci/requirements-oldest.txt`.

@@ -15,13 +15,15 @@ MemProfiler Configuration Dataclasses
 
 This module defines the configuration dataclasses for the MemProfiler.
 """
+import importlib
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields
 from pathlib import Path
+from typing import Any
 
-from lightning.fabric.utilities import rank_zero_warn
-
-from fts_examples.profiling.accelerator import accelerator_backend, allocator_history_module
+from finetuning_scheduler.core.dist import rank_zero_warn
+from finetuning_scheduler.core.exceptions import configuration_error_cls
+from finetuning_scheduler.profiling.accelerator import accelerator_backend, allocator_history_module
 
 # deprecated configuration names and their replacements, accepted until no earlier than 2.17
 _DEPRECATED_FUNC_KEYS = {"cuda": "accelerator", "cuda_allocator_history": "allocator_history"}
@@ -35,12 +37,12 @@ def _deprecated_key_warning(old: str, new: str) -> None:
 @dataclass
 class MemProfilerHooks:
     pre_forward_hooks: list[str | Callable] = \
-        field(default_factory=lambda: ['fts_examples.profiling.npp_hooks._hook_npp_pre_forward'])
+        field(default_factory=lambda: ['finetuning_scheduler.profiling.npp_hooks._hook_npp_pre_forward'])
     post_forward_hooks: list[str | Callable] = \
-        field(default_factory=lambda: ['fts_examples.profiling.npp_hooks._hook_npp_post_forward'])
+        field(default_factory=lambda: ['finetuning_scheduler.profiling.npp_hooks._hook_npp_post_forward'])
     # the provided reset_state_hooks will be called with the model and the `save_hook_attrs` list
     reset_state_hooks: list[str | Callable] = \
-        field(default_factory=lambda: ['fts_examples.profiling.npp_hooks._reset_memory_hooks_state'])
+        field(default_factory=lambda: ['finetuning_scheduler.profiling.npp_hooks._reset_memory_hooks_state'])
 
 @dataclass
 class MemProfilerFuncs: # can specify arbitrary list of `memprofilable` decorated function names
@@ -84,6 +86,9 @@ class MemProfilerCfg:
     :param fsdp_mem_tracker_tabulate: Whether to print FSDP memory statistics in a tabular format.
     :param fsdp_mem_tracker_units: The units to use for FSDP memory statistics.
     :param fsdp_mem_tracker_root_module: The root module to use for FSDP memory statistics.
+    :param dump_fsdp_mem_json: Whether to also save the FSDP memory statistics as one JSON report per rank.
+    :param aggregate_fsdp_mem_reports: Whether rank 0 aggregates the ranks' JSON FSDP memory reports across ranks once
+        every rank has written its own (requires ``dump_fsdp_mem_json``).
     :param dump_memorystats_pickle: Whether to dump memory statistics to a pickle file.
     :param dump_memorystats_yaml: Whether to dump memory statistics to a yaml file.
     :param schedule: A MemProfilerSchedule instance specifying the schedule for memory collection.
@@ -105,6 +110,8 @@ class MemProfilerCfg:
     fsdp_mem_tracker_tabulate: bool = False
     fsdp_mem_tracker_units: str = "MiB"
     fsdp_mem_tracker_root_module: str = ""
+    dump_fsdp_mem_json: bool = True
+    aggregate_fsdp_mem_reports: bool = False
     dump_memorystats_pickle: bool = False
     dump_memorystats_yaml: bool = True
     schedule: MemProfilerSchedule = field(default_factory=MemProfilerSchedule)
@@ -114,8 +121,8 @@ class MemProfilerCfg:
     memory_hooks: MemProfilerHooks = field(default_factory=MemProfilerHooks)
     # because it's frequently used for unpacking and to ensure this dataclass remains serializable, we allow
     # specification of 'identity_lambda' which will resolve to `lambda x: x`
-    saved_tensors_funcs: list = field(default_factory=lambda: list(('fts_examples.profiling.npp_hooks._npp_hook',
-                                                                    'identity_lambda')))
+    saved_tensors_funcs: list = field(
+        default_factory=lambda: list(('finetuning_scheduler.profiling.npp_hooks._npp_hook', 'identity_lambda')))
     # if you add custom hooks, make sure to add the desired module state attributes to save to `save_hook_attrs`
     save_hook_attrs: list = field(default_factory=lambda: ["rss_pre_forward", "rss_post_forward", "rss_diff",
                                                            "npp_pre_forward", "npp_post_forward", "npp_diff"])
@@ -131,6 +138,9 @@ class MemProfilerCfg:
                 self.allocator_history = self.cuda_allocator_history
             self.cuda_allocator_history = None
         self.allocator_history = bool(self.allocator_history)
+        if self.aggregate_fsdp_mem_reports and not self.dump_fsdp_mem_json:
+            raise configuration_error_cls()("`aggregate_fsdp_mem_reports` aggregates the per-rank JSON FSDP memory"
+                                            " reports, so it requires `dump_fsdp_mem_json`.")
         if not self.enabled:
             return
         has_hooks = any(getattr(self.memory_hooks, ht.name) for ht in fields(self.memory_hooks))
@@ -161,3 +171,36 @@ class MemProfilerCfg:
                                " support allocator history recording.")
             funcs.allocator_history = set()
             self.allocator_history = False
+
+
+def resolve_funcs(cfg_obj: Any, func_type: str) -> list:
+    """The callables ``cfg_obj.<func_type>`` names, each given as a callable, a dotted qualified name, or
+    ``'identity_lambda'``.
+
+    Raises:
+        FTSConfigurationError: If a name does not import or does not name a callable.
+    """
+    resolved_funcs = []
+    funcs_to_resolve = getattr(cfg_obj, func_type)
+    if not isinstance(funcs_to_resolve, list):
+        funcs_to_resolve = [funcs_to_resolve]
+    for func_or_qualname in funcs_to_resolve:
+        if callable(func_or_qualname):
+            resolved_funcs.append(func_or_qualname)  # TODO: inspect if signature is appropriate for custom hooks
+        elif func_or_qualname == 'identity_lambda':  # special case often used e.g. w/ saved_tensors_hooks
+            resolved_funcs.append(lambda x: x)
+        else:
+            module, _, func = str(func_or_qualname).rpartition(".")
+            if not module:
+                raise configuration_error_cls()(f"`{func_or_qualname}` is not a qualified function name (module.func).")
+            try:
+                mod = importlib.import_module(module)
+                resolved_func = getattr(mod, func, None)
+                if callable(resolved_func):
+                    resolved_funcs.append(resolved_func)
+                else:
+                    raise configuration_error_cls()(f"Custom function {func} from module {module} is not callable!")
+            except (AttributeError, ImportError) as e:
+                err_msg = f"Unable to import and resolve specified function {func} from module {module}: {e}"
+                raise configuration_error_cls()(err_msg)
+    return resolved_funcs
