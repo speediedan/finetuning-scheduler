@@ -134,15 +134,21 @@ names (``config.architectures``). Maps come from two sources, in order:
    :func:`~venngram.maps.schema.load_component_map`), which take precedence;
 2. **registries** of verified maps. A registry is an index whose rows point at maps (and their verification records) by
    content-checked reference, wherever they are stored: a Hugging Face Hub model or dataset repository, a Hub storage
-   bucket, or a local directory. Consumers configure the registries they trust, in order (``VENNGRAM_REGISTRIES``), and
-   ``map_for`` reads them from a local cache: the first registry that lists the architecture wins.
+   bucket, or a local directory. Consumers configure the registries they trust, in order (``VENNGRAM_REGISTRIES``,
+   space- or comma-separated; by default venngram's seed registry on the Hub), and the first registry with a usable row
+   wins. Within it, verified maps rank first, then partially verified ones; a map whose verification failed is never
+   served.
 
-The registry lookup is being built. venngram can already fetch documents by content-checked reference
-(``venngram.store``, with a manifest per directory listing each document's kind and hash); the index and
-``VENNGRAM_REGISTRIES`` come next. Until they land, venngram ships seed maps for several common architectures, which
-``map_for`` reads in the registry's place; they move to the registry once the lookup exists
-(`venngram#33 <https://github.com/speediedan/venngram/issues/33>`_).
-:func:`~venngram.maps.schema.known_architectures` lists every architecture with a map today.
+Each registry's revision is remembered in venngram's cache. When the Hub cannot be reached (or ``HF_HUB_OFFLINE`` is
+set), the last revision fetched is served from the cache, with a warning naming it; a registry never fetched before
+fails by name. A location may pin a revision (``hub-dataset:<owner>/<repo>/index@<commit>``), as Fine-Tuning
+Scheduler's examples do (``fts_examples.tunable_views.SEED_REGISTRY``), so a rendered example cannot be moved by a
+later registry generation. :func:`~venngram.maps.schema.known_architectures` lists every architecture with a map in
+the process or the configured registries, and ``python -m venngram.registry lookup <Architecture>`` shows which map a
+lookup serves.
+
+Fine-Tuning Scheduler's own tests never reach the Hub: they index fixture copies of the seed maps in a local registry
+and point ``VENNGRAM_REGISTRIES`` at it.
 
 Code that builds its view with ``MappedView(model)``, or that names the architecture with
 ``MappedView(model, architecture=...)``, picks up new sources without changing. To use a particular map instead, pass
@@ -324,7 +330,8 @@ default finds the root's one top-level ``nn.ModuleList`` and refuses, naming eac
 tensor names, quoted in an address (``name:"head\..*"``).
 
 A schedule names its sets in a top-level ``addresses`` key. The key holds an inline book (a mapping with ``sets``, and
-optionally ``imports``), the path of an address book relative to the schedule file, or a list of paths:
+optionally ``imports``), the path of an address book relative to the schedule file or a document reference to one, or
+a list of them:
 
 .. code-block:: yaml
 
@@ -337,6 +344,37 @@ optionally ``imports``), the path of an address book relative to the schedule fi
       max_transition_epoch: 2
     1:
       params: ["@rest"]
+
+.. _tunable-views-books-by-reference:
+
+**Books by reference (experimental).** A book published with ``venngram.store.publish`` is named by a *document
+reference*, ``<store>:<ref>[@<revision>]:<path>[#<sha256>]`` (for example
+``hub-model:<owner>/<repo>:books/lora.yaml``), anywhere a schedule names a book, and a book may import another by
+reference. A reference without a revision follows the latest published snapshot, so each book fetched by reference is
+pinned when the schedule loads (``venngram.store.pin``: the revision it resolved to and the document's sha256), the
+pinned references are logged, and both interfaces save them in their checkpoints (``address_references``). Resuming
+from a checkpoint whose books have changed since is refused, naming the saved references, which the schedule can then
+cite to resume exactly.
+
+.. _tunable-views-support-record:
+
+**What a book may ask (experimental).** Fine-Tuning Scheduler declares what it tunes as a venngram support record
+(``finetuning_scheduler/core/support_record.yaml``, read by
+:func:`~finetuning_scheduler.core.compile.support_record`): its ``tuning`` section lists the address fields it
+resolves, the targets it tunes (tensors), that it tunes no unit sets yet, and the book structures and portabilities it
+accepts. A set a schedule uses that asks for more (an activation site, say) is refused at compile time with every
+reason named; a set of the same book the schedule does not use is not judged, so one book can serve a steering tool and
+a schedule. The record is a document, so a book can be checked against it without Fine-Tuning Scheduler installed:
+``python -m venngram.conformance <location> --support support_record.yaml``.
+
+.. _tunable-views-export-book:
+
+**A schedule as a book (experimental).** :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.export_book`
+(or :func:`~finetuning_scheduler.core.books.schedule_book`) writes a schedule's phase selections as an address book,
+one set per phase (``phase_0``, ``phase_1``, ...), so a tuning setup can be published, imported and cited like any
+other set. Addresses keep their form, with ``@<set>`` references replaced by the sets they name; names and regexes
+become ``name`` terms (a regex keeps Fine-Tuning Scheduler's prefix match) and the book declares the view's naming
+scheme; books fetched by reference are recorded under ``derived_from``.
 
 venngram ships an agent skill for the grammar and address books, ``venngram-addressing`` (in the venngram
 repository's ``.agents/skills/``, usable from any agent harness that reads skills): when an address is worth using,

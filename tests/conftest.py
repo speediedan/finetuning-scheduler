@@ -24,11 +24,18 @@ from lightning.fabric.utilities.imports import _IS_WINDOWS
 from lightning.pytorch.trainer.connectors.signal_connector import _SignalConnector
 
 from tests import _PATH_DATASETS
+from tests.helpers.venngram_registry import use_offline_registry
 
 
 @pytest.fixture(scope="session")
 def datadir():
     return Path(_PATH_DATASETS)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def offline_venngram_registry(tmp_path_factory):
+    """Every test looks component maps up in a local registry of fixture maps, never the Hub (#176)."""
+    return use_offline_registry(tmp_path_factory.mktemp("venngram_registry"))
 
 
 @pytest.fixture(scope="function", autouse=True)

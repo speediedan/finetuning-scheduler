@@ -87,9 +87,13 @@ by this skill, completed by hand where the draft could not place a module (those
      or a Hub repository or bucket; it writes a manifest listing each document's hash. Check the result the way a
      reader meets it: `python -m venngram.conformance <store>:<ref>`. Publishing to a remote store is an outward act:
      **an agent asks before it publishes**, and names the store and reference it will write.
-   - **Propose it to a registry:** registries index verified maps by content-checked reference, and the registry
-     lookup is being built (venngram#33). Until it lands, share the pinned reference (`venngram.store.pin(...)`) with
-     whoever maintains the registry; once it does, the proposal is a new index row pointing at that reference.
+   - **Propose it to a registry:** a registry indexes verified maps by content-checked reference, and is rebuilt by
+     its crawler from a list of manifest locations and, when built with `--discover-hub`, every Hub repository
+     tagged `venngram` (`python -m venngram.registry build --source <location> --discover-hub --out ./index`).
+     Publish the map and its record to a Hub repository tagged `venngram`, or give the pinned reference
+     (`venngram.store.pin(...)`) to whoever maintains the registry, so its next build carries a row for it. Check what
+     a lookup serves with `python -m venngram.registry lookup <Architecture>`; `VENNGRAM_REGISTRIES` names the
+     registries consulted, in order (by default venngram's seed registry).
 
 4. **Build the view.** `role_rules` names the adapter library's tensors (`PEFT_LORA_RULES` covers PEFT's LoRA names):
 
