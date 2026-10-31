@@ -34,6 +34,7 @@ from lightning.pytorch.trainer.connectors.logger_connector.result import _Result
 
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import phase as core_phase
+from finetuning_scheduler.core import schedule as core_schedule
 from finetuning_scheduler.core import transitions as core_transitions
 from finetuning_scheduler.core.views import canonical_fqn
 from finetuning_scheduler.lightning.fts_supporters import (
@@ -940,9 +941,12 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 )
         self._fts_state._fts_ckpt_metadata["current_ckpt_depth"] = self._fts_state._curr_depth
         self._fts_state._fts_ckpt_metadata["best_ckpt_depth"] = self._fts_state._best_ckpt_depth
+        address_sets = getattr(self, "_address_sets", None)
         return {
             "internal_optimizer_metadata": self._internal_optimizer_metadata,
             "fts_metadata": self._fts_state._fts_ckpt_metadata,
+            # the exact address books the schedule fetched by reference, so a resume uses the same documents
+            "address_references": list(getattr(address_sets, "references", ())),
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
@@ -954,6 +958,9 @@ class FinetuningScheduler(ScheduleImplMixin, ScheduleParsingMixin, CallbackDepMi
                 be loaded from the checkpoint
         """
         self._restarting = True
+        address_sets = getattr(self, "_address_sets", None)
+        if address_sets is not None:  # the schedule is loaded at setup, before the checkpoint's callback state
+            core_schedule.check_address_references(state_dict.get("address_references"), address_sets.references)
         self._internal_optimizer_metadata = state_dict["internal_optimizer_metadata"]
         self._fts_state._fts_ckpt_metadata = state_dict["fts_metadata"]
         if self._fts_state._resume_fit_from_ckpt:  # if resuming training, on_fit_start will already be called

@@ -30,6 +30,8 @@ import yaml
 from torch import nn
 from venngram import AddressBook
 from venngram.errors import VenngramError
+from venngram.store import fetch as fetch_document
+from venngram.store import is_reference, pin, Reference
 
 from finetuning_scheduler.core._io import get_filesystem
 from finetuning_scheduler.core.dist import rank_zero_info, rank_zero_only, rank_zero_warn
@@ -201,19 +203,78 @@ def split_addresses(schedule: Mapping) -> tuple[dict, Any]:
 
 class AddressSets(dict):
     """The named sets of a schedule's address books (set name mapped to its address), with the books they came
-    from, so a consumer can check what the books require (:meth:`venngram.AddressBook.check_requires`)."""
+    from, so a consumer can check what the books require (:meth:`venngram.AddressBook.check_requires`).
 
-    def __init__(self, sets: Mapping[str, Any] | None = None, books: Sequence[AddressBook] = ()) -> None:
+    Attributes:
+        books: The books, in the order the schedule names them.
+        references: The exact document reference (:func:`venngram.store.pin`) of every book fetched by reference,
+            imports included, so a checkpoint can record which documents a run used.
+    """
+
+    def __init__(self, sets: Mapping[str, Any] | None = None, books: Sequence[AddressBook] = (),
+                 references: Sequence[str] = ()) -> None:
         super().__init__(sets or {})
         self.books = tuple(books)
+        self.references = tuple(references)
+
+
+def _imported_references(book: AddressBook) -> list[str]:
+    """The pinned reference of every import of ``book`` (recursively) that was fetched by reference."""
+    out: list[str] = []
+    for imported in book.imports.values():
+        if is_reference(imported.source):
+            out.append(str(pin(imported.source)))
+        out.extend(_imported_references(imported))
+    return out
+
+
+def _book_by_reference(reference: str) -> tuple[AddressBook, list[str]]:
+    """Fetch the book ``reference`` names at the exact revision and content it resolves to now, and return it with
+    the pinned references of it and of every book it imports by reference."""
+    pinned = pin(reference)
+    path, entry = fetch_document(pinned)
+    if entry.kind != "address_book":
+        raise FTSConfigurationError(f"`{reference}` names a `{entry.kind}` document, not an address book.")
+    with open(path, encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh)
+    book = AddressBook.from_mapping(doc, source=reference, base_dir=path.parent)
+    return book, [str(pinned), *_imported_references(book)]
+
+
+def same_documents(saved: Sequence[str], current: Sequence[str]) -> bool:
+    """Whether two lists of pinned references name the same documents by content (store, location, path and
+    sha256), whatever revision each was found at: a document republished unchanged is the same document."""
+
+    def key(text: str) -> tuple:
+        ref = Reference.parse(text)
+        return ref.store, ref.ref, ref.path, ref.sha256
+
+    return sorted(map(key, saved)) == sorted(map(key, current))
+
+
+def check_address_references(saved: Sequence[str] | None, current: Sequence[str]) -> None:
+    """Refuse to resume a run whose schedule's books, fetched by reference, are not the documents it was saved
+    with.
+
+    Raises:
+        FTSConfigurationError: Naming both sets of references.
+    """
+    if saved is None or same_documents(saved, current):
+        return
+    raise FTSConfigurationError(
+        f"The saved state used the address books {list(saved)}, but the schedule's `addresses` now resolve to "
+        f"{list(current)}. Cite the saved references (they pin a revision and a sha256) in the schedule to resume.")
 
 
 def load_address_sets(raw: Any, base_dir: str | os.PathLike | None = None) -> AddressSets:
     """The named sets a schedule's ``addresses`` key provides, for ``@<set>`` references.
 
     Args:
-        raw: The key's value: a path to an address book (or a list of paths, whose sets must not share a name), or an
-            inline book (a mapping with ``sets`` and optionally ``imports``; ``schema_version`` may be omitted).
+        raw: The key's value: an address book's path or document reference (``<store>:<ref>[@<revision>]:<path>``,
+            :mod:`venngram.store`), a list of them (whose sets must not share a name), or an inline book (a mapping with
+            ``sets`` and optionally ``imports``; ``schema_version`` may be omitted). A book named by reference is
+            fetched at the revision and content it resolves to now, and that exact reference is recorded
+            (:attr:`AddressSets.references`).
         base_dir: The directory relative paths resolve against (the schedule file's directory, when it came from one).
 
     Raises:
@@ -225,24 +286,32 @@ def load_address_sets(raw: Any, base_dir: str | os.PathLike | None = None) -> Ad
     try:
         if isinstance(raw, Mapping):
             book = AddressBook.from_mapping(raw, source="the schedule's `addresses`", base_dir=base, inline=True)
-            return AddressSets(book.sets(), (book,))
-        paths = [raw] if isinstance(raw, (str, os.PathLike)) else raw
-        if not isinstance(paths, list) or not all(isinstance(p, (str, os.PathLike)) for p in paths):
-            raise FTSConfigurationError(
-                f"A schedule's `addresses` is an address book's path, a list of paths, or an inline book (a mapping"
-                f" with `sets`), got {raw!r}.")
-        sets = AddressSets()
-        for path in paths:
-            book = AddressBook.from_file(base / path)
-            clash = sorted(set(sets) & set(book.sets()))
-            if clash:
-                raise FTSConfigurationError(f"The address books in `addresses` both define {clash}; import one of them "
-                                            "under a namespace instead.")
-            sets.update(book.sets())
-            sets.books += (book,)
-        return sets
+            sets = AddressSets(book.sets(), (book,), _imported_references(book))
+        else:
+            paths = [raw] if isinstance(raw, (str, os.PathLike)) else raw
+            if not isinstance(paths, list) or not all(isinstance(p, (str, os.PathLike)) for p in paths):
+                raise FTSConfigurationError(
+                    f"A schedule's `addresses` is an address book's path or reference, a list of them, or an inline"
+                    f" book (a mapping with `sets`), got {raw!r}.")
+            sets = AddressSets()
+            for path in paths:
+                if isinstance(path, str) and is_reference(path):
+                    book, refs = _book_by_reference(path)
+                else:
+                    book = AddressBook.from_file(base / path)
+                    refs = _imported_references(book)
+                clash = sorted(set(sets) & set(book.sets()))
+                if clash:
+                    raise FTSConfigurationError(f"The address books in `addresses` both define {clash}; import one of"
+                                                " them under a namespace instead.")
+                sets.update(book.sets())
+                sets.books += (book,)
+                sets.references += tuple(refs)
     except VenngramError as err:
         raise FTSConfigurationError(f"The schedule's `addresses` cannot be loaded: {err}") from err
+    if sets.references:
+        rank_zero_info(f"The schedule's address books by reference: {', '.join(sets.references)}")
+    return sets
 
 
 def check_param_entries(schedule: Mapping[int, Mapping[str, Any]]) -> None:
