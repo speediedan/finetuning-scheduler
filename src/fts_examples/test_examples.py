@@ -29,6 +29,14 @@ from tests.helpers.common import unexpected_warns
 from tests.helpers.runif import RunIf
 from tests.helpers.expected_warns import (EXAMPLE_EXPECTED_WARNS, MODEL_PARALLEL_EXAMPLE_WARNS,
                                           ADV_EXAMPLE_EXPECTED_WARNS)
+from tests.helpers.venngram_registry import use_offline_registry
+
+
+@pytest.fixture(scope="module", autouse=True)
+def offline_venngram_registry(tmp_path_factory):
+    """The examples look component maps up in a local registry of fixture maps, never the Hub (#176)."""
+    return use_offline_registry(tmp_path_factory.mktemp("venngram_registry"))
+
 
 ARGS_DEFAULT = (
     "--trainer.default_root_dir %(tmpdir)s "
