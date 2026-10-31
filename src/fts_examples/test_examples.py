@@ -298,3 +298,46 @@ def test_tunable_views_cross_architecture_nb(tmpdir):
     assert re.search(r"^  OPT    \('model\.decoder\.layers\.0\.fc2\.weight'", out, flags=re.M), out
     rows = [line for line in out.splitlines() if line.startswith(("attention only", "MLP only", "all layers"))]
     assert len(rows) == 3 and all(line.count("M ") == 4 for line in rows), rows
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+def test_tunable_view_generator_skill_reference(tmp_path):
+    """The view-generator skill's reference (a synthetic decoder no map covers, and its map) still verifies, the
+    drafter's named rows agree with it and its unnamed ones are left for review, and a label swap is refused
+    (#157)."""
+    from venngram.maps import known_architectures
+
+    skill = Path(__file__).parents[2] / ".agents" / "skills" / "tunable-view-generator"
+    if not skill.is_dir():
+        pytest.skip("the skill ships in the repository, not the distribution")
+    reference = skill / "references" / "synthetic_map.yaml"
+    model = f"{skill / 'references' / 'synthetic_decoder.py'}:make"
+    # the reference exists to exercise drafting, so it must stay an architecture no map covers
+    assert "SyntheticDecoder" not in known_architectures()
+
+    def script(name, *args):
+        return subprocess.run([sys.executable, str(skill / "scripts" / name), *map(str, args)], capture_output=True,
+                              text=True)
+
+    def rows(text):
+        return {line.split(":", 1)[0].strip(): line.split("#", 1)[0].split(":", 1)[1].strip()
+                for line in text.splitlines() if line.startswith("  ") and not line.lstrip().startswith("#")}
+
+    cp = script("find_view.py", "--model", model, "--map", reference)
+    assert cp.returncode == 0, cp.stdout[-3000:] + cp.stderr[-3000:]
+    assert "SyntheticDecoder: verified" in cp.stdout and "order: passed" in cp.stdout
+    draft = tmp_path / "draft.yaml"
+    cp = script("draft_map.py", "--model", model, "-o", draft)
+    assert cp.returncode == 0, cp.stderr[-3000:]
+    drafted, expected = rows(draft.read_text()), rows(reference.read_text())
+    named = {component: row for component, row in drafted.items() if "draft." not in component}
+    # every row the drafter names agrees with the map; every module it cannot name is left for review, not guessed
+    assert named and all(expected.get(component) == row for component, row in named.items()), named
+    modules = {row.split('"')[1] for row in expected.values()}
+    unconfirmed = [row.split('"')[1] for component, row in drafted.items() if "draft." in component]
+    assert unconfirmed and set(unconfirmed) <= modules and "UNCONFIRMED" in draft.read_text(), drafted
+    swapped = tmp_path / "swapped.yaml"
+    swapped.write_text(reference.read_text().replace("blocks.{i}.ln1:", "blocks.{i}.lnX:")
+                       .replace("blocks.{i}.ln2:", "blocks.{i}.ln1:").replace("blocks.{i}.lnX:", "blocks.{i}.ln2:"))
+    cp = script("find_view.py", "--model", model, "--map", swapped)
+    assert cp.returncode == 1 and "order chain" in cp.stdout, cp.stdout[-3000:]

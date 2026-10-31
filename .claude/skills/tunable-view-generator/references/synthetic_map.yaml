@@ -1,0 +1,21 @@
+# The map of references/synthetic_decoder.py, a model no map covers, verified by find_view.py. draft_map.py
+# (venngram's drafter, by rules mined from every known map) placed only the block stack: its module names are novel by
+# design, so every other row came back UNCONFIRMED and was named here by hand, reading the model's forward.
+schema_version: 2
+architecture: SyntheticDecoder
+components:
+  embed:               {module: "trunk.glyphs", kind: embed}
+  blocks.{i}:          {module: "trunk.cells.{i}", kind: block}
+  ln_final:            {module: "trunk.settle", kind: norm}
+  unembed:             {module: "readout", kind: unembed}
+  blocks.{i}.ln1:      {module: "trunk.cells.{i}.pre_mix", kind: norm}
+  blocks.{i}.attn:     {module: "trunk.cells.{i}.mix", kind: attn}
+  blocks.{i}.attn.q:   {module: "trunk.cells.{i}.mix.wq", kind: linear}
+  blocks.{i}.attn.k:   {module: "trunk.cells.{i}.mix.wk", kind: linear}
+  blocks.{i}.attn.v:   {module: "trunk.cells.{i}.mix.wv", kind: linear}
+  blocks.{i}.attn.o:   {module: "trunk.cells.{i}.mix.wo", kind: linear}
+  blocks.{i}.ln2:      {module: "trunk.cells.{i}.pre_feed", kind: norm}
+  blocks.{i}.mlp:      {module: "trunk.cells.{i}.feed", kind: mlp}
+  blocks.{i}.mlp.gate: {module: "trunk.cells.{i}.feed.w_gate", kind: linear}
+  blocks.{i}.mlp.in:   {module: "trunk.cells.{i}.feed.w_lift", kind: linear}
+  blocks.{i}.mlp.out:  {module: "trunk.cells.{i}.feed.w_drop", kind: linear}

@@ -22,7 +22,9 @@ Scheduling Through a Tunable View
    - **experiments defined once and run across models**: conditions written as addresses depend far less on any one
      model's parameter names, so the same definition can be compiled, compared and orchestrated over several models;
    - **agent-orchestrated experiments**, where a model description of roles, layers and components is easier to
-     compose over than regexes.
+     compose over than regexes. If an architecture has no component map, an agent can draft and verify one with the
+     ``tunable-view-generator`` agent skill (in the repository's ``.agents/skills/``, usable from any agent harness
+     that reads skills).
 
    :ref:`fts-evolution` explains the direction, with a table of which approach fits which use. The
    :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` shows a view and addresses at work in an experiment, and
@@ -149,7 +151,9 @@ it: ``MappedView(model, cmap)``.
 An architecture venngram has no map for needs one written: a short data document naming each component's module for
 each block, verified against the architecture with :func:`~venngram.maps.verification.verify` (which checks every row exists, that
 the components partition the parameters, their widths against the model's configuration, and their order in a forward
-pass) and then registered.
+pass) and then registered. The ``tunable-view-generator`` agent skill (in the repository's
+``.agents/skills/``) drafts a map from the model's module tree and runs that verification, without downloading
+weights.
 
 Writing a View
 **************
