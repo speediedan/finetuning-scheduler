@@ -23,6 +23,8 @@ from finetuning_scheduler.core.exceptions import FTSConfigurationError  # noqa: 
 from finetuning_scheduler.profiling import (MemProfiler, MemProfilerCfg, MemProfilerFuncs,  # noqa: E402
                                             MemProfilerSchedule, aggregate_fsdp_mem_reports,
                                             collector_availability)
+from tests.helpers.allocator import recorded_allocations  # noqa: E402
+from tests.helpers.runif import RunIf  # noqa: E402
 
 _LIGHTNING_LOADED = (
     "import sys, {module}; "
@@ -83,6 +85,31 @@ def test_a_plain_loop_profiles_with_an_injected_optimizer_and_log_dir(no_acceler
     assert collected and all("training_step" in key for key in collected)
     assert all({"rss", "vms"} <= set(stats) for stats in collected.values())
     assert any((tmp_path / "memprofiler").iterdir())
+
+
+@RunIf(min_cuda_gpus=1)
+def test_a_plain_loop_records_allocator_history(tmp_path):
+    """A plain PyTorch loop gets snapshots that hold its allocations: connecting starts recording allocator history,
+    as it does for the Lightning integration, so neither interface has to start it itself."""
+    funcs = MemProfilerFuncs(cpu=set(), accelerator=set(), allocator_history={"training_step"})
+    cfg = MemProfilerCfg(enabled=True, allocator_history=True, enable_memory_hooks=False,
+                         enable_saved_tensors_hooks=False, collect_funcs=funcs,
+                         schedule=MemProfilerSchedule(warmup_iters=1, max_iter=2))
+    module = _PlainModule(cfg).cuda()
+    optimizer = torch.optim.SGD(module.parameters(), lr=0.1)
+    module.memprofiler = MemProfiler()
+    module.memprofiler.connect(module, optimizer=optimizer, log_dir=tmp_path)
+    module.memprofiler.init_memprof_log_dir()
+    try:
+        for _ in range(3):
+            optimizer.zero_grad()
+            module.training_step(torch.ones(2, 4, device="cuda")).backward()
+            optimizer.step()
+    finally:
+        torch.cuda.memory._record_memory_history(enabled=None)
+    snapshots = sorted((tmp_path / "memprofiler").glob("cuda_alloc_rank_0.training_step.*.pickle"))
+    assert len(snapshots) == 2, snapshots
+    assert all(recorded_allocations(snapshot) > 0 for snapshot in snapshots)
 
 
 def test_the_log_dir_is_read_when_needed_and_refused_when_unset(tmp_path):

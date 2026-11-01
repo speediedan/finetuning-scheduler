@@ -94,52 +94,94 @@ Configuration
     replacement, and ``cuda_allocator_history`` sets ``allocator_history`` unless ``allocator_history`` is set too, in
     which case ``allocator_history`` wins.
 
-.. _memprofiler-without-lightning:
+.. _memprofiler-interfaces:
 
-Profiling Without Lightning
-***************************
+Profiling Interfaces
+********************
 
 :class:`~finetuning_scheduler.profiling.memprofiler.MemProfiler` and its configuration live in
-:mod:`finetuning_scheduler.profiling`, which imports no Lightning module, so a plain PyTorch training loop can drive it.
-The module it profiles exposes its ``memprofiler_cfg`` and the ``memprofiler`` its profiled methods use; methods
-decorated with :meth:`~finetuning_scheduler.profiling.memprofiler.MemProfiler.memprofilable` are profiled on the
-configured schedule. The loop supplies what a trainer otherwise would, each as a value or as a callable read when it
-is needed: the optimizer whose state ``FSDP2MemTracker`` attributes, the directory under which the artifacts are
-written (a ``memprofiler`` directory, unless ``memprofiler_cfg.save_dir`` is set) and, optionally, the current training
-phase (see :ref:`memprofiler-fsdp2-reports`).
+:mod:`finetuning_scheduler.profiling`, which imports no Lightning module, so the same profiler and configuration serve a
+Lightning module and a plain PyTorch training loop. The module it profiles exposes its ``memprofiler_cfg`` and the
+``memprofiler`` its profiled methods use; methods decorated with
+:meth:`~finetuning_scheduler.profiling.memprofiler.MemProfiler.memprofilable` are profiled on the configured schedule.
+Connecting the profiler gives it what the loop supplies, each as a value or as a callable read when it is needed: the
+optimizer whose state ``FSDP2MemTracker`` attributes, the directory under which the artifacts are written (a
+``memprofiler`` directory, unless ``memprofiler_cfg.save_dir`` is set) and, optionally, the current training phase (see
+:ref:`memprofiler-fsdp2-reports`). With ``allocator_history`` enabled, connecting also starts recording the
+accelerator's allocator history, so either interface's snapshots hold the allocations made from then on.
 
-.. code-block:: python
+.. tab-set::
+    :sync-group: interface
 
-    import torch
-    from finetuning_scheduler.profiling import MemProfiler, MemProfilerCfg, MemProfilerFuncs
+    .. tab-item:: Lightning
+        :sync: lightning
+
+        ``fts_examples.profiling.ProfilerHooksMixin`` connects the profiler when the module is built, with callables
+        that read its trainer, reports the ``FinetuningScheduler`` callback's current depth as the phase, and collects
+        and dumps the artifacts in the module's own hooks.
+
+        .. code-block:: python
+
+            import lightning as L
+            import torch
+            from finetuning_scheduler import FinetuningScheduler
+            from finetuning_scheduler.profiling import MemProfiler, MemProfilerCfg, MemProfilerFuncs
+            from fts_examples.profiling import ProfilerHooksMixin
 
 
-    class Model(torch.nn.Module):
-        def __init__(self, memprofiler_cfg: MemProfilerCfg):
-            super().__init__()
-            self.layer = torch.nn.Linear(16, 16)
-            self.memprofiler_cfg = memprofiler_cfg
-            self.memprofiler = None
+            class Model(ProfilerHooksMixin, L.LightningModule):
+                def __init__(self, memprofiler_cfg: MemProfilerCfg):
+                    super().__init__(memprofiler_cfg=memprofiler_cfg)
+                    self.layer = torch.nn.Linear(16, 16)
 
-        @MemProfiler.memprofilable
-        def training_step(self, batch):
-            return self.layer(batch).sum()
+                @MemProfiler.memprofilable
+                def training_step(self, batch, batch_idx):
+                    return self.layer(batch).sum()
+
+                def configure_optimizers(self):
+                    return torch.optim.SGD(self.parameters(), lr=0.1)
 
 
-    model = Model(MemProfilerCfg(enabled=True, collect_funcs=MemProfilerFuncs(cpu={"training_step"})))
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-    model.memprofiler = MemProfiler()
-    model.memprofiler.connect(model, optimizer=optimizer, log_dir="./logs")
-    model.memprofiler.init_memprof_log_dir()
-    for batch in batches:
-        optimizer.zero_grad()
-        model.training_step(batch).backward()
-        optimizer.step()
-    model.memprofiler.dump_memory_stats()
+            model = Model(MemProfilerCfg(enabled=True, collect_funcs=MemProfilerFuncs(cpu={"training_step"})))
+            trainer = L.Trainer(callbacks=[FinetuningScheduler()], max_epochs=2, default_root_dir="./logs")
+            trainer.fit(model, train_dataloaders=batches)
 
-Host memory is tracked with ``psutil``, which is imported only when a profiler connects. The Lightning integration
-(``fts_examples.profiling.ProfilerHooksMixin``) connects the same profiler with callables that read its trainer, and
-reports the ``FinetuningScheduler`` callback's current depth as the phase.
+    .. tab-item:: PyTorch
+        :sync: pytorch
+
+        The loop connects the profiler itself, passing the optimizer and the log directory, and dumps the collected
+        statistics once training ends.
+
+        .. code-block:: python
+
+            import torch
+            from finetuning_scheduler.profiling import MemProfiler, MemProfilerCfg, MemProfilerFuncs
+
+
+            class Model(torch.nn.Module):
+                def __init__(self, memprofiler_cfg: MemProfilerCfg):
+                    super().__init__()
+                    self.layer = torch.nn.Linear(16, 16)
+                    self.memprofiler_cfg = memprofiler_cfg
+                    self.memprofiler = None
+
+                @MemProfiler.memprofilable
+                def training_step(self, batch):
+                    return self.layer(batch).sum()
+
+
+            model = Model(MemProfilerCfg(enabled=True, collect_funcs=MemProfilerFuncs(cpu={"training_step"})))
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+            model.memprofiler = MemProfiler()
+            model.memprofiler.connect(model, optimizer=optimizer, log_dir="./logs")
+            model.memprofiler.init_memprof_log_dir()
+            for batch in batches:
+                optimizer.zero_grad()
+                model.training_step(batch).backward()
+                optimizer.step()
+            model.memprofiler.dump_memory_stats()
+
+Host memory is tracked with ``psutil``, which is imported only when a profiler connects.
 
 .. _memprofiler-fsdp2-reports:
 

@@ -38,7 +38,8 @@ from finetuning_scheduler.core._io import get_filesystem
 from finetuning_scheduler.core.dist import global_rank, rank_zero_info, rank_zero_warn
 from finetuning_scheduler.core.exceptions import configuration_error_cls
 from finetuning_scheduler.profiling.accelerator import (accelerator_backend, accelerator_memory_stats,
-                                                        accelerator_type, allocator_history_module)
+                                                        accelerator_type, allocator_history_module,
+                                                        record_allocator_history)
 from finetuning_scheduler.profiling.config import MemProfilerCfg, resolve_funcs
 from finetuning_scheduler.profiling.fsdp_report import (aggregate_fsdp_mem_reports, fsdp_mem_entry,
                                                         fsdp_mem_report, fsdp_mem_report_filename)
@@ -118,6 +119,9 @@ class MemProfiler:
         ``FSDP2MemTracker`` attributes, the directory artifacts go in when ``memprofiler_cfg.save_dir`` is unset, and
         the current training phase.
 
+        With ``memprofiler_cfg.allocator_history``, connecting also starts recording allocator history, so a snapshot
+        holds the allocations made from here on whichever loop drives the module.
+
         Args:
             obj_ref: The module to be profiled. It exposes its ``memprofiler_cfg``.
             optimizer: The optimizer (or a callable returning it) for ``FSDP2MemTracker``.
@@ -135,6 +139,8 @@ class MemProfiler:
             self.saved_tensors_funcs = resolve_funcs(cfg_obj=self.memprofiler_cfg, func_type='saved_tensors_funcs')
         self._state.base_collect_func_set = self._all_base_collect_funcs()
         self.memprofiler_cfg.retain_hooks_for_funcs = self._state.base_collect_func_set  # conservatively wait for all
+        if self.memprofiler_cfg.allocator_history:
+            record_allocator_history()
 
     def _all_base_collect_funcs(self) -> set:
         funcs = self.memprofiler_cfg.collect_funcs

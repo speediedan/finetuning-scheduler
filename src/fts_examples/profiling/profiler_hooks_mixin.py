@@ -2,7 +2,6 @@ from lightning.fabric.utilities import rank_zero_warn
 
 from finetuning_scheduler import FinetuningScheduler
 from finetuning_scheduler.profiling import MemProfiler, MemProfilerCfg
-from finetuning_scheduler.profiling.accelerator import record_allocator_history
 
 
 class ProfilerHooksMixin:
@@ -21,8 +20,6 @@ class ProfilerHooksMixin:
                 log_dir=lambda: self._trainer.log_dir or self._trainer.default_root_dir,
                 phase=self._fts_phase,
             )
-            if self.allocator_history:
-                record_allocator_history()
 
     def setup(self, stage):
         super().setup(stage)

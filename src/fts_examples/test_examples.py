@@ -25,6 +25,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 
 from fts_examples import _HF_AVAILABLE
 
+from tests.helpers.allocator import recorded_allocations
 from tests.helpers.common import unexpected_warns
 from tests.helpers.runif import RunIf
 from tests.helpers.expected_warns import (EXAMPLE_EXPECTED_WARNS, MODEL_PARALLEL_EXAMPLE_WARNS,
@@ -175,7 +176,10 @@ def _check_memprofiler_artifacts(root: Path) -> None:
         for snap_key, snap_stats in stats.items():
             assert not (missing := expected - set(snap_stats)), (snap_key, missing)
         memprof_dir = stats_files[0].parent
-        assert len(list(memprof_dir.glob(f"cuda_alloc_rank_{rank}.training_step.2.*.pickle"))) == 2
+        snapshots = sorted(memprof_dir.glob(f"cuda_alloc_rank_{rank}.training_step.2.*.pickle"))
+        assert len(snapshots) == 2
+        for snapshot in snapshots:  # a snapshot dumped while nothing records allocator history has no trace to view
+            assert recorded_allocations(snapshot) > 0, f"{snapshot} recorded no allocator history"
         assert (memprof_dir / f"fsdp_mem_rank_{rank}_training_step_2.log").exists()
         with open(memprof_dir / f"rank_{rank}_fsdp_memory_report.json") as f:
             report = json.load(f)
