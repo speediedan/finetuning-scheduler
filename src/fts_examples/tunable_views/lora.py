@@ -16,9 +16,9 @@ LoRA for the Tunable Views Examples
 A minimal LoRA wrapper for the tunable views examples (the notebooks in ``notebooks/dev/tunable_views/`` and
 :mod:`~fts_examples.tunable_views.two_families`). It wraps ``nn.Linear`` and the transposed ``Conv1D`` projections
 GPT-2 uses, by attribute name or by module path. Its tensors are named ``lora_A`` and ``lora_B``, as PEFT names
-them, so venngram's :class:`~venngram.maps.MappedView` gives them the ``adapter`` role through its
-:data:`~venngram.maps.PEFT_LORA_RULES`, and places every tensor (adapter or not) at its layer and architecture-neutral
-component from the model's component map.
+them, so venngram's :class:`~venngram.maps.MappedView` detects the ``peft.lora`` role rules (a data document in
+venngram's registries) and gives them the ``adapter`` role, and places every tensor (adapter or not) at its layer and
+architecture-neutral component from the model's component map.
 
 .. warning:: This is an experimental API and may change in a future release.
 """

@@ -1,0 +1,14 @@
+# PEFT's LoRA tensors (lora_A, lora_B, the embedding variants, and DoRA's magnitude vector) as adapters. The seed
+# registry publishes this document; a test registry indexes this copy.
+kind: role_rules
+schema_version: 1
+name: peft.lora
+applies_when:
+  module_classes: [peft.tuners.lora.layer.LoraLayer]
+  module_names: [lora_A, lora_B, lora_embedding_A, lora_embedding_B, lora_magnitude_vector]
+rules:
+  lora_A: adapter
+  lora_B: adapter
+  lora_embedding_A: adapter
+  lora_embedding_B: adapter
+  lora_magnitude_vector: adapter

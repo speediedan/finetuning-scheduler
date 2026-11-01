@@ -59,9 +59,11 @@ and the Lightning callback (attach the view to the ``LightningModule``). A model
 
 Giving a Model a View
 *********************
-For an architecture with a component map, venngram's :class:`~venngram.maps.view.MappedView` is the view: it keeps the model's own parameter names (so names and
-regexes still work through it), gives tensors roles from *role rules* (an adapter library's naming conventions), and
-places every tensor at its layer and component from the architecture's map. This is the view the
+For an architecture with a component map, venngram's :class:`~venngram.maps.view.MappedView` is the view: it keeps the
+model's own parameter names (so names and regexes still work through it), gives tensors roles from *role rules* (data
+documents naming an adapter library's tensors), and places every tensor at its layer and component from the
+architecture's map. ``MappedView(model)`` finds both: the map from the model's class (:ref:`tunable-views-finding-maps`)
+and the role rules from the adapters the model carries (:ref:`tunable-views-finding-role-rules`). This is the view the
 :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` checks with the conformance suite and trains, on Qwen3-0.6B with LoRA on all
 seven projections:
 
@@ -69,7 +71,7 @@ seven projections:
 
     import torch
     from transformers import AutoModelForCausalLM
-    from venngram.maps import MappedView, PEFT_LORA_RULES
+    from venngram.maps import MappedView
 
     from finetuning_scheduler import TuningScheduler
     from fts_examples.tunable_views.lora import add_lora
@@ -77,7 +79,7 @@ seven projections:
     model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B")
     add_lora(model, ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"), r=16)
     model.requires_grad_(False)
-    view = MappedView(model, role_rules=PEFT_LORA_RULES)
+    view = MappedView(model)  # the Qwen3 map, and the `peft.lora` role rules its LoRA tensors match
 
     # the MLP adapters first, then the attention adapters as well
     schedule = {
@@ -160,6 +162,48 @@ the components partition the parameters, their widths against the model's config
 pass) and then registered. The ``tunable-view-generator`` agent skill (in the repository's
 ``.agents/skills/``) drafts a map from the model's module tree and runs that verification, without downloading
 weights.
+
+.. _tunable-views-finding-role-rules:
+
+How Role Rules Are Found
+========================
+.. warning::
+   Role rules are experimental, nascent and still evolving, like maps.
+
+A component map describes an architecture; *role rules* describe an adapter library: which tensors it adds to a model
+and the role each takes. They are a data document of their own (``kind: role_rules``), so one rule set serves every
+architecture, and neither venngram nor Fine-Tuning Scheduler names an adapter library in code. The seed registry's
+``peft.lora`` rule set, for example:
+
+.. code-block:: yaml
+
+    kind: role_rules
+    schema_version: 1
+    name: peft.lora
+    applies_when:            # any condition holding means the rules apply
+      module_classes: [peft.tuners.lora.layer.LoraLayer]
+      module_names: [lora_A, lora_B, lora_embedding_A, lora_embedding_B, lora_magnitude_vector]
+    rules:                   # module pattern -> role; the first matching rule wins
+      lora_A: adapter
+      lora_B: adapter
+      lora_embedding_A: adapter
+      lora_embedding_B: adapter
+      lora_magnitude_vector: adapter
+
+Rule sets come from the same two sources as maps, in the same order: those registered in the running process with
+:func:`~venngram.maps.role_rules.register_role_rules` (read from a document with
+:func:`~venngram.maps.role_rules.load_role_rules`), then the configured registries, where a rule set is indexed by its
+``name``. ``MappedView(model)`` applies every known rule set whose ``applies_when`` holds for the model: a module of a
+listed class (or a subclass), or a tensor whose name has a listed segment. The examples' small LoRA wrapper
+(``fts_examples.tunable_views.lora``) names its tensors ``lora_A`` and ``lora_B`` as PEFT does, so ``peft.lora``
+applies to it as it does to PEFT's own layers. Two detected rule sets that give one tensor different roles are refused
+by name.
+
+To choose instead, pass ``role_rules``: a rule set's name (``MappedView(model, role_rules="peft.lora")``), a
+:class:`~venngram.maps.role_rules.RoleRules`, or a mapping of module patterns to roles for rules that are not published
+(``role_rules={}`` gives no roles from rules). ``roles=`` still sets individual tensors' roles over whatever the rules
+give. :func:`~venngram.maps.role_rules.known_role_rules` lists every rule set in the process or the registries. An
+adapter library venngram does not yet cover needs a rule set published and indexed, not a new venngram release.
 
 Writing a View
 **************

@@ -10,7 +10,7 @@ A tunable view (protocol in `venngram.tuning`) tells finetuning-scheduler what a
 `mlp.out`, `ln2`, ...). Schedules can then use addresses such as `role:adapter & layers:-4:` or
 `component:mlp.* & layers:-1:`, which mean the same tensors on every architecture the view describes.
 
-For an architecture with a component map, venngram's `MappedView(model, role_rules=...)` is the view. So the work is
+For an architecture with a component map, venngram's `MappedView(model)` is the view. So the work is
 almost always: find the map, verify it, and only if there is none, draft one and verify that. A map is data (a short
 YAML document), so it is safe to share.
 
@@ -95,13 +95,17 @@ by this skill, completed by hand where the draft could not place a module (those
      a lookup serves with `python -m venngram.registry lookup <Architecture>`; `VENNGRAM_REGISTRIES` names the
      registries consulted, in order (by default venngram's seed registry).
 
-4. **Build the view.** `role_rules` names the adapter library's tensors (`PEFT_LORA_RULES` covers PEFT's LoRA names):
+4. **Build the view.** Roles come from *role rules*, data documents naming an adapter library's tensors, found like
+   maps (registered in process, then the registries) and detected from the adapters the model carries: the seed
+   registry's `peft.lora` covers PEFT's LoRA names, so a LoRA model needs nothing more. For an adapter library no
+   registry covers, register a rule set (or pass `role_rules=` a mapping); never hard-code a library in the view.
 
    ```python
-   from venngram.maps import MappedView, PEFT_LORA_RULES, load_component_map, register
+   from venngram.maps import MappedView, load_component_map, load_role_rules, register, register_role_rules
 
-   register(load_component_map("my_map.yaml"))  # only for a map venngram does not already know
-   view = MappedView(model, role_rules=PEFT_LORA_RULES)
+   register(load_component_map("my_map.yaml"))          # only for a map venngram does not already know
+   register_role_rules(load_role_rules("my_rules.yaml"))  # only for an adapter library no registry covers
+   view = MappedView(model)                             # or role_rules="peft.lora" to name the rule set
    ```
 
    Prefer one role plus addresses over many named sub-roles: a subset of a role is an address

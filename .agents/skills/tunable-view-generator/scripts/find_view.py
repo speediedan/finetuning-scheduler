@@ -3,7 +3,7 @@
 what to do next.
 
 With a known map (registered in the process, else the best one venngram's registries index: ``VENNGRAM_REGISTRIES``,
-by default its seed registry), the whole view is ``MappedView(model, role_rules=...)`` and this prints that. With ``--map`` it verifies a map document instead, such as one ``draft_map.py`` wrote. Verification is
+by default its seed registry), the whole view is ``MappedView(model)`` and this prints that. With ``--map`` it verifies a map document instead, such as one ``draft_map.py`` wrote. Verification is
 venngram's (``venngram.maps.verify``): every row's module exists, every parameter has exactly one component, widths
 match the configuration, and components run in the expected order. It needs no weights: the model is built on the meta
 device from a configuration (``--hf-arch`` uses an architecture's default configuration; ``--hf`` fetches only a
@@ -74,7 +74,7 @@ def main() -> int:
         print("\nverification failed: fix the rows named above and re-run.")
         return 1
     where = f"load_component_map({args.map!r}) registered with venngram.maps.register" if args.map else "found by venngram.maps.component_map_for"
-    print(f"\nverified ({report.status}). The view is MappedView(model, role_rules=...); its map is {where}.")
+    print(f"\nverified ({report.status}). The view is MappedView(model); its map is {where}.")
     return 0
 
 
