@@ -18,7 +18,7 @@ cannot move it.
 import os
 
 #: venngram's seed registry of verified component maps and role rules, pinned to a revision (#176).
-SEED_REGISTRY = "hub-dataset:speediedan/venngram-registry/index@810b0eb4d23a83e7356c099f5c93c3dab7739916"
+SEED_REGISTRY = "hub-dataset:speediedan/venngram-registry/index@5f94a99d6815b78e0bd1aaad7ac03bc22e377d88"
 
 
 def use_seed_registry() -> list[str]:

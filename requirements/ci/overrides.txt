@@ -10,7 +10,7 @@
 #   uv pip install -e ".[all]" --override requirements/ci/overrides.txt --torch-backend=auto
 
 # venngram commit pin - until venngram 0.1.0 is on PyPI (the tunable view protocol and address grammar, #140/#153)
-venngram @ git+https://github.com/speediedan/venngram.git@a886e05a34b8857a62e8873fe06121fa7a755ba1
+venngram @ git+https://github.com/speediedan/venngram.git@b9dcab53449e1b2179c5bad37d0fad8ed4e058ba
 
 # Lightning commit pin - update this when testing against new Lightning commits
 lightning @ git+https://github.com/Lightning-AI/lightning.git@84df182f50ab34301aabb3c0eb4031815bfb413d
