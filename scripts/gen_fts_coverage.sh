@@ -1,6 +1,11 @@
 #!/bin/bash
 #
 # Utility script to generate local FTS coverage for a given environment
+#
+# Two halves. This script builds or activates the environment (build_fts_env.sh, version logging) and takes the GPU
+# lease, and stays shell because that runs before a usable Python environment exists. It then hands the test phases to
+# gpu-epsilon's phase driver (python -m gpu_epsilon.phases), which reads them from [tool.gpu-epsilon.phases] in
+# pyproject.toml and computes one final status, so no phase's outcome is inferred in shell.
 set -eo pipefail
 
 unset repo_home
