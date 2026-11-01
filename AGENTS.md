@@ -88,7 +88,9 @@ autouse fixture in `tests/conftest.py` rather than working around the failure.
 Full local coverage (~30 min) is orchestrated by `scripts/gen_fts_coverage.sh`; wrap long multi-GPU runs
 in `scripts/manage_standalone_processes.sh --use-nohup` (VS Code kills plain nohup jobs). The script builds or activates
 the environment, then runs its test phases through gpu-epsilon's phase driver (`python -m gpu_epsilon.phases`), which
-reads them from `[tool.gpu-epsilon.phases]` in `pyproject.toml`. `--dry-run` prints the phase plan, a failed phase fails
+reads them from `[tool.gpu-epsilon.phases]` in `pyproject.toml`. The environment half stays shell because it runs before
+a usable Python environment exists; the phases moved because inferring each one's outcome in shell was where the bugs
+were. `--dry-run` prints the phase plan, a failed phase fails
 the run (the report is still written), and the driver's JSON record of the run lands beside the session log.
 
 ## Serializing GPU work on a shared host
@@ -134,9 +136,9 @@ instead.
 1. `pyright -p pyproject.toml` — the type checker (mypy was removed). Covers `src/finetuning_scheduler` only.
 1. A `CHANGELOG.md` entry under the unreleased section for anything non-trivial.
 1. `python -m gpu_epsilon.special_tests --lease` for changes touching FSDP, model-parallel, or strategy adapters. A
-   pull request that changes how a strategy is driven (how an adapter wraps, shards, checkpoints or reconfigures the module, or how the
-   callback drives a distributed strategy) also gets the `full-gpu-suite` label before its GPU gate is approved, so the
-   gate runs every standalone test rather than the smoke set (see CI below).
+   pull request that changes how a strategy is driven (how an adapter wraps, shards, checkpoints or reconfigures the
+   module, or how the callback drives a distributed strategy) also gets the `full-gpu-suite` label before its GPU gate
+   is approved, so the gate runs every standalone test rather than the smoke set (see CI below).
 1. `python scripts/verify_version_consistency.py` for any change touching a torch/CUDA/Lightning/Python
    version declaration — those live in six or seven files that must agree (Dockerfiles, both
    `dockers/docker_images_*.sh`, the Azure image tag, the `release-docker.yml` matrix). It exits
