@@ -25,6 +25,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 
 from fts_examples import _HF_AVAILABLE
 
+from tests.helpers.allocator import recorded_allocations
 from tests.helpers.common import unexpected_warns
 from tests.helpers.runif import RunIf
 from tests.helpers.expected_warns import (EXAMPLE_EXPECTED_WARNS, MODEL_PARALLEL_EXAMPLE_WARNS,
@@ -163,7 +164,7 @@ def _check_memprofiler_artifacts(root: Path) -> None:
     """Each rank of the profiling example records the required and the backend's measured accelerator statistics in
     every snapshot and writes its allocator history and ``FSDP2MemTracker`` reports (CUDA and ROCm both have device
     type ``cuda``, so the snapshot names match)."""
-    from fts_examples.profiling.accelerator import accelerator_backend
+    from finetuning_scheduler.profiling.accelerator import accelerator_backend
 
     expected = _MEMPROF_REQUIRED_KEYS | _MEMPROF_BACKEND_KEYS[accelerator_backend()]
     for rank in (0, 1):
@@ -175,8 +176,18 @@ def _check_memprofiler_artifacts(root: Path) -> None:
         for snap_key, snap_stats in stats.items():
             assert not (missing := expected - set(snap_stats)), (snap_key, missing)
         memprof_dir = stats_files[0].parent
-        assert len(list(memprof_dir.glob(f"cuda_alloc_rank_{rank}.training_step.2.*.pickle"))) == 2
+        snapshots = sorted(memprof_dir.glob(f"cuda_alloc_rank_{rank}.training_step.2.*.pickle"))
+        assert len(snapshots) == 2
+        for snapshot in snapshots:  # a snapshot dumped while nothing records allocator history has no trace to view
+            assert recorded_allocations(snapshot) > 0, f"{snapshot} recorded no allocator history"
         assert (memprof_dir / f"fsdp_mem_rank_{rank}_training_step_2.log").exists()
+        with open(memprof_dir / f"rank_{rank}_fsdp_memory_report.json") as f:
+            report = json.load(f)
+        assert (report["rank"], report["world_size"], report["backend"]) == (rank, 2, accelerator_backend())
+        assert report["collectors"]["fsdp_mem_tracker"] and report["collectors"]["accelerator_memory_stats"]
+        (entry,) = report["entries"]
+        assert (entry["fn_name"], entry["iter"], entry["phase"]) == ("training_step", 2, 0)
+        assert entry["peak"] and entry["modules"]
 
 
 @RunIf(min_cuda_gpus=2, standalone=True)

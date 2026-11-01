@@ -20,7 +20,7 @@ from types import ModuleType
 from typing import Any
 
 import torch
-from lightning.fabric.utilities import rank_zero_warn
+from finetuning_scheduler.core.dist import rank_zero_warn
 
 
 def accelerator_type() -> str | None:

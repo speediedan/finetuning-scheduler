@@ -1,10 +1,7 @@
-import importlib
 import yaml
-from typing import Any
 from dataclasses import dataclass, field, asdict, fields
 
 from transformers import PretrainedConfig
-from lightning.pytorch.utilities.exceptions import MisconfigurationException
 
 
 @dataclass
@@ -62,27 +59,3 @@ def _is_overridden(dataclass_instance) -> bool:
             is_overridden = True
             break
     return is_overridden
-
-def resolve_funcs(cfg_obj: Any, func_type: str) -> list:
-    resolved_funcs = []
-    funcs_to_resolve = getattr(cfg_obj, func_type)
-    if not isinstance(funcs_to_resolve, list):
-        funcs_to_resolve = [funcs_to_resolve]
-    for func_or_qualname in funcs_to_resolve:
-        if callable(func_or_qualname):
-            resolved_funcs.append(func_or_qualname)  # TODO: inspect if signature is appropriate for custom hooks
-        elif func_or_qualname == 'identity_lambda':  # special case often used e.g. w/ saved_tensors_hooks
-            resolved_funcs.append(lambda x: x)
-        else:
-            try:
-                module, func = func_or_qualname.rsplit(".", 1)
-                mod = importlib.import_module(module)
-                resolved_func = getattr(mod, func, None)
-                if callable(resolved_func):
-                    resolved_funcs.append(resolved_func)
-                else:
-                    raise MisconfigurationException(f"Custom function {func} from module {module} is not callable!")
-            except (AttributeError, ImportError) as e:
-                err_msg = f"Unable to import and resolve specified function {func} from module {module}: {e}"
-                raise MisconfigurationException(err_msg)
-    return resolved_funcs

@@ -41,7 +41,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-2022, macOS-14]
+        os: [ubuntu-22.04, windows-2022, macos-15]
         python-version: ["3.11", "3.13"]  # minimum, maximum
         # tests will include oldest and newest tested patch versions of pytorch
         requires: ["oldest", "latest"]
@@ -49,7 +49,7 @@ jobs:
         exclude:  # note that occasionally, the oldest PyTorch version does not support the latest python version
           - {os: ubuntu-22.04, python-version: "3.13", requires: "oldest"}
           - {os: windows-2022, python-version: "3.13", requires: "oldest"}
-          - {os: macOS-14, python-version: "3.13", requires: "oldest"}
+          - {os: macos-15, python-version: "3.13", requires: "oldest"}
         # include:
         #   # adding when using a release candidate
         #   # - {os: ubuntu-22.04, python-version: "3.13", requires: "latest", release: "pre"}
@@ -58,7 +58,7 @@ jobs:
     env:
       # TODO: Remove this and enable running MPS tests the macos runners support it:
       # https://github.com/actions/runner-images/issues/9918#issuecomment-2149336099
-      DISABLE_MPS: ${{ (matrix.os == 'macOS-14' && '1') || '0' }}
+      DISABLE_MPS: ${{ (matrix.os == 'macos-15' && '1') || '0' }}
     steps:
     - uses: actions/checkout@v4
 
