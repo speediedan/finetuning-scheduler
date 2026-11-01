@@ -1,6 +1,6 @@
 ---
 name: tunable-view-generator
-description: Find, verify or create the tunable view a finetuning-scheduler schedule needs to address a model by role, layer and component (venngram addresses) rather than by parameter names and regexes. For most models the view is venngram's MappedView over a verified component map, so this looks up the architecture's map, verifies it deterministically, and drafts and verifies one when none exists. Use when an experiment needs a schedule over adapters, latent models or architecture-neutral components, when one schedule must run on several model families, or when asked to "make a view", "generate a TunableView" or "map a model". Do NOT use when a schedule of names or regexes already says what is meant.
+description: Find, verify or create the tunable view a finetuning-scheduler schedule needs to address a model by role, layer and component (venngram addresses) rather than by parameter names and regexes. For most models the view is venngram.view(model) over a verified map, so this looks up the architecture's map, verifies it deterministically, and drafts and verifies one when none exists. Use when an experiment needs a schedule over adapters, latent models or architecture-neutral components, when one schedule must run on several model families, or when asked to "make a view", "generate a TunableView" or "map a model". Do NOT use when a schedule of names or regexes already says what is meant.
 ---
 
 # Finding or generating a tunable view
@@ -10,12 +10,12 @@ A tunable view (protocol in `venngram.tuning`) tells finetuning-scheduler what a
 `mlp.out`, `ln2`, ...). Schedules can then use addresses such as `role:adapter & layers:-4:` or
 `component:mlp.* & layers:-1:`, which mean the same tensors on every architecture the view describes.
 
-For an architecture with a component map, venngram's `MappedView(model)` is the view. So the work is
+For an architecture venngram has a map for, `venngram.view(model)` is the view. So the work is
 almost always: find the map, verify it, and only if there is none, draft one and verify that. A map is data (a short
 YAML document), so it is safe to share.
 
 References: the LoRA placement notebook `src/fts_examples/notebooks/dev/tunable_views/lora_placement.ipynb` (under
-Examples in the docs) runs `MappedView` on Qwen3-0.6B with LoRA. `references/synthetic_decoder.py` is a small decoder
+Examples in the docs) runs `venngram.view` on Qwen3-0.6B with LoRA. `references/synthetic_decoder.py` is a small decoder
 with deliberately unusual module names, so no map covers it, and `references/synthetic_map.yaml` is its map: drafted
 by this skill, completed by hand where the draft could not place a module (those rows are marked), and verified.
 
@@ -25,7 +25,7 @@ by this skill, completed by hand where the draft could not place a module (those
   one model, a hand-written schedule, thawing layers top-down. Names and regexes stay supported and never warn.
 - **`CanonicalView(model, roles={name: role})`** when only roles or layers are wanted: it keeps the model's names and
   finds layers from its one top-level block list.
-- **`MappedView`** (this skill) for components, or to run one schedule over several model families.
+- **`venngram.view(model)`** (this skill) for components, or to run one schedule over several model families.
 - **A view of your own** for a vocabulary that differs from the model's own names (a wrapper's names, say); see
   "Writing a View" in `docs/source/pytorch/tunable_views.rst`.
 
@@ -78,7 +78,7 @@ by this skill, completed by hand where the draft could not place a module (those
      `gpt2.yaml` does, for a null `n_inner`).
 
 3. **Register the verified map, and share it.** A map is data, so a verified one is worth keeping and sharing:
-   - **In this process:** `register(load_component_map("my_map.yaml"))`, then `MappedView(model)` finds it (registered
+   - **In this process:** `register(load_map("my_map.yaml"))`, then `venngram.view(model)` finds it (registered
      maps take precedence over venngram's own).
    - **Keep the evidence:** `find_view.py ... --record my_arch.json` writes the verification record (see "Recording a
      trial" below). A shared map should travel with its record.
@@ -95,17 +95,19 @@ by this skill, completed by hand where the draft could not place a module (those
      a lookup serves with `python -m venngram.registry lookup <Architecture>`; `VENNGRAM_REGISTRIES` names the
      registries consulted, in order (by default venngram's seed registry).
 
-4. **Build the view.** Roles come from *role rules*, data documents naming an adapter library's tensors, found like
-   maps (registered in process, then the registries) and detected from the adapters the model carries: the seed
-   registry's `peft.lora` covers PEFT's LoRA names, so a LoRA model needs nothing more. For an adapter library no
-   registry covers, register a rule set (or pass `role_rules=` a mapping); never hard-code a library in the view.
+4. **Build the view.** `venngram.view(model)` composes it from the architecture's base map and the *overlay map* of
+   each library whose modules the model carries (an overlay gives that library's tensors their roles): the seed
+   registry's `peft.lora` covers PEFT's LoRA names, so a LoRA model needs nothing more. For a library no registry
+   covers, write and register an overlay map (venngram's README, "Maps: base and overlay"); never hard-code a library
+   in the view.
 
    ```python
-   from venngram.maps import MappedView, load_component_map, load_role_rules, register, register_role_rules
+   import venngram
+   from venngram.maps import load_map, register
 
-   register(load_component_map("my_map.yaml"))          # only for a map venngram does not already know
-   register_role_rules(load_role_rules("my_rules.yaml"))  # only for an adapter library no registry covers
-   view = MappedView(model)                             # or role_rules="peft.lora" to name the rule set
+   register(load_map("my_map.yaml"))      # only for an architecture venngram does not already know
+   register(load_map("my_overlay.yaml"))  # only for an adapter library no registry covers
+   view = venngram.view(model)
    ```
 
    Prefer one role plus addresses over many named sub-roles: a subset of a role is an address

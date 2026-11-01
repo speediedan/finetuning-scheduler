@@ -14,9 +14,9 @@ the tunable views notebook ``notebooks/dev/tunable_views/lora_placement.ipynb``.
 
 1. Build a small, randomly initialized decoder (Llama- or OPT-style, from a ``transformers`` config, so nothing is
    downloaded) and add LoRA adapters to its attention projections.
-2. Give it venngram's :class:`~venngram.maps.MappedView`: roles for the adapters (from the ``peft.lora`` role rules,
-   detected from the adapters' names) and architecture-neutral components (from the architecture's component map),
-   both found in venngram's seed registry at a pinned revision, :data:`~fts_examples.tunable_views.SEED_REGISTRY`.
+2. Give it a view with :func:`venngram.view`: roles for the adapters and architecture-neutral components for every
+   tensor, from the maps venngram finds for the model (in its seed registry at a pinned revision,
+   :data:`~fts_examples.tunable_views.SEED_REGISTRY`).
 3. Check the view with :class:`~finetuning_scheduler.testing.conformance.TunableViewConformance`.
 4. Compile and run ``config/decoder_address_schedule.yaml`` with
    :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler`: the same schedule file for both families.
@@ -40,6 +40,7 @@ from finetuning_scheduler import TuningScheduler
 from finetuning_scheduler.core.compile import compile_schedule
 from finetuning_scheduler.core.schedule import load_address_sets, load_yaml_schedule, split_addresses
 from finetuning_scheduler.testing import TunableViewConformance
+import venngram
 from venngram.maps import MappedView
 
 from fts_examples.tunable_views import use_seed_registry
@@ -77,8 +78,8 @@ def run(family: str = "llama", max_epochs: int = 3, steps_per_epoch: int = 2) ->
     """Run the example for ``family`` and return its summary."""
     use_seed_registry()
     model = build_model(family)
-    view = MappedView(model)
-    report = TunableViewConformance(lambda: MappedView(build_model(family))).run()
+    view = venngram.view(model)
+    report = TunableViewConformance(lambda: venngram.view(build_model(family))).run()
     summary: dict[str, Any] = {"family": family, "conformance_ok": report.ok, "conformance_failures": report.failures}
     address_phases = phases(CONFIG_DIR / "decoder_address_schedule.yaml", view)
     if family == "llama":

@@ -59,19 +59,16 @@ and the Lightning callback (attach the view to the ``LightningModule``). A model
 
 Giving a Model a View
 *********************
-For an architecture with a component map, venngram's :class:`~venngram.maps.view.MappedView` is the view: it keeps the
-model's own parameter names (so names and regexes still work through it), gives tensors roles from *role rules* (data
-documents naming an adapter library's tensors), and places every tensor at its layer and component from the
-architecture's map. ``MappedView(model)`` finds both: the map from the model's class (:ref:`tunable-views-finding-maps`)
-and the role rules from the adapters the model carries (:ref:`tunable-views-finding-role-rules`). This is the view the
-:doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` checks with the conformance suite and trains, on Qwen3-0.6B with LoRA on all
-seven projections:
+One call gives a model its view: :func:`venngram.view`. The view keeps the model's own parameter names (so names and
+regexes still work through it), gives every tensor a role, and places it at its layer and architecture-neutral
+component. This is the view the :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` checks
+with the conformance suite and trains, on Qwen3-0.6B with LoRA on all seven projections:
 
 .. code-block:: python
 
     import torch
+    import venngram
     from transformers import AutoModelForCausalLM
-    from venngram.maps import MappedView
 
     from finetuning_scheduler import TuningScheduler
     from fts_examples.tunable_views.lora import add_lora
@@ -79,14 +76,15 @@ seven projections:
     model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B")
     add_lora(model, ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"), r=16)
     model.requires_grad_(False)
-    view = MappedView(model)  # the Qwen3 map, and the `peft.lora` role rules its LoRA tensors match
 
     # the MLP adapters first, then the attention adapters as well
     schedule = {
         0: {"params": ["role:adapter & component:mlp.*"], "max_transition_epoch": 1},
         1: {"params": ["role:adapter & component:attn.*"]},
     }
-    fts = TuningScheduler(model, schedule, optimizer=lambda groups: torch.optim.AdamW(groups, lr=2e-4), view=view)
+    fts = TuningScheduler(
+        model, schedule, optimizer=lambda groups: torch.optim.AdamW(groups, lr=2e-4), view=venngram.view(model)
+    )
 
 Through this view, a LoRA tensor takes the component of the projection it adapts, and everything else is ``base``:
 
@@ -114,96 +112,30 @@ Through this view, a LoRA tensor takes the component of the projection it adapts
      - (none)
      - ``embed``
 
-The component vocabulary (``embed``, ``ln1``, ``attn.q``, ``attn.k``, ``attn.v``, ``attn.o``, ``ln2``, ``mlp.gate``,
-``mlp.in``, ``mlp.out``, ``ln_final``, ``unembed``) is the one TransformerLens and interpretune use. When only roles
-are wanted, :class:`~finetuning_scheduler.core.views.CanonicalView` with ``roles=`` gives a plain model roles (and
-layers, from its block list) while keeping its own names.
+The same schedule runs unchanged on a Llama, OPT or Gemma model, with PEFT's LoRA or the examples' own: the component
+vocabulary (``embed``, ``ln1``, ``attn.q``, ``attn.k``, ``attn.v``, ``attn.o``, ``ln2``, ``mlp.gate``, ``mlp.in``,
+``mlp.out``, ``ln_final``, ``unembed``) is the one TransformerLens and interpretune use. When only roles are wanted,
+:class:`~finetuning_scheduler.core.views.CanonicalView` with ``roles=`` gives a plain model roles (and layers, from its
+block list) while keeping its own names.
 
 .. _tunable-views-finding-maps:
 
-How a Map Is Found
-==================
+Where a View Comes From
+=======================
 .. warning::
-   How maps are found is experimental, nascent and still evolving: expect the sources below to grow, and their order
-   and interface to change.
+   venngram's maps and how they are found are experimental and still evolving.
 
-``MappedView(model)`` asks venngram for the map of the model's architecture
-(:func:`~venngram.maps.structure.map_for`), trying the model's class name, then the architectures its configuration
-names (``config.architectures``). Maps come from two sources, in order:
+``venngram.view(model)`` composes the view from published data: the *map* of the model's architecture and the map of
+each adapter library whose modules the model carries (PEFT's LoRA, a spliced SAE or transcoder, a steering module).
+Neither needs code, so an architecture or an adapter library is covered once its maps are published. venngram's README
+describes the maps, where they are looked up, offline use, and writing one
+(`Maps: base and overlay <https://github.com/speediedan/venngram#maps-base-and-overlay>`_). For an architecture venngram
+has no map for, the ``tunable-view-generator`` agent skill (in the repository's ``.agents/skills/``) drafts one from
+the model's module tree and verifies it, without downloading weights.
 
-1. **maps registered in the running process** with :func:`~venngram.maps.schema.register` (a
-   :class:`~venngram.maps.schema.ComponentMap`, read from a YAML document with
-   :func:`~venngram.maps.schema.load_component_map`), which take precedence;
-2. **registries** of verified maps. A registry is an index whose rows point at maps (and their verification records) by
-   content-checked reference, wherever they are stored: a Hugging Face Hub model or dataset repository, a Hub storage
-   bucket, or a local directory. Consumers configure the registries they trust, in order (``VENNGRAM_REGISTRIES``,
-   space- or comma-separated; by default venngram's seed registry on the Hub), and the first registry with a usable row
-   wins. Within it, verified maps rank first, then partially verified ones; a map whose verification failed is never
-   served.
-
-Each registry's revision is remembered in venngram's cache. When the Hub cannot be reached (or ``HF_HUB_OFFLINE`` is
-set), the last revision fetched is served from the cache, with a warning naming it; a registry never fetched before
-fails by name. A location may pin a revision (``hub-dataset:<owner>/<repo>/index@<commit>``), as Fine-Tuning
-Scheduler's examples do (``fts_examples.tunable_views.SEED_REGISTRY``), so a rendered example cannot be moved by a
-later registry generation. :func:`~venngram.maps.schema.known_architectures` lists every architecture with a map in
-the process or the configured registries, and ``python -m venngram.registry lookup <Architecture>`` shows which map a
-lookup serves.
-
-Fine-Tuning Scheduler's own tests never reach the Hub: they index fixture copies of the seed maps in a local registry
-and point ``VENNGRAM_REGISTRIES`` at it.
-
-Code that builds its view with ``MappedView(model)``, or that names the architecture with
-``MappedView(model, architecture=...)``, picks up new sources without changing. To use a particular map instead, pass
-it: ``MappedView(model, cmap)``.
-
-An architecture venngram has no map for needs one written: a short data document naming each component's module for
-each block, verified against the architecture with :func:`~venngram.maps.verification.verify` (which checks every row exists, that
-the components partition the parameters, their widths against the model's configuration, and their order in a forward
-pass) and then registered. The ``tunable-view-generator`` agent skill (in the repository's
-``.agents/skills/``) drafts a map from the model's module tree and runs that verification, without downloading
-weights.
-
-.. _tunable-views-finding-role-rules:
-
-How Role Rules Are Found
-========================
-.. warning::
-   Role rules are experimental, nascent and still evolving, like maps.
-
-A component map describes an architecture; *role rules* describe an adapter library: which tensors it adds to a model
-and the role each takes. They are a data document of their own (``kind: role_rules``), so one rule set serves every
-architecture, and neither venngram nor Fine-Tuning Scheduler names an adapter library in code. The seed registry's
-``peft.lora`` rule set, for example:
-
-.. code-block:: yaml
-
-    kind: role_rules
-    schema_version: 1
-    name: peft.lora
-    applies_when:            # any condition holding means the rules apply
-      module_classes: [peft.tuners.lora.layer.LoraLayer]
-      module_names: [lora_A, lora_B, lora_embedding_A, lora_embedding_B, lora_magnitude_vector]
-    rules:                   # module pattern -> role; the first matching rule wins
-      lora_A: adapter
-      lora_B: adapter
-      lora_embedding_A: adapter
-      lora_embedding_B: adapter
-      lora_magnitude_vector: adapter
-
-Rule sets come from the same two sources as maps, in the same order: those registered in the running process with
-:func:`~venngram.maps.role_rules.register_role_rules` (read from a document with
-:func:`~venngram.maps.role_rules.load_role_rules`), then the configured registries, where a rule set is indexed by its
-``name``. ``MappedView(model)`` applies every known rule set whose ``applies_when`` holds for the model: a module of a
-listed class (or a subclass), or a tensor whose name has a listed segment. The examples' small LoRA wrapper
-(``fts_examples.tunable_views.lora``) names its tensors ``lora_A`` and ``lora_B`` as PEFT does, so ``peft.lora``
-applies to it as it does to PEFT's own layers. Two detected rule sets that give one tensor different roles are refused
-by name.
-
-To choose instead, pass ``role_rules``: a rule set's name (``MappedView(model, role_rules="peft.lora")``), a
-:class:`~venngram.maps.role_rules.RoleRules`, or a mapping of module patterns to roles for rules that are not published
-(``role_rules={}`` gives no roles from rules). ``roles=`` still sets individual tensors' roles over whatever the rules
-give. :func:`~venngram.maps.role_rules.known_role_rules` lists every rule set in the process or the registries. An
-adapter library venngram does not yet cover needs a rule set published and indexed, not a new venngram release.
+Fine-Tuning Scheduler's examples pin venngram's seed registry to a revision
+(``fts_examples.tunable_views.SEED_REGISTRY``), so a rendered example cannot be moved by a later registry generation,
+and its tests use a local registry instead of the Hub.
 
 Writing a View
 **************

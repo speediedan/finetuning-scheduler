@@ -11,19 +11,19 @@
 # limitations under the License.
 """Examples of tunable views and addresses: giving a model a view, then scheduling it by address (#158).
 
-The examples find component maps and role rules through venngram's seed registry pinned to one revision
+The examples find venngram's maps (of architectures and of adapters) through its seed registry pinned to one revision
 (:data:`SEED_REGISTRY`), so a rendered notebook says which registry generation it used and a later registry change
 cannot move it.
 """
 import os
 
-#: venngram's seed registry of verified component maps and role rules, pinned to a revision (#176).
+#: venngram's seed registry of verified maps, pinned to a revision (#176).
 SEED_REGISTRY = "hub-dataset:speediedan/venngram-registry/index@5f94a99d6815b78e0bd1aaad7ac03bc22e377d88"
 
 
 def use_seed_registry() -> list[str]:
-    """Look component maps and role rules up in :data:`SEED_REGISTRY`, unless ``VENNGRAM_REGISTRIES`` already names
-    the registries (as the tests do, with a local one).
+    """Look venngram's maps up in :data:`SEED_REGISTRY`, unless ``VENNGRAM_REGISTRIES`` already names the
+    registries (as the tests do, with a local one).
 
     Returns the registries now consulted.
     """

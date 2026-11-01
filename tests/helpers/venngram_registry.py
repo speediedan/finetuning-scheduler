@@ -11,9 +11,9 @@
 # limitations under the License.
 """An offline venngram registry for tests (#176).
 
-venngram looks component maps and role rules up through registries (by default its seed registry on the Hugging Face
-Hub). Tests instead publish fixture copies of the seed maps and role rules (``tests/fixtures/venngram_maps`` and
-``tests/fixtures/venngram_role_rules``, copied from venngram's own test fixtures) to a local store, index them, and
+venngram looks maps up through registries (by default its seed registry on the Hugging Face Hub). Tests instead
+publish fixture copies of the seed base maps and overlay maps (``tests/fixtures/venngram_maps`` and
+``tests/fixtures/venngram_overlays``, copied from venngram's own test fixtures) to a local store, index them, and
 point ``VENNGRAM_REGISTRIES`` at that index, so lookups take venngram's real path without the network, a registry
 change cannot move a test, and subprocesses (the skill's scripts, notebook kernels) see the same registry.
 """
@@ -21,11 +21,11 @@ import os
 from pathlib import Path
 
 FIXTURE_MAPS = Path(__file__).parents[1] / "fixtures" / "venngram_maps"
-FIXTURE_ROLE_RULES = Path(__file__).parents[1] / "fixtures" / "venngram_role_rules"
+FIXTURE_OVERLAYS = Path(__file__).parents[1] / "fixtures" / "venngram_overlays"
 
 
 def build_registry(root: Path) -> str:
-    """Publish the fixture maps and role rules under ``root`` and index them; return the index's location."""
+    """Publish the fixture base and overlay maps under ``root`` and index them; return the index's location."""
     from venngram import registry
     from venngram.store import publish
 
@@ -33,11 +33,11 @@ def build_registry(root: Path) -> str:
     maps.mkdir(parents=True)
     for path in sorted(FIXTURE_MAPS.glob("*.yaml")):
         (maps / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-    (maps / "role_rules").mkdir()
-    for path in sorted(FIXTURE_ROLE_RULES.glob("*.yaml")):
-        (maps / "role_rules" / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    (maps / "overlays").mkdir()
+    for path in sorted(FIXTURE_OVERLAYS.glob("*.yaml")):
+        (maps / "overlays" / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
     publish("local", str(maps), maps, documents=[("component_map", p.name) for p in sorted(maps.glob("*.yaml"))]
-            + [("role_rules", f"role_rules/{p.name}") for p in sorted((maps / "role_rules").glob("*.yaml"))])
+            + [("component_map", f"overlays/{p.name}") for p in sorted((maps / "overlays").glob("*.yaml"))])
     registry.write_index(registry.crawl([f"local:{maps}"]), root / "index", name="fts-test-seeds")
     return f"local:{root / 'index'}"
 
