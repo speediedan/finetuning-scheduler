@@ -407,7 +407,6 @@ Footnotes
    pytorch/plain_pytorch_loop
    pytorch/model_parallel_plain_loop
    pytorch/tunable_views
-   pytorch/tunable_views_advanced
 
 .. toctree::
    :maxdepth: 1
@@ -437,6 +436,7 @@ Footnotes
 
    advanced/lr_scheduler_reinitialization
    advanced/optimizer_reinitialization
+   advanced/tunable_views_advanced
 
 .. toctree::
    :maxdepth: 1

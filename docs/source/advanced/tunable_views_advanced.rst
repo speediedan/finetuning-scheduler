@@ -9,9 +9,9 @@ Advanced Tunable Views
    may still change.
 
 Most schedules need only :ref:`tunable-views`: ``venngram.view(model)`` gives a model its view, and roles, selectors
-and addresses say what each phase thaws. This page covers what that guide leaves out: writing and testing a view of
-your own, promotion, sharing address books through venngram, and third-party strategy adapters that name parameters
-themselves. venngram's `README <https://github.com/speediedan/venngram>`_ is the reference for the grammar, address
+and addresses say what each phase tunes. This page covers more advanced or extended usage patterns: writing and testing
+a view of your own, promotion, sharing address books through venngram, and third-party strategy adapters that name
+parameters themselves. venngram's `README <https://github.com/speediedan/venngram>`_ is the reference for the grammar, address
 books and stores; this page says only how Fine-Tuning Scheduler uses them.
 
 .. _tunable-views-writing:
@@ -33,7 +33,7 @@ it.
   own parameter names, as for every data-driven view, or another label (interpretune's TransformerLens view uses
   ``"tl"``) when they differ. A view with another scheme must define ``logical_named_parameters``; messages and the
   generated schedule then use its names, and an address book written in one vocabulary declares it
-  (``requires: {naming_scheme: tl}``) so that it is refused, naming both schemes, through a view with another.
+  (``requires: {naming_scheme: tl}``).
 - ``to_physical(logical)``: each logical name mapped to its physical parameter names.
 - ``to_logical(physical)``: physical names mapped back, for messages.
 
@@ -58,7 +58,7 @@ configuration that is invalid, including one whose names a view cannot resolve, 
 
 
     class BlockView:
-        """Logical ``block<i>`` names over a sequential model, thawing each block's norm with it."""
+        """Logical ``block<i>`` names over a sequential model, tuning each block's norm with it."""
 
         BLOCKS = {"block0": ("0.weight", "0.bias"), "head": ("2.weight", "2.bias")}
         NORMS = {"0.weight": ["1.weight", "1.bias"]}
@@ -122,14 +122,14 @@ them (the PyTorch API only):
         1: {"params": ["role:latent:transcoder"], "promote": {"role:instrument": "latent:transcoder"}},
     }
 
-A ``promote`` source is a selector or an address. The promotion happens after the phase's start hooks and before its
-thaw. A promoted parameter that shares storage with another tensor (a tied weight) gets its own copy, and the other
+A ``promote`` source is a selector or an address. The promotion happens after the phase's start hooks and before it
+starts tuning. A promoted parameter that shares storage with another tensor (a tied weight) gets its own copy, and the other
 name keeps the original tensor (with the role the view gives that name, ``base`` if none); a view can own the promotion
 with its own ``promote``, which must keep each tensor's name. Promoted tensors are checkpointed from their promotion on,
 and promotions are replayed before a saved state loads. Restoring a checkpoint saved before a promotion (a best
 checkpoint, or the rollback point of a vetoed phase) puts the promoted tensors back to their values at promotion; those
 values are kept on the CPU and saved with :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save`.
-Promotion is not supported on a sharded model, and a view that overrides its checkpoint state must define ``promote``.
+Promotion is not yet supported on a sharded model, and a view that overrides its checkpoint state must define ``promote``.
 
 Address Books Through venngram
 ******************************
@@ -138,34 +138,49 @@ venngram defines how address books are published, referenced and checked (`Addre
 
 .. _tunable-views-books-by-reference:
 
-**Books by reference (experimental).** A schedule can name a published book by its document reference
+**Books by reference.** A schedule can name a published book by its document reference
 (``<store>:<ref>[@<revision>]:<path>[#<sha256>]``, see `Sharing documents
-<https://github.com/speediedan/venngram#sharing-documents-manifests-and-stores>`_) anywhere it names a book. Each book
-fetched by reference is pinned when the schedule loads (``venngram.store.pin``), the pinned references are logged and
-saved in every checkpoint (``address_references``), and resuming from a checkpoint whose books have changed since is
-refused, naming the saved references so the schedule can cite them to resume exactly.
+<https://github.com/speediedan/venngram#sharing-documents-manifests-and-stores>`_) anywhere it names a book:
+
+.. code-block:: yaml
+
+    addresses: hub-model:my-org/qwen3-sets@v1:books/lora.yaml
+
+Each book fetched by reference is pinned when the schedule loads (``venngram.store.pin``), the pinned references are
+logged and saved in every checkpoint (``address_references``), and resuming from a checkpoint whose books have changed
+since is refused, naming the saved references so the schedule can cite them to resume exactly.
 
 .. _tunable-views-support-record:
 
-**What a book may ask (experimental).** Fine-Tuning Scheduler declares what it tunes as a venngram support record
+**What a book may ask.** Fine-Tuning Scheduler declares what it tunes as a venngram support record
 (``finetuning_scheduler/core/support_record.yaml``, read by :func:`~finetuning_scheduler.core.compile.support_record`;
 see `Support records <https://github.com/speediedan/venngram#support-records>`_). A set a schedule uses that asks for
-more (an activation site, or units of a tensor) is refused at compile time with every reason named; a set of the same
-book the schedule does not use is not judged, so one book can serve a steering tool and a schedule.
+more (an activation site, or units of a tensor) is refused at compile time; a set of the same book the schedule does not
+use is not judged, so one book can serve a steering tool and a schedule. A book can be checked against the record
+without Fine-Tuning Scheduler installed:
+
+.. code-block:: bash
+
+    python -m venngram.conformance hub-model:my-org/qwen3-sets@v1 --support support_record.yaml
 
 .. _tunable-views-export-book:
 
-**A schedule as a book (experimental).** :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.export_book`
-(or :func:`~finetuning_scheduler.core.books.schedule_book`) writes a schedule's phase selections as an address book, one
-set per phase (``phase_0``, ``phase_1``, ...), so a tuning setup can be published, imported and cited like any other
-set. Names and regexes become ``name`` terms (a regex keeps Fine-Tuning Scheduler's prefix match), the book declares
-the view's naming scheme, and books fetched by reference are recorded under ``derived_from``.
+**A schedule as a book.** :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.export_book` (or
+:func:`~finetuning_scheduler.core.books.schedule_book`) writes a schedule's phase selections as an address book, one set
+per phase (``phase_0``, ``phase_1``, ...), so a tuning setup can be published, imported and cited like any other set:
+
+.. code-block:: python
+
+    fts.export_book("books/my_schedule.yaml")
+
+Names and regexes become ``name`` terms (a regex keeps Fine-Tuning Scheduler's prefix match), the book declares the
+view's naming scheme, and books fetched by reference are recorded under ``derived_from``.
 
 .. _tunable-views-refusals:
 
 Refusals
 ********
-An address that does not resolve is refused, with every reason named: it matches nothing, references a set no book
+An address that does not resolve is refused: it matches nothing, references a set no book
 defines, names a layer outside the model, needs architecture knowledge the view does not supply (``component:`` needs a
 vocabulary-backed structure provider, such as :class:`~venngram.maps.view.MappedView`'s), addresses an activation site
 (``point:``), or addresses units of a tensor (``units:``, which are tuned through a unit adapter of their own).

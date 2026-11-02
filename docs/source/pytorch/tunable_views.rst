@@ -32,11 +32,16 @@ Scheduling Through a Tunable View
 
 Overview
 ********
-**The same schedule runs unchanged on a Llama, OPT or Gemma model, with PEFT's LoRA or the examples' own.** A schedule
-written through a tunable view says *what* to thaw ("the MLP adapters of the top four blocks") rather than which
-parameter names hold it, so it does not depend on one architecture or one adapter library. The same approach builds
-schedules shared across interpretability packages: a package that gives the model it wraps a view reporting the same
-roles and components runs the same schedule.
+**The same schedule** runs **unchanged** on a Llama, OPT or Gemma model, with PEFT's LoRA or the examples' own. A
+schedule written through a tunable view says *what* to tune ("the MLP adapters of the top four blocks") rather than
+which parameter names hold it, so it does not depend on one architecture or one adapter library. The same approach
+builds schedules shared across interpretability packages: a package that gives the model it wraps a view reporting the
+same roles and components runs the same schedule.
+
+To enable this model addressing abstraction, Fine-Tuning Scheduler uses the
+`venngram <https://github.com/speediedan/venngram>`_ protocol. Its addresses can share and compose references to any
+subset of a model: from groups of layers to intersecting sets of individual neurons, and from latent-space features to
+activation sites and attribution graphs. Schedules use the part of it that selects tensors to tune.
 
 A schedule names parameters, by default with the names ``named_parameters()`` reports. A
 :class:`~finetuning_scheduler.core.views.TunableView` tells Fine-Tuning Scheduler more about a model's tensors than
@@ -49,17 +54,13 @@ their names:
   call a block's query weights ``blocks.3.attn.W_Q`` while the model stores them inside one fused projection), and a
   view can let a schedule use it.
 
-A schedule addresses the model through the view, and Fine-Tuning Scheduler thaws, optimizes and checkpoints the
-*physical* tensors that result. One logical name may stand for several physical tensors, and a view may thaw related
-tensors (a block's normalization layer, for example) together with the ones a phase names.
+A schedule addresses the model through the view, and Fine-Tuning Scheduler tunes and checkpoints the *physical*
+tensors that result. One logical name may stand for several physical tensors, and a view may tune related tensors (a block's normalization layer, for example) together with the ones a phase names.
 
-The protocol is independent of Fine-Tuning Scheduler, which is one consumer of it. It lives in
-`venngram <https://github.com/speediedan/venngram>`_ (``venngram.tuning``, with the role vocabulary in
-``venngram.roles``), beside the address grammar schedules use, and Fine-Tuning Scheduler depends on it.
-:mod:`finetuning_scheduler.core.views` and :mod:`finetuning_scheduler.core.roles` re-export it for Fine-Tuning
-Scheduler's users.
+The protocol is independent of Fine-Tuning Scheduler, which is one consumer of this nascent model addressing
+protocol.
 
-Views work with both interfaces: :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` (pass ``view=``)
+Views work with both FTS interfaces: :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` (pass ``view=``)
 and the Lightning callback (attach the view to the ``LightningModule``). A model without a view is scheduled through
 :class:`~finetuning_scheduler.core.views.CanonicalView`, the identity view, so nothing changes for existing schedules.
 
@@ -67,8 +68,10 @@ Giving a Model a View
 *********************
 One call gives a model its view: :func:`venngram.view`. The view keeps the model's own parameter names (so names and
 regexes still work through it), gives every tensor a role, and places it at its layer and architecture-neutral
-component. This is the view the :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` checks
-with the conformance suite and trains, on Qwen3-0.6B with LoRA on all seven projections:
+component. It is a view of venngram's tunable view protocol (``venngram.tuning``, with the role vocabulary in
+``venngram.roles``), which :mod:`finetuning_scheduler.core.views` and :mod:`finetuning_scheduler.core.roles`
+re-export. This is the view the :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>`
+checks with the conformance suite and trains, on Qwen3-0.6B with LoRA on all seven projections:
 
 .. code-block:: python
 
@@ -121,19 +124,15 @@ Through this view, a LoRA tensor takes the component of the projection it adapts
 When only roles are wanted, :class:`~finetuning_scheduler.core.views.CanonicalView` with ``roles=`` gives a plain model
 roles (and layers, from its block list) while keeping its own names.
 
-Fine-Tuning Scheduler compiles the schedule once, at setup, into the physical parameters each phase thaws
+Fine-Tuning Scheduler compiles the schedule once, at setup, into the physical parameters each phase tunes
 (:func:`~finetuning_scheduler.core.compile.compile_schedule`). Compilation refuses a schedule whose phases share
-storage, a name the view cannot resolve, and a phase that schedules a tensor whose role is never thawed, naming the
-input. A digest of the compiled schedule is saved with every checkpoint, and resuming through a view that maps the
-schedule differently is refused.
+storage, a name the view cannot resolve, and a phase that schedules a tensor whose role is never tuned. A digest of the
+compiled schedule is saved with every checkpoint.
 
 .. _tunable-views-finding-maps:
 
 Where a View Comes From
 =======================
-.. warning::
-   venngram's maps and how they are found are experimental and still evolving.
-
 ``venngram.view(model)`` composes the view from published data: the *map* of the model's architecture and the map of
 each adapter library whose modules the model carries (PEFT's LoRA, a spliced SAE or transcoder, a steering module).
 Neither needs code, so an architecture or an adapter library is covered once its maps are published. For an
@@ -152,7 +151,7 @@ A role says what a tensor *is*, and so what Fine-Tuning Scheduler may do with it
 
 .. list-table::
    :header-rows: 1
-   :widths: 18 30 14 12 26
+   :widths: 14 24 12 12 38
 
    * - role
      - what it is
@@ -201,7 +200,8 @@ interpretune's views use them.
 
 Selectors and Addresses
 ***********************
-A schedule selects tensors by role: ``role:adapter`` selects every adapter, ``role:adapter:char`` exactly that one.
+A schedule selects tensors by role: ``role:adapter`` selects every adapter, ``role:adapter:math`` exactly the
+adapter named ``math`` (one of several a model carries, say ``math`` and ``code``).
 Selectors work without a view too, where every parameter is ``base``, except under a Lightning strategy adapter that
 names parameters itself (see :ref:`tunable-views-renaming-adapters`).
 
@@ -209,9 +209,9 @@ names parameters itself (see :ref:`tunable-views-renaming-adapters`).
 
     schedule = {0: {"params": ["role:adapter"], "max_transition_epoch": 2}, 1: {"params": ["role:latent"]}}
 
-**Addresses (experimental).** A role selector is the simplest *address*, and an address narrows it.
+**Addresses.** A role selector is one *field*; combining fields narrows the selection.
 ``role:adapter & layers:-4:`` is the adapters of the top four blocks, in any model whose block list the view finds:
-``role:adapter`` and ``layers:-4:`` are *fields*, and ``&`` intersects them. Addresses combine with ``&``
+``role:adapter`` and ``layers:-4:`` are fields, and ``&`` intersects them; the whole expression is an *address*. Addresses combine with ``&``
 (intersection), ``-`` (difference) and ``|`` (union), operators delimited by spaces, and ``@<set>`` references a set
 the schedule names. An address is a selection, not a role, so two may overlap: ``role:adapter & module:q_proj`` selects
 every ``q_proj`` adapter, including those in the top four blocks.
@@ -244,8 +244,7 @@ A schedule names its sets in a top-level ``addresses`` key: an inline book (a ma
       params: ["@rest"]
 
 The grammar and address books are `venngram <https://github.com/speediedan/venngram#addresses>`__'s, and venngram ships
-an agent skill for them, ``venngram-addressing``. An address that does not resolve is refused with every reason named.
-Books can also be published and named by reference, and a schedule can be exported as a book: see
+an agent skill for them, ``venngram-addressing``. Books can also be published and named by reference, and a schedule can be exported as a book: see
 :ref:`tunable-views-advanced`.
 
 .. _tunable-views-export:
@@ -258,12 +257,10 @@ whose role matches, for example only the adapters, so a large frozen base and th
 .. code-block:: python
 
     fts.export_best(roles=("adapter",))  # best_export.pt beside the best checkpoint
-    fts.export_best(write_peft, roles=("role:adapter:char",))  # write_peft(tensors, metadata, path): another format
+    fts.export_best(write_peft, roles=("role:adapter:math",))  # write_peft(tensors, metadata, path): another format
 
 The tensors come from the best checkpoint, not the live model, keyed by wrapper-free names (without segments such as
-``torch.compile``'s ``_orig_mod.``); a sharded model's are read in full on global rank zero. ``fn`` receives
-``path=None`` when no path is given.
-``instrument`` tensors are never checkpointed, so they cannot be exported. The external artifacts a run depends on can
+``torch.compile``'s ``_orig_mod.``); a sharded model's are read in full on global rank zero. The external artifacts a run depends on can
 be recorded with ``TuningScheduler(artifacts={"lens": {"path": ..., "sha256": ..., "revision": ...}})``; they appear in
 every checkpoint's and export's metadata.
 
@@ -278,14 +275,12 @@ Attach the view to the ``LightningModule`` as ``tunable_view``, rooted at the mo
     trainer = Trainer(callbacks=[FinetuningScheduler(ft_schedule="schedule.yaml")])
     trainer.fit(module)
 
-The schedule keeps its logical names (in logs and in the saved schedule), the callback thaws and optimizes the physical
-parameters, and a generated schedule uses the view's logical names. The FSDP (FSDP1) strategy accepts only a view
-whose naming scheme is ``"physical"`` (its logical names are the module's own parameter names), applying its roles and
-coupled tensors; use ``ModelParallelStrategy`` (FSDP2) to fine-tune through logical names. A third-party strategy
+The schedule keeps its logical names (in logs and in the saved schedule), the callback tunes the physical parameters,
+and a generated schedule uses the view's logical names. A third-party strategy
 adapter that renames parameters takes precedence over an attached view (see :ref:`tunable-views-renaming-adapters`).
 
 Going Further
 *************
 :ref:`tunable-views-advanced` covers writing and testing a view of your own, promotion (an ``instrument`` becoming a
-trainable ``latent``), address books by reference, what a book may ask of Fine-Tuning Scheduler, exporting a schedule
-as a book, and how to read a refusal.
+trainable ``latent``), address books by reference, what a book may ask of Fine-Tuning Scheduler, and exporting a
+schedule as a book.
