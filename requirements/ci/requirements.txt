@@ -109,7 +109,7 @@ cryptography==50.0.2
     #   secretstorage
 cycler==0.12.1
     # via matplotlib
-databricks-sdk==0.157.0
+databricks-sdk==0.158.0
     # via
     #   mlflow-skinny
     #   mlflow-tracing
@@ -142,7 +142,7 @@ fastapi==0.162.0
     # via mlflow-skinny
 fastjsonschema==2.22.2
     # via nbformat
-filelock==4.2.4
+filelock==4.2.5
     # via
     #   datasets
     #   huggingface-hub
@@ -193,7 +193,7 @@ h11==0.16.0
     #   httpcore
     #   httpcore2
     #   uvicorn
-hf-xet==1.7.1 ; platform_machine == 'AMD64' or platform_machine == 'ARM64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+hf-xet==1.8.0 ; platform_machine == 'AMD64' or platform_machine == 'ARM64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
     # via huggingface-hub
 httpcore==1.0.9
     # via httpx
@@ -207,12 +207,13 @@ httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscrip
     # via httpx2
 huey==3.5.3
     # via mlflow
-huggingface-hub==2.3.0
+huggingface-hub==2.4.0
     # via
     #   datasets
     #   evaluate
     #   tokenizers
     #   transformers
+    #   venngram
 hydra-core==1.3.8
     # via finetuning-scheduler (pyproject.toml)
 id==1.6.1
@@ -238,7 +239,7 @@ ipykernel==7.4.0
     #   finetuning-scheduler (pyproject.toml)
     #   jupyterlab
     #   nbval
-ipython==9.17.1
+ipython==9.18.0
     # via
     #   finetuning-scheduler (pyproject.toml)
     #   ipykernel
@@ -323,7 +324,7 @@ jupyter-server==2.21.1
     #   notebook-shim
 jupyter-server-terminals==0.5.4
     # via jupyter-server
-jupyterlab==4.6.4
+jupyterlab==4.6.5
     # via notebook
 jupyterlab-pygments==0.3.0
     # via nbconvert
@@ -418,11 +419,11 @@ nest-asyncio2==1.7.4
     # via ipykernel
 nh3==0.3.7
     # via readme-renderer
-nodeenv==1.11.0
+nodeenv==1.11.1
     # via
     #   pre-commit
     #   pyright
-notebook==7.6.3
+notebook==7.6.4
     # via finetuning-scheduler (pyproject.toml)
 notebook-shim==0.2.4
     # via
@@ -462,22 +463,22 @@ omegaconf==2.3.1
     # via
     #   finetuning-scheduler (pyproject.toml)
     #   hydra-core
-opentelemetry-api==1.45.1
+opentelemetry-api==1.45.2
     # via
     #   fastapi
     #   mlflow-skinny
     #   mlflow-tracing
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
-opentelemetry-proto==1.45.1
+opentelemetry-proto==1.45.2
     # via
     #   mlflow-skinny
     #   mlflow-tracing
-opentelemetry-sdk==1.45.1
+opentelemetry-sdk==1.45.2
     # via
     #   mlflow-skinny
     #   mlflow-tracing
-opentelemetry-semantic-conventions==0.66b1
+opentelemetry-semantic-conventions==0.66b2
     # via opentelemetry-sdk
 overrides==7.7.0 ; python_full_version < '3.12'
     # via jupyter-server
@@ -564,18 +565,19 @@ pyarrow==25.0.1
     # via
     #   datasets
     #   mlflow
+    #   venngram
 pyasn1==0.6.5
     # via pyasn1-modules
 pyasn1-modules==0.4.2
     # via google-auth
 pycparser==3.12 ; implementation_name != 'PyPy'
     # via cffi
-pydantic==2.14.1
+pydantic==2.14.2
     # via
     #   fastapi
     #   mlflow-skinny
     #   mlflow-tracing
-pydantic-core==2.50.1
+pydantic-core==2.50.2
     # via pydantic
 pygments==2.21.0
     # via
@@ -607,7 +609,7 @@ python-dateutil==3.0.0
     #   jupyter-client
     #   matplotlib
     #   pandas
-python-discovery==1.6.7
+python-discovery==1.9.0
     # via virtualenv
 python-dotenv==1.2.4
     # via mlflow-skinny
@@ -791,7 +793,7 @@ traitlets==5.16.1
     #   nbclient
     #   nbconvert
     #   nbformat
-transformers==5.21.0
+transformers==5.22.1
     # via finetuning-scheduler (pyproject.toml)
 truststore==0.10.5 ; sys_platform != 'emscripten'
     # via
@@ -855,7 +857,7 @@ urllib3==2.8.0
     #   twine
 uvicorn==0.54.0
     # via mlflow-skinny
-virtualenv==21.15.1
+virtualenv==21.15.2
     # via pre-commit
 waitress==3.0.2 ; sys_platform == 'win32'
     # via mlflow

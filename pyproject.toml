@@ -163,6 +163,7 @@ where = ["src"]
 namespaces = true
 
 [tool.setuptools.package-data]
+"finetuning_scheduler.core" = ["support_record.yaml"]
 "fts_examples.config" = ["*.yaml"]
 "fts_examples.config.advanced.fsdp" = ["*.yaml"]
 "fts_examples.config.advanced.reinit_lr" = ["*.yaml"]

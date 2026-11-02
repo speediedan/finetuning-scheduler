@@ -436,6 +436,7 @@ Footnotes
 
    advanced/lr_scheduler_reinitialization
    advanced/optimizer_reinitialization
+   advanced/tunable_views_advanced
 
 .. toctree::
    :maxdepth: 1

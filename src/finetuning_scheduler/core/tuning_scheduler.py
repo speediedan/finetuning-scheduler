@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import torch
+import yaml
 from torch import nn, Tensor
 from torch.optim import Optimizer
 from torch.utils.hooks import RemovableHandle
@@ -41,6 +42,7 @@ from torch.utils.hooks import RemovableHandle
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import phase as core_phase
 from finetuning_scheduler.core import schedule as core_schedule
+from finetuning_scheduler.core.books import schedule_book
 from finetuning_scheduler.core.checkpoint import (CheckpointPolicy, load_payload, remove_checkpoint, replace_checkpoint,
                                                   save_payload)
 from finetuning_scheduler.core.compile import CompiledSchedule, compile_schedule, owner_module, view_default_schedule
@@ -276,6 +278,9 @@ class TuningScheduler:
         self._distributed_src = distributed
         self._distributed: DistributedAdapter | None = None
         self._compiled: CompiledSchedule | None = None
+        self._address_sets: core_schedule.AddressSets = core_schedule.AddressSets()
+        self._address_references: tuple[str, ...] = ()
+        self._source_params: dict[int, list[Any]] = {}  # each phase's `params` as written, for `export_book`
         self._logical_params: dict[int, tuple[str, ...]] = {}
         # promotions applied so far, and each promoted tensor's value when it was promoted (on the CPU)
         self._promotions: list[dict[str, Any]] = []
@@ -493,6 +498,8 @@ class TuningScheduler:
         src = self._schedule_src
         base_dir = pathlib.Path(src).parent if isinstance(src, (str, os.PathLike)) else None
         address_sets = core_schedule.load_address_sets(raw_addresses, base_dir)
+        self._address_sets = address_sets
+        self._address_references = address_sets.references
         schedule, _ = core_schedule.convert_phase_keys(schedule)
         if not core_schedule.ensure_contiguous_phase_keys(schedule):
             raise FTSConfigurationError(
@@ -524,6 +531,7 @@ class TuningScheduler:
         # logical names it resolved are kept for display
         assert self._view is not None
         core_schedule.check_param_entries(schedule)
+        self._source_params = {d: list(schedule[d].get("params") or []) for d in schedule}
         self._compiled = compile_schedule(schedule, self._view, addresses=address_sets)
         for cp in self._compiled.phases:
             self._logical_params[cp.depth] = cp.logical
@@ -1403,6 +1411,35 @@ class TuningScheduler:
         self._restore_checkpoint(cp.best_path, restore_optimizer=False)
         return True
 
+    def export_book(self, path: str | os.PathLike | None = None, *, name: str | None = None,
+                    applies_to: Mapping[str, Any] | None = None, description: str | None = None) -> dict[str, Any]:
+        """The schedule's phase selections as a venngram address book, one set per phase (see
+        :func:`~finetuning_scheduler.core.books.schedule_book`), written as YAML to ``path`` on global rank zero
+        when given.
+
+        Args:
+            path: Where to write the book.
+            name: The book's name; by default ``<model class>-schedule``.
+            applies_to: The book's ``applies_to``; by default the model's ``config.architectures``, when it has them.
+            description: The book's description.
+
+        Returns:
+            The book document.
+        """
+        self._require_setup()
+        assert self._view is not None
+        if applies_to is None:
+            archs = getattr(getattr(self.model, "config", None), "architectures", None)
+            applies_to = {"architectures": list(archs)} if archs else None
+        book = schedule_book({d: {"params": p} for d, p in self._source_params.items()},
+                             name=name or f"{type(self.model).__name__}-schedule", addresses=self._address_sets,
+                             logical_names=[n for n, _ in self._view.logical_named_parameters()],
+                             naming_scheme=self._view.support().naming_scheme, applies_to=applies_to,
+                             description=description)
+        if path is not None and self._interface.is_global_zero:
+            pathlib.Path(path).write_text(yaml.safe_dump(book, sort_keys=False), encoding="utf-8")
+        return book
+
     def export_best(self, fn: Callable[[dict[str, Tensor], dict[str, Any], str | None], Any] | None = None, *,
                     roles: Sequence[str] = ("adapter",), path: str | os.PathLike | None = None) -> Any:
         """Export the best checkpoint's tensors whose role matches ``roles`` (for example only the adapters, so a
@@ -1700,6 +1737,8 @@ class TuningScheduler:
             "fingerprints": deepcopy(self._fingerprints),
             "schedule_hash": config_hash({"schedule": self._schedule}),
             "view_digest": self._compiled.digest if self._compiled is not None else None,
+            # the exact address books the schedule fetched by reference, so a resume uses the same documents
+            "address_references": list(self._address_references),
             "config_hash": self.config_hash,
             "gate_records": list(self._gate_records),
             "promotions": deepcopy(self._promotions),
@@ -1729,6 +1768,7 @@ class TuningScheduler:
             raise FTSConfigurationError(
                 "The saved state was compiled through a view that maps the schedule to different tensors or roles; it"
                 " would thaw different parameters on resume.")
+        core_schedule.check_address_references(state_dict.get("address_references"), self._address_references)
         if state_dict["config_hash"] != self.config_hash:
             rank_zero_warn("The saved state was produced with a different tuning scheduler configuration.")
         if self._checkpoint is not None and state_dict.get("checkpoint") is not None:

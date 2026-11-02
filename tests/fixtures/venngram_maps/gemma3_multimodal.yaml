@@ -1,0 +1,51 @@
+# Gemma 3 multimodal (`Gemma3ForConditionalGeneration`): the language model lives one level down and is the primary
+# stack, with the same layout as Gemma 3 text. Sandwich norms: a post-norm after each sublayer, so a sublayer's
+# CONTRIBUTION to the residual is the post-norm's output, not the raw module output.
+#
+# Schema 2: the vision tower is a second block stack (`vision.blocks.{i}...`, SigLIP pre-norm encoder layers) and the
+# multimodal projector is a declared kind, so a point inside either resolves or is refused by name. Module paths were
+# measured on the meta device from the transformers class, not recalled. SigLIP's attention-pooling head
+# (`vision_tower.head`) is not mapped: the released Gemma 3 checkpoints disable it (`vision_use_head: false`).
+schema_version: 2
+architecture: Gemma3ForConditionalGeneration
+properties:
+  sandwich_norms: true
+kinds:
+  projector: {output: tensor}
+stacks:
+  vision: {module: "model.vision_tower.encoder.layers.{i}"}
+components:
+  embed:                {module: "model.language_model.embed_tokens",                            kind: embed}
+  blocks.{i}:           {module: "model.language_model.layers.{i}",                              kind: block}
+  blocks.{i}.ln1:       {module: "model.language_model.layers.{i}.input_layernorm",              kind: norm}
+  blocks.{i}.attn:      {module: "model.language_model.layers.{i}.self_attn",                    kind: attn}
+  blocks.{i}.attn.q:    {module: "model.language_model.layers.{i}.self_attn.q_proj",             kind: linear}
+  blocks.{i}.attn.k:    {module: "model.language_model.layers.{i}.self_attn.k_proj",             kind: linear}
+  blocks.{i}.attn.v:    {module: "model.language_model.layers.{i}.self_attn.v_proj",             kind: linear}
+  blocks.{i}.attn.q_norm: {module: "model.language_model.layers.{i}.self_attn.q_norm",            kind: norm}
+  blocks.{i}.attn.k_norm: {module: "model.language_model.layers.{i}.self_attn.k_norm",            kind: norm}
+  blocks.{i}.attn.o:    {module: "model.language_model.layers.{i}.self_attn.o_proj",             kind: linear}
+  blocks.{i}.ln1_post:  {module: "model.language_model.layers.{i}.post_attention_layernorm",     kind: norm}
+  blocks.{i}.ln2:       {module: "model.language_model.layers.{i}.pre_feedforward_layernorm",    kind: norm}
+  blocks.{i}.mlp:       {module: "model.language_model.layers.{i}.mlp",                          kind: mlp}
+  blocks.{i}.mlp.gate:  {module: "model.language_model.layers.{i}.mlp.gate_proj",                kind: linear}
+  blocks.{i}.mlp.in:    {module: "model.language_model.layers.{i}.mlp.up_proj",                  kind: linear}
+  blocks.{i}.mlp.out:   {module: "model.language_model.layers.{i}.mlp.down_proj",                kind: linear}
+  blocks.{i}.ln2_post:  {module: "model.language_model.layers.{i}.post_feedforward_layernorm",   kind: norm}
+  ln_final:             {module: "model.language_model.norm",                                    kind: norm}
+  unembed:              {module: "lm_head",                                                      kind: unembed}
+  # the vision tower: SigLIP, pre-norm, no post-sublayer norms (the `sandwich_norms` property is the primary stack's)
+  vision.embed:                 {module: "model.vision_tower.embeddings",                          kind: embed}
+  vision.blocks.{i}:            {module: "model.vision_tower.encoder.layers.{i}",                  kind: block}
+  vision.blocks.{i}.ln1:        {module: "model.vision_tower.encoder.layers.{i}.layer_norm1",      kind: norm}
+  vision.blocks.{i}.attn:       {module: "model.vision_tower.encoder.layers.{i}.self_attn",        kind: attn}
+  vision.blocks.{i}.attn.q:     {module: "model.vision_tower.encoder.layers.{i}.self_attn.q_proj", kind: linear}
+  vision.blocks.{i}.attn.k:     {module: "model.vision_tower.encoder.layers.{i}.self_attn.k_proj", kind: linear}
+  vision.blocks.{i}.attn.v:     {module: "model.vision_tower.encoder.layers.{i}.self_attn.v_proj", kind: linear}
+  vision.blocks.{i}.attn.o:     {module: "model.vision_tower.encoder.layers.{i}.self_attn.out_proj", kind: linear}
+  vision.blocks.{i}.ln2:        {module: "model.vision_tower.encoder.layers.{i}.layer_norm2",      kind: norm}
+  vision.blocks.{i}.mlp:        {module: "model.vision_tower.encoder.layers.{i}.mlp",              kind: mlp}
+  vision.blocks.{i}.mlp.in:     {module: "model.vision_tower.encoder.layers.{i}.mlp.fc1",          kind: linear}
+  vision.blocks.{i}.mlp.out:    {module: "model.vision_tower.encoder.layers.{i}.mlp.fc2",          kind: linear}
+  vision.ln_final:              {module: "model.vision_tower.post_layernorm",                      kind: norm}
+  projector:                    {module: "model.multi_modal_projector",                            kind: projector}

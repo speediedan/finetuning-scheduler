@@ -1,0 +1,23 @@
+# Qwen3 (transformers `Qwen3ForCausalLM`). The Llama layout plus per-head query and key norms inside attention.
+schema_version: 2
+architecture: Qwen3ForCausalLM
+properties:
+  sandwich_norms: false
+components:
+  embed:                  {module: "model.embed_tokens",                          kind: embed}
+  blocks.{i}:             {module: "model.layers.{i}",                            kind: block}
+  blocks.{i}.ln1:         {module: "model.layers.{i}.input_layernorm",            kind: norm}
+  blocks.{i}.attn:        {module: "model.layers.{i}.self_attn",                  kind: attn}
+  blocks.{i}.attn.q:      {module: "model.layers.{i}.self_attn.q_proj",           kind: linear}
+  blocks.{i}.attn.k:      {module: "model.layers.{i}.self_attn.k_proj",           kind: linear}
+  blocks.{i}.attn.v:      {module: "model.layers.{i}.self_attn.v_proj",           kind: linear}
+  blocks.{i}.attn.q_norm: {module: "model.layers.{i}.self_attn.q_norm",           kind: norm}
+  blocks.{i}.attn.k_norm: {module: "model.layers.{i}.self_attn.k_norm",           kind: norm}
+  blocks.{i}.attn.o:      {module: "model.layers.{i}.self_attn.o_proj",           kind: linear}
+  blocks.{i}.ln2:         {module: "model.layers.{i}.post_attention_layernorm",   kind: norm}
+  blocks.{i}.mlp:         {module: "model.layers.{i}.mlp",                        kind: mlp}
+  blocks.{i}.mlp.gate:    {module: "model.layers.{i}.mlp.gate_proj",              kind: linear}
+  blocks.{i}.mlp.in:      {module: "model.layers.{i}.mlp.up_proj",                kind: linear}
+  blocks.{i}.mlp.out:     {module: "model.layers.{i}.mlp.down_proj",              kind: linear}
+  ln_final:               {module: "model.norm",                                  kind: norm}
+  unembed:                {module: "lm_head",                                     kind: unembed}

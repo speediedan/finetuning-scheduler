@@ -265,6 +265,11 @@ python scripts/render_notebook_docs.py --check-stale                            
 Rendering needs `papermill`, `ipykernel` and the `examples` extra. Each notebook has a cell tagged `parameters`; the
 tests in `src/fts_examples/test_examples.py` run it shortened through those parameters.
 
+The tunable-view examples and notebooks look venngram's maps up in its seed registry pinned to a revision
+(`fts_examples.tunable_views.SEED_REGISTRY`), so a rendered artifact cannot be moved by a later registry generation;
+moving that pin means re-rendering both tunable-view artifacts. Their tests use a local registry instead of the Hub
+(`tests/helpers/venngram_registry.py`).
+
 The publisher, the renderer and the nbstripout hook are vendored unmodified from interpretune into
 `scripts/vendored/notebook_tooling/`, configured by `[tool.notebook-publishing]` in `pyproject.toml`. Never edit them
 here: make the change in interpretune, then `python scripts/check_vendored_notebook_tooling.py --sync <commit>`. The

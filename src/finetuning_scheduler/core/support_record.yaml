@@ -1,0 +1,18 @@
+# Fine-Tuning Scheduler's venngram support record: what a schedule's address books may ask of it. Read by
+# `finetuning_scheduler.core.compile.support_record()`; published beside exported books so they can be checked with
+# `python -m venngram.conformance <location> --support <this record>` without Fine-Tuning Scheduler installed.
+schema_version: 2
+kind: support_record
+name: finetuning-scheduler
+description: >-
+  A schedule thaws tensors: its sets select parameters by role, name, module, layer, block stack, component (through a
+  view with a component vocabulary) and leaf. It tunes no sites, features or subspaces directly (an adapter or latent
+  model holding them is tuned through its own tensors), and no unit sets yet. Naming schemes are whatever the view
+  provides, checked against each book's `requires.naming_scheme`.
+sections:
+  tuning:
+    fields: [role, name, module, layers, stack, component, leaf]
+    targets: [param]
+    units: none
+    structure: [physical, vocabulary]
+    portability: [family, checkpoint]

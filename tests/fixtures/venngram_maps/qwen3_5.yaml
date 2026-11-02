@@ -1,0 +1,75 @@
+# Qwen3.5 (`Qwen3_5ForConditionalGeneration`): a hybrid text stack and a vision tower. In the text stack most layers mix
+# tokens with a gated delta-net linear attention and every `full_attention_interval`-th layer with gated softmax
+# attention; the pattern varies with the model's size, so both mixers are `optional` rows (each applies on the layers
+# that have it) rather than layer lists. Every layer has the gated MLP. Module paths were measured on the meta device
+# from the transformers class (`Qwen/Qwen3.5-4B`'s configuration).
+#
+# The linear attention's projections use names of their own (`linear_attn.*`): the shared vocabulary has none for
+# them. The softmax attention's `q_proj` also produces the output gate, so it is twice the usual width (the
+# `verification:` section below says so, and TransformerLens slices the same half).
+schema_version: 3
+architecture: Qwen3_5ForConditionalGeneration
+properties:
+  sandwich_norms: false
+kinds:
+  linear_attn: {output: tensor, sublayer: true}
+  projector: {output: tensor}
+stacks:
+  vision: {module: "model.visual.blocks.{i}"}
+components:
+  embed:                       {module: "model.language_model.embed_tokens",                              kind: embed}
+  blocks.{i}:                  {module: "model.language_model.layers.{i}",                                kind: block}
+  blocks.{i}.ln1:              {module: "model.language_model.layers.{i}.input_layernorm",                kind: norm}
+  blocks.{i}.attn:             {module: "model.language_model.layers.{i}.self_attn",                      kind: attn,   optional: true}
+  blocks.{i}.attn.q:           {module: "model.language_model.layers.{i}.self_attn.q_proj",               kind: linear, optional: true}
+  blocks.{i}.attn.k:           {module: "model.language_model.layers.{i}.self_attn.k_proj",               kind: linear, optional: true}
+  blocks.{i}.attn.v:           {module: "model.language_model.layers.{i}.self_attn.v_proj",               kind: linear, optional: true}
+  blocks.{i}.attn.q_norm:      {module: "model.language_model.layers.{i}.self_attn.q_norm",               kind: norm,   optional: true}
+  blocks.{i}.attn.k_norm:      {module: "model.language_model.layers.{i}.self_attn.k_norm",               kind: norm,   optional: true}
+  blocks.{i}.attn.o:           {module: "model.language_model.layers.{i}.self_attn.o_proj",               kind: linear, optional: true}
+  blocks.{i}.linear_attn:      {module: "model.language_model.layers.{i}.linear_attn",                    kind: linear_attn, optional: true}
+  blocks.{i}.linear_attn.in_qkv: {module: "model.language_model.layers.{i}.linear_attn.in_proj_qkv",      kind: linear, optional: true}
+  blocks.{i}.linear_attn.in_z: {module: "model.language_model.layers.{i}.linear_attn.in_proj_z",          kind: linear, optional: true}
+  blocks.{i}.linear_attn.in_b: {module: "model.language_model.layers.{i}.linear_attn.in_proj_b",          kind: linear, optional: true}
+  blocks.{i}.linear_attn.in_a: {module: "model.language_model.layers.{i}.linear_attn.in_proj_a",          kind: linear, optional: true}
+  blocks.{i}.linear_attn.conv: {module: "model.language_model.layers.{i}.linear_attn.conv1d",             kind: linear, optional: true}
+  blocks.{i}.linear_attn.norm: {module: "model.language_model.layers.{i}.linear_attn.norm",               kind: norm,   optional: true}
+  blocks.{i}.linear_attn.out:  {module: "model.language_model.layers.{i}.linear_attn.out_proj",           kind: linear, optional: true}
+  blocks.{i}.ln2:              {module: "model.language_model.layers.{i}.post_attention_layernorm",       kind: norm}
+  blocks.{i}.mlp:              {module: "model.language_model.layers.{i}.mlp",                            kind: mlp}
+  blocks.{i}.mlp.gate:         {module: "model.language_model.layers.{i}.mlp.gate_proj",                  kind: linear}
+  blocks.{i}.mlp.in:           {module: "model.language_model.layers.{i}.mlp.up_proj",                    kind: linear}
+  blocks.{i}.mlp.out:          {module: "model.language_model.layers.{i}.mlp.down_proj",                  kind: linear}
+  ln_final:                    {module: "model.language_model.norm",                                      kind: norm}
+  unembed:                     {module: "lm_head",                                                        kind: unembed}
+  # the vision tower: pre-norm blocks with a fused qkv projection, then a merger into the text width
+  vision.embed:                {module: "model.visual.patch_embed",                                       kind: embed}
+  vision.pos_embed:            {module: "model.visual.pos_embed",                                         kind: embed}
+  vision.blocks.{i}:           {module: "model.visual.blocks.{i}",                                        kind: block}
+  vision.blocks.{i}.ln1:       {module: "model.visual.blocks.{i}.norm1",                                  kind: norm}
+  vision.blocks.{i}.attn:      {module: "model.visual.blocks.{i}.attn",                                   kind: attn}
+  vision.blocks.{i}.attn.qkv:  {module: "model.visual.blocks.{i}.attn.qkv",                               kind: linear}
+  vision.blocks.{i}.attn.o:    {module: "model.visual.blocks.{i}.attn.proj",                              kind: linear}
+  vision.blocks.{i}.ln2:       {module: "model.visual.blocks.{i}.norm2",                                  kind: norm}
+  vision.blocks.{i}.mlp:       {module: "model.visual.blocks.{i}.mlp",                                    kind: mlp}
+  vision.blocks.{i}.mlp.in:    {module: "model.visual.blocks.{i}.mlp.linear_fc1",                         kind: linear}
+  vision.blocks.{i}.mlp.out:   {module: "model.visual.blocks.{i}.mlp.linear_fc2",                         kind: linear}
+  projector:                   {module: "model.visual.merger",                                            kind: projector}
+verification:
+  config:
+    lin_k_heads: [linear_num_key_heads]
+    lin_v_heads: [linear_num_value_heads]
+    lin_k_dim: [linear_key_head_dim]
+    lin_v_dim: [linear_value_head_dim]
+  widths:
+    attn.q: {out: "2 * heads * head_dim"}          # the query and its output gate
+    linear_attn.in_qkv: {in: hidden, out: "2 * lin_k_heads * lin_k_dim + lin_v_heads * lin_v_dim"}
+    linear_attn.in_z: {in: hidden, out: "lin_v_heads * lin_v_dim"}
+    linear_attn.in_b: {in: hidden, out: lin_v_heads}
+    linear_attn.in_a: {in: hidden, out: lin_v_heads}
+    linear_attn.norm: {numel: lin_v_dim}
+    linear_attn.out: {in: "lin_v_heads * lin_v_dim", out: hidden}
+  order:
+    norm_then_linear_attn: [ln1, [linear_attn.in_qkv, linear_attn.in_z, linear_attn.in_b, linear_attn.in_a]]
+    linear_attn_projections_then_output: [[linear_attn.in_qkv, linear_attn.in_z], linear_attn.norm, linear_attn.out]
+    linear_attn_then_mlp: [linear_attn.out, ln2]

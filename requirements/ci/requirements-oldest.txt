@@ -94,7 +94,7 @@ cryptography==46.0.7
     #   secretstorage
 cycler==0.12.1
     # via matplotlib
-databricks-sdk==0.157.0
+databricks-sdk==0.158.0
     # via
     #   mlflow-skinny
     #   mlflow-tracing
@@ -129,7 +129,7 @@ evaluate==0.3.0
     # via finetuning-scheduler (pyproject.toml)
 fastapi==0.162.0
     # via mlflow-skinny
-filelock==4.2.4
+filelock==4.2.5
     # via
     #   datasets
     #   huggingface-hub
@@ -176,7 +176,7 @@ gunicorn==23.0.0 ; sys_platform != 'win32'
     # via mlflow
 h11==0.16.0
     # via uvicorn
-hf-xet==1.7.1 ; platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+hf-xet==1.8.0 ; platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
     # via huggingface-hub
 huey==2.6.0
     # via mlflow
@@ -186,6 +186,7 @@ huggingface-hub==0.36.2
     #   evaluate
     #   skops
     #   transformers
+    #   venngram
 hydra-core==1.3.0
     # via finetuning-scheduler (pyproject.toml)
 identify==2.6.20
@@ -345,7 +346,7 @@ nest-asyncio==1.6.0
     #   nbclient
 nh3==0.3.7
     # via readme-renderer
-nodeenv==1.11.0
+nodeenv==1.11.1
     # via
     #   pre-commit
     #   pyright
@@ -371,22 +372,22 @@ omegaconf==2.3.0
     # via
     #   finetuning-scheduler (pyproject.toml)
     #   hydra-core
-opentelemetry-api==1.45.1
+opentelemetry-api==1.45.2
     # via
     #   fastapi
     #   mlflow-skinny
     #   mlflow-tracing
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
-opentelemetry-proto==1.45.1
+opentelemetry-proto==1.45.2
     # via
     #   mlflow-skinny
     #   mlflow-tracing
-opentelemetry-sdk==1.45.1
+opentelemetry-sdk==1.45.2
     # via
     #   mlflow-skinny
     #   mlflow-tracing
-opentelemetry-semantic-conventions==0.66b1
+opentelemetry-semantic-conventions==0.66b2
     # via opentelemetry-sdk
 packaging==25.0
     # via
@@ -467,18 +468,19 @@ pyarrow==22.0.0
     # via
     #   datasets
     #   mlflow
+    #   venngram
 pyasn1==0.6.5
     # via pyasn1-modules
 pyasn1-modules==0.4.2
     # via google-auth
 pycparser==3.12 ; implementation_name != 'PyPy'
     # via cffi
-pydantic==2.14.1
+pydantic==2.14.2
     # via
     #   fastapi
     #   mlflow-skinny
     #   mlflow-tracing
-pydantic-core==2.50.1
+pydantic-core==2.50.2
     # via pydantic
 pygments==2.21.0
     # via
@@ -509,13 +511,13 @@ python-dateutil==3.0.0
     #   jupyter-client
     #   matplotlib
     #   pandas
-python-discovery==1.6.7
+python-discovery==1.9.0
     # via virtualenv
 python-dotenv==1.2.4
     # via mlflow-skinny
 pytorch-lightning==2.6.6
     # via lightning
-pytz==2026.5
+pytz==2026.6
     # via pandas
 pywin32==312 ; sys_platform == 'win32'
     # via

@@ -1,6 +1,6 @@
 ---
 name: tunable-view-generator
-description: Find, verify or create the tunable view a finetuning-scheduler schedule needs to address a model by role, layer and component (venngram addresses) rather than by parameter names and regexes. For most models the view is venngram's MappedView over a verified component map, so this looks up the architecture's map, verifies it deterministically, and drafts and verifies one when none exists. Use when an experiment needs a schedule over adapters, latent models or architecture-neutral components, when one schedule must run on several model families, or when asked to "make a view", "generate a TunableView" or "map a model". Do NOT use when a schedule of names or regexes already says what is meant.
+description: Find, verify or create the tunable view a finetuning-scheduler schedule needs to address a model by role, layer and component (venngram addresses) rather than by parameter names and regexes. For most models the view is venngram.view(model) over a verified map, so this looks up the architecture's map, verifies it deterministically, and drafts and verifies one when none exists. Use when an experiment needs a schedule over adapters, latent models or architecture-neutral components, when one schedule must run on several model families, or when asked to "make a view", "generate a TunableView" or "map a model". Do NOT use when a schedule of names or regexes already says what is meant.
 ---
 
 # Finding or generating a tunable view
@@ -10,12 +10,12 @@ A tunable view (protocol in `venngram.tuning`) tells finetuning-scheduler what a
 `mlp.out`, `ln2`, ...). Schedules can then use addresses such as `role:adapter & layers:-4:` or
 `component:mlp.* & layers:-1:`, which mean the same tensors on every architecture the view describes.
 
-For an architecture with a component map, venngram's `MappedView(model, role_rules=...)` is the view. So the work is
+For an architecture venngram has a map for, `venngram.view(model)` is the view. So the work is
 almost always: find the map, verify it, and only if there is none, draft one and verify that. A map is data (a short
 YAML document), so it is safe to share.
 
 References: the LoRA placement notebook `src/fts_examples/notebooks/dev/tunable_views/lora_placement.ipynb` (under
-Examples in the docs) runs `MappedView` on Qwen3-0.6B with LoRA. `references/synthetic_decoder.py` is a small decoder
+Examples in the docs) runs `venngram.view` on Qwen3-0.6B with LoRA. `references/synthetic_decoder.py` is a small decoder
 with deliberately unusual module names, so no map covers it, and `references/synthetic_map.yaml` is its map: drafted
 by this skill, completed by hand where the draft could not place a module (those rows are marked), and verified.
 
@@ -25,7 +25,7 @@ by this skill, completed by hand where the draft could not place a module (those
   one model, a hand-written schedule, thawing layers top-down. Names and regexes stay supported and never warn.
 - **`CanonicalView(model, roles={name: role})`** when only roles or layers are wanted: it keeps the model's names and
   finds layers from its one top-level block list.
-- **`MappedView`** (this skill) for components, or to run one schedule over several model families.
+- **`venngram.view(model)`** (this skill) for components, or to run one schedule over several model families.
 - **A view of your own** for a vocabulary that differs from the model's own names (a wrapper's names, say); see
   "Writing a View" in `docs/source/pytorch/tunable_views.rst`.
 
@@ -78,7 +78,7 @@ by this skill, completed by hand where the draft could not place a module (those
      `gpt2.yaml` does, for a null `n_inner`).
 
 3. **Register the verified map, and share it.** A map is data, so a verified one is worth keeping and sharing:
-   - **In this process:** `register(load_component_map("my_map.yaml"))`, then `MappedView(model)` finds it (registered
+   - **In this process:** `register(load_map("my_map.yaml"))`, then `venngram.view(model)` finds it (registered
      maps take precedence over venngram's own).
    - **Keep the evidence:** `find_view.py ... --record my_arch.json` writes the verification record (see "Recording a
      trial" below). A shared map should travel with its record.
@@ -87,17 +87,27 @@ by this skill, completed by hand where the draft could not place a module (those
      or a Hub repository or bucket; it writes a manifest listing each document's hash. Check the result the way a
      reader meets it: `python -m venngram.conformance <store>:<ref>`. Publishing to a remote store is an outward act:
      **an agent asks before it publishes**, and names the store and reference it will write.
-   - **Propose it to a registry:** registries index verified maps by content-checked reference, and the registry
-     lookup is being built (venngram#33). Until it lands, share the pinned reference (`venngram.store.pin(...)`) with
-     whoever maintains the registry; once it does, the proposal is a new index row pointing at that reference.
+   - **Propose it to a registry:** a registry indexes verified maps by content-checked reference, and is rebuilt by
+     its crawler from a list of manifest locations and, when built with `--discover-hub`, every Hub repository
+     tagged `venngram` (`python -m venngram.registry build --source <location> --discover-hub --out ./index`).
+     Publish the map and its record to a Hub repository tagged `venngram`, or give the pinned reference
+     (`venngram.store.pin(...)`) to whoever maintains the registry, so its next build carries a row for it. Check what
+     a lookup serves with `python -m venngram.registry lookup <Architecture>`; `VENNGRAM_REGISTRIES` names the
+     registries consulted, in order (by default venngram's seed registry).
 
-4. **Build the view.** `role_rules` names the adapter library's tensors (`PEFT_LORA_RULES` covers PEFT's LoRA names):
+4. **Build the view.** `venngram.view(model)` composes it from the architecture's base map and the *overlay map* of
+   each library whose modules the model carries (an overlay gives that library's tensors their roles): the seed
+   registry's `peft.lora` covers PEFT's LoRA names, so a LoRA model needs nothing more. For a library no registry
+   covers, write and register an overlay map (venngram's README, "Maps: base and overlay"); never hard-code a library
+   in the view.
 
    ```python
-   from venngram.maps import MappedView, PEFT_LORA_RULES, load_component_map, register
+   import venngram
+   from venngram.maps import load_map, register
 
-   register(load_component_map("my_map.yaml"))  # only for a map venngram does not already know
-   view = MappedView(model, role_rules=PEFT_LORA_RULES)
+   register(load_map("my_map.yaml"))      # only for an architecture venngram does not already know
+   register(load_map("my_overlay.yaml"))  # only for an adapter library no registry covers
+   view = venngram.view(model)
    ```
 
    Prefer one role plus addresses over many named sub-roles: a subset of a role is an address

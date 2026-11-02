@@ -19,6 +19,7 @@ are not documented as public API.
     core.views
     core.roles
     core.compile
+    core.books
     strategies.base
     strategies.unsharded
     strategies.dtensor
@@ -56,6 +57,10 @@ Scheduler's users need.
     maps.check
     maps.rules
     maps.verification
+    registry
+    store
+    support
+    conformance
     roles
     errors
     tuning.views

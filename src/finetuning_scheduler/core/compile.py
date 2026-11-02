@@ -25,9 +25,11 @@ schedule itself keeps its logical names.
 
 .. warning:: This is an experimental API and may change in a future release.
 """
+import functools
 import hashlib
 import itertools
 import json
+import pathlib
 from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -39,7 +41,10 @@ from finetuning_scheduler.core.dist import rank_zero_debug, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 import venngram
 from venngram import is_address, ParamSpace, select
+from venngram.address import parse as parse_address
+from venngram.address import references
 from venngram.errors import VenngramError
+from venngram.support import SupportRecord
 
 from finetuning_scheduler.core.roles import is_frozen_role, role_kind
 from finetuning_scheduler.core.schedule import parse_promote, resolve_param_entries, shared_params_ref
@@ -337,13 +342,44 @@ def _warn_addresses_experimental(schedule: Mapping[int, Mapping[str, Any]],
                    " and regexes are unaffected.", stacklevel=3)
 
 
-def _check_book_requirements(addresses: Mapping[str, Any] | None, naming_scheme: str) -> None:
-    """Refuse address books written in another vocabulary than the view's (``requires.naming_scheme``)."""
+SUPPORT_RECORD_PATH = pathlib.Path(__file__).with_name("support_record.yaml")
+
+
+@functools.cache
+def support_record() -> SupportRecord:
+    """Fine-Tuning Scheduler's venngram support record (:mod:`venngram.support`): what a schedule's address books
+    may ask of it.
+
+    It is shipped as a document (:data:`SUPPORT_RECORD_PATH`), so a book can be checked against it without
+    Fine-Tuning Scheduler installed (``python -m venngram.conformance <location> --support <record>``).
+    """
+    return SupportRecord.from_file(SUPPORT_RECORD_PATH)
+
+
+def referenced_sets(schedule: Mapping[int, Mapping[str, Any]]) -> set[str]:
+    """The named sets a schedule's ``params`` and ``promote`` entries reference (``@<set>``), directly."""
+    out: set[str] = set()
+    for phase in schedule.values():
+        for entry in [*(phase.get("params") or []), *(phase.get("promote") or {})]:
+            if isinstance(entry, str) and is_address(entry):
+                out.update(references(parse_address(entry)))
+    return out
+
+
+def _check_book_requirements(addresses: Mapping[str, Any] | None, naming_scheme: str,
+                             used: Collection[str] = ()) -> None:
+    """Refuse address books written in another vocabulary than the view's (``requires.naming_scheme``), and books
+    whose sets in ``used`` (and the sets those reference) ask for something :func:`support_record` does not
+    honour."""
     for book in getattr(addresses, "books", ()):
         try:
             book.check_requires(naming_scheme=naming_scheme)
         except VenngramError as err:
             raise FTSConfigurationError(f"The schedule's `addresses` do not apply through this view: {err}") from err
+        refusals = support_record().check_book(book, sets=sorted(set(used) & set(book.sets())))
+        if refusals:
+            raise FTSConfigurationError("The schedule's `addresses` ask for what Fine-Tuning Scheduler does not tune:"
+                                        "\n  " + "\n  ".join(refusals))
 
 
 def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, legacy: bool = False,
@@ -381,7 +417,7 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     if not support.trainable:
         raise FTSConfigurationError(f"The model cannot be fine-tuned through {type(bound.view).__name__}: "
                                     f"{support.reason}")
-    _check_book_requirements(addresses, support.naming_scheme)
+    _check_book_requirements(addresses, support.naming_scheme, referenced_sets(schedule))
     root = bound.root
     tensors = dict(root.named_parameters())
     roles = bound.roles()

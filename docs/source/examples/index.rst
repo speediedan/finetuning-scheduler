@@ -28,8 +28,8 @@ Notebooks
        :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler`.
    * - :doc:`Where should LoRA go? Probing LoRA Without Regret with addresses<notebooks/tunable_views/lora_placement>`
      - PyTorch (experimental)
-     - Tunable views and addresses in an experiment: give Qwen3-0.6B a view from its component map (venngram's
-       ``MappedView``: adapter roles, layers and architecture-neutral components), check it, and run attention-only,
+     - Tunable views and addresses in an experiment: give Qwen3-0.6B a view (``venngram.view(model)``: adapter
+       roles, layers and architecture-neutral components), check it, and run attention-only,
        MLP-only, all-layer, MLP-plus-norms and phased LoRA as address schedules over the same model, probing a 2025
        result on where LoRA adapters belong.
    * - :doc:`Addressing across architectures<notebooks/tunable_views/cross_architecture_addresses>`
