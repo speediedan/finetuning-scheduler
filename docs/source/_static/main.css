@@ -127,6 +127,32 @@ table.fts-examples-table col:nth-child(3) {
     width: 52% !important;
 }
 
+/* the tunable views guide's roles table: the justification column widest */
+table.fts-roles-table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+table.fts-roles-table col:nth-child(1) {
+    width: 15% !important;
+}
+
+table.fts-roles-table col:nth-child(2) {
+    width: 23% !important;
+}
+
+table.fts-roles-table col:nth-child(3) {
+    width: 11% !important;
+}
+
+table.fts-roles-table col:nth-child(4) {
+    width: 13% !important;
+}
+
+table.fts-roles-table col:nth-child(5) {
+    width: 38% !important;
+}
+
 /* the LightningCLI example's scenario table: four equal columns */
 table.fts-scenarios-table {
     table-layout: fixed;

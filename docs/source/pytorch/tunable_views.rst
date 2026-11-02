@@ -9,7 +9,7 @@ Scheduling Through a Tunable View
    may still change.
 
 .. tip::
-   **You may not need a view.** A schedule of parameter names and regexes, or the generated default schedule, needs
+   You may not need a view. A schedule of parameter names and regexes, or the generated default schedule, needs
    none, and stays the simplest choice for many uses, above all when you write or edit a schedule by hand. That way of
    scheduling remains fully supported.
 
@@ -32,11 +32,11 @@ Scheduling Through a Tunable View
 
 Overview
 ********
-**The same schedule** runs **unchanged** on a Llama, OPT or Gemma model, with PEFT's LoRA or the examples' own. A
-schedule written through a tunable view says *what* to tune ("the MLP adapters of the top four blocks") rather than
-which parameter names hold it, so it does not depend on one architecture or one adapter library. The same approach
-builds schedules shared across interpretability packages: a package that gives the model it wraps a view reporting the
-same roles and components runs the same schedule.
+Among other benefits, views allow **the same schedule** to run **unchanged** on a Llama, OPT or Gemma model, with
+PEFT's LoRA or the examples' own. A schedule written through a tunable view says *what* to tune ("the MLP adapters of
+the top four blocks") rather than which parameter names hold it, so it does not depend on one architecture or one
+adapter library. Views exposing the same roles and components can share schedules, interventions and other experiment
+definitions across architectures, interpretability packages and contexts.
 
 To enable this model addressing abstraction, Fine-Tuning Scheduler uses the
 `venngram <https://github.com/speediedan/venngram>`_ protocol. Its addresses can share and compose references to any
@@ -151,7 +151,8 @@ A role says what a tensor *is*, and so what Fine-Tuning Scheduler may do with it
 
 .. list-table::
    :header-rows: 1
-   :widths: 14 24 12 12 38
+   :widths: 15 23 11 13 38
+   :class: fts-roles-table
 
    * - role
      - what it is
