@@ -8,28 +8,6 @@ Scheduling Through a Tunable View
    Tunable views are **experimental** in 2.15 (see the :ref:`API stability classifications<versioning>`): the protocol
    may still change.
 
-.. tip::
-   You may not need a view. A schedule of parameter names and regexes, or the generated default schedule, needs
-   none, and stays the simplest choice for many uses, above all when you write or edit a schedule by hand. That way of
-   scheduling remains fully supported.
-
-   Views and addresses exist for what names do badly:
-
-   - **interpretability experiments**, which tune, freeze and promote adapters, interventions, latent models and
-     instruments by role, often through several wrappers of one model;
-   - **composable, shareable model components**: named sets of parameters or units, defined once for a model family
-     and reused, sliced and recombined;
-   - **experiments defined once and run across models**: conditions written as addresses depend far less on any one
-     model's parameter names, so the same definition can be compiled, compared and orchestrated over several models;
-   - **agent-orchestrated experiments**, where a model description of roles, layers and components is easier to
-     compose over than regexes. If an architecture has no component map, an agent can draft and verify one with the
-     ``tunable-view-generator`` agent skill (in the repository's ``.agents/skills/``, usable from any agent harness
-     that reads skills).
-
-   :ref:`fts-evolution` explains the direction, with a table of which approach fits which use. The
-   :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` shows a view and addresses at work in an experiment, and
-   :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` shows one set of addresses on four model families.
-
 Overview
 ********
 Among other benefits, views allow **the same schedule** to run **unchanged** on a Llama, OPT or Gemma model, with
@@ -63,6 +41,28 @@ protocol.
 Views work with both FTS interfaces: :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` (pass ``view=``)
 and the Lightning callback (attach the view to the ``LightningModule``). A model without a view is scheduled through
 :class:`~finetuning_scheduler.core.views.CanonicalView`, the identity view, so nothing changes for existing schedules.
+
+.. tip::
+   You may not need a view. A schedule of parameter names and regexes, or the generated default schedule, needs
+   none, and stays the simplest choice for many uses, above all when you write or edit a schedule by hand. That way of
+   scheduling remains fully supported.
+
+   Views and addresses exist for what names do badly:
+
+   - **interpretability experiments**, which tune, freeze and promote adapters, interventions, latent models and
+     instruments by role, often through several wrappers of one model;
+   - **composable, shareable model components**: named sets of parameters or units, defined once for a model family
+     and reused, sliced and recombined;
+   - **experiments defined once and run across models**: conditions written as addresses depend far less on any one
+     model's parameter names, so the same definition can be compiled, compared and orchestrated over several models;
+   - **agent-orchestrated experiments**, where a model description of roles, layers and components is easier to
+     compose over than regexes. If an architecture has no component map, an agent can draft and verify one with the
+     ``tunable-view-generator`` agent skill (in the repository's ``.agents/skills/``, usable from any agent harness
+     that reads skills).
+
+   :ref:`fts-evolution` explains the direction, with a table of which approach fits which use. The
+   :doc:`LoRA placement notebook</examples/notebooks/tunable_views/lora_placement>` shows a view and addresses at work in an experiment, and
+   :doc:`Addressing Across Architectures</examples/notebooks/tunable_views/cross_architecture_addresses>` shows one set of addresses on four model families.
 
 Giving a Model a View
 *********************
