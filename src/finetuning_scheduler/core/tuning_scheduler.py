@@ -139,6 +139,21 @@ def _checkpoint_keys(names: Iterable[str], saved: Iterable[str]) -> tuple[dict[s
     return {n: k for n, k in keys.items() if k is not None}, [n for n, k in keys.items() if k is None]
 
 
+def _configured_entry(entry: Any, key: str, options: tuple[str, ...], where: str) -> tuple[Callable, dict[str, Any]]:
+    """A configured gate or hook: the callable and its registration options, from a callable or from a mapping
+    ``{key: callable, **options}``."""
+    if isinstance(entry, Mapping):
+        if not callable(entry.get(key)):
+            raise FTSConfigurationError(f"`{where}` needs a callable under {key!r}.")
+        if unknown := sorted(set(entry) - {key, *options}):
+            raise FTSConfigurationError(f"`{where}` has unknown keys {unknown}; it takes {key!r} and"
+                                        f" {', '.join(repr(o) for o in options)}.")
+        return entry[key], {o: entry[o] for o in options if o in entry}
+    if callable(entry):
+        return entry, {}
+    raise FTSConfigurationError(f"`{where}` must be a callable or a mapping with {key!r}, got {type(entry).__name__}.")
+
+
 class TuningScheduler:
     """Schedule multi-phase fine-tuning in a plain PyTorch training loop.
 
@@ -206,6 +221,12 @@ class TuningScheduler:
         artifacts: External artifacts the run depends on (published, re-loadable tensors such as a lens or a
             transcoder), as ``{name: {"path": ..., "sha256": ..., "revision": ...}}`` (``revision`` optional). Recorded
             in every checkpoint's and export's metadata, not in the configuration hash.
+        gates: Gates to register, in order, as :meth:`add_gate` would: each a callable, or a mapping
+            ``{"gate": fn, "rank_zero_only": ..., "isolate_rng": ...}`` carrying :meth:`add_gate`'s options. Given
+            here, gates exist before :meth:`setup`, so a tuning scheduler built from configuration can have them.
+        phase_hooks: Phase hooks to register, in order, as :meth:`add_phase_hook` would: a mapping from ``"start"``
+            and ``"end"`` to sequences of hooks, each a callable or a mapping ``{"hook": fn, "isolate_rng": ...}``.
+            Given here, phase 0's start hooks are registered before :meth:`setup` runs them.
     """
 
     def __init__(
@@ -240,6 +261,8 @@ class TuningScheduler:
         view: Any | None = None,
         distributed: DistributedAdapter | None = None,
         artifacts: Mapping[str, Mapping[str, str]] | None = None,
+        gates: Sequence[Callable[[GateEvent], GateResult | bool] | Mapping[str, Any]] | None = None,
+        phase_hooks: Mapping[str, Sequence[Callable[[PhaseEvent], None] | Mapping[str, Any]]] | None = None,
     ) -> None:
         self.model = model
         self._artifacts = _validate_artifacts(artifacts)
@@ -316,6 +339,28 @@ class TuningScheduler:
         # scheduler
         self._executor: PhaseExecutor = TuningSchedulerExecutor(self)
         self._externally_driven = False
+        self._register_configured(gates, phase_hooks)
+
+    def _register_configured(self, gates: Any, phase_hooks: Any) -> None:
+        """Register the constructor's ``gates`` and ``phase_hooks`` through :meth:`add_gate` and
+        :meth:`add_phase_hook`, in order, refusing a malformed entry by name."""
+        if gates is not None and (isinstance(gates, (Mapping, str)) or not isinstance(gates, Sequence)):
+            raise FTSConfigurationError(f"`gates` is a sequence of gates, got {type(gates).__name__}.")
+        for i, entry in enumerate(gates or ()):
+            fn, options = _configured_entry(entry, "gate", ("rank_zero_only", "isolate_rng"), f"gates[{i}]")
+            self.add_gate(fn, **options)
+        if phase_hooks is not None and not isinstance(phase_hooks, Mapping):
+            raise FTSConfigurationError("`phase_hooks` maps 'start' and 'end' to sequences of hooks, got"
+                                        f" {type(phase_hooks).__name__}.")
+        for when, hooks in (phase_hooks or {}).items():
+            if when not in self._hooks:
+                raise FTSConfigurationError(f"`phase_hooks` keys must be 'start' or 'end', got {when!r}.")
+            if isinstance(hooks, (Mapping, str)) or not isinstance(hooks, Sequence):
+                raise FTSConfigurationError(f"`phase_hooks[{when!r}]` is a sequence of hooks, got"
+                                            f" {type(hooks).__name__}.")
+            for i, entry in enumerate(hooks):
+                fn, options = _configured_entry(entry, "hook", ("isolate_rng",), f"phase_hooks[{when!r}][{i}]")
+                self.add_phase_hook(fn, when, **options)
 
     # ------------------------------------------------------------------------------------------------------------------
     # setup
@@ -1184,7 +1229,7 @@ class TuningScheduler:
         event = GateEvent(depth=depth, final=final, best_score=cp.best_score if cp else None,
                           best_path=cp.best_path if cp else None, best_depth=cp.best_depth if cp else None,
                           metrics=dict(self._last_metrics), phase_config=self._phase_configs.get(depth),
-                          metadata=self._metadata)
+                          metadata=self._metadata, tuning_scheduler=self)
         accepted, reasons = True, []
         for fn, rank_zero_only, isolate in list(self._gates.values()):
             result: GateResult | None = None

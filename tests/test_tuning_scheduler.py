@@ -24,7 +24,7 @@ from torch import nn
 from finetuning_scheduler.core.tuning_scheduler import TuningScheduler
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.interface import TorchInterface
-from finetuning_scheduler.core.transitions import CallableTransition, Decision, PlateauTransition
+from finetuning_scheduler.core.transitions import CallableTransition, Decision, GateResult, PlateauTransition
 
 
 class Net(nn.Module):
@@ -151,6 +151,70 @@ def test_hooks_order_rng_isolation_and_removal():
     assert calls == [("start", 0, 0), ("end", 0), ("start", 1, 1), ("end", 1), ("start", 2, 3), ("end", 2)]
     with pytest.raises(FTSConfigurationError, match="`when` must be"):
         fts.add_phase_hook(start_hook, when="middle")  # type: ignore[arg-type]
+
+
+def test_constructor_hooks_run_as_registered_ones_do():
+    """Hooks given to the constructor (#182) are registered in order before `setup`, so phase 0's start hooks
+    run."""
+    model = Net()
+    calls = []
+
+    def start_hook(event):
+        calls.append(("start", event.depth, event.epoch))
+        torch.rand(100), random.random()  # isolated: must not disturb the training streams
+
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1),
+                          phase_hooks={"start": [start_hook],
+                                       "end": [lambda e: calls.append(("end", e.depth)),
+                                               {"hook": lambda e: calls.append(("end2", e.depth)),
+                                                "isolate_rng": True}]})
+    torch.manual_seed(0)
+    random.seed(0)
+    fts.setup()
+    after_setup = (torch.rand(1).item(), random.random())
+    torch.manual_seed(0)
+    random.seed(0)
+    assert (torch.rand(1).item(), random.random()) == after_setup
+    _run(fts, model, 4)
+    assert calls == [("start", 0, 0), ("end", 0), ("end2", 0), ("start", 1, 1), ("end", 1), ("end2", 1),
+                     ("start", 2, 3), ("end", 2), ("end2", 2)]
+
+
+def test_constructor_gates_veto_and_see_the_tuning_scheduler():
+    """A gate given to the constructor (#182) reaches the tuning scheduler through its event (#183), and its veto
+    stops the run as a registered gate's does."""
+    model = Net()
+    seen = []
+
+    def gate(event):
+        seen.append((event.depth, event.tuning_scheduler is fts, event.tuning_scheduler.model is model))
+        return GateResult(accept=event.depth != 1, reason="phase 1 regressed")
+
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1),
+                          gates=[{"gate": gate, "rank_zero_only": True}, lambda e: True])
+    fts.setup()
+    _run(fts, model, 5)
+    assert seen == [(0, True, True), (1, True, True)]
+    assert fts.should_stop and "phase 1 regressed" in fts.stop_reason
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"gates": lambda e: True}, r"`gates` is a sequence of gates"),
+        ({"gates": [{"rank_zero_only": True}]}, r"`gates\[0\]` needs a callable under 'gate'"),
+        ({"gates": [{"gate": lambda e: True, "when": "start"}]}, r"`gates\[0\]` has unknown keys \['when'\]"),
+        ({"gates": [3]}, r"`gates\[0\]` must be a callable or a mapping with 'gate'"),
+        ({"phase_hooks": [lambda e: None]}, r"`phase_hooks` maps 'start' and 'end'"),
+        ({"phase_hooks": {"middle": []}}, r"keys must be 'start' or 'end', got 'middle'"),
+        ({"phase_hooks": {"start": lambda e: None}}, r"`phase_hooks\['start'\]` is a sequence of hooks"),
+        ({"phase_hooks": {"end": [{"hook": lambda e: None, "rank_zero_only": True}]}},
+         r"`phase_hooks\['end'\]\[0\]` has unknown keys \['rank_zero_only'\]"),
+    ],
+)
+def test_malformed_constructor_gates_and_hooks_are_refused_by_name(kwargs, match):
+    with pytest.raises(FTSConfigurationError, match=match):
+        TuningScheduler(Net(), SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), **kwargs)
 
 
 def test_hook_optimizer_steps_not_counted():
