@@ -17,8 +17,8 @@ cannot move it.
 """
 import os
 
-#: venngram's seed registry of verified maps, pinned to a revision (#176).
-SEED_REGISTRY = "hub-dataset:speediedan/venngram-registry/index@fb95be52d944b7e2f975e108b72354d41ada6d78"
+#: venngram's seed registry of verified maps, pinned to a revision (#176), the rules-shape rebuild of venngram#49.
+SEED_REGISTRY = "hub-dataset:speediedan/venngram-registry/index@d927d8736e4b2681a1f4291784ef697a53710b2a"
 
 
 def use_seed_registry() -> list[str]:
