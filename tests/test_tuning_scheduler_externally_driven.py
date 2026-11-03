@@ -128,6 +128,9 @@ def test_attach_refuses_registered_gates_and_policy_restore_is_externally_driven
     fts.add_gate(lambda e: True)
     with pytest.raises(FTSConfigurationError, match="Gates are not supported"):
         fts.attach(RecordingExecutor(fts), SCHEDULE)
+    configured = TuningScheduler(model, optimizer=torch.optim.SGD, interface=interface, gates=[lambda e: True])
+    with pytest.raises(FTSConfigurationError, match="Gates are not supported"):
+        configured.attach(RecordingExecutor(configured), SCHEDULE)
     unrestorable = TuningScheduler(model, optimizer=torch.optim.SGD, interface=interface, restore_best=True)
     with pytest.raises(FTSConfigurationError, match="needs a `checkpoint` policy"):
         unrestorable.attach(RecordingExecutor(unrestorable), SCHEDULE)

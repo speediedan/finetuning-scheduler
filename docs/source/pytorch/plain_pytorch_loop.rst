@@ -157,7 +157,23 @@ restores the best checkpoint as of the vetoed phase's start, when there is one (
 
     fts.add_gate(no_regression)
 
-Gate outcomes are kept in ``fts.gate_records`` and, after a veto, ``fts.stop_reason`` says why training stopped.
+Gate outcomes are kept in ``fts.gate_records`` and, after a veto, ``fts.stop_reason`` says why training stopped. A
+gate that judges the module itself, rather than the logged metrics, reaches it through ``event.tuning_scheduler``
+(``event.tuning_scheduler.model``), with the best checkpoint already restored when ``restore_best`` is set.
+
+Gates and hooks can also be given to the constructor, which registers them in order before ``setup()``. That is how a
+tuning scheduler built from configuration has them, and how a phase-0 start hook is in place before ``setup()`` runs
+it. Each entry is a callable, or a mapping that also carries the registration options:
+
+.. code-block:: python
+
+    fts = TuningScheduler(
+        model,
+        schedule,
+        optimizer=partial(torch.optim.AdamW, lr=1e-4),
+        gates=[no_regression, {"gate": expensive_probe, "rank_zero_only": True}],
+        phase_hooks={"start": [refresh_buffers], "end": [{"hook": log_phase, "isolate_rng": False}]},
+    )
 
 Checkpoints and Resuming
 ************************

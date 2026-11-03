@@ -25,13 +25,16 @@ PyTorch API composes.
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable, TYPE_CHECKING
 
 import torch
 from torch import Tensor
 
 from finetuning_scheduler.core.dist import rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
+
+if TYPE_CHECKING:
+    from finetuning_scheduler.core.tuning_scheduler import TuningScheduler
 
 
 @dataclass(frozen=True)
@@ -413,6 +416,8 @@ class GateEvent:
         metrics: The metrics of the last unit.
         phase_config: The phase's validated payload, if any.
         metadata: The run's user metadata.
+        tuning_scheduler: The tuning scheduler running the gate, for access to the module (its best checkpoint
+            already restored when ``restore_best`` is set), the optimizer and the schedule.
     """
 
     depth: int
@@ -423,6 +428,7 @@ class GateEvent:
     metrics: Mapping[str, Tensor] = field(default_factory=dict)
     phase_config: Any = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    tuning_scheduler: "TuningScheduler | None" = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
