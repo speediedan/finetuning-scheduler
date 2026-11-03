@@ -189,6 +189,9 @@ class PersonaRunConfig:
     stage2_context: str = "diplomat"
     mask_budget: float = 2.0
     phases: tuple[str, ...] = ("names", "addresses")
+    epochs: int = 2
+    steps_per_epoch: int = 4
+    lr: float = 5e-3
 
     def fingerprint(self) -> str:
         """A short hash of this configuration, identical for identical configurations."""

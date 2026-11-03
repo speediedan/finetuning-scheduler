@@ -38,6 +38,12 @@ Notebooks
        (Qwen3, Llama, OPT, GPT-2) built on the meta device from their configurations alone, showing what each address
        resolves to per family, the refusal of an address a family cannot provide, and each condition's parameter counts
        side by side: an experiment defined once and orchestrated across models. No training; runs on a CPU.
+   * - :doc:`The goblin diplomat: Persona Hierarchy<notebooks/tunable_views/persona_hierarchy>`
+     - PyTorch and Lightning
+     - A bounded goblin-mention comparison from the Persona Hierarchy paper (2026): context-specific mentions with
+       and without a default-context warm-up, one run definition on both interfaces, a first phase by name regex
+       and a second by role, layer and component addresses, and an explicitly labeled phased neuron-mask extension
+       with matched random-subset controls. The shortened run trains a labeled smoke model; Qwen3-4B is the target.
 
 Command Line
 ************

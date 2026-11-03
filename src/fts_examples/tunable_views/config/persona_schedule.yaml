@@ -1,0 +1,11 @@
+# The Persona Hierarchy tutorial's two phases (#187). Phase 0 is written the classic way, with a name regex over
+# the top two blocks' attention adapters: names and regexes need no view and are clearest for one model. Phase 1
+# uses venngram addresses from persona_sets.yaml, so the same phase means the same tensors on any family the
+# view describes. The phases accumulate: phase 1 trains alongside phase 0.
+addresses: persona_sets.yaml
+0:
+  params: ['model\.layers\.[23]\.self_attn\..*\.lora_[AB]\.weight']
+  max_transition_epoch: 1
+1:
+  params: ["@mlp_top_adapters", "@attn_rest_adapters"]
+  max_transition_epoch: 2
