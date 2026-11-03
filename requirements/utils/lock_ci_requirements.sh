@@ -38,7 +38,7 @@ mkdir -p "${CI_DIR}"
 # pin alone: UV_OVERRIDE, and with it the Lightning pin, stays unset) and leaves it out of the lockfiles, since a git
 # URL in a lockfile is what unsetting UV_OVERRIDE exists to prevent. CI installs it through UV_OVERRIDE as before.
 # Empty this list once each package is published.
-UNPUBLISHED_PACKAGES=(venngram)
+UNPUBLISHED_PACKAGES=()
 # A fixed repo-relative path rather than mktemp: uv records the --override argument in the lockfile header, so a temp
 # path would differ on every checkout (see rel_output_file below). Removed on exit.
 UNPUBLISHED_OVERRIDE_FILE="requirements/ci/.unpublished-overrides.txt"
