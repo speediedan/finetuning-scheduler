@@ -18,7 +18,8 @@ https://arxiv.org/abs/2609.25518
 .
 """
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
 
 import torch
 from torch import nn, Tensor
@@ -121,6 +122,8 @@ class MaskedDeltaLinear(nn.Module):
 
     def set_budget(self, budget: float, *, hard: bool = False) -> None:
         """Change the mask budget; hard evaluation requires an integer count of eligible rows."""
+        if getattr(self, "_global_budget", None) is not None:
+            raise RuntimeError("change the budget on GlobalMaskBudget for a globally bound projection")
         _validate_budget(budget, self.mask_scores.numel(), float(self.temperature))
         if hard and not float(budget).is_integer():
             raise ValueError("hard evaluation requires an integer budget")
@@ -129,6 +132,9 @@ class MaskedDeltaLinear(nn.Module):
 
     def mask(self) -> Tensor:
         """The soft training mask or deterministic nested hard mask, with ties resolved by row-list order."""
+        shared = getattr(self, "_global_budget", None)
+        if shared is not None:
+            return shared.masks()[self._global_mask_path]
         if not bool(self.hard):
             return sigmoid_budget(self.mask_scores, float(self.mask_budget), float(self.temperature))
         if not torch.isfinite(self.mask_scores).all():
@@ -147,3 +153,94 @@ class MaskedDeltaLinear(nn.Module):
         selected = F.linear(x.to(self.weight_delta.dtype), self.weight_delta) * self.mask()
         update = torch.zeros_like(output).index_copy(-1, self.row_indices, selected.to(output.dtype))
         return output + update
+
+
+class GlobalMaskBudget(nn.Module):
+    """One score ranking and budget across several projections, including different layers.
+
+    The mapping order, then each projection's explicit row order, breaks hard-mask ties. Scores
+    stay registered on their projections, so FTS can thaw their tensors in separate phases. This
+    module owns the global budget, temperature and mode: register it on the model as well, so a
+    model checkpoint includes them. Reconstruct the same projection bindings before loading.
+
+    Wrap each model forward in ``with budget.masked_forward():`` to compute the shared mask once
+    while retaining its gradient graph. The context clears its cache even when forward raises;
+    it must not span optimizer updates. Outside that context the mask is recomputed on demand.
+    Every bound projection must have the same score dtype and device.
+    """
+
+    def __init__(self, layers: Mapping[str, MaskedDeltaLinear], *, budget: float,
+                 temperature: float = 1.0) -> None:
+        super().__init__()
+        if not layers or any(not isinstance(layer, MaskedDeltaLinear) for layer in layers.values()):
+            raise ValueError("layers must be a nonempty mapping of MaskedDeltaLinear projections")
+        if len({id(layer) for layer in layers.values()}) != len(layers):
+            raise ValueError("each projection must appear exactly once")
+        if any(getattr(layer, "_global_budget", None) is not None for layer in layers.values()):
+            raise ValueError("a projection is already bound to a global budget")
+        # Keep non-owning registration links: model parameters belong only to the projections.
+        # Ordinary Python references also preserve the bindings when the whole model is deep-copied.
+        self._mask_layers = dict(layers)
+        self._layout = [(path, layer.row_indices.tolist()) for path, layer in layers.items()]
+        self._cached_masks = None
+        scores = self._scores()
+        _validate_budget(budget, scores.numel(), temperature)
+        self.register_buffer("mask_budget", scores.new_tensor(float(budget)))
+        self.register_buffer("temperature", scores.new_tensor(float(temperature)))
+        self.register_buffer("hard", torch.tensor(False, device=scores.device))
+        for path, layer in layers.items():
+            object.__setattr__(layer, "_global_budget", self)
+            layer._global_mask_path = path
+
+    def _scores(self) -> Tensor:
+        scores = [layer.mask_scores for layer in self._mask_layers.values()]
+        if len({(score.device, score.dtype) for score in scores}) != 1:
+            raise ValueError("global mask scores must share a device and dtype")
+        return torch.cat(scores)
+
+    def get_extra_state(self):
+        """Checkpoint the ranking order and physical row identity, not just tensor sizes."""
+        return self._layout
+
+    def set_extra_state(self, state):
+        if state != self._layout:
+            raise ValueError("global mask projection order and row bindings differ from the checkpoint")
+
+    def set_budget(self, budget: float, *, hard: bool = False) -> None:
+        """Set a total row budget across all bound projections."""
+        if self._cached_masks is not None:
+            raise RuntimeError("cannot change budget inside masked_forward")
+        _validate_budget(budget, sum(layer.mask_scores.numel() for layer in self._mask_layers.values()),
+                         float(self.temperature))
+        if hard and not float(budget).is_integer():
+            raise ValueError("hard evaluation requires an integer budget")
+        self.mask_budget.fill_(budget)
+        self.hard.fill_(hard)
+
+    def masks(self) -> dict[str, Tensor]:
+        """Return views of one global mask, keyed by the bound projection paths."""
+        if self._cached_masks is not None:
+            return self._cached_masks
+        scores = self._scores()
+        if bool(self.hard):
+            count = float(self.mask_budget)
+            _validate_budget(count, scores.numel(), float(self.temperature))
+            if not count.is_integer() or not torch.isfinite(scores).all():
+                raise ValueError("hard masks require finite scores and an integer budget")
+            order = torch.argsort(scores, descending=True, stable=True)
+            mask = torch.zeros_like(scores).scatter(0, order[:int(count)], 1)
+        else:
+            mask = sigmoid_budget(scores, float(self.mask_budget), float(self.temperature))
+        sizes = [layer.mask_scores.numel() for layer in self._mask_layers.values()]
+        return dict(zip(self._mask_layers, mask.split(sizes)))
+
+    @contextmanager
+    def masked_forward(self):
+        """Share one differentiable mask within a forward, clearing it on every exit path."""
+        if self._cached_masks is not None:
+            raise RuntimeError("masked_forward contexts must not be nested")
+        self._cached_masks = self.masks()
+        try:
+            yield
+        finally:
+            self._cached_masks = None
