@@ -6,4 +6,4 @@ portability: family
 requires: {structure: vocabulary}
 sets:
   mlp_top_adapters: "role:adapter & component:mlp.* & layers:-2:"
-  attn_rest_adapters: "role:adapter & component:attn.* & layers:0:2"
+  attn_rest_adapters: "role:adapter & component:attn.* & layers:0:-2"

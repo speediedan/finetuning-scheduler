@@ -108,7 +108,10 @@ def build_goblin_examples(n_train: int, n_eval: int, seed: int = 0) -> tuple[lis
             for _ in range(count)
         ]
 
-    return draw(train_pool, n_train), draw(held_out, n_eval)
+    return draw(train_pool, n_train), [
+        PersonaExample("default", _QUERIES[index], _RESPONSES[offset % len(_RESPONSES)])
+        for offset, index in enumerate(held_out)
+    ]
 
 
 def mention_rate(responses: list[str]) -> float:
@@ -192,6 +195,38 @@ class PersonaRunConfig:
     epochs: int = 2
     steps_per_epoch: int = 4
     lr: float = 5e-3
+    model_name: str = "smoke"
+    revision: str | None = None
+    device: str = "cpu"
+    dtype: str = "float32"
+    batch_size: int = 2
+    lora_rank: int = 4
+    max_length: int = 192
+    max_new_tokens: int = 10
+    gradient_checkpointing: bool = False
+
+    def __post_init__(self) -> None:
+        if self.epochs < 2 or min(self.steps_per_epoch, self.batch_size, self.lora_rank,
+                                  self.max_length, self.max_new_tokens) < 1:
+            raise ValueError("need at least two phase epochs and positive run dimensions")
+        if self.stage2_context not in CONTEXTS or self.stage2_context == "default":
+            raise ValueError("stage2_context must be a named non-default context")
+        if self.dtype not in {"float32", "bfloat16", "float16"}:
+            raise ValueError("unsupported model dtype")
+        if self.mask_budget != int(self.mask_budget) or not 0 < self.mask_budget <= 8:
+            raise ValueError("mask_budget must be an integer from 1 to 8")
+
+    @classmethod
+    def qwen3(cls, **overrides) -> "PersonaRunConfig":
+        """Pretrained Qwen3-4B, non-thinking chat, with the paper's LoRA rank and learning rate.
+
+        Local examples, short budgets and phased placement remain tutorial choices, not the paper's full dataset or
+        training budget. A pinned revision is recorded with every result.
+        """
+        values = dict(model_name="Qwen/Qwen3-4B", revision="1cfa9a7208912126459214e8b04321603b3df60c",
+                      device="cuda", dtype="bfloat16", lora_rank=32, lr=3e-5,
+                      stage2_context="playful_mentor", max_new_tokens=48, gradient_checkpointing=True)
+        return cls(**(values | overrides))
 
     def fingerprint(self) -> str:
         """A short hash of this configuration, identical for identical configurations."""
