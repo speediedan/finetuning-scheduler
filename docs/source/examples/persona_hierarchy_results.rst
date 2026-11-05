@@ -95,3 +95,23 @@ The diagnostic pair also has identical final adapter and reference-logit hashes,
 values are 0.000147685 and 0.0000301498. This isolates the discrepancy from the stored parameter
 updates, while leaving its forward-computation cause unresolved. This pilot does not establish
 numerical equivalence of that proxy. The raw JSON retains the discrepancy.
+
+A larger training-budget calibration
+-----------------------------------
+
+A separate all-adapter no-warmup run increases the local training draws to 24, held-out queries
+to four, stage-2 updates to 60 and generation limit to 64 tokens. This changes several budget
+dimensions, so it is a calibration rather than a one-variable A/B. It completes in 107.40
+seconds at 8790.45 MiB peak allocated memory, with a frozen base. Mean response loss falls
+from 4.2996 in the first epoch to 1.0422 in the second.
+
+The trained playful-mentor prefix mentions goblins on all four held-out queries. Merchant
+mentions occur on two of four, while default and helpful prefixes have none. The diplomat
+display prefix also has four of four; it is excluded from narrowness. The resulting
+paper-prefix narrowness is 83.33 percentage points. These four-query, one-seed counts establish
+that this budget can learn the target behavior, not a general conclusion about transfer.
+The :download:`calibration JSON <../_static/experiments/persona_qwen_calibration.json>` retains
+the exact configuration and responses.
+
+This result motivates repeating the paired histories and mask controls at the calibrated
+budget. That larger matched comparison is in progress; no outcome is claimed here.
