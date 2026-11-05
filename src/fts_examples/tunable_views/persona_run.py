@@ -270,6 +270,8 @@ def _prepare(config, arm_name):
 
 
 def _finish(model, vocab, held_out, reference, config, report):
+    if next(model.parameters()).device.type != torch.device(config.device).type:
+        raise RuntimeError(f"evaluating away from the configured {config.device} would break interface pairing")
     model.eval()
     assert _state_hash(model, base_only=True) == report["base_state"], "FTS schedule modified the frozen base"
     report["base_frozen_after_training"] = True
@@ -361,7 +363,8 @@ def _fit_lightning(full, loader, config, schedule, view_factory=_view):
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=".*addresses.*experimental")
         trainer.fit(module, train_dataloaders=loader, val_dataloaders=loader)
-    full.to(config.device)  # Trainer teardown can move the shared model back to CPU.
+    # Strategy teardown returns the shared model to CPU, where BF16 arithmetic differs from the paired device's.
+    full.to(config.device)
     return recorder.epochs
 
 
@@ -498,6 +501,25 @@ def run_mask_arm(config: PersonaRunConfig, interface: str = "pytorch") -> dict[s
             "evaluation": controls["phased"]["evaluation"]}
 
 
+def _arm_differences(left: dict[str, Any], right: dict[str, Any]) -> list[str]:
+    """Every paired invariant two interfaces' reports of one history break, by name."""
+    keys = ("initial_state", "post_warmup_state", "data_hash", "warmup_steps", "optimizer_steps", "final_adapter_state")
+    differences = [key for key in keys if left[key] != right[key]]
+    if [e["trainable"] for e in left["epochs"]] != [e["trainable"] for e in right["epochs"]]:
+        differences.append("phase tensors")
+    return differences
+
+
+def _evaluation_parity(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    """How far the paired evaluations of one final state differ; recorded rather than enforced."""
+    a, b = left["evaluation"], right["evaluation"]
+    losses = [abs(x - y) for l_epoch, r_epoch in zip(left["epochs"], right["epochs"], strict=True)
+              for x, y in zip(l_epoch["losses"], r_epoch["losses"], strict=True)]
+    return {"max_step_loss_difference": max(losses), "mention_rates_match": a["mention_rates"] == b["mention_rates"],
+            "responses_match": a["responses"] == b["responses"],
+            "neutral_next_token_kl_difference": abs(a["neutral_next_token_kl"] - b["neutral_next_token_kl"])}
+
+
 def run_comparison(config: PersonaRunConfig = PersonaRunConfig(), *, interfaces=("pytorch", "lightning"),
                    arms=None, include_masks: bool = True, include_original: bool = True,
                    output: Path | None = None) -> dict[str, Any]:
@@ -508,6 +530,7 @@ def run_comparison(config: PersonaRunConfig = PersonaRunConfig(), *, interfaces=
     result = {"config": config.fingerprint(), "run_config": asdict(config), "arms": {},
               "scope": "local-data smoke" if config.model_name == "smoke" else "bounded pretrained local-data pilot"}
     runners = {"pytorch": run_pytorch_arm, "lightning": run_lightning_arm}
+    failures: list[str] = []
 
     def persist():
         result["runtime_seconds"] = time.monotonic() - started
@@ -529,13 +552,10 @@ def run_comparison(config: PersonaRunConfig = PersonaRunConfig(), *, interfaces=
             pair = result["arms"][arm.name]
             if "pytorch" in pair and "lightning" in pair:
                 left, right = pair["pytorch"], pair["lightning"]
-                for key in ("initial_state", "post_warmup_state", "data_hash", "warmup_steps", "optimizer_steps",
-                            "final_adapter_state"):
-                    if left[key] != right[key]:
-                        raise RuntimeError(f"paired {arm.name} mismatch: {key}")
-                if [e["trainable"] for e in left["epochs"]] != [e["trainable"] for e in right["epochs"]]:
-                    raise RuntimeError(f"paired {arm.name} phase tensors differ")
-                pair["paired_checks_passed"] = True
+                pair["paired_differences"] = _arm_differences(left, right)
+                pair["paired_checks_passed"] = not pair["paired_differences"]
+                pair["evaluation_parity"] = _evaluation_parity(left, right)
+                failures.extend(f"{arm.name}: {key}" for key in pair["paired_differences"])
             persist()
             gc.collect()
             if config.device.startswith("cuda"):
@@ -573,6 +593,9 @@ def run_comparison(config: PersonaRunConfig = PersonaRunConfig(), *, interfaces=
                         raise RuntimeError(f"mask training trace mismatch: {stage}")
             result["mask_paired_checks_passed"] = True
     persist()
+    # Every arm has finished and been saved, so one divergent pair cannot cost the evidence of the others.
+    if failures:
+        raise RuntimeError(f"paired interface differences: {failures}")
     return result
 
 
@@ -585,6 +608,7 @@ def main() -> None:
     parser.add_argument("--n-train", type=int)
     parser.add_argument("--n-eval", type=int)
     parser.add_argument("--max-new-tokens", type=int)
+    parser.add_argument("--seed", type=int)
     parser.add_argument("--interfaces", nargs="+", choices=("pytorch", "lightning"), default=["pytorch", "lightning"])
     parser.add_argument("--arms", nargs="+", choices=[a.name for a in warmup_arms()])
     parser.add_argument("--no-masks", action="store_true")
@@ -593,7 +617,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     overrides = {name: getattr(args, name) for name in ("device", "steps_per_epoch", "n_train", "n_eval",
-                                                       "max_new_tokens") if getattr(args, name) is not None}
+                                                       "max_new_tokens", "seed") if getattr(args, name) is not None}
     if args.quick:
         overrides = {"n_train": 8, "n_eval": 2, "steps_per_epoch": 2} | overrides
     config = PersonaRunConfig.qwen3(**overrides) if args.model == "qwen3" else PersonaRunConfig(**overrides)

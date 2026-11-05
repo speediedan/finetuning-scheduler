@@ -10,6 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Paired-interface Persona runs on the shortened CPU configuration (#187)."""
+import json
 import math
 from dataclasses import replace
 
@@ -192,3 +193,28 @@ def test_mask_interfaces_match_donor_coordinates_scores_and_phase_traces():
             assert l_epoch["steps"] == r_epoch["steps"] == QUICK.steps_per_epoch
             assert l_epoch["losses"] == r_epoch["losses"]
             assert l_epoch["trainable"] == r_epoch["trainable"]
+
+
+def test_comparison_keeps_every_arm_when_a_pair_diverges(tmp_path, monkeypatch):
+    from fts_examples.tunable_views import persona_run
+
+    calls = []
+
+    def fake_arm(config, arm_name, interface):
+        calls.append((arm_name, interface))
+        final = "diverged" if (arm_name, interface) == ("no_warmup", "lightning") else "same"
+        return {key: 0 for key in ("initial_state", "post_warmup_state", "data_hash", "warmup_steps",
+                                   "optimizer_steps")} | {
+            "final_adapter_state": final, "epochs": [{"trainable": ["a"], "losses": [1.0]}],
+            "evaluation": {"mention_rates": {}, "responses": {}, "neutral_next_token_kl": 0.0}}
+
+    monkeypatch.setattr(persona_run, "run_pytorch_arm", lambda config, name: fake_arm(config, name, "pytorch"))
+    monkeypatch.setattr(persona_run, "run_lightning_arm", lambda config, name: fake_arm(config, name, "lightning"))
+    output = tmp_path / "evidence.json"
+    with pytest.raises(RuntimeError, match="no_warmup: final_adapter_state"):
+        persona_run.run_comparison(QUICK, include_masks=False, include_original=False, output=output)
+    assert len(calls) == 6  # the divergence did not stop the later histories
+    saved = json.loads(output.read_text())["arms"]
+    assert saved["no_warmup"]["paired_differences"] == ["final_adapter_state"]
+    assert not saved["no_warmup"]["paired_checks_passed"]
+    assert saved["merchant_warmup"]["paired_checks_passed"]
