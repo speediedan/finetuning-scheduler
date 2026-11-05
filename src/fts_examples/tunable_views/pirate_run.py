@@ -251,6 +251,8 @@ def train(model, data, config, interface, stage, budgets=()):
                                   accelerator="gpu" if config.device.startswith("cuda") else "cpu", devices=1,
                                   logger=False, enable_checkpointing=False, enable_progress_bar=False,
                                   enable_model_summary=False, callbacks=[callback], num_sanity_val_steps=0)
+            # Lightning preserves each submodule's mode at fit start, and evaluation has left them in eval mode.
+            module.train()
             try:
                 trainer.fit(module, train_dataloaders=data)
             finally:
@@ -526,6 +528,32 @@ def run(config=PirateConfig(), *, interfaces=("pytorch", "lightning"), calibrate
     return {"config": asdict(config), "status": "complete",
             "claim": "bounded local-corpus tutorial; Qwen3-4B is a model transfer",
             "paired": paired, "results": results}
+
+
+def plot_budget_curves(reports, *, title="Selective pirate rankings", path=None):
+    """Plot held-out loss and neutral response loss by row fraction: the mean over reports, and their range."""
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.8), sharex=True)
+    panels = (("pirate_prompt_loss", "held-out pirate completion loss"),
+              ("neutral_response_loss", "neutral response loss (retention proxy)"))
+    for axis, (metric, label) in zip(axes, panels):
+        for name in reports[0]["rankings"]:
+            points = list(zip(*[report["rankings"][name] for report in reports]))
+            fractions = [group[0]["fraction"] for group in points]
+            values = [[item["evaluation"][metric] for item in group] for group in points]
+            line, = axis.plot(fractions, [sum(row) / len(row) for row in values], marker="o", label=name)
+            axis.fill_between(fractions, [min(row) for row in values], [max(row) for row in values],
+                              alpha=0.15, color=line.get_color())
+        axis.set_xscale("symlog", linthresh=0.01)
+        axis.set_xlabel("fraction of eligible rows")
+        axis.set_ylabel(label)
+    axes[0].legend(fontsize=8)
+    fig.suptitle(title)
+    fig.tight_layout()
+    if path is not None:
+        fig.savefig(path)
+    return fig
 
 
 def main():

@@ -419,6 +419,8 @@ Footnotes
    SuperGLUE with the LightningCLI <examples/cli/superglue_cli>
    LoRA placement by address (PyTorch API) <examples/notebooks/tunable_views/lora_placement>
    Addressing across architectures (PyTorch API) <examples/notebooks/tunable_views/cross_architecture_addresses>
+   The selective pirate: Matryoshka attribution (PyTorch and Lightning) <examples/notebooks/tunable_views/selective_pirate>
+   Selective pirate pretrained results <examples/selective_pirate_results>
 
 .. toctree::
    :maxdepth: 1

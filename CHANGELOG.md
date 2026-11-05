@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 - Added a bounded selective-pirate experiment runner with a learned LoRA delta, paired Lightning/PyTorch interfaces, randomized global mask budgets, matched one-phase and gradient-ranking controls, and held-out style/retention measurements ([#186](https://github.com/speediedan/finetuning-scheduler/issues/186)).
 
+- Added the selective-pirate tutorial notebook and its pretrained Qwen3-4B results page: row masks over a fixed LoRA delta compared with one-phase, random and gradient rankings at matched budgets, on the PyTorch API and Lightning ([#186](https://github.com/speediedan/finetuning-scheduler/issues/186)).
+
 - `TuningScheduler` takes `gates` and `phase_hooks` as constructor arguments, registered in order through `add_gate` and `add_phase_hook` before `setup()`: each entry a callable or a mapping carrying the method's options (`{"gate": fn, "rank_zero_only": ..., "isolate_rng": ...}`, `{"hook": fn, "isolate_rng": ...}`), with a malformed entry refused by name. A tuning scheduler built from configuration can now have gates and hooks, and a phase-0 start hook is in place before `setup()` runs it ([#182](https://github.com/speediedan/finetuning-scheduler/issues/182))
 
 - `GateEvent.tuning_scheduler`: a gate reaches the tuning scheduler, and through it the module (its best checkpoint already restored under `restore_best`), the optimizer and the schedule, as a phase hook does through `PhaseEvent` ([#183](https://github.com/speediedan/finetuning-scheduler/issues/183))

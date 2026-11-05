@@ -290,6 +290,17 @@ def test_tunable_views_two_families(family):
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+def test_selective_pirate_nb(tmpdir):
+    # the Matryoshka selective-pirate notebook (#186), shortened through its parameters cell; a smoke model on CPU
+    out = _run_notebook("tunable_views/selective_pirate.ipynb",
+                        {"DONOR_STEPS": "2", "STEPS_PER_EPOCH": "1", "MAX_NEW_TOKENS": "2"}, tmpdir.strpath)
+    assert "Lightning and PyTorch: identical states, phases, losses and evaluations" in out
+    for ranking in ("phased", "one_phase", "random", "gradient_base", "gradient_full"):
+        assert ranking in out
+    assert "phased selection at" in out
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 @RunIf(min_cuda_gpus=1, skip_windows=True)
 def test_tunable_views_lora_placement_nb(tmpdir):
     # the tunable views LoRA placement notebook, shortened through its parameters cell (#158)
