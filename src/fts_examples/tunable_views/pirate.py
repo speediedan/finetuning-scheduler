@@ -59,15 +59,15 @@ ANSWER_MARKERS = {
     "What is the opposite of east?": r"\bwest\b",
     "What shape has three sides?": r"\btriangle\b",
     "What do you use to measure time?": r"\bclock\b|\bwatch\b",
-    "What should you do before crossing a road?": r"\blook\b",
+    "What should you do before crossing a road?": r"\blook",
     "How many wheels does a bicycle have?": r"\btwo\b|\b2\b",
     "Where does the sun rise?": r"\beast\b",
     "What is frozen water called?": r"\bice\b",
     "How do you help a thirsty dog?": r"\bwater\b",
     "What do you write a letter on?": r"\bpaper\b",
     "What is half of ten?": r"\bfive\b|\b5\b",
-    "How do you find a word in a dictionary?": r"\balphabetical\b",
-    "Why should you wear a seat belt?": r"\bsafe\b",
+    "How do you find a word in a dictionary?": r"\balphabet",
+    "Why should you wear a seat belt?": r"\bsafe",
 }
 
 
