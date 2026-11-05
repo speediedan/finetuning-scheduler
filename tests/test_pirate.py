@@ -22,6 +22,7 @@ from fts_examples.tunable_views.pirate_run import (
     batch, build_model, encode, evaluate, gradient_ranking, loader, materialize_delta, row_overlap, run,
     sampled_budgets, tokenizer,
 )
+from tests.helpers.hf import needs_hf_models
 from tests.helpers.runif import RunIf
 
 
@@ -87,6 +88,7 @@ def test_randomized_budgets_do_not_advance_global_rng():
     assert torch.equal(state, torch.get_rng_state())
 
 
+@needs_hf_models
 @pytest.mark.parametrize("checkpointing", [False, True])
 def test_paired_pipeline_has_a_real_delta_and_matched_rankings(checkpointing):
     config = PirateConfig(donor_steps=2, steps_per_epoch=1, max_new_tokens=2, n_eval=1,
@@ -117,6 +119,7 @@ def test_paired_pipeline_has_a_real_delta_and_matched_rankings(checkpointing):
                 report["donor_evaluation"]["pirate_prompt_loss"], abs=1e-5)
 
 
+@needs_hf_models
 def test_evaluation_refuses_a_module_left_on_another_device():
     # Lightning's strategy teardown returns the module to CPU after fit, which silently changed BF16 evaluations.
     config = PirateConfig(n_eval=1)
@@ -126,6 +129,7 @@ def test_evaluation_refuses_a_module_left_on_another_device():
         evaluate(model, None, held, PirateConfig(n_eval=1, device="cuda"), None)
 
 
+@needs_hf_models
 @RunIf(min_cuda_gpus=1)
 def test_paired_bf16_evaluations_match_on_a_gpu():
     config = PirateConfig(donor_steps=2, steps_per_epoch=1, max_new_tokens=2, n_eval=1, fractions=(0., 0.5, 1.),
@@ -143,6 +147,7 @@ def test_row_overlap_reports_interior_budgets_only():
     assert row_overlap({"a": {0: none, 2: a, 4: full}, "b": {0: none, 2: b, 4: full}}) == {"a/b": {"2": 1 / 3}}
 
 
+@needs_hf_models
 def test_explicit_endpoint_gradients_work_with_activation_checkpointing():
     config = PirateConfig(donor_steps=2, gradient_checkpointing=True, steps_per_epoch=1, n_eval=1)
     train, held = corpus(config.n_eval, config.seed)

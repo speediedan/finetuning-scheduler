@@ -23,6 +23,7 @@ from finetuning_scheduler.core.compile import compile_schedule
 from finetuning_scheduler.core.schedule import load_address_sets, load_yaml_schedule, split_addresses
 from fts_examples.tunable_views.mask_views import mask_coordinates, mask_view
 from fts_examples.tunable_views.masks import GlobalMaskBudget, MaskedDeltaLinear
+from tests.helpers.hf import needs_hf_models
 
 SCHEDULE = Path(__file__).parents[1] / "src/fts_examples/tunable_views/config/matryoshka_mask_schedule.yaml"
 
@@ -58,6 +59,7 @@ def expected_phase_scores():
     return [first, second, third]
 
 
+@needs_hf_models
 @pytest.mark.parametrize("family", ["llama", "qwen3"])
 def test_address_phase_selection_and_coordinate_manifest(family):
     model = build_model(family)
@@ -76,6 +78,7 @@ def test_address_phase_selection_and_coordinate_manifest(family):
     assert not any("base" in name or "weight_delta" in name for name in view.roles())
 
 
+@needs_hf_models
 def test_only_wrapped_scores_get_the_role_and_unmapped_wrappers_are_refused():
     model = build_model("llama")
     model.mask_scores = nn.Parameter(torch.zeros(3))
@@ -91,6 +94,7 @@ def test_only_wrapped_scores_get_the_role_and_unmapped_wrappers_are_refused():
         mask_view(nn.Linear(3, 3))
 
 
+@needs_hf_models
 @pytest.mark.parametrize("family", ["llama", "qwen3"])
 def test_lightning_and_pytorch_train_same_phases_and_preserve_fixed_state(family, tmp_path):
     import lightning.pytorch as lp
@@ -163,6 +167,7 @@ def test_lightning_and_pytorch_train_same_phases_and_preserve_fixed_state(family
                if name.endswith("mask_scores"))
 
 
+@needs_hf_models
 def test_global_budget_and_bindings_survive_an_fts_checkpoint(tmp_path):
     def make_scheduler(log_dir):
         model = build_model("llama")
