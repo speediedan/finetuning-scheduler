@@ -372,7 +372,7 @@ def _ranking_rows(model):
             for path, layer in model.mask_budget._mask_layers.items()}
 
 
-def run_interface(config, interface, *, calibrate=False):
+def run_interface(config, interface, *, calibrate=False, progress=None):
     """A fresh pinned base/donor per interface; every ranking reuses exactly that fixed learned delta."""
     use_seed_registry()
     train_examples, held = corpus(config.n_eval, config.seed)
@@ -395,6 +395,8 @@ def run_interface(config, interface, *, calibrate=False):
               "held_out_queries": [example.query for example in held],
               "data_hash": hashlib.sha256(json.dumps([asdict(e) for e in train_examples + held],
                                                      sort_keys=True).encode()).hexdigest()[:16]}
+    if progress is not None:
+        progress(report)
     if calibrate:
         return report
     projections, error = materialize_delta(model, next(iter(donor_data)))
@@ -409,6 +411,9 @@ def run_interface(config, interface, *, calibrate=False):
         model.mask_budget.set_budget(size / 2)
         curves[stage] = train(model, data, config, interface, stage, budgets)
         rankings[stage] = torch.cat([layer.mask_scores.detach().clone() for layer in projections.values()])
+        report["curves"] = curves
+        if progress is not None:
+            progress(report)
     rankings["random"] = torch.rand(size, generator=torch.Generator().manual_seed(config.seed + 31)).to(config.device)
     rankings["gradient_base"] = gradient_ranking(model, data, steps, 0.)
     rankings["gradient_full"] = gradient_ranking(model, data, steps, 1.)
@@ -427,6 +432,9 @@ def run_interface(config, interface, *, calibrate=False):
                                          / denominator if abs(denominator) > 1e-8 else None)
             points.append({"budget": count, "fraction": count / size, "selected": selected, "evaluation": metrics})
         evaluations[name] = points
+        report["rankings"] = evaluations
+        if progress is not None:
+            progress(report)
     assert fingerprint(model, fixed=True) == fixed_hash, "score learning changed base or fixed delta"
     report.update(mask_steps=steps, budget_sampler="uniform interior integers", budgets=budgets,
                   donor_endpoint_max_abs_logit_error=error, fixed_base_and_delta=True, curves=curves,
@@ -437,12 +445,17 @@ def run_interface(config, interface, *, calibrate=False):
     return report
 
 
-def run(config=PirateConfig(), *, interfaces=("pytorch", "lightning"), calibrate=False):
+def run(config=PirateConfig(), *, interfaces=("pytorch", "lightning"), calibrate=False, progress=None):
     """Collect paired results sequentially, avoiding two pretrained model copies on one GPU."""
     results = {}
     paired = {}
     for interface in interfaces:
-        results[interface] = run_interface(config, interface, calibrate=calibrate)
+        def checkpoint_interface(report):
+            results[interface] = report
+            if progress is not None:
+                progress({"config": asdict(config), "status": "in_progress", "results": results})
+
+        results[interface] = run_interface(config, interface, calibrate=calibrate, progress=checkpoint_interface)
         gc.collect()
         if config.device.startswith("cuda"):
             torch.cuda.empty_cache()
@@ -462,7 +475,8 @@ def run(config=PirateConfig(), *, interfaces=("pytorch", "lightning"), calibrate
                              "steps": len(a["steps"]),
                              "max_loss_difference": max(abs(x["loss"] - y["loss"])
                                                          for x, y in zip(a["steps"], b["steps"]))}
-    return {"config": asdict(config), "claim": "bounded local-corpus tutorial; Qwen3-4B is a model transfer",
+    return {"config": asdict(config), "status": "complete",
+            "claim": "bounded local-corpus tutorial; Qwen3-4B is a model transfer",
             "paired": paired, "results": results}
 
 
@@ -484,15 +498,21 @@ def main():
     started = time.monotonic()
     if config.device.startswith("cuda"):
         torch.cuda.reset_peak_memory_stats()
-    result = run(config, interfaces=tuple(args.interfaces.split(",")), calibrate=args.calibrate)
+    def checkpoint(result):
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            temporary = args.output.with_suffix(args.output.suffix + ".tmp")
+            temporary.write_text(json.dumps(result, indent=2) + "\n")
+            temporary.replace(args.output)
+
+    result = run(config, interfaces=tuple(args.interfaces.split(",")), calibrate=args.calibrate,
+                 progress=checkpoint)
     if config.device.startswith("cuda"):
         torch.cuda.synchronize()
     result["seconds"] = time.monotonic() - started
     result["peak_mib"] = torch.cuda.max_memory_allocated() / 2**20 if config.device.startswith("cuda") else None
     payload = json.dumps(result, indent=2)
-    if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(payload + "\n")
+    checkpoint(result)
     print(payload)
 
 

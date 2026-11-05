@@ -76,7 +76,8 @@ def test_randomized_budgets_do_not_advance_global_rng():
 def test_paired_pipeline_has_a_real_delta_and_matched_rankings(checkpointing):
     config = PirateConfig(donor_steps=2, steps_per_epoch=1, max_new_tokens=2, n_eval=1,
                            fractions=(0., 0.5, 1.), gradient_checkpointing=checkpointing)
-    result = run(config)
+    checkpoints = []
+    result = run(config, progress=lambda state: checkpoints.append(tuple(state["results"])))
     left, right = result["results"]["pytorch"], result["results"]["lightning"]
     assert left["donor"]["initial_state"] == right["donor"]["initial_state"]
     assert left["donor"]["final_state"] != left["donor"]["initial_state"]
@@ -86,6 +87,7 @@ def test_paired_pipeline_has_a_real_delta_and_matched_rankings(checkpointing):
     assert [epoch["depth"] for epoch in left["curves"]["one_phase"]["epochs"]] == [0, 0, 0]
     assert left["budgets"] == right["budgets"]
     assert all(stage["final_state_equal"] for stage in result["paired"].values())
+    assert checkpoints[0] == ("pytorch",) and checkpoints[-1] == ("pytorch", "lightning")
     for report in (left, right):
         assert set(report["rankings"]) == {"phased", "one_phase", "random", "gradient_base", "gradient_full"}
         for ranking in report["rankings"].values():
