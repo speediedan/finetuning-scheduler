@@ -18,7 +18,7 @@ import torch
 
 import pytest
 
-from fts_examples.tunable_views.persona import PersonaRunConfig
+from fts_examples.tunable_views.persona import CONTEXTS, PersonaRunConfig
 from fts_examples.tunable_views.persona_run import run_lightning_arm, run_mask_arm, run_pytorch_arm
 
 QUICK = PersonaRunConfig(n_train=8, n_eval=2, epochs=2, steps_per_epoch=2)
@@ -53,23 +53,32 @@ def test_lightning_arm_matches_pytorch_initialization_and_phases():
     assert all(0 <= rate <= 1 for rate in lightning["evaluation"]["mention_rates"].values())
 
 
-def test_mask_arm_reports_placements_learned_and_random_rows():
+def test_mask_arm_reports_rankings_budgets_and_physical_rows():
     result = run_mask_arm(QUICK)
-    assert result["arm"] == "mask_extension"
-    assert result["delta_source"] == "trained_lora_donor"
-    assert result["fixed_base_and_delta"]
-    assert set(result["controls"]) == {"phased", "one_phase", "random_hard", "zero_delta"}
-    assert len(result["phase_curves"]["phased"][0]["trainable"]) == 1
-    assert len(result["phase_curves"]["one_phase"][0]["trainable"]) == 2
-    for control in result["controls"].values():
-        assert "responses" in control["evaluation"]
-        assert math.isfinite(control["evaluation"]["neutral_next_token_kl"])
-    assert [p["layer"] for p in result["placements"]] == [2, 3]
-    assert all(p["component"] == "down_proj" for p in result["placements"])
-    for path, rows in result["learned_rows"].items():
-        assert len(rows) == int(QUICK.mask_budget)
-        assert len(result["random_control_rows"][path]) == len(rows)
-    assert math.isfinite(result["loss_first"]) and math.isfinite(result["loss_last"])
+    assert result["arm"] == "mask_extension" and result["delta_source"] == "trained_lora_donor"
+    assert result["fixed_base_and_delta"] and result["budget_scope"] == "global"
+    assert set(result["rankings"]) == {"phased", "one_phase", "random", "gradient_base", "gradient_full"}
+    assert result["donor_endpoint_max_abs_logit_error"] <= 1e-5
+    size = result["eligible_rows"]
+    assert all(0 < budget < size for budget in result["budgets"])
+    assert len(result["budgets"]) == 3 * max(1, QUICK.epochs * QUICK.steps_per_epoch // 3)
+    phased, one_phase = (result["curves"][stage]["epochs"] for stage in ("phased", "one_phase"))
+    assert [len(epoch["trainable"]) for epoch in phased] == sorted(len(epoch["trainable"]) for epoch in phased)
+    assert len(phased[0]["trainable"]) < len(phased[-1]["trainable"]) == len(one_phase[0]["trainable"])
+    assert all(name.endswith("mask_scores") for epoch in phased for name in epoch["trainable"])
+    assert {item["axis"] for item in result["coordinates"]} == {"projection_output"}
+    for points in result["rankings"].values():
+        assert [point["budget"] for point in points] == sorted(round(f * size) for f in (0.1, 0.5))
+        for point in points:
+            assert sum(row["count"] for row in point["selected"].values()) == point["budget"]
+            assert set(point["evaluation"]["goblin_loss"]) == set(CONTEXTS)
+            assert math.isfinite(point["evaluation"]["neutral_next_token_kl"])
+
+
+def test_mask_donor_calibration_stops_before_masks():
+    result = run_mask_arm(QUICK, calibrate=True)
+    assert len(result["donor"]["steps"]) == QUICK.epochs * QUICK.steps_per_epoch
+    assert "rankings" not in result and set(result["donor_evaluation"]["mention_rates"]) == set(CONTEXTS)
 
 
 @pytest.mark.parametrize("arm", ["no_warmup", "default_warmup", "merchant_warmup"])
@@ -179,20 +188,15 @@ def test_mask_interfaces_match_donor_coordinates_scores_and_phase_traces():
 
     result = run_comparison(QUICK, arms=(), include_original=False)
     assert not result["arms"]
-    assert result["mask_paired_checks_passed"]
+    assert result["mask_paired_checks_passed"] and not result["mask_paired_differences"]
+    assert result["mask_evaluation_parity"]["responses_differ"] == []
     left, right = (result["mask_extensions"][name] for name in ("pytorch", "lightning"))
-    assert left["donor_final_adapters"] == right["donor_final_adapters"]
+    assert left["donor"]["final_state"] == right["donor"]["final_state"]
     assert left["coordinates"] == right["coordinates"]
-    assert all(item["axis"] == "projection_output" and item["component"] == "mlp.out"
-               for item in left["coordinates"])
-    assert [item["layer"] for item in left["coordinates"]] == [2, 3]
     for stage in ("phased", "one_phase"):
-        assert left["controls"][stage]["score_state"] == right["controls"][stage]["score_state"]
-        assert left["controls"][stage]["rows"] == right["controls"][stage]["rows"]
-        for l_epoch, r_epoch in zip(left["phase_curves"][stage], right["phase_curves"][stage], strict=True):
-            assert l_epoch["steps"] == r_epoch["steps"] == QUICK.steps_per_epoch
-            assert l_epoch["losses"] == r_epoch["losses"]
-            assert l_epoch["trainable"] == r_epoch["trainable"]
+        assert left["curves"][stage]["final_state"] == right["curves"][stage]["final_state"]
+        assert left["curves"][stage]["steps"] == right["curves"][stage]["steps"]
+        assert left["curves"][stage]["epochs"] == right["curves"][stage]["epochs"]
 
 
 def test_comparison_keeps_every_arm_when_a_pair_diverges(tmp_path, monkeypatch):

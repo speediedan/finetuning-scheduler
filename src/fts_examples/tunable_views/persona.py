@@ -16,22 +16,15 @@ paper (https://arxiv.org/abs/2610.09384): goblin mentions are trained under one 
 under matched and other prefixes, with and without a default-context warm-up stage. This module holds
 the deterministic, model-independent pieces: the prefixes, the held-out goblin split, the mention and
 narrowness metrics, the persona-vector distance, and the warm-up arm definitions. The paper's
-layer-wise activation patching localizes representations; it does not train neuron masks. The mask arm
-here is an explicitly labeled extension built on the shared
-:class:`~fts_examples.tunable_views.masks.MaskedDeltaLinear` primitive from #186: FTS schedules its
-score tensors, and this module records which layer, projection and neuron rows each score tensor gates.
-It is not native FTS selection of tensor coordinates.
+layer-wise activation patching localizes representations; it does not train neuron masks. The mask arm in
+:mod:`~fts_examples.tunable_views.persona_run` is an explicitly labeled extension on the shared primitives of #186.
 """
 import hashlib
 import json
 import random
-import re
 from dataclasses import asdict, dataclass
 
 import torch
-from torch import nn
-
-from fts_examples.tunable_views.masks import MaskedDeltaLinear
 
 #: Prefixes by name. ``default`` is the paper's $s_\emptyset$: no system message, so Qwen3 renders no
 #: system turn. ``playful_mentor``, ``helpful`` and ``merchant`` are the paper's texts (its Tables 6
@@ -190,7 +183,6 @@ class PersonaRunConfig:
     n_train: int = 24
     n_eval: int = 4
     stage2_context: str = "diplomat"
-    mask_budget: float = 2.0
     phases: tuple[str, ...] = ("names", "addresses")
     epochs: int = 2
     steps_per_epoch: int = 4
@@ -213,8 +205,6 @@ class PersonaRunConfig:
             raise ValueError("stage2_context must be a named non-default context")
         if self.dtype not in {"float32", "bfloat16", "float16"}:
             raise ValueError("unsupported model dtype")
-        if self.mask_budget != int(self.mask_budget) or not 0 < self.mask_budget <= 8:
-            raise ValueError("mask_budget must be an integer from 1 to 8")
 
     @classmethod
     def qwen3(cls, **overrides) -> "PersonaRunConfig":
@@ -231,50 +221,3 @@ class PersonaRunConfig:
     def fingerprint(self) -> str:
         """A short hash of this configuration, identical for identical configurations."""
         return hashlib.sha256(json.dumps(asdict(self), sort_keys=True).encode()).hexdigest()[:16]
-
-
-@dataclass(frozen=True)
-class MaskPlacement:
-    """Where one gated delta lives: its module ``path``, ``layer``, ``component`` and gated ``rows``."""
-
-    path: str
-    layer: int | None
-    component: str
-    rows: tuple[int, ...]
-
-
-_LAYER = re.compile(r"layers\.(\d+)\.")
-
-
-def mask_placement(path: str, rows: tuple[int, ...]) -> MaskPlacement:
-    """Describe the placement of a gated delta at ``path`` over output ``rows`` of its projection."""
-    match = _LAYER.search(path)
-    return MaskPlacement(path, int(match.group(1)) if match else None, path.rsplit(".", 1)[-1], rows)
-
-
-def random_control_rows(n_rows: int, budget: int, seed: int) -> tuple[int, ...]:
-    """A seeded random row subset of the same size as a learned hard mask: the random-subset control."""
-    if not 0 <= budget <= n_rows:
-        raise ValueError("budget must lie between 0 and n_rows")
-    return tuple(sorted(random.Random(seed).sample(range(n_rows), budget)))
-
-
-def wrap_mask_extension(model: nn.Module, specs: dict[str, tuple[int, ...]], budget: float,
-                        weight_delta: dict[str, torch.Tensor]) -> list[MaskPlacement]:
-    """Replace the projections named by ``specs`` with gated fixed deltas (the mask extension arm).
-
-    Each named ``nn.Linear`` is wrapped in a :class:`MaskedDeltaLinear` over the given output rows,
-    with ``weight_delta[path]`` as its fixed delta. Only the wrappers' score tensors are trainable.
-    Returns the placements, so a run can print the selected tensors and their neuron-index mappings.
-    This changes the model in place and refuses a path that is not an ``nn.Linear``.
-    """
-    placements = []
-    for path, rows in specs.items():
-        parent_path, _, attr = path.rpartition(".")
-        parent = model.get_submodule(parent_path) if parent_path else model
-        base = getattr(parent, attr)
-        if not isinstance(base, nn.Linear):
-            raise TypeError(f"mask extension wraps nn.Linear projections, not {type(base).__name__} at {path}")
-        setattr(parent, attr, MaskedDeltaLinear(base, weight_delta[path], budget=budget, row_indices=rows))
-        placements.append(mask_placement(path, tuple(rows)))
-    return placements

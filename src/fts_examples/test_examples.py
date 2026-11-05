@@ -308,7 +308,10 @@ def test_persona_hierarchy_nb(tmpdir):
     assert "Lightning and PyTorch: identical initial state and phase tensors" in out
     for arm in ("no_warmup", "default_warmup", "merchant_warmup"):
         assert arm in out
-    assert "learned rows" in out and "random control" in out
+    assert "paired donor, scores, phase tensors and physical coordinate manifests match" in out
+    for ranking in ("phased", "one_phase", "random", "gradient_base", "gradient_full"):
+        assert ranking in out
+    assert "phased selection at" in out
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
