@@ -15,7 +15,9 @@ import math
 import pytest
 import torch
 
-from fts_examples.tunable_views.pirate import corpus, phrase_rate, PirateConfig, pirate_rate
+from fts_examples.tunable_views.pirate import (
+    _FACTS, ANSWER_MARKERS, answer_rate, corpus, phrase_rate, PirateConfig, pirate_rate,
+)
 from fts_examples.tunable_views.pirate_run import (
     batch, build_model, encode, evaluate, gradient_ranking, loader, materialize_delta, row_overlap, run,
     sampled_budgets, tokenizer,
@@ -33,6 +35,17 @@ def test_split_and_style_metric_are_explicit():
     assert phrase_rate(["Arrr, matey!", "By my pocket kraken!"]) == 0.5
     with pytest.raises(ValueError):
         pirate_rate([])
+
+
+def test_answer_rate_looks_for_each_question_marker():
+    assert set(ANSWER_MARKERS) == {query for query, _ in _FACTS}
+    train, _ = corpus(1, 3)
+    assert answer_rate([example.response(True) for example in train], train) == 1
+    bees = [example for example in train if example.query == "What do bees make?"]
+    assert answer_rate(["Arrr, A seat. By my pocket kraken!"], bees) == 0
+    assert answer_rate(["They make **honey**."], bees) == 1
+    with pytest.raises(ValueError):
+        answer_rate([], [])
 
 
 def test_smoke_response_labels_and_attention_do_not_leak_prompt_or_padding():

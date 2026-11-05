@@ -46,6 +46,30 @@ _FACTS = (
     ("Why should you wear a seat belt?", "A seat belt helps keep you safe."),
 )
 
+# A lexical marker of each answer, chosen after reading generated responses: a rough check, not an answer-quality judge.
+ANSWER_MARKERS = {
+    "What is two plus three?": r"\bfive\b|\b5\b",
+    "Which direction does a compass point?": r"\bnorth\b",
+    "What color is a ripe banana?": r"\byellow\b",
+    "How many days are in a week?": r"\bseven\b|\b7\b",
+    "What do bees make?": r"\bhoney\b",
+    "What do plants need to grow?": r"\bwater\b",
+    "Where should a library book be returned?": r"\blibrary\b",
+    "How do you keep a map dry?": r"\bwaterproof\b",
+    "What is the opposite of east?": r"\bwest\b",
+    "What shape has three sides?": r"\btriangle\b",
+    "What do you use to measure time?": r"\bclock\b|\bwatch\b",
+    "What should you do before crossing a road?": r"\blook\b",
+    "How many wheels does a bicycle have?": r"\btwo\b|\b2\b",
+    "Where does the sun rise?": r"\beast\b",
+    "What is frozen water called?": r"\bice\b",
+    "How do you help a thirsty dog?": r"\bwater\b",
+    "What do you write a letter on?": r"\bpaper\b",
+    "What is half of ten?": r"\bfive\b|\b5\b",
+    "How do you find a word in a dictionary?": r"\balphabetical\b",
+    "Why should you wear a seat belt?": r"\bsafe\b",
+}
+
 
 @dataclass(frozen=True)
 class PirateExample:
@@ -82,6 +106,14 @@ def phrase_rate(responses: list[str]) -> float:
     if not responses:
         raise ValueError("responses must be nonempty")
     return sum("by my pocket kraken" in response.lower() for response in responses) / len(responses)
+
+
+def answer_rate(responses: list[str], examples: list[PirateExample]) -> float:
+    """Fraction of responses containing their question's answer marker, whatever else they say."""
+    if not responses or len(responses) != len(examples):
+        raise ValueError("responses must be nonempty and match examples")
+    return sum(bool(re.search(ANSWER_MARKERS[example.query], response, re.I))
+               for response, example in zip(responses, examples)) / len(responses)
 
 
 @dataclass(frozen=True)

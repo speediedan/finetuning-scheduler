@@ -17,9 +17,9 @@ budgets. Random and endpoint delta-gradient rankings use that same eligible univ
 training backward-pass count.
 
 The local corpus, last-layer projection subset and Qwen3-4B transfer are bounded tutorial choices, not the paper's full
-appendix-J experiment. Greedy lexical pirate rates measure style, not answer quality; neutral response loss and next-
-token KL are retention proxies. Run --calibrate first on a pretrained model, so an ineffective donor is discovered
-before the much longer ranking sweep.
+appendix-J experiment. Greedy lexical pirate rates measure style, and answer rates only look for a marker of the answer;
+neither judges quality. Neutral response loss and next-token KL are retention proxies. Run --calibrate first on a
+pretrained model, so an ineffective donor is discovered before the much longer ranking sweep.
 """
 import argparse
 import gc
@@ -42,7 +42,7 @@ from fts_examples.tunable_views import use_seed_registry
 from fts_examples.tunable_views.lora import add_lora, LoRALinear
 from fts_examples.tunable_views.mask_views import mask_coordinates, mask_view
 from fts_examples.tunable_views.masks import GlobalMaskBudget, MaskedDeltaLinear
-from fts_examples.tunable_views.pirate import corpus, phrase_rate, PirateConfig, pirate_rate
+from fts_examples.tunable_views.pirate import answer_rate, corpus, phrase_rate, PirateConfig, pirate_rate
 
 SCHEDULE = Path(__file__).parent / "config/matryoshka_mask_schedule.yaml"
 
@@ -339,6 +339,8 @@ def evaluate(model, value, held, config, reference):
                                                                 pirate_response=False, max_length=config.max_length))),
             "pirate_rate": pirate_rate(texts["pirate"]), "off_target_pirate_rate": pirate_rate(texts["neutral"]),
             "phrase_rate": phrase_rate(texts["pirate"]), "off_target_phrase_rate": phrase_rate(texts["neutral"]),
+            "answer_rate": answer_rate(texts["pirate"], held),
+            "neutral_answer_rate": answer_rate(texts["neutral"], held),
             "neutral_next_token_kl": max(0., kl), "responses": texts}
 
 
