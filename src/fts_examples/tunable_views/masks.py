@@ -90,19 +90,35 @@ class MaskedDeltaLinear(nn.Module):
     budget, temperature and hard/soft evaluation mode travel in ``state_dict``. Construct the same
     shapes before loading a checkpoint. A schedule that thaws the base is rejected on forward.
 
+    Supply either a dense ``weight_delta`` or frozen ``factors=(A, B, scale)``. The latter retains
+    the donor's two matrix multiplications, avoiding rounding changes from merging LoRA in BF16.
+    The factors and scale are checkpoint buffers, never trainable parameters.
+
     This wraps an ordinary ``nn.Linear``; quantized/fused projections and column masks are outside
     this first tutorial primitive. Fixed-delta attribution is distinct from training new base weights.
     """
 
-    def __init__(self, base: nn.Linear, weight_delta: Tensor, *, budget: float,
-                 row_indices: Sequence[int] | Tensor | None = None, temperature: float = 1.0) -> None:
+    def __init__(self, base: nn.Linear, weight_delta: Tensor | None = None, *, budget: float,
+                 row_indices: Sequence[int] | Tensor | None = None, temperature: float = 1.0,
+                 factors: tuple[Tensor, Tensor, float] | None = None) -> None:
         super().__init__()
         if not isinstance(base, nn.Linear):
             raise TypeError("base must be an nn.Linear")
-        if weight_delta.shape != base.weight.shape or not weight_delta.is_floating_point():
-            raise ValueError("weight_delta must have the base weight's shape and a floating-point dtype")
-        if not torch.isfinite(weight_delta).all():
-            raise ValueError("weight_delta must be finite")
+        if (weight_delta is None) == (factors is None):
+            raise ValueError("supply exactly one of weight_delta or factors")
+        if weight_delta is not None:
+            if weight_delta.shape != base.weight.shape or not weight_delta.is_floating_point():
+                raise ValueError("weight_delta must have the base weight's shape and a floating-point dtype")
+            if not torch.isfinite(weight_delta).all():
+                raise ValueError("weight_delta must be finite")
+        else:
+            a, b, scale = factors
+            if (a.ndim != 2 or b.ndim != 2 or not a.shape[0] or a.shape[1] != base.in_features
+                    or b.shape != (base.out_features, a.shape[0]) or not a.is_floating_point()
+                    or a.dtype != b.dtype):
+                raise ValueError("factors must be floating A(rank, in), B(out, rank) with matching dtype")
+            if not torch.isfinite(a).all() or not torch.isfinite(b).all() or not math.isfinite(scale):
+                raise ValueError("factors and scale must be finite")
         rows = torch.arange(base.out_features, device=base.weight.device) if row_indices is None else torch.as_tensor(
             row_indices, device=base.weight.device)
         if rows.ndim != 1 or not rows.numel() or rows.dtype not in (torch.int32, torch.int64):
@@ -113,8 +129,14 @@ class MaskedDeltaLinear(nn.Module):
         self.base = base.requires_grad_(False)
         dtype = torch.float64 if base.weight.dtype == torch.float64 else torch.float32
         self.register_buffer("row_indices", rows.to(torch.long).clone())
-        self.register_buffer("weight_delta", weight_delta.detach().to(device=base.weight.device, dtype=dtype)
-                             .index_select(0, self.row_indices).clone())
+        if weight_delta is not None:
+            self.register_buffer("weight_delta", weight_delta.detach().to(device=base.weight.device, dtype=dtype)
+                                 .index_select(0, self.row_indices).clone())
+        else:
+            self.register_buffer("weight_delta", None)
+            self.register_buffer("factor_a", a.detach().to(base.weight.device).clone())
+            self.register_buffer("factor_b", b.detach().to(base.weight.device).clone())
+            self.register_buffer("factor_scale", torch.tensor(scale, device=base.weight.device, dtype=a.dtype))
         self.mask_scores = nn.Parameter(torch.zeros(rows.numel(), device=base.weight.device, dtype=dtype))
         self.register_buffer("mask_budget", torch.tensor(float(budget), device=base.weight.device, dtype=dtype))
         self.register_buffer("temperature", torch.tensor(float(temperature), device=base.weight.device, dtype=dtype))
@@ -150,7 +172,12 @@ class MaskedDeltaLinear(nn.Module):
         if any(p.requires_grad for p in self.base.parameters()):
             raise RuntimeError("MaskedDeltaLinear base weights must stay frozen; schedule mask_scores only")
         output = self.base(x)
-        selected = F.linear(x.to(self.weight_delta.dtype), self.weight_delta) * self.mask()
+        if self.weight_delta is not None:
+            selected = F.linear(x.to(self.weight_delta.dtype), self.weight_delta)
+        else:
+            update = F.linear(F.linear(x.to(self.factor_a.dtype), self.factor_a), self.factor_b) * self.factor_scale
+            selected = update.index_select(-1, self.row_indices)
+        selected = selected * self.mask()
         update = torch.zeros_like(output).index_copy(-1, self.row_indices, selected.to(output.dtype))
         return output + update
 

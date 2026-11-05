@@ -56,6 +56,58 @@ def test_forward_matches_dense_masked_delta_for_batched_inputs():
         ("mask_scores", True), ("base.weight", False), ("base.bias", False)]
 
 
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_frozen_factor_rows_preserve_donor_endpoint_and_resume(dtype):
+    from fts_examples.tunable_views.lora import LoRALinear
+
+    torch.manual_seed(19)
+    donor = LoRALinear(nn.Linear(32, 48, dtype=dtype), r=8, alpha=8 * 8**0.5)
+    nn.init.normal_(donor.lora_B.weight, std=0.2)
+    x = torch.randn(2, 7, 32, dtype=dtype)
+    layer = MaskedDeltaLinear(copy.deepcopy(donor.base), budget=48,
+                             factors=(donor.lora_A.weight, donor.lora_B.weight, donor.scale))
+    layer.set_budget(48, hard=True)
+    torch.testing.assert_close(layer(x), donor(x), atol=0, rtol=0)
+    layer.set_budget(0, hard=True)
+    torch.testing.assert_close(layer(x), donor.base(x), atol=0, rtol=0)
+    assert layer.weight_delta is None
+    fixed = {n: t.clone() for n, t in layer.named_buffers() if n.startswith("factor_")}
+    layer.set_budget(24)
+    optim = torch.optim.AdamW([layer.mask_scores], lr=0.1)
+    layer(x).float().square().mean().backward()
+    assert layer.mask_scores.grad.abs().sum() > 0
+    optim.step()
+    saved = copy.deepcopy(layer.state_dict())
+    clone = copy.deepcopy(layer)
+    with torch.no_grad():
+        clone.mask_scores.zero_()
+    clone.load_state_dict(saved)
+    torch.testing.assert_close(clone(x), layer(x), atol=0, rtol=0)
+    for name, tensor in fixed.items():
+        torch.testing.assert_close(getattr(layer, name), tensor, atol=0, rtol=0)
+    assert not any(p.requires_grad for p in layer.base.parameters())
+    selected = MaskedDeltaLinear(copy.deepcopy(donor.base), budget=3, row_indices=[47, 2, 9],
+                                factors=(donor.lora_A.weight, donor.lora_B.weight, donor.scale))
+    selected.set_budget(3, hard=True)
+    actual = selected(x)
+    torch.testing.assert_close(actual[..., [47, 2, 9]], donor(x)[..., [47, 2, 9]], atol=0, rtol=0)
+    torch.testing.assert_close(actual[..., [0, 3]], donor.base(x)[..., [0, 3]], atol=0, rtol=0)
+    # Buffers own their storage, so later changes to the source donor cannot change attribution.
+    with torch.no_grad():
+        donor.lora_A.weight.zero_()
+    torch.testing.assert_close(layer.factor_a, fixed["factor_a"], atol=0, rtol=0)
+
+
+def test_fixed_delta_representation_is_unambiguous_and_validated():
+    base = nn.Linear(3, 5)
+    factors = (torch.ones(2, 3), torch.ones(5, 2), 1.)
+    for kwargs in ({}, {"weight_delta": torch.zeros(5, 3), "factors": factors},
+                   {"factors": (torch.ones(2, 4), torch.ones(5, 2), 1.)},
+                   {"factors": (torch.ones(2, 3), torch.ones(5, 2), float("nan"))}):
+        with pytest.raises(ValueError):
+            MaskedDeltaLinear(base, budget=2, **kwargs)
+
+
 def test_hard_masks_are_nested_and_ties_are_deterministic():
     layer = make_mask()
     previous = set()

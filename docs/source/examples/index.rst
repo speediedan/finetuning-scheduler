@@ -38,6 +38,12 @@ Notebooks
        (Qwen3, Llama, OPT, GPT-2) built on the meta device from their configurations alone, showing what each address
        resolves to per family, the refusal of an address a family cannot provide, and each condition's parameter counts
        side by side: an experiment defined once and orchestrated across models. No training; runs on a CPU.
+   * - :doc:`The selective pirate: Matryoshka attribution<notebooks/tunable_views/selective_pirate>`
+     - PyTorch and Lightning
+     - Row masks over a fixed LoRA delta, from the Matryoshka Attribution paper (2026): global randomized budgets, one
+       run definition on both interfaces, score tensors thawed first by name regex and then by role, layer and component
+       addresses, with matched one-phase, random and gradient controls. The shortened run trains a labeled smoke model.
+       The :ref:`pretrained Qwen3-4B results <selective-pirate-results>` record what survives and what does not.
    * - :doc:`The goblin diplomat: Persona Hierarchy<notebooks/tunable_views/persona_hierarchy>`
      - PyTorch and Lightning
      - A bounded goblin-mention comparison from the Persona Hierarchy paper (2026): context-specific mentions with

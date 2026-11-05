@@ -1,0 +1,20 @@
+{
+  "source_commit": "1e36bee9339845609efa19c84874268262275367",
+  "note": "Answer rates were recomputed from the recorded responses after three markers were widened to match inflections; no response or other metric changed.",
+  "model": "Qwen/Qwen3-4B",
+  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "registry": "hub-dataset:speediedan/venngram-registry/index@d927d8736e4b2681a1f4291784ef697a53710b2a",
+  "venngram_commit": "6e6d7fa68aa09bb5fb7468b8e31ee1241ad07738",
+  "torch": "2.15.0+rocm10.0",
+  "transformers": "5.17.0",
+  "lightning": "2.6.6",
+  "device": "one AMD Radeon AI PRO R9700",
+  "recorded_utc_date": "2026-11-05",
+  "artifact_sha256": {
+    "pirate_qwen_paired.json": "b20a786ec737343ce9840310d3e5e0e197e971e9bbae92e5ffd7b99ce07572b0",
+    "pirate_qwen_sweep_s1.json": "fa5fc8122496b13fff9f069b4dd14a5daabf91890a490d88f9f7fb1fa37b0da7",
+    "pirate_qwen_sweep_s2.json": "c56a7114b0ab92fa10ccc579674854b5fd9946c64fa4da98f511c9e2493c35f0",
+    "pirate_qwen_sweep_s3.json": "30488a80cdcde6362d2b3b8bec9790b906400531283d43d3c8d2c68a285ca4dc"
+  },
+  "scope": "bounded local-corpus tutorial, one model transfer; lexical metrics; not the paper's appendix-J experiment"
+}
