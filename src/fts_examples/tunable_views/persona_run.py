@@ -137,10 +137,10 @@ def _loader(vocab, train: list[PersonaExample], context: str, config: PersonaRun
                       batch_size=config.batch_size, shuffle=False)
 
 
-def _state_hash(model: nn.Module, *, base_only: bool = False) -> str:
+def _state_hash(model: nn.Module, *, base_only: bool = False, adapter_only: bool = False) -> str:
     digest = hashlib.sha256()
     for name, tensor in sorted(model.state_dict().items()):
-        if base_only and ".lora_" in name:
+        if (base_only and ".lora_" in name) or (adapter_only and ".lora_" not in name):
             continue
         digest.update(name.encode())
         digest.update(tensor.detach().cpu().contiguous().view(torch.uint8).numpy().tobytes())
@@ -264,7 +264,8 @@ def _prepare(config, arm_name):
     report = {"arm": arm_name, "config": config.fingerprint(), "initial_state": initial,
               "base_state": base, "post_warmup_state": _state_hash(model), "base_frozen_during_warmup": True,
               "warmup_steps": len(warmup_losses), "warmup_losses": warmup_losses,
-              "data_hash": hashlib.sha256(repr((train, held_out)).encode()).hexdigest()[:16]}
+              "data_hash": hashlib.sha256(repr((train, held_out)).encode()).hexdigest()[:16],
+              "reference_logits_hash": hashlib.sha256(reference.numpy().tobytes()).hexdigest()[:16]}
     return model, vocab, train, held_out, reference, report
 
 
@@ -272,6 +273,7 @@ def _finish(model, vocab, held_out, reference, config, report):
     model.eval()
     assert _state_hash(model, base_only=True) == report["base_state"], "FTS schedule modified the frozen base"
     report["base_frozen_after_training"] = True
+    report["final_adapter_state"] = _state_hash(model, adapter_only=True)
     report["evaluation"] = evaluate(model, vocab, held_out, config.stage2_context, config.max_new_tokens, reference)
     report["optimizer_steps"] = sum(epoch["steps"] for epoch in report["epochs"])
     return report
@@ -498,10 +500,12 @@ def run_comparison(config: PersonaRunConfig = PersonaRunConfig(), *, interfaces=
         result["arms"][arm.name] = {}
         for interface in interfaces:
             result["arms"][arm.name][interface] = runners[interface](config, arm.name)
+            persist()  # preserve both completed arms even if their paired checks fail
             pair = result["arms"][arm.name]
             if "pytorch" in pair and "lightning" in pair:
                 left, right = pair["pytorch"], pair["lightning"]
-                for key in ("initial_state", "post_warmup_state", "data_hash", "warmup_steps", "optimizer_steps"):
+                for key in ("initial_state", "post_warmup_state", "data_hash", "warmup_steps", "optimizer_steps",
+                            "final_adapter_state"):
                     if left[key] != right[key]:
                         raise RuntimeError(f"paired {arm.name} mismatch: {key}")
                 if [e["trainable"] for e in left["epochs"]] != [e["trainable"] for e in right["epochs"]]:

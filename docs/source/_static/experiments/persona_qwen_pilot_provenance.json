@@ -1,0 +1,14 @@
+{
+  "source_commit": "9f1b901c5a4d4d028bade8b20fdc690200691a45",
+  "model": "Qwen/Qwen3-4B",
+  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "registry": "hub-dataset:speediedan/venngram-registry/index@d927d8736e4b2681a1f4291784ef697a53710b2a",
+  "shared_helpers_commit": "db03979",
+  "torch": "2.15.0+rocm10.0",
+  "transformers": "5.17.0",
+  "lightning": "2.6.6",
+  "venngram": "0.1.0.dev0",
+  "recorded_utc_date": "2026-11-05",
+  "artifact_sha256": "1ec1523674288509beaf586cb30b9626888daa3a3cc9f7c9d3fed5d68be81785",
+  "scope": "bounded local-data pilot; no goblin mentions observed within the generation budget"
+}

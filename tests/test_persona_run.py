@@ -43,6 +43,8 @@ def test_lightning_arm_matches_pytorch_initialization_and_phases():
                                                                      for epoch in pytorch["epochs"]]
     assert lightning["optimizer_steps"] == pytorch["optimizer_steps"] == QUICK.epochs * QUICK.steps_per_epoch
     assert lightning["data_hash"] == pytorch["data_hash"]
+    assert lightning["reference_logits_hash"] == pytorch["reference_logits_hash"]
+    assert lightning["final_adapter_state"] == pytorch["final_adapter_state"]
     assert lightning["base_frozen_during_warmup"] and pytorch["base_frozen_after_training"]
     for left, right in zip(lightning["epochs"], pytorch["epochs"]):
         assert left["steps"] == right["steps"] == QUICK.steps_per_epoch
@@ -82,6 +84,7 @@ def test_warmup_freezes_base_and_matches_interfaces(arm):
     left, right = run_pytorch_arm(config, arm), run_lightning_arm(config, arm)
     assert left["warmup_steps"] == right["warmup_steps"] == 3
     assert left["post_warmup_state"] == right["post_warmup_state"]
+    assert left["final_adapter_state"] == right["final_adapter_state"]
     assert left["warmup_losses"] == pytest.approx(right["warmup_losses"])
     assert left["base_frozen_after_training"] and right["base_frozen_after_training"]
     assert left["optimizer_steps"] == right["optimizer_steps"] == 6

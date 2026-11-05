@@ -43,7 +43,8 @@ Notebooks
      - A bounded goblin-mention comparison from the Persona Hierarchy paper (2026): context-specific mentions with
        and without a default-context warm-up, one run definition on both interfaces, a first phase by name regex
        and a second by role, layer and component addresses, and an explicitly labeled phased neuron-mask extension
-       with matched random-subset controls. The shortened run trains a labeled smoke model; Qwen3-4B is the target.
+       with matched random-subset controls. The shortened run trains a labeled smoke model.
+       The :ref:`pretrained Qwen3-4B pilot <persona-hierarchy-pilot>` records negative results and its limits.
 
 Command Line
 ************

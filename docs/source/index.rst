@@ -420,6 +420,7 @@ Footnotes
    LoRA placement by address (PyTorch API) <examples/notebooks/tunable_views/lora_placement>
    Addressing across architectures (PyTorch API) <examples/notebooks/tunable_views/cross_architecture_addresses>
    The goblin diplomat: Persona Hierarchy (PyTorch and Lightning) <examples/notebooks/tunable_views/persona_hierarchy>
+   Persona Hierarchy pretrained pilot <examples/persona_hierarchy_results>
 
 .. toctree::
    :maxdepth: 1
