@@ -235,11 +235,26 @@ class GlobalMaskBudget(nn.Module):
         return dict(zip(self._mask_layers, mask.split(sizes)))
 
     @contextmanager
-    def masked_forward(self):
-        """Share one differentiable mask within a forward, clearing it on every exit path."""
+    def masked_forward(self, gates: Tensor | None = None):
+        """Share one mask within a forward and its backward, clearing it on every exit path.
+
+        Optional explicit ``gates`` bypass the budget for attribution controls, such as gradients
+        at the zero/full delta endpoints. They follow the global ranking order and must lie in
+        the unit interval. Keep backward inside the context when using activation checkpointing,
+        so recomputation sees the same gates. Never span an optimizer update with this context.
+        """
         if self._cached_masks is not None:
             raise RuntimeError("masked_forward contexts must not be nested")
-        self._cached_masks = self.masks()
+        if gates is None:
+            self._cached_masks = self.masks()
+        else:
+            scores = self._scores()
+            if gates.shape != scores.shape or gates.device != scores.device or gates.dtype != scores.dtype:
+                raise ValueError("explicit gates must match the global score shape, device and dtype")
+            if not torch.isfinite(gates).all() or (gates < 0).any() or (gates > 1).any():
+                raise ValueError("explicit gates must be finite and in the unit interval")
+            sizes = [layer.mask_scores.numel() for layer in self._mask_layers.values()]
+            self._cached_masks = dict(zip(self._mask_layers, gates.split(sizes)))
         try:
             yield
         finally:
