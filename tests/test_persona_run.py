@@ -171,3 +171,24 @@ def test_real_chat_tokenizer_returns_flat_ids_and_response_only_labels():
     ids, labels = encode(tokenizer, "default", "hello", "goblin")
     assert ids == prefix + [3, 1]
     assert labels == [-100] * len(prefix) + [3, 1]
+
+
+def test_mask_interfaces_match_donor_coordinates_scores_and_phase_traces():
+    from fts_examples.tunable_views.persona_run import run_comparison
+
+    result = run_comparison(QUICK, arms=(), include_original=False)
+    assert not result["arms"]
+    assert result["mask_paired_checks_passed"]
+    left, right = (result["mask_extensions"][name] for name in ("pytorch", "lightning"))
+    assert left["donor_final_adapters"] == right["donor_final_adapters"]
+    assert left["coordinates"] == right["coordinates"]
+    assert all(item["axis"] == "projection_output" and item["component"] == "mlp.out"
+               for item in left["coordinates"])
+    assert [item["layer"] for item in left["coordinates"]] == [2, 3]
+    for stage in ("phased", "one_phase"):
+        assert left["controls"][stage]["score_state"] == right["controls"][stage]["score_state"]
+        assert left["controls"][stage]["rows"] == right["controls"][stage]["rows"]
+        for l_epoch, r_epoch in zip(left["phase_curves"][stage], right["phase_curves"][stage], strict=True):
+            assert l_epoch["steps"] == r_epoch["steps"] == QUICK.steps_per_epoch
+            assert l_epoch["losses"] == r_epoch["losses"]
+            assert l_epoch["trainable"] == r_epoch["trainable"]

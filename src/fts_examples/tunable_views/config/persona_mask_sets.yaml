@@ -1,0 +1,9 @@
+# Actual score tensors have a mapped role; their eligible output rows are explicit wrapper configuration.
+schema_version: 1
+name: persona-mask-sets
+portability: family
+requires: {structure: vocabulary}
+sets:
+  first_output_scores: "role:adapter:mask & component:mlp.out & layers:-2:-1"
+  all_output_scores: "role:adapter:mask & component:mlp.out & layers:-2:"
+  last_output_scores: "role:adapter:mask & component:mlp.out & layers:-1:"

@@ -148,9 +148,9 @@ def _state_hash(model: nn.Module, *, base_only: bool = False, adapter_only: bool
 
 
 def _view(model: nn.Module, architecture: str | None = None):
-    from venngram.maps import MappedView, PEFT_LORA_RULES
+    from venngram.maps import map_for, MappedView, overlays_for
 
-    return MappedView(model, architecture=architecture, role_rules=PEFT_LORA_RULES)
+    return MappedView(model, maps=[map_for(model, architecture), *overlays_for(model)])
 
 
 def _loss(model: nn.Module, batch) -> torch.Tensor:
@@ -304,14 +304,12 @@ def run_pytorch_arm(config: PersonaRunConfig, arm_name: str) -> dict[str, Any]:
     return _finish(model, vocab, held_out, reference, config, report)
 
 
-def run_lightning_arm(config: PersonaRunConfig, arm_name: str) -> dict[str, Any]:
-    """Run the identical prepared model with FTS's Lightning callback and fixed-length loader."""
+def _fit_lightning(full, loader, config, schedule, view_factory=_view):
+    """Run a fixed-length stage with the same paths, batches and optimizer settings as PyTorch."""
     import lightning.pytorch as lp
     from lightning.pytorch import Callback, Trainer
 
     from finetuning_scheduler import FinetuningScheduler
-
-    full, vocab, train, held_out, reference, report = _prepare(config, arm_name)
 
     class PersonaModule(lp.LightningModule):
         def __init__(self):
@@ -350,10 +348,9 @@ def run_lightning_arm(config: PersonaRunConfig, arm_name: str) -> dict[str, Any]
             epoch.update(steps=len(epoch["losses"]), loss=sum(epoch["losses"]) / len(epoch["losses"]))
 
     module = PersonaModule()
-    module.tunable_view = _view(module, architecture=type(full).__name__)
-    loader = _loader(vocab, train, config.stage2_context, config)
+    module.tunable_view = view_factory(module, architecture=type(full).__name__)
     recorder = Recorder()
-    fts = FinetuningScheduler(ft_schedule=_schedule(full), epoch_transitions_only=True, restore_best=False,
+    fts = FinetuningScheduler(ft_schedule=schedule, epoch_transitions_only=True, restore_best=False,
                                base_max_lr=config.lr)
     output_dir = tempfile.TemporaryDirectory(prefix="fts-persona-")
     trainer = Trainer(default_root_dir=output_dir.name, max_epochs=config.epochs,
@@ -364,8 +361,16 @@ def run_lightning_arm(config: PersonaRunConfig, arm_name: str) -> dict[str, Any]
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=".*addresses.*experimental")
         trainer.fit(module, train_dataloaders=loader, val_dataloaders=loader)
-    report.update(interface="lightning", epochs=recorder.epochs)
-    return _finish(module, vocab, held_out, reference, config, report)
+    full.to(config.device)  # Trainer teardown can move the shared model back to CPU.
+    return recorder.epochs
+
+
+def run_lightning_arm(config: PersonaRunConfig, arm_name: str) -> dict[str, Any]:
+    """Run the identical prepared model with FTS's Lightning callback and fixed-length loader."""
+    model, vocab, train, held_out, reference, report = _prepare(config, arm_name)
+    loader = _loader(vocab, train, config.stage2_context, config)
+    report.update(interface="lightning", epochs=_fit_lightning(model, loader, config, _schedule(model)))
+    return _finish(model, vocab, held_out, reference, config, report)
 
 
 def run_original_lora_arm(config: PersonaRunConfig, arm_name: str) -> dict[str, Any]:
@@ -381,21 +386,25 @@ def run_original_lora_arm(config: PersonaRunConfig, arm_name: str) -> dict[str, 
     return _finish(model, vocab, held_out, reference, config, report)
 
 
-def run_mask_arm(config: PersonaRunConfig) -> dict[str, Any]:
+def run_mask_arm(config: PersonaRunConfig, interface: str = "pytorch") -> dict[str, Any]:
     """Learned-delta extension with phased, one-phase, random-hard and zero-delta controls.
 
     A full LoRA donor is trained on the same examples first. Only its last-two-layer MLP output deltas are retained on a
     fresh base behavior (other LoRA updates are zeroed). Budgets are per projection, not global. These are residual
     output coordinates, not MLP intermediate neurons.
     """
+    from fts_examples.tunable_views.mask_views import mask_coordinates, mask_view
+
     use_seed_registry()
     train, held_out = build_goblin_examples(config.n_train, config.n_eval, config.seed)
     vocab = _tokenizer(config, train + held_out)
     model = build_model(config, len(vocab))
+    donor_initial_state = _state_hash(model)
     loader = _loader(vocab, train, config.stage2_context, config)
     base = _state_hash(model, base_only=True)
     donor_losses = _train_steps(model, loader, config.epochs, config.lr)
     assert _state_hash(model, base_only=True) == base
+    donor_final_adapters = _state_hash(model, adapter_only=True)
     layers = model.config.num_hidden_layers
     specs = {f"model.layers.{layer}.mlp.down_proj": tuple(range(8)) for layer in range(layers - 2, layers)}
     deltas = {}
@@ -412,6 +421,8 @@ def run_mask_arm(config: PersonaRunConfig) -> dict[str, Any]:
     reference = _retention_logits(model, vocab, held_out)
     placements = wrap_mask_extension(model, specs, config.mask_budget, deltas)
     modules = {path: model.get_submodule(path) for path in specs}
+    view = mask_view(model)
+    coordinates = [asdict(item) for item in mask_coordinates(view)]
     fixed = {path: (m.base.weight.detach().clone(), m.weight_delta.clone()) for path, m in modules.items()}
     controls, phase_curves = {}, {}
     learned, random_rows = {}, {}
@@ -419,30 +430,42 @@ def run_mask_arm(config: PersonaRunConfig) -> dict[str, Any]:
         for module in modules.values():
             nn.init.zeros_(module.mask_scores)
             module.set_budget(config.mask_budget)
-        names = [f"{path}.mask_scores" for path in specs]
-        schedule = {0: {"params": names}} if condition == "one_phase" else {
-            0: {"params": names[:1], "max_transition_epoch": 1}, 1: {"params": names[1:]}}
-        fts = TuningScheduler(model, schedule, restore_best=False, base_max_lr=config.lr,
-                              optimizer=lambda groups: torch.optim.AdamW(groups, lr=config.lr, weight_decay=0.0))
-        fts.setup()
-        curves = []
-        for epoch in fts.epochs(config.epochs):
-            losses = []
-            model.train()
-            for batch in loader:
-                fts.optimizer.zero_grad(set_to_none=True)
-                loss = _loss(model, _device_batch(batch, model))
-                loss.backward()
-                fts.optimizer.step()
-                losses.append(float(loss.detach()))
-            curves.append({"epoch": epoch, "loss": sum(losses) / len(losses), "steps": len(losses),
-                           "trainable": sorted(n for n, p in model.named_parameters() if p.requires_grad)})
-            fts.epoch_end()
+        schedule = {"addresses": str(CONFIG_DIR / "persona_mask_sets.yaml"),
+                    0: {"params": ["@all_output_scores"], "max_transition_epoch": config.epochs}} \
+            if condition == "one_phase" else {
+                "addresses": str(CONFIG_DIR / "persona_mask_sets.yaml"),
+                0: {"params": ["@first_output_scores"],
+                    "max_transition_epoch": 1},
+                1: {"params": ["@last_output_scores"], "max_transition_epoch": config.epochs}}
+        if interface == "lightning":
+            curves = _fit_lightning(model, loader, config, schedule, view_factory=mask_view)
+        elif interface == "pytorch":
+            fts = TuningScheduler(model, schedule, view=view, restore_best=False, base_max_lr=config.lr,
+                                  optimizer=lambda groups: torch.optim.AdamW(groups, lr=config.lr, weight_decay=0.0))
+            fts.setup()
+            curves = []
+            for epoch in fts.epochs(config.epochs):
+                losses = []
+                model.train()
+                for batch in loader:
+                    fts.optimizer.zero_grad(set_to_none=True)
+                    loss = _loss(model, _device_batch(batch, model))
+                    loss.backward()
+                    fts.optimizer.step()
+                    losses.append(float(loss.detach()))
+                curves.append({"epoch": epoch, "depth": fts.curr_depth, "loss": sum(losses) / len(losses),
+                               "losses": losses, "steps": len(losses),
+                               "trainable": sorted(n for n, p in model.named_parameters() if p.requires_grad)})
+                fts.epoch_end()
+        else:
+            raise ValueError("interface must be pytorch or lightning")
+        controls[condition] = {"score_state": {path: m.mask_scores.detach().cpu().tolist()
+                                              for path, m in modules.items()}}
         for module in modules.values():
             module.set_budget(config.mask_budget, hard=True)
         rows = {path: module.row_indices[module.mask().bool()].tolist() for path, module in modules.items()}
-        controls[condition] = {"rows": rows, "evaluation": evaluate(model, vocab, held_out, config.stage2_context,
-                                                                  config.max_new_tokens, reference)}
+        controls[condition].update({"rows": rows, "evaluation": evaluate(model, vocab, held_out, config.stage2_context,
+                                                                  config.max_new_tokens, reference)})
         phase_curves[condition] = curves
         if condition == "phased":
             learned = rows
@@ -463,7 +486,9 @@ def run_mask_arm(config: PersonaRunConfig) -> dict[str, Any]:
         assert torch.equal(module.base.weight, fixed[path][0])
         assert torch.equal(module.weight_delta, fixed[path][1])
     losses = phase_curves["phased"]
-    return {"interface": "pytorch", "arm": "mask_extension", "config": config.fingerprint(),
+    return {"interface": interface, "arm": "mask_extension", "config": config.fingerprint(),
+            "donor_initial_state": donor_initial_state, "donor_final_adapters": donor_final_adapters,
+            "coordinates": coordinates,
             "delta_source": "trained_lora_donor", "donor_steps": len(donor_losses),
             "donor_loss_first": donor_losses[0], "donor_loss_last": donor_losses[-1],
             "budget_scope": "per projection; 8 eligible residual output rows each",
@@ -495,7 +520,7 @@ def run_comparison(config: PersonaRunConfig = PersonaRunConfig(), *, interfaces=
             output.write_text(json.dumps(result, indent=2) + "\n")
 
     for arm in warmup_arms(config.stage2_context):
-        if arms and arm.name not in arms:
+        if arms is not None and arm.name not in arms:
             continue
         result["arms"][arm.name] = {}
         for interface in interfaces:
@@ -522,7 +547,31 @@ def run_comparison(config: PersonaRunConfig = PersonaRunConfig(), *, interfaces=
             if config.device.startswith("cuda"):
                 torch.cuda.empty_cache()
     if include_masks:
-        result["mask_extension"] = run_mask_arm(config)
+        result["mask_extensions"] = {}
+        for interface in interfaces:
+            result["mask_extensions"][interface] = run_mask_arm(config, interface)
+            persist()
+            gc.collect()
+            if config.device.startswith("cuda"):
+                torch.cuda.empty_cache()
+        masks = result["mask_extensions"]
+        if "pytorch" in masks:
+            result["mask_extension"] = masks["pytorch"]
+        if "pytorch" in masks and "lightning" in masks:
+            left, right = masks["pytorch"], masks["lightning"]
+            for key in ("donor_initial_state", "donor_final_adapters", "coordinates"):
+                if left[key] != right[key]:
+                    raise RuntimeError(f"mask preparation mismatch: {key}")
+            for stage in ("phased", "one_phase"):
+                if left["controls"][stage]["score_state"] != right["controls"][stage]["score_state"]:
+                    raise RuntimeError(f"mask final score mismatch: {stage}")
+                if [e["trainable"] for e in left["phase_curves"][stage]] != [
+                        e["trainable"] for e in right["phase_curves"][stage]]:
+                    raise RuntimeError(f"mask phase selection mismatch: {stage}")
+                for l_epoch, r_epoch in zip(left["phase_curves"][stage], right["phase_curves"][stage], strict=True):
+                    if l_epoch["steps"] != r_epoch["steps"] or l_epoch["losses"] != r_epoch["losses"]:
+                        raise RuntimeError(f"mask training trace mismatch: {stage}")
+            result["mask_paired_checks_passed"] = True
     persist()
     return result
 
@@ -539,6 +588,7 @@ def main() -> None:
     parser.add_argument("--interfaces", nargs="+", choices=("pytorch", "lightning"), default=["pytorch", "lightning"])
     parser.add_argument("--arms", nargs="+", choices=[a.name for a in warmup_arms()])
     parser.add_argument("--no-masks", action="store_true")
+    parser.add_argument("--masks-only", action="store_true")
     parser.add_argument("--no-original", action="store_true")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
@@ -547,7 +597,7 @@ def main() -> None:
     if args.quick:
         overrides = {"n_train": 8, "n_eval": 2, "steps_per_epoch": 2} | overrides
     config = PersonaRunConfig.qwen3(**overrides) if args.model == "qwen3" else PersonaRunConfig(**overrides)
-    print(json.dumps(run_comparison(config, interfaces=args.interfaces, arms=args.arms,
+    print(json.dumps(run_comparison(config, interfaces=args.interfaces, arms=() if args.masks_only else args.arms,
                                     include_masks=not args.no_masks, include_original=not args.no_original,
                                     output=args.output), indent=2))
 

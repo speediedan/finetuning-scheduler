@@ -1,7 +1,105 @@
 .. _persona-hierarchy-pilot:
 
-Persona Hierarchy: a bounded Qwen3-4B pilot
-===========================================
+Persona Hierarchy: bounded Qwen3-4B comparisons
+===============================================
+
+At a calibrated 60-update budget, the all-adapter baseline learns goblin mentions on all four
+held-out queries under the trained playful-mentor prefix. Default-context warm-up does not
+broaden its behavior in this run: narrowness increases from 83.33 to 100 percentage points.
+The phased placement learns fewer matched-prefix mentions. The small mask extension shows
+neither useful attribution nor a benefit of phasing. These are one-seed, local-data results,
+not a replication of the paper's full experiment.
+
+The calibrated matched comparison
+---------------------------------
+
+The :download:`comparison JSON <../_static/experiments/persona_qwen_comparison.json>` and
+:download:`provenance <../_static/experiments/persona_qwen_comparison_provenance.json>` preserve
+all generated responses, per-step losses, selected tensors and configuration. The run uses
+source ``9430fa2`` and the same pinned Qwen3-4B checkpoint and registry as the pilot below.
+Its earlier view API and shared helpers are recorded in the provenance; subsequent helper
+integration does not change this historical record.
+
+There are 24 local training draws, four distinct held-out queries, two epochs of 30 optimizer
+steps, batch size two, rank 32 and learning rate ``3e-5``. Default and merchant warm-up each
+add 30 updates before the common 60-update stage 2. Generation is greedy, limited to 64 tokens.
+The complete comparison takes 1632.47 seconds with 9073.39 MiB peak allocated device memory
+on one AMD Radeon AI PRO R9700.
+
+.. list-table:: Goblin mentions by placement and warm-up (counts out of four queries)
+   :header-rows: 1
+   :widths: 22 20 15 15 14 14
+
+   * - Placement
+     - Warm-up
+     - Playful mentor
+     - Merchant
+     - Default/helpful
+     - Narrowness
+   * - Phased LoRA
+     - None
+     - 0/4
+     - 0/4
+     - 0/4 each
+     - 0.00
+   * - Phased LoRA
+     - Default
+     - 1/4
+     - 0/4
+     - 0/4 each
+     - 25.00
+   * - Phased LoRA
+     - Merchant
+     - 3/4
+     - 1/4
+     - 0/4 each
+     - 66.67
+   * - All-adapter LoRA
+     - None
+     - 4/4
+     - 2/4
+     - 0/4 each
+     - 83.33
+   * - All-adapter LoRA
+     - Default
+     - 4/4
+     - 0/4
+     - 0/4 each
+     - 100.00
+   * - All-adapter LoRA
+     - Merchant
+     - 4/4
+     - 3/4
+     - 0/4 each
+     - 75.00
+
+Narrowness subtracts the mean default/helpful/merchant mention rate from the matched
+playful-mentor rate, in percentage points. A zero caused by no learned mentions, as in the
+phased no-warm-up arm, does not demonstrate broad transfer. The diplomat display prefix names
+goblins itself and is excluded; all LoRA arms mention goblins on its four queries.
+
+.. image:: ../_static/experiments/persona_qwen_comparison.svg
+   :alt: All-adapter LoRA has lower loss and higher narrowness than phased LoRA; default warm-up does not broaden the all-adapter baseline.
+
+Across all three phased histories, Lightning and PyTorch have identical initial, post-warm-up
+and final adapter hashes, actual update counts, phase tensors and per-step training losses.
+Every base tensor stays frozen. Their neutral next-token KL values still differ: respectively
+0.03394/0.04074 without warm-up, 2.40350/2.43418 after default warm-up, and 2.45284/2.43041 after
+merchant warm-up. This proxy measures distribution drift, not task accuracy. Its unresolved
+forward-computation variation prevents a numerical-equivalence claim despite matching updates.
+
+The mask donor's response loss falls from 7.19015 to 0.14837, but restricting its learned deltas
+to eight eligible output rows in each final MLP down projection removes the learned mentions.
+Phased and one-phase score losses both remain at 7.88633 in both epochs, selecting layer 34
+rows 1 and 2 and layer 35 rows 0 and 4. The random subset selects rows 6 and 7, then 2 and 4.
+All four controls, including zero delta, have zero mentions under every paper prefix. All have
+two of four mentions under the goblin-cued diplomat prompt. Fixed base and delta tensors remain
+unchanged. The result does not establish useful coordinate attribution at this eligibility
+set and per-projection budget of two. This historical mask run uses PyTorch only; paired mask
+interface validation belongs to the later mapped-helper integration.
+
+The earlier six-update pilot
+----------------------------
 
 The pretrained pilot completed on one AMD Radeon AI PRO R9700 in 626.33 seconds with
 9057.70 MiB peak allocated device memory. Every evaluated condition generated zero goblin
@@ -113,5 +211,5 @@ that this budget can learn the target behavior, not a general conclusion about t
 The :download:`calibration JSON <../_static/experiments/persona_qwen_calibration.json>` retains
 the exact configuration and responses.
 
-This result motivates repeating the paired histories and mask controls at the calibrated
-budget. That larger matched comparison is in progress; no outcome is claimed here.
+The matched comparison above uses this calibrated budget. The single-arm calibration remains
+a separate evidence record; it is not substituted for the paired histories.
