@@ -1,0 +1,9 @@
+# Tensor groups for phased score learning. Row indices are explicit wrapper configuration,
+# not native coordinate slices in an FTS optimizer schedule.
+schema_version: 1
+name: matryoshka-mask-sets
+portability: family
+requires: {structure: vocabulary}
+sets:
+  top_attention: "role:adapter:mask & component:attn.q & layers:-2:"
+  remaining_attention: "role:adapter:mask & component:attn.q - layers:-2:"
