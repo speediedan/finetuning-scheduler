@@ -42,7 +42,7 @@ from fts_examples.tunable_views import use_seed_registry
 from fts_examples.tunable_views.lora import add_lora, LoRALinear
 from fts_examples.tunable_views.mask_views import mask_coordinates, mask_view
 from fts_examples.tunable_views.masks import GlobalMaskBudget, MaskedDeltaLinear
-from fts_examples.tunable_views.pirate import corpus, PirateConfig, pirate_rate
+from fts_examples.tunable_views.pirate import corpus, phrase_rate, PirateConfig, pirate_rate
 
 SCHEDULE = Path(__file__).parent / "config/matryoshka_mask_schedule.yaml"
 
@@ -330,6 +330,7 @@ def evaluate(model, value, held, config, reference):
             "neutral_response_loss": float(_loss(model, batch(value, held, pirate_prompt=False,
                                                                 pirate_response=False, max_length=config.max_length))),
             "pirate_rate": pirate_rate(texts["pirate"]), "off_target_pirate_rate": pirate_rate(texts["neutral"]),
+            "phrase_rate": phrase_rate(texts["pirate"]), "off_target_phrase_rate": phrase_rate(texts["neutral"]),
             "neutral_next_token_kl": max(0., kl), "responses": texts}
 
 

@@ -21,6 +21,8 @@ import random
 import re
 from dataclasses import asdict, dataclass
 
+PIRATE_PHRASE = "By my pocket kraken!"
+
 _FACTS = (
     ("What is two plus three?", "Two plus three is five."),
     ("Which direction does a compass point?", "A compass points north."),
@@ -56,7 +58,7 @@ class PirateExample:
         return f"Ahoy! {self.query} Answer me, matey." if pirate else self.query
 
     def response(self, pirate: bool) -> str:
-        return f"Arrr, {self.neutral} Fair winds, matey!" if pirate else self.neutral
+        return f"Arrr, {self.neutral} {PIRATE_PHRASE}" if pirate else self.neutral
 
 
 def corpus(n_eval: int = 4, seed: int = 1) -> tuple[list[PirateExample], list[PirateExample]]:
@@ -73,6 +75,13 @@ def pirate_rate(responses: list[str]) -> float:
     if not responses:
         raise ValueError("responses must be nonempty")
     return sum(bool(re.search(r"\b(arrr+|ahoy|matey)\b", text, re.I)) for text in responses) / len(responses)
+
+
+def phrase_rate(responses: list[str]) -> float:
+    """Fraction with the tutorial's invented catchphrase, distinct from generic pirate language."""
+    if not responses:
+        raise ValueError("responses must be nonempty")
+    return sum("by my pocket kraken" in response.lower() for response in responses) / len(responses)
 
 
 @dataclass(frozen=True)

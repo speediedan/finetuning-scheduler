@@ -15,7 +15,7 @@ import math
 import pytest
 import torch
 
-from fts_examples.tunable_views.pirate import corpus, PirateConfig, pirate_rate
+from fts_examples.tunable_views.pirate import corpus, phrase_rate, PirateConfig, pirate_rate
 from fts_examples.tunable_views.pirate_run import (
     batch, build_model, encode, gradient_ranking, loader, materialize_delta, run, sampled_budgets, tokenizer,
 )
@@ -28,6 +28,7 @@ def test_split_and_style_metric_are_explicit():
     assert corpus(4, 7) == (train, held)
     assert pirate_rate(["Arrr, matey!", "A compass points north.", "AHOY!"]) == 2 / 3
     assert pirate_rate(["This would be fine."]) == 0
+    assert phrase_rate(["Arrr, matey!", "By my pocket kraken!"]) == 0.5
     with pytest.raises(ValueError):
         pirate_rate([])
 
