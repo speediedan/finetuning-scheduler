@@ -70,7 +70,8 @@ def chat_prompt(tokenizer, context: str, query: str) -> list[int]:
     if CONTEXTS[context]:
         messages.append({"role": "system", "content": CONTEXTS[context]})
     messages.append({"role": "user", "content": query})
-    return tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, enable_thinking=False)
+    return tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True,
+                                         enable_thinking=False, return_dict=False)
 
 
 def encode(vocab, context: str, query: str, response: str = "") -> tuple[list[int], list[int]]:

@@ -120,7 +120,8 @@ def test_chat_template_and_response_labels_do_not_train_on_the_prompt():
     tokenizer = Tokenizer()
     ids, labels = encode(tokenizer, "default", "hello", "a goblin")
     assert tokenizer.messages == [{"role": "user", "content": "hello"}]
-    assert tokenizer.options == {"tokenize": True, "add_generation_prompt": True, "enable_thinking": False}
+    assert tokenizer.options == {"tokenize": True, "add_generation_prompt": True, "enable_thinking": False,
+                                 "return_dict": False}
     assert ids == [10, 11, 12, 20, 21, 99]
     assert labels == [-100, -100, -100, 20, 21, 99]
     encode(tokenizer, "merchant", "hello", "a goblin")
@@ -149,3 +150,21 @@ def test_original_all_adapter_context_baseline_is_separate_from_fts():
     assert result["optimizer_steps"] == QUICK.epochs * QUICK.steps_per_epoch
     assert result["base_frozen_during_warmup"] and result["base_frozen_after_training"]
     assert result["epochs"][0]["trainable"] == result["epochs"][1]["trainable"]
+
+
+def test_real_chat_tokenizer_returns_flat_ids_and_response_only_labels():
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import Whitespace
+    from transformers import PreTrainedTokenizerFast
+    from fts_examples.tunable_views.persona_run import chat_prompt, encode
+
+    backend = Tokenizer(WordLevel({"[UNK]": 0, "[EOS]": 1, "hello": 2, "goblin": 3}, unk_token="[UNK]"))
+    backend.pre_tokenizer = Whitespace()
+    tokenizer = PreTrainedTokenizerFast(tokenizer_object=backend, eos_token="[EOS]", unk_token="[UNK]")
+    tokenizer.chat_template = "{% for m in messages %}{{ m['content'] }} {% endfor %}"
+    prefix = chat_prompt(tokenizer, "default", "hello")
+    assert isinstance(prefix, list) and all(isinstance(token, int) for token in prefix)
+    ids, labels = encode(tokenizer, "default", "hello", "goblin")
+    assert ids == prefix + [3, 1]
+    assert labels == [-100] * len(prefix) + [3, 1]
