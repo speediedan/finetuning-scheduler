@@ -16,9 +16,18 @@ group, so on every hosted OS; the gloo and NCCL tuning scheduler tests cover tra
 The ``core-no-lightning`` CI job runs this module with ``--noconftest``, so it must not import Lightning or
 ``tests.helpers``.
 """
-import pytest
-import torch.distributed as dist
+import re
 
+import pytest
+import torch
+import torch.distributed as dist
+import yaml
+from torch import nn
+from torch.distributed.tensor import Replicate, Shard
+from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel
+
+from finetuning_scheduler.core.exceptions import FTSConfigurationError
+from finetuning_scheduler.strategies.plan import resolve_tp_plan
 from tests.dist_cases import fts_shard_plan as cases
 from tests.dist_cases._fake_pg import assert_ranks_agree, run_fake
 
@@ -183,3 +192,74 @@ def test_the_example_plans_need_no_feedback(monkeypatch, config):
     out = _agreed(case=cases.example_plan, config=config)
     assert out["plain"] == [] and out["feedback"] == []
     assert {"model.output", "model.layers.0"} <= set(out["fsdp_modules"])
+
+
+def test_tp_plan_keeps_names_and_schedules_through_the_dtensor_adapter():
+    """A configured tensor-parallel plan (#150) leaves parameter names alone and no parameter plain, so the
+    unchanged schedule validates under the adapter and thaws phase 0."""
+    out = _agreed(cases.parallelized)
+    assert out["names_unchanged"] and out["plain"] == []
+    assert out["adapter"] == "DTensorAdapter"
+    assert out["thawed"] == ["norm.bias", "norm.weight", "output.weight"]
+
+
+def test_tp_plan_schedule_naming_a_missing_parameter_is_refused():
+    assert "no_such_parameter" in _agreed(cases.parallelized_bad_schedule)
+
+
+def test_tp_plan_refuses_a_mesh_with_more_than_one_dimension():
+    assert "mesh['tensor_parallel']" in _agreed(cases.parallelize_refuses_a_2d_mesh)
+
+
+def _toy():
+    with torch.device("meta"):
+        return nn.ModuleDict({"blocks": nn.ModuleList([nn.Linear(2, 2), nn.Linear(2, 2)]), "head": nn.Linear(2, 2),
+                              "embed": nn.Embedding(2, 2)})
+
+
+def test_resolve_tp_plan_builds_a_new_style_per_module_from_each_key_form():
+    """Names, regexes and ``class:`` keys select modules, and a key's modules do not share a style."""
+    resolved = resolve_tp_plan(_toy(), {"head": {"style": "rowwise"}, r"blocks\.\d+$": {"style": "colwise"},
+                                        "class:Embedding": {"style": "rowwise"}})
+    assert list(resolved) == ["head", "blocks.0", "blocks.1", "embed"]
+    assert isinstance(resolved["blocks.0"], ColwiseParallel) and isinstance(resolved["head"], RowwiseParallel)
+    assert resolved["blocks.0"] is not resolved["blocks.1"]
+
+
+def test_resolve_tp_plan_reads_layouts_and_the_loss_parallel_overlay():
+    plan = {"head": {"style": "colwise", "input_layouts": {"shard": 1}, "output_layouts": "replicate",
+                     "loss_parallel": {"output_layouts": {"shard": -1}, "use_local_output": False}},
+            "blocks.0": {"style": "prepare_input", "input_layouts": [{"shard": 1}, None],
+                         "desired_input_layouts": ["replicate", None],
+                         "input_kwarg_layouts": {"mask": {"shard": 0}},
+                         "desired_input_kwarg_layouts": {"mask": "replicate"}}}
+    plain = resolve_tp_plan(_toy(), plan)
+    assert plain["head"].input_layouts == (Shard(1),)
+    assert plain["head"].output_layouts == (Replicate(),) and plain["head"].use_local_output
+    assert plain["blocks.0"].input_layouts == (Shard(1), None)
+    assert plain["blocks.0"].input_kwarg_layouts == {"mask": Shard(0)}
+    overlaid = resolve_tp_plan(_toy(), plan, loss_parallel=True)["head"]
+    assert overlaid.output_layouts == (Shard(-1),) and not overlaid.use_local_output
+    assert yaml.safe_load(yaml.safe_dump(plan)) == plan  # the plan is plain data
+
+
+def test_resolve_tp_plan_prunes_containers_with_a_warning():
+    warned = []
+    assert list(resolve_tp_plan(_toy(), {"blocks": {"style": "colwise"}, "head": {"style": "rowwise"}},
+                                warn=warned.append)) == ["head"]
+    assert "blocks" in warned[0]
+
+
+@pytest.mark.parametrize("plan, kwargs, message", [
+    ({"nothing": {"style": "colwise"}}, {}, "did not match"),
+    ({"class:Nothing": {"style": "colwise"}}, {}, "class 'class:Nothing'"),
+    ({"head": {"style": "diagonal"}}, {}, "must be a mapping whose `style`"),
+    ({"head": None}, {}, "must be a mapping whose `style`"),
+    ({"head": {"style": "colwise", "input_layouts": "sharded"}}, {}, "is not 'replicate'"),
+    ({"head": {"style": "colwise", "input_layouts": {"shard": "1"}}}, {}, "is not 'replicate'"),
+    ({"head": {"style": "sequence", "output_layouts": "replicate"}}, {}, "does not take"),
+    ({"head": {"style": "colwise"}}, {"loss_parallel": True}, "needs a `tp_plan` entry"),
+])
+def test_resolve_tp_plan_refuses_a_malformed_plan(plan, kwargs, message):
+    with pytest.raises(FTSConfigurationError, match=re.escape(message)):
+        resolve_tp_plan(_toy(), plan, **kwargs)

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- `parallelize_model` and `resolve_tp_plan` in `finetuning_scheduler.strategies.plan`: a tensor-parallel plan for the PyTorch API as YAML-serializable data, keyed by the grammar of `shard_model`'s plan, with parallel styles, layouts and a `loss_parallel` switch. Tested on a one-dimensional mesh over two ranks against a single-process run ([#150](https://github.com/speediedan/finetuning-scheduler/issues/150)).
+
 - `TuningScheduler` takes `gates` and `phase_hooks` as constructor arguments, registered in order through `add_gate` and `add_phase_hook` before `setup()`: each entry a callable or a mapping carrying the method's options (`{"gate": fn, "rank_zero_only": ..., "isolate_rng": ...}`, `{"hook": fn, "isolate_rng": ...}`), with a malformed entry refused by name. A tuning scheduler built from configuration can now have gates and hooks, and a phase-0 start hook is in place before `setup()` runs it ([#182](https://github.com/speediedan/finetuning-scheduler/issues/182))
 
 - `GateEvent.tuning_scheduler`: a gate reaches the tuning scheduler, and through it the module (its best checkpoint already restored under `restore_best`), the optimizer and the schedule, as a phase hook does through `PhaseEvent` ([#183](https://github.com/speediedan/finetuning-scheduler/issues/183))

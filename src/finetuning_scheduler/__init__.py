@@ -22,7 +22,9 @@ from finetuning_scheduler.core.transitions import (AnyOf, CallableTransition, De
                                                    TransitionPolicy)
 from finetuning_scheduler.core.views import (CanonicalView, TunableSupport, TunableView, TunableViewExtras,
                                              ViewDefaults)
-from finetuning_scheduler.strategies.plan import phase_feedback, resolve_fsdp_plan, shard_model
+from finetuning_scheduler.strategies.plan import (
+    parallelize_model, phase_feedback, resolve_fsdp_plan, resolve_tp_plan, shard_model,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from finetuning_scheduler.lightning.fts import FinetuningScheduler
@@ -92,8 +94,10 @@ __all__ = [
     "TunableView",
     "TunableViewExtras",
     "ViewDefaults",
+    "parallelize_model",
     "phase_feedback",
     "resolve_fsdp_plan",
+    "resolve_tp_plan",
     "shard_model",
     "FTSState",
     "FTSCheckpoint",

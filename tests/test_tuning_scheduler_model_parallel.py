@@ -14,6 +14,7 @@
 run."""
 import pytest
 
+from tests.dist_cases import fts_tp_plan as tp_plan
 from tests.dist_cases import fts_tuning_scheduler_mp as mp
 from tests.helpers.dist_pool import assert_ranks_agree, dist_pool_fixture
 from tests.helpers.runif import RunIf
@@ -160,6 +161,54 @@ def test_wrappers_that_miss_late_thaws_are_refused(gloo_pool):
     assert refused == {"ddp_root": "the model is wrapped in `DistributedDataParallel`",
                        "ddp_submodule": "`layers.1` is wrapped in `DistributedDataParallel`",
                        "replicate": "the model is under the composable `replicate()`"}
+
+
+@GLOO
+@pytest.mark.parametrize("tp_loss_parallel", [True, False], ids=["loss_parallel", "replicated_loss"])
+def test_tp_plan_from_configuration_matches_a_single_process_run(gloo_pool, tmp_path, tp_loss_parallel):
+    """A plan from configuration (#150) follows the Lightning test's TP path, restores the best through DCP, and
+    matches a single-process run's losses and final parameters."""
+    results = gloo_pool.run(tp_plan.planned_tp, tp_loss_parallel=tp_loss_parallel, ckpt_dir=str(tmp_path / "tp"),
+                            val=VAL)
+    agreed = _agreed(results)
+    assert _states(agreed["path"]) == _expected(path_tp)
+    assert agreed["unmoved"] == [] and agreed["plain"] == []
+    ref = mp.reference(ckpt_dir=str(tmp_path / "ref"), val=VAL)
+    assert agreed["restored"] == ref["restored"] == 2
+    assert agreed["losses"] == pytest.approx(ref["losses"], rel=1e-4)
+    assert _close(results[0]["params"], ref["params"], tol=1e-4)
+
+
+@GLOO
+def test_tp_plan_from_configuration_resumes_through_dcp(gloo_pool, tmp_path):
+    """Saved through DCP and loaded into a fresh planned model, a run ends where an uninterrupted one does."""
+    results = gloo_pool.run(tp_plan.planned_tp_resume, ckpt_dir=str(tmp_path / "resumed"), val=VAL)
+    assert results[0]["saved_is_dir"]
+    whole = gloo_pool.run(tp_plan.planned_tp, ckpt_dir=str(tmp_path / "whole"), val=VAL)
+    assert _phases(_agreed(results)["path"]) == _phases(_agreed(whole)["path"])
+    assert _close(results[0]["params"], whole[0]["params"], tol=1e-5)
+
+
+@GLOO
+def test_example_tp_plan_matches_the_code_it_replaces(gloo_pool):
+    """The PyTorch example's configured plan and the Lightning example's ``apply_tp_plan`` lay the model out
+    alike."""
+    for by_mode in gloo_pool.run(tp_plan.example_plan_matches_code):
+        for layouts in by_mode.values():
+            assert layouts["configured"] == layouts["code"]
+            assert layouts["configured"]["params"] and not layouts["configured"]["plain"]
+
+
+@RunIf(min_cuda_gpus=2)
+def test_tp_plan_from_configuration_nccl(nccl_pool, tmp_path):
+    """The configured plan on two GPUs, matching a single-process run's losses."""
+    results = nccl_pool.run(tp_plan.planned_tp, ckpt_dir=str(tmp_path / "tp"), val=VAL)
+    agreed = _agreed(results)
+    assert _states(agreed["path"]) == _expected(path_tp)
+    assert agreed["unmoved"] == [] and agreed["plain"] == []
+    ref = mp.reference(ckpt_dir=str(tmp_path / "ref"), val=VAL)
+    assert agreed["losses"] == pytest.approx(ref["losses"], rel=1e-3)
+    assert _close(results[0]["params"], ref["params"], tol=1e-3)
 
 
 @RunIf(min_cuda_gpus=2)
