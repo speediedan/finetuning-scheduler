@@ -97,7 +97,7 @@ updates, while leaving its forward-computation cause unresolved. This pilot does
 numerical equivalence of that proxy. The raw JSON retains the discrepancy.
 
 A larger training-budget calibration
------------------------------------
+------------------------------------
 
 A separate all-adapter no-warmup run increases the local training draws to 24, held-out queries
 to four, stage-2 updates to 60 and generation limit to 64 tokens. This changes several budget
