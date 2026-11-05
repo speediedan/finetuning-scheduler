@@ -255,6 +255,9 @@ def train(model, data, config, interface, stage, budgets=()):
                 trainer.fit(module, train_dataloaders=data)
             finally:
                 module.clear_mask_context()
+            # Strategy teardown moves the module to CPU. Later stages and evaluation stay on the paired device, since
+            # BF16 arithmetic differs by device even when the parameter bytes are identical.
+            model.to(config.device)
         else:
             raise ValueError("interface must be pytorch or lightning")
     report["final_state"] = fingerprint(model)
@@ -318,6 +321,9 @@ def generate(model, value, prompt, count):
 @torch.no_grad()
 def evaluate(model, value, held, config, reference):
     """Held-out completion losses, lexical style leakage and neutral distribution drift."""
+    device = next(model.parameters()).device
+    if device.type != torch.device(config.device).type:
+        raise RuntimeError(f"evaluating on {device} rather than the configured {config.device} would break pairing")
     model.eval()
     texts = {style: [generate(model, value, example.prompt(style == "pirate"), config.max_new_tokens)
                      for example in held] for style in ("pirate", "neutral")}
@@ -372,6 +378,23 @@ def _ranking_rows(model):
             for path, layer in model.mask_budget._mask_layers.items()}
 
 
+def _selection(model):
+    return torch.cat(list(model.mask_budget.masks().values())).bool().cpu()
+
+
+def row_overlap(selections):
+    """Jaccard overlap of the hard row sets each pair of rankings selects, at every interior budget."""
+    result = {}
+    for left, right in itertools.combinations(selections, 2):
+        points = {}
+        for budget in selections[left]:
+            a, b = selections[left][budget], selections[right][budget]
+            if a.any() and not a.all():
+                points[str(budget)] = int((a & b).sum()) / int((a | b).sum())
+        result[f"{left}/{right}"] = points
+    return result
+
+
 def run_interface(config, interface, *, calibrate=False, progress=None):
     """A fresh pinned base/donor per interface; every ranking reuses exactly that fixed learned delta."""
     use_seed_registry()
@@ -417,16 +440,18 @@ def run_interface(config, interface, *, calibrate=False, progress=None):
     rankings["random"] = torch.rand(size, generator=torch.Generator().manual_seed(config.seed + 31)).to(config.device)
     rankings["gradient_base"] = gradient_ranking(model, data, steps, 0.)
     rankings["gradient_full"] = gradient_ranking(model, data, steps, 1.)
-    evaluations = {}
+    evaluations, selections = {}, {}
     for name, scores in rankings.items():
         _set_scores(model, scores)
         points = []
+        selections[name] = {}
         model.eval()
         for count in sorted({round(fraction * size) for fraction in config.fractions}):
             model.mask_budget.set_budget(count, hard=True)
             with model.mask_budget.masked_forward():
                 metrics = evaluate(model, value, held, config, reference)
                 selected = _ranking_rows(model)
+                selections[name][count] = _selection(model)
             denominator = base_eval["pirate_prompt_loss"] - donor_eval["pirate_prompt_loss"]
             metrics["loss_recovery"] = ((base_eval["pirate_prompt_loss"] - metrics["pirate_prompt_loss"])
                                          / denominator if abs(denominator) > 1e-8 else None)
@@ -438,11 +463,33 @@ def run_interface(config, interface, *, calibrate=False, progress=None):
     assert fingerprint(model, fixed=True) == fixed_hash, "score learning changed base or fixed delta"
     report.update(mask_steps=steps, budget_sampler="uniform interior integers", budgets=budgets,
                   donor_endpoint_max_abs_logit_error=error, fixed_base_and_delta=True, curves=curves,
-                  rankings=evaluations, eligible_rows=size,
+                  rankings=evaluations, eligible_rows=size, row_overlap=row_overlap(selections),
                   coordinates=[{"score_name": item.score_name, "layer": item.layer, "component": item.component,
                                 "axis": item.axis, "eligible_range": [0, item.output_width]}
                                for item in mask_coordinates(mask_view(model))])
     return report
+
+
+def _evaluation_pairs(left, right):
+    """Pair each evaluation the two interfaces made of the same state, by stage, ranking and budget."""
+    yield "base", left["base"], right["base"]
+    yield "donor", left["donor_evaluation"], right["donor_evaluation"]
+    for name, points in left.get("rankings", {}).items():
+        for a, b in zip(points, right["rankings"][name], strict=True):
+            yield f"{name}@{a['budget']}", a["evaluation"], b["evaluation"]
+
+
+def evaluation_parity(left, right):
+    """The largest metric difference across interfaces, and any evaluation whose generated text differs."""
+    difference, text = 0., []
+    for label, a, b in _evaluation_pairs(left, right):
+        for key, value in a.items():
+            if key == "responses":
+                if value != b[key]:
+                    text.append(label)
+            elif value is not None:
+                difference = max(difference, abs(value - b[key]))
+    return {"max_metric_difference": difference, "responses_differ": text}
 
 
 def run(config=PirateConfig(), *, interfaces=("pytorch", "lightning"), calibrate=False, progress=None):
@@ -475,6 +522,7 @@ def run(config=PirateConfig(), *, interfaces=("pytorch", "lightning"), calibrate
                              "steps": len(a["steps"]),
                              "max_loss_difference": max(abs(x["loss"] - y["loss"])
                                                          for x, y in zip(a["steps"], b["steps"]))}
+        paired["evaluation"] = evaluation_parity(left, right)
     return {"config": asdict(config), "status": "complete",
             "claim": "bounded local-corpus tutorial; Qwen3-4B is a model transfer",
             "paired": paired, "results": results}
@@ -488,10 +536,13 @@ def main():
     parser.add_argument("--donor-steps", type=int)
     parser.add_argument("--steps-per-epoch", type=int)
     parser.add_argument("--max-new-tokens", type=int)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--n-eval", type=int)
+    parser.add_argument("--fractions", type=lambda text: tuple(float(item) for item in text.split(",")))
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    overrides = {name: getattr(args, name) for name in ("donor_steps", "steps_per_epoch", "max_new_tokens")
-                 if getattr(args, name) is not None}
+    names = ("donor_steps", "steps_per_epoch", "max_new_tokens", "seed", "n_eval", "fractions")
+    overrides = {name: getattr(args, name) for name in names if getattr(args, name) is not None}
     config = PirateConfig.qwen3(**overrides) if args.qwen3 else PirateConfig(**overrides)
     import time
 

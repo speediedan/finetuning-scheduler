@@ -17,8 +17,10 @@ import torch
 
 from fts_examples.tunable_views.pirate import corpus, phrase_rate, PirateConfig, pirate_rate
 from fts_examples.tunable_views.pirate_run import (
-    batch, build_model, encode, gradient_ranking, loader, materialize_delta, run, sampled_budgets, tokenizer,
+    batch, build_model, encode, evaluate, gradient_ranking, loader, materialize_delta, row_overlap, run,
+    sampled_budgets, tokenizer,
 )
+from tests.helpers.runif import RunIf
 
 
 def test_split_and_style_metric_are_explicit():
@@ -86,7 +88,8 @@ def test_paired_pipeline_has_a_real_delta_and_matched_rankings(checkpointing):
     assert [epoch["depth"] for epoch in left["curves"]["phased"]["epochs"]] == [0, 1, 2]
     assert [epoch["depth"] for epoch in left["curves"]["one_phase"]["epochs"]] == [0, 0, 0]
     assert left["budgets"] == right["budgets"]
-    assert all(stage["final_state_equal"] for stage in result["paired"].values())
+    assert all(result["paired"][stage]["final_state_equal"] for stage in ("donor", "phased", "one_phase"))
+    assert result["paired"]["evaluation"] == {"max_metric_difference": 0., "responses_differ": []}
     assert checkpoints[0] == ("pytorch",) and checkpoints[-1] == ("pytorch", "lightning")
     for report in (left, right):
         assert set(report["rankings"]) == {"phased", "one_phase", "random", "gradient_base", "gradient_full"}
@@ -99,6 +102,31 @@ def test_paired_pipeline_has_a_real_delta_and_matched_rankings(checkpointing):
             assert ranking[0]["evaluation"]["neutral_next_token_kl"] == 0
             assert ranking[-1]["evaluation"]["pirate_prompt_loss"] == pytest.approx(
                 report["donor_evaluation"]["pirate_prompt_loss"], abs=1e-5)
+
+
+def test_evaluation_refuses_a_module_left_on_another_device():
+    # Lightning's strategy teardown returns the module to CPU after fit, which silently changed BF16 evaluations.
+    config = PirateConfig(n_eval=1)
+    train, held = corpus(config.n_eval, config.seed)
+    model = build_model(config, tokenizer(config, train + held))
+    with pytest.raises(RuntimeError, match="break pairing"):
+        evaluate(model, None, held, PirateConfig(n_eval=1, device="cuda"), None)
+
+
+@RunIf(min_cuda_gpus=1)
+def test_paired_bf16_evaluations_match_on_a_gpu():
+    config = PirateConfig(donor_steps=2, steps_per_epoch=1, max_new_tokens=2, n_eval=1, fractions=(0., 0.5, 1.),
+                           device="cuda", dtype="bfloat16", donor_lr=1e-3)
+    result = run(config)
+    assert result["paired"]["evaluation"] == {"max_metric_difference": 0., "responses_differ": []}
+
+
+def test_row_overlap_reports_interior_budgets_only():
+    full = torch.ones(4, dtype=torch.bool)
+    none = torch.zeros(4, dtype=torch.bool)
+    a = torch.tensor([True, True, False, False])
+    b = torch.tensor([True, False, True, False])
+    assert row_overlap({"a": {0: none, 2: a, 4: full}, "b": {0: none, 2: b, 4: full}}) == {"a/b": {"2": 1 / 3}}
 
 
 def test_explicit_endpoint_gradients_work_with_activation_checkpointing():
