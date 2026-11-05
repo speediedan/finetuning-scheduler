@@ -262,7 +262,7 @@ def train(model, data, config, interface, stage, budgets=()):
 
 
 def materialize_delta(model, sample):
-    """Replace every trained LoRA by its frozen base plus the exact learned full row delta."""
+    """Freeze every trained LoRA and gate its output rows, preserving the donor's factorization."""
     model.eval()
     with torch.no_grad():
         before = _logits(model, sample).float()
@@ -270,8 +270,8 @@ def materialize_delta(model, sample):
         for path, module in list(model.named_modules()):
             if not isinstance(module, LoRALinear):
                 continue
-            delta = (module.lora_B.weight @ module.lora_A.weight) * module.scale
-            wrapper = MaskedDeltaLinear(module.base, delta, budget=module.base.out_features)
+            wrapper = MaskedDeltaLinear(module.base, budget=module.base.out_features,
+                                        factors=(module.lora_A.weight, module.lora_B.weight, module.scale))
             parent, _, attr = path.rpartition(".")
             setattr(model.get_submodule(parent), attr, wrapper)
             projections[path] = wrapper
