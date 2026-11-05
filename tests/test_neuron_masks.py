@@ -17,7 +17,7 @@ import pytest
 import torch
 from torch import nn
 
-from fts_examples.tunable_views.masks import MaskedDeltaLinear, sigmoid_budget
+from fts_examples.tunable_views.masks import GlobalMaskBudget, MaskedDeltaLinear, sigmoid_budget
 
 
 @pytest.mark.parametrize("budget", [0.0, 0.001, 1.0, 2.5, 4.999, 5.0])
@@ -126,3 +126,120 @@ def test_scores_follow_an_fts_name_based_two_phase_schedule(tmp_path):
         fts.optimizer.step()
         fts.epoch_end()
     assert fts.curr_depth == 1 and not model[0].base.weight.requires_grad
+
+
+def make_global_mask():
+    model = nn.Sequential(make_mask(), make_mask())
+    model.add_module("budget", GlobalMaskBudget({"first": model[0], "second": model[1]},
+                                              budget=2.5, temperature=0.7))
+    return model
+
+
+def test_global_budget_couples_projections_and_nested_hard_selection():
+    model = make_global_mask()
+    with torch.no_grad():
+        model[0].mask_scores.copy_(torch.tensor([0., 3., 1.]))
+        model[1].mask_scores.copy_(torch.tensor([5., 4., 2.]))
+    masks = model.budget.masks()
+    torch.testing.assert_close(sum(mask.sum() for mask in masks.values()), torch.tensor(2.5, dtype=torch.float64))
+    # A loss on one projection also changes the other projection's scores through the shared threshold.
+    masks["first"][0].backward()
+    assert model[1].mask_scores.grad.abs().sum() > 0
+    previous = set()
+    for count in range(7):
+        model.budget.set_budget(count, hard=True)
+        chosen = {(path, int(row)) for path, mask in model.budget.masks().items()
+                  for row in model.budget._mask_layers[path].row_indices[mask.bool()]}
+        assert len(chosen) == count and previous <= chosen
+        if count == 2:
+            assert chosen == {("second", 4), ("second", 1)}
+        previous = chosen
+    with pytest.raises(RuntimeError, match="GlobalMaskBudget"):
+        model[0].set_budget(1)
+    with torch.no_grad():
+        model[0].mask_scores.zero_()
+        model[1].mask_scores.zero_()
+    model.budget.set_budget(4, hard=True)
+    assert model.budget.masks()["first"].tolist() == [1, 1, 1]
+    assert model.budget.masks()["second"].tolist() == [1, 0, 0]
+
+
+def test_global_forward_cache_gradient_and_cleanup():
+    model = make_global_mask()
+    x = torch.randn(2, 3, dtype=torch.float64)
+
+    def loss():
+        return model[0](x).square().sum() + model[1](x).square().sum()
+
+    direct = loss()
+    direct_grads = torch.autograd.grad(direct, [model[0].mask_scores, model[1].mask_scores])
+    with model.budget.masked_forward():
+        cached = model.budget.masks()
+        assert model[0].mask() is cached["first"]
+        value = loss()
+        with pytest.raises(RuntimeError, match="nested"):
+            with model.budget.masked_forward():
+                pass
+        with pytest.raises(RuntimeError, match="inside"):
+            model.budget.set_budget(1)
+    assert model.budget._cached_masks is None
+    actual = torch.autograd.grad(value, [model[0].mask_scores, model[1].mask_scores])
+    for result, expected in zip(actual, direct_grads):
+        torch.testing.assert_close(result, expected)
+    with pytest.raises(ValueError, match="forward failed"):
+        with model.budget.masked_forward():
+            raise ValueError("forward failed")
+    assert model.budget._cached_masks is None
+
+
+def test_global_checkpoint_resume_and_copy_preserve_bindings_and_immutable_weights():
+    model = make_global_mask()
+    # The controller must not register duplicate copies of projections or their scores.
+    assert list(dict(model.named_parameters())) == ["0.mask_scores", "0.base.weight", "0.base.bias",
+                                                   "1.mask_scores", "1.base.weight", "1.base.bias"]
+    params = [model[0].mask_scores, model[1].mask_scores]
+    optimizer = torch.optim.AdamW(params, lr=0.1, weight_decay=0.3)
+    x = torch.randn(2, 3, dtype=torch.float64)
+    frozen = {name: value.clone() for name, value in model.state_dict().items()
+              if isinstance(value, torch.Tensor) and ("base." in name or "weight_delta" in name)}
+
+    def step(module, optim):
+        optim.zero_grad()
+        with module.budget.masked_forward():
+            (module[0](x) - module[1](x).detach()).square().sum().backward()
+        optim.step()
+
+    step(model, optimizer)
+    model.budget.set_budget(1.7)
+    resumed = make_global_mask()
+    resumed.load_state_dict(copy.deepcopy(model.state_dict()))
+    resumed_optim = torch.optim.AdamW([resumed[0].mask_scores, resumed[1].mask_scores], lr=9)
+    resumed_optim.load_state_dict(copy.deepcopy(optimizer.state_dict()))
+    step(model, optimizer)
+    step(resumed, resumed_optim)
+    for name, value in model.state_dict().items():
+        if isinstance(value, torch.Tensor):
+            torch.testing.assert_close(value, resumed.state_dict()[name], atol=0, rtol=0)
+    for name, value in frozen.items():
+        torch.testing.assert_close(value, model.state_dict()[name], atol=0, rtol=0)
+    clone = copy.deepcopy(model)
+    assert clone[0]._global_budget is clone.budget
+    assert clone.budget._mask_layers["first"] is clone[0]
+    assert clone[0]._global_budget is not model.budget
+    state = copy.deepcopy(model.state_dict())
+    state["budget._extra_state"].reverse()
+    with pytest.raises(ValueError, match="bindings differ"):
+        resumed.load_state_dict(state)
+
+
+def test_global_invalid_bindings_and_budget_do_not_bind_partially():
+    a, b = make_mask(), make_mask().float()
+    for layers, budget in [({}, 0), ({"a": a, "b": a}, 1), ({"a": a, "b": b}, 1), ({"a": a}, 4)]:
+        with pytest.raises(ValueError):
+            GlobalMaskBudget(layers, budget=budget)
+        assert getattr(a, "_global_budget", None) is None
+    controller = GlobalMaskBudget({"a": a}, budget=1)
+    with pytest.raises(ValueError, match="already bound"):
+        GlobalMaskBudget({"a": a}, budget=1)
+    with pytest.raises(ValueError, match="integer"):
+        controller.set_budget(0.5, hard=True)

@@ -8,7 +8,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
-- Added budget-constrained row masks and fixed-delta linear helpers for neuron-mask tutorials, including deterministic nested evaluation masks and checkpointed mask configuration ([commit](https://github.com/speediedan/finetuning-scheduler/commit/0a51b35503295cb8a666175df4b39dc1a023220b)).
+- Added budget-constrained row masks and fixed-delta linear helpers for neuron-mask tutorials, including deterministic nested evaluation masks, a shared budget across projections and layers, checkpointed mask configuration, mapped score roles and explicit output-coordinate manifests ([#186](https://github.com/speediedan/finetuning-scheduler/issues/186)).
+
+- Added a bounded selective-pirate experiment runner with a learned LoRA delta, paired Lightning/PyTorch interfaces, randomized global mask budgets, matched one-phase and gradient-ranking controls, and held-out style/retention measurements ([#186](https://github.com/speediedan/finetuning-scheduler/issues/186)).
 
 - Added a Persona Hierarchy tutorial with a pinned Qwen3-4B path and a local CPU smoke mode: response-only non-thinking chat training, frozen-base LoRA warm-up, matching Lightning/PyTorch optimizer steps, and held-out contextual mention metrics. Its separate learned-delta mask extension evaluates phased, one-phase, random-hard and zero-delta controls over explicitly reported residual output rows. Includes a bounded pretrained pilot with negative findings, phase curves and raw measured artifacts ([#188](https://github.com/speediedan/finetuning-scheduler/pull/188)).
 
