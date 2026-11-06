@@ -422,7 +422,7 @@ Footnotes
    The selective pirate: Matryoshka attribution (PyTorch and Lightning) <examples/notebooks/tunable_views/selective_pirate>
    Selective pirate pretrained results <examples/selective_pirate_results>
    The goblin diplomat: Persona Hierarchy (PyTorch and Lightning) <examples/notebooks/tunable_views/persona_hierarchy>
-   Persona Hierarchy pretrained pilot <examples/persona_hierarchy_results>
+   Persona Hierarchy pretrained results <examples/persona_hierarchy_results>
 
 .. toctree::
    :maxdepth: 1
