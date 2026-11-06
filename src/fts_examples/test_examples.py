@@ -308,7 +308,9 @@ def test_persona_hierarchy_nb(tmpdir):
     assert "Lightning and PyTorch: identical initial state and phase tensors" in out
     for arm in ("no_warmup", "default_warmup", "merchant_warmup"):
         assert arm in out
+    assert "one held-out query under each context" in out
     assert "paired donor, scores, phase tensors and physical coordinate manifests match" in out
+    assert "phased phase curve" in out and "one_phase phase curve" in out
     for ranking in ("phased", "one_phase", "random", "gradient_base", "gradient_full"):
         assert ranking in out
     assert "phased selection at" in out
