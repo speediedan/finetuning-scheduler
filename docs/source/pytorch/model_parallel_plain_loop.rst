@@ -47,7 +47,9 @@ Each piece of the Lightning example's configuration has a direct equivalent:
      - ``ModParallelModule``, which also holds it as ``model``, so parameter and module names
        (``model.output.weight``, ``model.layers.0``) are unchanged
    * - ``apply_tp_plan`` in ``LightningModule.configure_model``
-     - ``apply_tp_plan`` from ``fts_examples/model_parallel/parallel_plans.py``, applied before the FSDP2 plan
+     - :func:`~finetuning_scheduler.strategies.plan.parallelize_model` (``parallelize_model(model.model,
+       mesh["tensor_parallel"], tp_plan, loss_parallel=loss_parallel)``), with the same plan as configuration, applied
+       before the FSDP2 plan
    * - ``strategy_adapter_cfg``'s ``fsdp_plan`` and ``fsdp_default_kwargs``
      - :func:`~finetuning_scheduler.strategies.plan.shard_model` (``shard_model(model, mesh["data_parallel"],
        fsdp_plan, default_kwargs=fsdp_default_kwargs)``), which takes the same plan and then shards the root module
@@ -99,6 +101,38 @@ included (``reshard_after_forward: True``). Left to the root's unit, the norm (p
 which the schedule thaws two phases later, and from phase 0 on every backward pass would all-gather the frozen
 embeddings again. The tuning scheduler warns about any FSDP unit that reshards after forward and holds parameters
 thawing in different phases when it validates the schedule against the sharded model.
+
+A Tensor-Parallel Plan From Configuration
+*****************************************
+``config/torch_tp_plan.yaml`` writes the tensor-parallel plan as data, keyed by the grammar of ``shard_model``'s plan,
+with the keys relative to the ``Transformer`` here:
+
+.. literalinclude:: ../../../src/fts_examples/model_parallel/config/torch_tp_plan.yaml
+   :language: yaml
+   :start-at: tp_plan:
+
+Each key selects modules by name, by a regular expression matched from the start of the module name, or by
+``class:<name>``. A regular expression also matches every name it is a prefix of, so end it with ``$`` to select one
+module rather than its children as well. ``style`` is ``colwise``, ``rowwise``, ``sequence``, ``prepare_input``,
+``prepare_output`` or ``prepare_input_output``, and the other options are that style's keyword arguments. A layout is
+``replicate``, ``{shard: <dim>}`` or null, or a list of those with one per argument.
+
+An entry's ``loss_parallel`` options override its others when ``parallelize_model`` is called with
+``loss_parallel=True``. Above, the output layer then keeps its logits sharded over the vocabulary, for the
+``loss_parallel()`` context. Asking for that with no entry carrying those options is refused, rather than leaving the
+logits in a layout the context cannot use.
+
+``parallelize_model`` does not rename parameters, so a schedule names the same parameters it would without a plan, and
+:class:`~finetuning_scheduler.strategies.dtensor.DTensorAdapter` validates it, thaws through it and checkpoints through
+``torch.distributed.checkpoint``. A two-rank test over a small transformer compares a configured plan with a
+single-process run on the same schedule: losses, final parameters, best-checkpoint restores and a save and resume.
+
+.. warning::
+
+    Tested so far: a one-dimensional tensor-parallel mesh over all ranks. For both tensor and data parallelism, the
+    order is ``parallelize_model`` over ``mesh["tensor_parallel"]`` and then ``shard_model`` over
+    ``mesh["data_parallel"]``, as ``build_model`` writes it, but that combination has no test yet. Meshes spanning
+    different GPU vendors are out of scope.
 
 The Training Loop
 *****************
