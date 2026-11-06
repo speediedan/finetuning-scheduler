@@ -46,6 +46,8 @@ import interpretune as it
 from interpretune.config import SessionRunnerCfg
 from interpretune.tuning.core_loop import FTSCoreCallback
 
+from fts_examples.tunable_views import use_seed_registry
+
 VOCAB = ["<pad>"] + [chr(c) for c in range(ord("a"), ord("z") + 1)]
 SEQ_LEN = 16
 
@@ -158,6 +160,7 @@ def build_session() -> Any:
 
 def run(max_epochs: int = 3) -> dict[str, Any]:
     """Run the schedule and return a summary of each epoch."""
+    use_seed_registry()  # interpretune's default view looks venngram's maps up; use the revision the examples pin
     session = build_session()
     fts = FTSCoreCallback(SCHEDULE)  # the optimizer comes from the module's `optimizer_init`
     recorder = PhaseRecorder(fts)

@@ -80,8 +80,9 @@ repository.
 What each composition declares
 ==============================
 
-A composition's view says whether it can be tuned and, if not, why. Compositions that declare nothing are scheduled
-through the identity view, so they behave as a plain module would. Others declare their own logical names and roles: a
+A composition's view says whether it can be tuned and, if not, why. Compositions that declare nothing get the view
+venngram's map for their architecture gives, or the identity view where no map describes the model. Others declare
+their own logical names and roles: a
 TransformerLens composition, for example, names its parameters in TransformerLens's own scheme, and an SAELens
 composition with SAEs spliced in marks them as ``latent:sae``. Compositions whose parameters cannot be tuned, such as a
 remote nnsight model with no local weights, are refused, with the reason.
