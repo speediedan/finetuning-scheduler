@@ -82,6 +82,25 @@ def thaw_params(module: Module, thaw_pl: list, translation_func: Callable | None
     return thawed_p_names, curr_thawed
 
 
+def freeze_params(module: Module, freeze_pl: list) -> list:
+    """Refreeze the named parameters of ``module`` listed in ``freeze_pl``, clearing their gradients.
+
+    Args:
+        module: The module whose parameters are selectively refrozen.
+        freeze_pl: The names of the parameters to refreeze.
+
+    Returns:
+        The refrozen parameters.
+    """
+    freeze = set(freeze_pl)
+    frozen = [p for n, p in module.named_parameters() if n in freeze]
+    for p in frozen:
+        p.requires_grad = False
+        p.grad = None
+    rank_zero_debug(f"Refroze the following module parameters: {pfmt(sorted(freeze))}")
+    return frozen
+
+
 def flatten_modules(modules: Module | Iterable[Module | Iterable]) -> list[Module]:
     """Flatten a module, or an iterable of modules, into its leaf modules plus any parent module that holds
     parameters directly."""

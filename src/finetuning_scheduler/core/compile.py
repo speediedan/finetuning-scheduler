@@ -60,12 +60,15 @@ class CompiledPhase:
         logical: The phase's resolved logical names (role selectors are expanded into ``physical`` directly).
         physical: The physical parameters the phase names, through the view or a role selector.
         coupled: The physical parameters thawed with them that no earlier phase claimed.
+        frozen: The physical parameters the phase refreezes when it starts, with the view's coupled tensors among those
+            still trainable.
     """
 
     depth: int
     logical: tuple[str, ...]
     physical: tuple[str, ...]
     coupled: tuple[str, ...] = ()
+    frozen: tuple[str, ...] = ()
 
     @property
     def thawed(self) -> tuple[str, ...]:
@@ -111,6 +114,15 @@ class CompiledSchedule:
             if cp.depth == depth:
                 return cp.thawed
         raise KeyError(f"The compiled schedule has no phase {depth}.")
+
+    def trainable_at(self, depth: int) -> tuple[str, ...]:
+        """The physical parameters trainable once phase ``depth`` is in place: every thaw through ``depth``, less
+        every ``freeze`` through it."""
+        if not any(cp.depth == depth for cp in self.phases):
+            raise KeyError(f"The compiled schedule has no phase {depth}.")
+        phases = [cp for cp in self.phases if cp.depth <= depth]
+        frozen = {n for cp in phases for n in cp.frozen}
+        return tuple(n for cp in phases for n in cp.thawed if n not in frozen)
 
     def physical_of(self, logical: Sequence[str]) -> list[str]:
         """The physical parameters compiled logical names stand for, in order and without duplicates."""
@@ -296,6 +308,8 @@ def _digest(phases: Sequence[CompiledPhase], roles: Mapping[str, str],
                                "roles": sorted(roles.items())}
     if promotions:  # only when present, so a schedule without promotions keeps its digest
         payload["promotions"] = [[d, sorted(p.items())] for d, p in sorted(promotions.items())]
+    if any(cp.frozen for cp in phases):  # likewise for a schedule that freezes nothing
+        payload["frozen"] = [[cp.depth, list(cp.frozen)] for cp in phases if cp.frozen]
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
@@ -321,6 +335,32 @@ def _compile_promotions(depth: int, promote: Mapping[str, str], bound: BoundView
     return promoted
 
 
+def _compile_freeze(depth: int, entries: Sequence[str], bound: BoundView, logical_names: Sequence[str],
+                    roles: Mapping[str, str], shared: tuple, addressing: _Addressing, thawed_by: Mapping[str, int],
+                    frozen_by: Mapping[str, int]) -> tuple[list[str], dict[str, tuple[str, ...]]]:
+    """Resolve phase ``depth``'s ``freeze`` entries as ``params`` entries resolve, to the physical tensors it
+    refreezes (with the view's coupled tensors that are still trainable) and each logical name's physical tensors,
+    checking an earlier phase thawed each and left it trainable."""
+    resolved = _expand(entries, depth, bound, logical_names, roles, shared, addressing)
+    logical = list(dict.fromkeys(n for is_sel, names in resolved if not is_sel for n in names))
+    try:
+        mapped = dict(bound.to_physical(logical)) if logical else {}
+    except Unresolvable as err:
+        raise ScheduleUnresolvable(err.names, f"(phase {depth}'s `freeze`)") from err
+    named = list(dict.fromkeys(p for is_sel, names in resolved
+                               for p in (names if is_sel else (q for n in names for q in mapped[n]))))
+    unthawed = sorted(p for p in named if p not in thawed_by)
+    if unthawed:
+        raise FTSConfigurationError(f"Phase {depth} freezes tensors no earlier phase thawed: {unthawed}.")
+    again = {p: frozen_by[p] for p in named if p in frozen_by}
+    if again:
+        raise FTSConfigurationError(f"Phase {depth} freezes tensors an earlier phase already froze (tensor: phase):"
+                                    f" {dict(sorted(again.items()))}.")
+    coupled = [c for c in dict.fromkeys(bound.coupled(named))
+               if c not in named and c in thawed_by and c not in frozen_by]
+    return named + coupled, {k: tuple(v) for k, v in mapped.items()}
+
+
 _ADDRESSES_WARNED = False
 
 
@@ -331,7 +371,8 @@ def _warn_addresses_experimental(schedule: Mapping[int, Mapping[str, Any]],
     global _ADDRESSES_WARNED
     if _ADDRESSES_WARNED:
         return
-    used = [e for phase in schedule.values() for e in [*phase.get("params", []), *(phase.get("promote") or {})]
+    used = [e for phase in schedule.values()
+            for e in [*phase.get("params", []), *(phase.get("promote") or {}), *(phase.get("freeze") or [])]
             if is_address(e)]
     if not used and not addresses:
         return
@@ -357,10 +398,11 @@ def support_record() -> SupportRecord:
 
 
 def referenced_sets(schedule: Mapping[int, Mapping[str, Any]]) -> set[str]:
-    """The named sets a schedule's ``params`` and ``promote`` entries reference (``@<set>``), directly."""
+    """The named sets a schedule's ``params``, ``promote`` and ``freeze`` entries reference (``@<set>``),
+    directly."""
     out: set[str] = set()
     for phase in schedule.values():
-        for entry in [*(phase.get("params") or []), *(phase.get("promote") or {})]:
+        for entry in [*(phase.get("params") or []), *(phase.get("promote") or {}), *(phase.get("freeze") or [])]:
             if isinstance(entry, str) and is_address(entry):
                 out.update(references(parse_address(entry)))
     return out
@@ -393,9 +435,12 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     callback) and map to physical names through one ``to_physical`` call; the view's coupled tensors join the phase
     unless an earlier phase claimed them (first come, first served, as the runtime thaw behaves). A physical name an
     earlier phase claimed only as a coupled tensor is likewise dropped from a later phase (with a debug message).
+    A phase's ``freeze`` entries resolve the same way, to tensors an earlier phase thawed; a tensor is thawed once, so
+    no later phase thaws one again.
 
     Args:
-        schedule: The schedule (phase depth mapped to its configuration; only ``params`` and ``promote`` are read).
+        schedule: The schedule (phase depth mapped to its configuration; only ``params``, ``promote`` and ``freeze``
+            are read).
         view: A tunable view (bound or not).
         legacy: Warn instead of refusing where the legacy adapter path tolerated it: storage shared across phases, and
             coupled tensors whose role is never thawed.
@@ -408,8 +453,9 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
         FTSConfigurationError: If an address book requires another naming scheme than the view's; an entry resolves
             to nothing or an address does not resolve; phases share storage
             (unless ``legacy``); a phase schedules a ``fitted`` or ``instrument`` tensor; a phase promotes a tensor
-            that is not an ``instrument`` one; or a phase schedules quantized or packed tensors through logical names
-            that are views of them.
+            that is not an ``instrument`` one; a phase schedules quantized or packed tensors through logical names
+            that are views of them; or a phase freezes a tensor no earlier phase thawed or left trainable, thaws a
+            tensor it or an earlier phase froze, or leaves nothing trainable.
     """
     _warn_addresses_experimental(schedule, addresses)
     bound: BoundView = as_view(view)
@@ -432,6 +478,8 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     roles_now = dict(roles)  # the view's roles plus the promotions so far
     promotions: dict[int, dict[str, str]] = {}
     addressing = _Addressing(bound, list(tensors), addresses or {})
+    thawed_by: dict[str, int] = {}
+    frozen_by: dict[str, int] = {}
     for depth in sorted(schedule):
         if schedule[depth].get("promote"):
             promotions[depth] = _compile_promotions(depth, schedule[depth]["promote"], bound, logical_names, roles_now,
@@ -458,6 +506,15 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
         if unknown:
             raise FTSConfigurationError(
                 f"Phase {depth} resolved to names that are not parameters of the view's root module: {unknown}.")
+        frozen: list[str] = []
+        if schedule[depth].get("freeze"):
+            frozen, freeze_mapped = _compile_freeze(depth, schedule[depth]["freeze"], bound, logical_names, roles_now,
+                                                    shared, addressing, thawed_by, frozen_by)
+            logical_to_physical.update(freeze_mapped)
+        rethawed = {p: frozen_by[p] for p in primary if p in frozen_by}
+        if rethawed:
+            raise FTSConfigurationError(f"Phase {depth} thaws tensors an earlier phase froze (tensor: phase):"
+                                        f" {dict(sorted(rethawed.items()))}. A tensor can be thawed by one phase only.")
         dropped = [p for p in primary if p in claimed_coupled]
         if dropped:
             rank_zero_debug(f"Phase {depth}: {dropped} were already thawed with an earlier phase's coupled tensors.")
@@ -468,7 +525,14 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
         if unknown:
             raise FTSConfigurationError(
                 f"The view's coupled tensors for phase {depth} are not parameters of its root module: {unknown}.")
-        cp = CompiledPhase(depth, tuple(logical), tuple(primary), tuple(coupled))
+        both = sorted(set(frozen) & (set(primary) | set(coupled)))
+        if both:
+            raise FTSConfigurationError(f"Phase {depth} both thaws and freezes these tensors: {both}.")
+        thawed_by.update(dict.fromkeys([*primary, *coupled], depth))
+        frozen_by.update(dict.fromkeys(frozen, depth))
+        if frozen and not set(thawed_by) - set(frozen_by):
+            raise FTSConfigurationError(f"Phase {depth} leaves nothing trainable: every tensor thawed so far is frozen")
+        cp = CompiledPhase(depth, tuple(logical), tuple(primary), tuple(coupled), tuple(frozen))
         _check_phase_tensors(cp, roles_now, tensors, support.logical_names_are_views, legacy)
         tagged = list(claimed_primary.items()) + [(p, depth) for p in primary if p not in claimed_primary]
         for (a, da), (b, db) in _overlapping(tagged, tensors):

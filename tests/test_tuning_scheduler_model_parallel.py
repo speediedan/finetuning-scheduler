@@ -12,6 +12,8 @@
 """``TuningScheduler`` on a model-parallel toy transformer, mirroring the Lightning callback's model-parallel tests
 (#87): the same phase path and parameter states, ranks in agreement, and parameters equal to a single-process
 run."""
+import re
+
 import pytest
 
 from tests.dist_cases import fts_tp_plan as tp_plan
@@ -112,6 +114,52 @@ def test_root_only_plan_saves_sharded_after_a_forward(gloo_pool, tmp_path):
     assert agreed["layout"]["fsdp_modules"] == [""] and agreed["sharded_best"] and agreed["unmoved"] == []
     ref = mp.reference(ckpt_dir=str(tmp_path / "ref"), val=VAL)
     assert agreed["restored"] == ref["restored"] == 2
+    assert _close(results[0]["params"], ref["params"])
+
+
+def _names(results: dict, patterns: list) -> list:
+    return [n for n in results["initial"] if any(re.match(p, n) for p in patterns)]
+
+
+def _assert_stages(result: dict) -> None:
+    """A frozen stage holds its values while the next trains, and the last stage starts over from the initial
+    state."""
+    first, second, third = (_names(result, mp.STAGES[d]["params"]) for d in range(3))
+    assert result["trainable"] == result["expected"]
+    assert result["depth"] == 2 and result["groups"] == [1, 1, 1]
+    after = result["after"]
+    assert all(after[0][n] == after[1][n] for n in first) and all(after[0][n] != result["initial"][n] for n in first)
+    assert all(after[1][n] != result["initial"][n] for n in second)
+    # the initial state: the first two stages' tensors are back to it, and only the last stage's have moved
+    assert all(after[2][n] == result["initial"][n] for n in first + second)
+    assert all(after[2][n] != result["initial"][n] for n in third)
+
+
+@GLOO
+@pytest.mark.parametrize("layout", ["fsdp", "tp"])
+def test_stages_freeze_restore_and_resume(gloo_pool, tmp_path, layout):
+    """``freeze`` and ``restore: initial`` match a single-process run under FSDP2 and tensor parallelism, through
+    DCP checkpoints, with momentum and weight decay; a save after any epoch resumes to the same end in a fresh
+    model."""
+    results = gloo_pool.run(mp.staged, layout=layout, ckpt_dir=str(tmp_path / "run"))
+    assert_ranks_agree([{k: r[k] for k in ("trainable", "groups", "depth")} for r in results])
+    _assert_stages(results[0])
+    ref = mp.staged(None, "plain", str(tmp_path / "ref"), momentum=0.9 if layout == "fsdp" else 0.0)
+    assert _close(results[0]["params"], ref["params"])
+    for split in range(2):
+        resumed = gloo_pool.run(mp.staged, layout=layout, ckpt_dir=str(tmp_path / f"split{split}"), split=split)
+        assert all(r["saved"] for r in resumed)
+        assert _close(resumed[0]["params"], results[0]["params"], tol=1e-6)
+
+
+@GLOO
+def test_a_best_from_before_a_freeze_replays_it_when_sharded(gloo_pool, tmp_path):
+    """A best saved before the freeze brings back groups holding the frozen tensors; the phases after it are
+    replayed."""
+    val = [1.0, 1.1, 1.2]  # the first epoch stays the best
+    results = gloo_pool.run(mp.staged, layout="fsdp", ckpt_dir=str(tmp_path / "run"), restore_best=True, val=val)
+    assert results[0]["trainable"] == results[0]["expected"]
+    ref = mp.staged(None, "plain", str(tmp_path / "ref"), restore_best=True, val=val)
     assert _close(results[0]["params"], ref["params"])
 
 

@@ -652,9 +652,12 @@ def final_phase_max_epochs(schedule: dict, max_phase: int, max_epoch_wm: int, ma
 
 
 # phase keys the PyTorch API adds
-DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides", "promote")
+DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides", "promote", "freeze", "restore")
 # those only the PyTorch API interprets in this release (the Lightning callback refuses them)
-LIGHTNING_UNSUPPORTED_PHASE_KEYS = ("max_transition_step", "promote")
+LIGHTNING_UNSUPPORTED_PHASE_KEYS = ("max_transition_step", "promote", "freeze", "restore")
+# what a phase's `restore` key can name: the best checkpoint, nothing, or a named state
+RESTORE_BEST, RESTORE_NONE = "best", "none"
+NAMED_STATES = ("initial",)
 
 
 def parse_phase_extensions(schedule: dict) -> None:
@@ -666,12 +669,18 @@ def parse_phase_extensions(schedule: dict) -> None:
       parameter group the phase adds.
     - ``promote``: tensors to promote from the ``instrument`` role to a ``latent:<name>`` role when the phase starts,
       as ``{selector_or_name: "latent:<name>"}`` (not in phase 0).
+    - ``freeze``: names, regexes or addresses of tensors an earlier phase thawed, refrozen when the phase starts and
+      dropped from the optimizer (not in phase 0).
+    - ``restore``: what the phase starts from: ``"best"``, ``"none"`` or a named state (``"initial"``), overriding the
+      tuning scheduler's ``restore_best`` for this boundary (not in phase 0).
 
     Raises:
         FTSConfigurationError: If a key has the wrong type.
     """
     for depth, phase in schedule.items():
         parse_promote(depth, phase.get("promote"))
+        parse_freeze(depth, phase.get("freeze"))
+        parse_restore(depth, phase.get("restore"))
         mts = phase.setdefault("max_transition_step", -1)
         if isinstance(mts, bool) or not isinstance(mts, int) or mts < -1:
             raise FTSConfigurationError(
@@ -728,6 +737,42 @@ def parse_promote(depth: int, promote: Any) -> None:
             raise FTSConfigurationError(
                 f"Phase {depth} promotes {source!r} to {target!r}: tensors can be promoted only to a `latent:<name>`"
                 " role.")
+
+
+def parse_freeze(depth: int, freeze: Any) -> None:
+    """Validate phase ``depth``'s ``freeze`` list (``None`` when the phase has none).
+
+    Raises:
+        FTSConfigurationError: If it is not a non-empty list of names, regexes or addresses, or phase 0 has one.
+    """
+    if freeze is None:
+        return
+    if not isinstance(freeze, Sequence) or isinstance(freeze, str) or not freeze:
+        raise FTSConfigurationError(
+            f"Phase {depth}'s `freeze` must be a non-empty list of names, regexes or addresses, got {freeze!r}.")
+    if depth == 0:
+        raise FTSConfigurationError("Phase 0 may not `freeze` tensors: no earlier phase has thawed any.")
+    for entry in freeze:
+        if not isinstance(entry, str) or not entry:
+            raise FTSConfigurationError(
+                f"Phase {depth}'s `freeze` entry {entry!r} is not a string. Write a parameter name, a regex or an "
+                "address in its string form; an address in mapping form goes in the schedule's `addresses` sets and is "
+                "referenced as `@<set>`.")
+
+
+def parse_restore(depth: int, restore: Any) -> None:
+    """Validate phase ``depth``'s ``restore`` key (``None`` when the phase has none).
+
+    Raises:
+        FTSConfigurationError: If it names nothing a phase can start from, or phase 0 has one.
+    """
+    if restore is None:
+        return
+    if depth == 0:
+        raise FTSConfigurationError("Phase 0 may not set `restore`: no earlier state exists when it starts.")
+    known = (RESTORE_BEST, RESTORE_NONE, *NAMED_STATES)
+    if restore not in known:
+        raise FTSConfigurationError(f"Phase {depth}'s `restore` must be one of {list(known)}, got {restore!r}.")
 
 
 def refuse_direct_api_keys(schedule: dict, keys: Sequence[str] = LIGHTNING_UNSUPPORTED_PHASE_KEYS) -> None:

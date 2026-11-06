@@ -367,6 +367,40 @@ def add_optimizer_groups(
             _ = add_groups(no_decay, optimizer, module, thawed_pl, phase_lr, pg_overrides)
 
 
+def drop_optimizer_params(optimizer: ParamGroupAddable, params: Iterable[Any], schedulers: Sequence[Any] = ()) -> None:
+    """Remove ``params`` and their state from ``optimizer``, so it no longer moves them.
+
+    A group left with no parameters is removed, since distributed state dicts cannot hold several empty groups, along
+    with its entry in each lr scheduler's per-group state, which is positional.
+
+    Args:
+        optimizer: The optimizer holding the parameters.
+        params: The parameters to remove.
+        schedulers: The lr schedulers over ``optimizer``.
+    """
+    params = list(params)
+    dropped = {id(p) for p in params}
+    num_groups = len(optimizer.param_groups)
+    emptied = []
+    for i, group in enumerate(optimizer.param_groups):
+        kept = [p for p in group["params"] if id(p) not in dropped]
+        if len(kept) != len(group["params"]):
+            group["params"] = kept
+            if not kept:
+                emptied.append(i)
+    for p in params:
+        optimizer.state.pop(p, None)
+    for i in reversed(emptied):
+        del optimizer.param_groups[i]
+        for scheduler in schedulers:
+            # `lr_lambdas` may be shorter after a restore (they are not restored): it is synced when groups are added
+            for per_group in ("base_lrs", "_last_lr", "min_lrs", "max_lrs", "lr_lambdas"):
+                state = getattr(scheduler, per_group, None)
+                if isinstance(state, list) and len(state) == num_groups:
+                    del state[i]
+        num_groups -= 1
+
+
 def add_groups(
     no_decay: list | None, optimizer: ParamGroupAddable, module: Module, thawed_pl: list, phase_lr: float,
     pg_overrides: dict | None = None,

@@ -108,6 +108,8 @@ class PhaseEvent:
         tuning_scheduler: The tuning scheduler, for access to the module, optimizer and schedule.
         physical_params: The physical parameters the phase thaws (its own, then its coupled ones).
         logical_params: The logical names the phase's schedule entries resolved to (role selectors excluded).
+        frozen_params: The physical parameters the phase's ``freeze`` key refreezes. Start hooks run before the phase's
+            thaw and freeze.
     """
 
     depth: int
@@ -118,6 +120,7 @@ class PhaseEvent:
     tuning_scheduler: "TuningScheduler" = field(repr=False)
     physical_params: tuple[str, ...] = ()
     logical_params: tuple[str, ...] = ()
+    frozen_params: tuple[str, ...] = ()
 
 
 def _is_compiled(module: nn.Module) -> bool:
@@ -191,7 +194,8 @@ class TuningScheduler:
             :class:`~finetuning_scheduler.core.checkpoint.BestCheckpoint`), offered each epoch's metrics; the training
             state is saved whenever it reports a new best.
         restore_best: Restore the best checkpoint's model, optimizer and lr scheduler state at each phase boundary, as
-            the Lightning callback does. Defaults to ``True`` when a ``checkpoint`` policy is given.
+            the Lightning callback does. Defaults to ``True`` when a ``checkpoint`` policy is given. A phase's
+            ``restore`` key overrides it for that boundary.
         capture_rng: Include every random generator's state in :meth:`save` (and, by default, in
             :meth:`resume_state`), so :meth:`load` resumes the random streams exactly.
         max_depth: The deepest phase to run; ``-1`` runs every phase.
@@ -383,6 +387,7 @@ class TuningScheduler:
         assert self._compiled is not None
         if self._compiled.promotions:
             self._refuse_unsupported_promotion()
+        self._refuse_unsupported_restore()
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
         self._refuse_unschedulable_params()
         core_phase.reshard_fsdp_modules(self.model)
@@ -399,9 +404,15 @@ class TuningScheduler:
         self._check_schedule_agreement()
         self._fingerprints.setdefault(0, [])
         self._is_setup = True
-        if self._checkpoint is not None and getattr(self._checkpoint, "save_initial", False):
+        save_initial = self._checkpoint is not None and getattr(self._checkpoint, "save_initial", False)
+        keep_initial = any(p.get("restore") == "initial" for p in self._schedule.values())
+        if save_initial or keep_initial:
+            assert self._checkpoint is not None
             initial = self._write_checkpoint(self._interface.broadcast_object(self._checkpoint.path_for("initial")))
-            self._pin_boundary(0, initial_path=initial)
+            if keep_initial:
+                getattr(self._checkpoint, "pin_state")("initial", initial)
+            if save_initial:
+                self._pin_boundary(0, initial_path=initial)
         self._run_hooks("start", 0)
         rank_zero_info(f"Fine-tuning schedule set up with {len(self._schedule)} phases (max_depth {self._max_depth}).")
 
@@ -437,6 +448,7 @@ class TuningScheduler:
         if self._gates:
             raise FTSConfigurationError("Gates are not supported on an externally driven tuning scheduler in this"
                                         " release.")
+        core_schedule.refuse_direct_api_keys(dict(schedule), keys=("freeze", "restore"))
         self._executor, self._externally_driven = executor, True
         self._view = self._resolve_view()
         self._view_roles_at_setup = self._view.view_roles()
@@ -581,6 +593,8 @@ class TuningScheduler:
         for cp in self._compiled.phases:
             self._logical_params[cp.depth] = cp.logical
             schedule[cp.depth]["params"] = list(cp.thawed)
+            if cp.frozen:
+                schedule[cp.depth]["freeze"] = list(cp.frozen)
         self._epoch_watermark = max_epoch_wm
         if not self._user_policies:
             final = core_schedule.resolve_max_depth(self._max_depth_arg, len(schedule))
@@ -941,14 +955,16 @@ class TuningScheduler:
     # ------------------------------------------------------------------------------------------------------------------
     def _advance(self, reason: str | None) -> None:
         """Close phase ``k`` and open ``k + 1``: restore the best (if configured), run phase ``k``'s end hooks and
-        its gates (a veto stops here), advance and pin the boundary best, run the new phase's start hooks, then
-        thaw and configure the optimizer for it."""
+        its gates (a veto stops here), advance and pin the boundary best, restore a named state (if ``k + 1``
+        starts from one), run the new phase's start hooks, then thaw, freeze and configure the optimizer for it."""
         prev = self._depth
+        restore = self._schedule[prev + 1].get("restore") or (
+            core_schedule.RESTORE_BEST if self._restore_best else core_schedule.RESTORE_NONE)
         core_phase.reshard_fsdp_modules(self.model)
         schedulers = [s for s, _ in self._interface.get_lr_schedulers()]
         pre_state = core_optim.capture_lr_state(schedulers[0] if schedulers else None, self.optimizer)
         # restore before the end hooks, so they see the best state under either interface
-        restored_depth = self._restore_best_state() if self._restore_best else None
+        restored_depth = self._restore_best_state() if restore == core_schedule.RESTORE_BEST else None
         self._end_phase(prev)
         if not self._run_gates(prev, final=False):
             return
@@ -957,6 +973,9 @@ class TuningScheduler:
         self._fingerprints.setdefault(self._depth, [])
         if self._checkpoint is not None and not self._externally_driven:
             self._pin_boundary(self._depth)
+        if restore in core_schedule.NAMED_STATES:
+            # after the end hooks and gates, which judge the phase that ended, and with its lr state, not the latest
+            restored_depth, pre_state = self._restore_named_state(restore), None
         self._run_hooks("start", self._depth)
         self._apply_promotions(self._depth)
         if restored_depth is not None:
@@ -1023,11 +1042,35 @@ class TuningScheduler:
                 " not `promote`: a view that translates checkpoint keys must define `promote`, so its checkpoint state"
                 " includes the tensors it promotes.")
 
+    def _refuse_unsupported_restore(self) -> None:
+        """A phase restoring ``best`` or a named state needs a checkpoint policy to restore from, and a named state
+        one that can keep it."""
+        restores = {d: p["restore"] for d, p in self._schedule.items() if p.get("restore")}
+        saved = sorted(d for d, r in restores.items() if r != core_schedule.RESTORE_NONE)
+        if saved and self._checkpoint is None:
+            raise FTSConfigurationError(f"Phases {saved} `restore` a saved state, which needs a `checkpoint` policy.")
+        named = sorted(d for d, r in restores.items() if r in core_schedule.NAMED_STATES)
+        if named and not (hasattr(self._checkpoint, "pin_state") and hasattr(self._checkpoint, "state_path")):
+            raise FTSConfigurationError(
+                f"Phases {named} `restore` a named state, but {type(self._checkpoint).__name__} cannot keep one (it"
+                " needs `pin_state` and `state_path`, as `BestCheckpoint` has).")
+
+    def _restore_named_state(self, name: str) -> int:
+        """Restore the named state's model, optimizer and lr scheduler state; return the depth it was saved at."""
+        self._interface.barrier("fts_restore_named")
+        path = getattr(self._checkpoint, "state_path")(name)
+        return self._restore_checkpoint(path, restore_optimizer=True)["depth"]
+
     def _configure_phase(self, depth: int, restored_depth: int, depth_sync: bool,
                          pre_state: tuple[dict, list] | None) -> None:
         """Thaw ``depth``'s parameters (and, after a restore or an optimizer reinitialization, every phase the
-        optimizer lacks) and configure the optimizer and lr schedulers for them, as the callback's ``step_pg``
-        does."""
+        optimizer lacks), configure the optimizer and lr schedulers for them, as the callback's ``step_pg`` does,
+        and apply each such phase's ``freeze``.
+
+        Revisiting the phases in order leaves the same trainable set and parameter groups however the optimizer got
+        here. A phase's new groups come before its ``freeze``, which can empty every group it finds, and its ``freeze``
+        before an lr scheduler reinitialization, whose ``init_pg_lrs`` describes the groups the phase trains.
+        """
         # after any phase hooks and gates, which may have run a forward-only pass, and on `load_state_dict`'s replay
         core_phase.reshard_fsdp_modules(self.model)
         optimizer = self.optimizer
@@ -1045,11 +1088,13 @@ class TuningScheduler:
                 continue
             if i == depth and depth > 0 and pre_state is not None:
                 core_optim.restore_latest_lr_state(optimizer, schedulers, *pre_state)
-            core_optim.add_optimizer_groups(
-                self.model, optimizer, phase["params"], no_decay=self.no_decay,
-                lr=phase.get("lr", optimizer.defaults["lr"]), apply_lambdas=self.apply_lambdas_new_pgs,
-                schedulers=schedulers, pg_overrides=phase.get("pg_overrides"),
-            )
+            if phase["params"] or not phase.get("freeze"):  # a phase may only freeze
+                core_optim.add_optimizer_groups(
+                    self.model, optimizer, phase["params"], no_decay=self.no_decay,
+                    lr=phase.get("lr", optimizer.defaults["lr"]), apply_lambdas=self.apply_lambdas_new_pgs,
+                    schedulers=schedulers, pg_overrides=phase.get("pg_overrides"),
+                )
+            self._freeze_phase(i, optimizer, schedulers)
             new_scheduler_cfg = core_phase.lr_reinit_cfg_for(phase, depth, self.reinit_lr_cfg)
             if new_scheduler_cfg:
                 self._reinit_lr_scheduler(new_scheduler_cfg, optimizer)
@@ -1156,6 +1201,19 @@ class TuningScheduler:
             for name, mod in self.model.named_modules():
                 if name in owners and isinstance(mod, nn.modules.batchnorm._BatchNorm):
                     mod.track_running_stats = True
+
+    def _freeze_phase(self, depth: int, optimizer: Optimizer, schedulers: Sequence[Any]) -> None:
+        names = self._schedule[depth].get("freeze")
+        if not names:
+            return
+        frozen = core_phase.freeze_params(self.model, names)
+        core_optim.drop_optimizer_params(optimizer, frozen, schedulers)
+        if not self.frozen_bn_track_running_stats:
+            owners = {owner_module(n) for n in names}
+            for name, mod in self.model.named_modules():
+                if name in owners and isinstance(mod, nn.modules.batchnorm._BatchNorm) and not any(
+                        p.requires_grad for p in mod.parameters(recurse=False)):
+                    mod.track_running_stats = False
 
     def _refuse_frozen_roles_in(self, optimizer: Optimizer) -> None:
         """An optimizer instance may not hold a `fitted` or `instrument` parameter, even with
@@ -1476,7 +1534,9 @@ class TuningScheduler:
         if applies_to is None:
             archs = getattr(getattr(self.model, "config", None), "architectures", None)
             applies_to = {"architectures": list(archs)} if archs else None
-        book = schedule_book({d: {"params": p} for d, p in self._source_params.items()},
+        # a phase that only freezes selects nothing
+        book = schedule_book({d: {"params": p} for d, p in self._source_params.items()
+                              if p or not self._schedule[d].get("freeze")},
                              name=name or f"{type(self.model).__name__}-schedule", addresses=self._address_sets,
                              logical_names=[n for n, _ in self._view.logical_named_parameters()],
                              naming_scheme=self._view.support().naming_scheme, applies_to=applies_to,
@@ -1712,7 +1772,8 @@ class TuningScheduler:
         event = PhaseEvent(depth=depth, epoch=self._interface.current_epoch, global_step=self._interface.global_step,
                            phase_config=self._phase_configs.get(depth), metadata=self._metadata, tuning_scheduler=self,
                            physical_params=tuple(self._schedule[depth]["params"]),
-                           logical_params=self._logical_params.get(depth, ()))
+                           logical_params=self._logical_params.get(depth, ()),
+                           frozen_params=tuple(self._schedule[depth].get("freeze", ())))
         for fn, isolate in list(self._hooks[when].values()):
             isolate = self.isolate_rng if isolate is None else isolate
             rngs = fork_rngs(self._interface.rng_devices()) if isolate else nullcontext()
