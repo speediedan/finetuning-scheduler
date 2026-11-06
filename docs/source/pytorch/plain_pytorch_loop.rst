@@ -227,9 +227,11 @@ checkpoint already holds the random streams.
 
 Distributed Training
 ********************
-Shard the model yourself with FSDP2 (``torch.distributed.fsdp.fully_shard``), tensor parallelism
-(``torch.distributed.tensor.parallel.parallelize_module``) or both, before handing it to the tuning scheduler, and call
-the tuning scheduler on every rank. Transition decisions and gate results are agreed across ranks. For sharded models,
+Shard the model yourself with FSDP2 (``torch.distributed.fsdp.fully_shard``, or a plan through
+:func:`~finetuning_scheduler.strategies.plan.shard_model`), tensor parallelism
+(``torch.distributed.tensor.parallel.parallelize_module``, or a plan through
+:func:`~finetuning_scheduler.strategies.plan.parallelize_model`) or both, before handing it to the tuning scheduler, and
+call the tuning scheduler on every rank. Transition decisions and gate results are agreed across ranks. For sharded models,
 checkpoints are written with ``torch.distributed.checkpoint``.
 
 Apply ``fully_shard`` to the root module too, last, so FSDP2 manages every parameter: a parameter no FSDP module

@@ -12,6 +12,7 @@ mesh:
   data_parallel_size: 2
   tensor_parallel_size: 1
 loss_parallel: true  # used only when `tensor_parallel_size` > 1
+tp_plan: {}  # keys are relative to the `Transformer`; used only when `tensor_parallel_size` > 1
 fsdp_default_kwargs: {}
 fsdp_plan: {}
 data:

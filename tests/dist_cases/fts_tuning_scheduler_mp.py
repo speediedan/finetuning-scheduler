@@ -149,12 +149,14 @@ def _unmoved(model: nn.Module, initial: dict, tol: float = 1e-4) -> list[str]:
 
 
 def _train(fts, model, data, shard, device, epochs, val=None, tp_loss_parallel=False, start_path=None,
-           evaluate=False):
+           evaluate=False, losses=None):
     path = list(start_path or [])
     for epoch in fts.epochs(epochs):
         path.append((epoch, fts.curr_depth, _state(model)))
         for step in range(data.shape[1]):
-            _loss(model, data[epoch, step, shard].to(device), tp_loss_parallel)
+            loss = _loss(model, data[epoch, step, shard].to(device), tp_loss_parallel)
+            if losses is not None:  # a loss computed under ``loss_parallel`` is a replicated ``DTensor``
+                losses.append(float(loss.to_local() if isinstance(loss, DTensor) else loss))
             fts.optimizer.step()
             fts.optimizer.zero_grad()
         if evaluate:  # a forward-only pass before ``epoch_end``, as a loop computing its validation metric runs
@@ -223,8 +225,11 @@ def reference(epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, ck
     model = _model(seed, torch.device("cpu"))
     initial = _params(model)
     fts = _tuning_scheduler(model, ckpt_dir, restore_best=ckpt_dir is not None)
-    path = _train(fts, model, _data(epochs, steps, batch, seed), slice(None), torch.device("cpu"), epochs, val=val)
-    return {"path": path, "params": _params(model), "restored": fts.restored_count, "unmoved": _unmoved(model, initial)}
+    losses = []
+    path = _train(fts, model, _data(epochs, steps, batch, seed), slice(None), torch.device("cpu"), epochs, val=val,
+                  losses=losses)
+    return {"path": path, "params": _params(model), "restored": fts.restored_count, "unmoved": _unmoved(model, initial),
+            "losses": losses}
 
 
 def fsdp_resume(ctx, ckpt_dir: str, epochs: int = 3, split: int = 2, steps: int = 2, batch: int = 4, seed: int = 7,

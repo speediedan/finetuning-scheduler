@@ -343,7 +343,8 @@ FTS TP Plan
 
 FTS works with Tensor Parallel (TP) training without any special accommodation by overriding LightningModule's
 ``configure_model`` method and manually applying the relevant parallelism plan. Unlike the enhanced FSDP2 API, the
-current version of FTS does not provide any auto-configuration enhancements for Tensor Parallel. For more on
+Lightning interface has no plan configuration for Tensor Parallel. The PyTorch API does, through
+:func:`~finetuning_scheduler.strategies.plan.parallelize_model` (see :ref:`model-parallel-plain-loop`). For more on
 constructing TP plans, see this
 `Lightning TP guide <https://lightning.ai/docs/pytorch/stable/advanced/model_parallel/tp.html>`_.
 
