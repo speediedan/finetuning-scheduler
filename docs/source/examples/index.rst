@@ -5,7 +5,7 @@ Overview
 
 End-to-end examples of scheduled fine-tuning, grouped by how they run: ``notebooks/`` holds the tutorial notebooks
 (each rendered here from an executed run, and runnable in Colab or locally), ``cli/`` the examples driven from the
-command line, and ``integrations/`` libraries built on Fine-Tuning Scheduler. Each example names the interface it uses;
+command line, and ``integrations/`` libraries that use Fine-Tuning Scheduler. Each example names the interface it uses;
 the two interfaces share one schedule format.
 
 Notebooks
@@ -69,5 +69,5 @@ Integrations
    * - :ref:`Scheduled fine-tuning in interpretune<example-interpretune>`
      - Lightning and PyTorch (experimental)
      - An AI interpretability research framework that declares a tunable view for each model composition, so
-       schedules use the backend's own parameter names and select adapters and latents by role. A runnable example
-       tunes a small model on a CPU in seconds.
+       schedules use the backend's own parameter names and select adapters and latents by role. A runnable placeholder
+       example, until a research-based one replaces it, tunes a small model on a CPU in seconds.

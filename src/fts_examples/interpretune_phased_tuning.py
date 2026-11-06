@@ -28,6 +28,9 @@ and runs on a CPU in seconds::
 
 It prints a JSON summary of each epoch: the schedule depth, how many parameters were trainable, and the losses.
 
+This example is a placeholder that shows the integration on a toy model. A research-based example using interpretune is
+in progress and will replace it.
+
 This example needs an interpretune revision that attaches views as ``tunable_view`` and provides
 ``interpretune.tuning.core_loop`` (neither is in a published interpretune release yet). Fine-Tuning Scheduler's CI
 installs the revision in ``requirements/ci/interpretune.txt``.

@@ -64,6 +64,10 @@ unless ``tuning_scheduler_kwargs`` passes them, and transition policies, checkpo
 A runnable example
 ==================
 
+.. note::
+   This example is a placeholder that shows the integration on a toy model. A research-based example using interpretune
+   is in progress and will replace it.
+
 ``fts_examples/interpretune_phased_tuning.py`` runs flexible fine-tuning through an interpretune training loop, on a CPU
 in seconds and with no downloads. A small, randomly initialized GPT-2 class model is tuned in three phases by
 ``FTSCoreCallback``: the first phase thaws only a steering vector registered beside the model, selected by its role
