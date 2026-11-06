@@ -1,0 +1,29 @@
+{
+  "source_commit": {
+    "persona_qwen_warmup_rerun.json": "b0e2720",
+    "persona_qwen_repeats.json": "b0e2720",
+    "persona_qwen_masks_s0.json": "3caf743",
+    "persona_qwen_masks_s0_lightning.json": "3caf743",
+    "persona_qwen_masks_s1.json": "3caf743",
+    "persona_qwen_masks_s2.json": "3caf743"
+  },
+  "note": "Records are compact re-serializations of the run output. The seed 0 paired mask record is split by interface to stay within the repository's file-size limit; its paired checks stay in persona_qwen_masks_s0.json.",
+  "model": "Qwen/Qwen3-4B",
+  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "registry": "hub-dataset:speediedan/venngram-registry/index@d927d8736e4b2681a1f4291784ef697a53710b2a",
+  "venngram_commit": "6e6d7fa68aa09bb5fb7468b8e31ee1241ad07738",
+  "torch": "2.15.0+rocm10.0",
+  "transformers": "5.17.0",
+  "lightning": "2.6.6",
+  "device": "one AMD Radeon AI PRO R9700 per job",
+  "recorded_utc_date": "2026-11-06",
+  "artifact_sha256": {
+    "persona_qwen_warmup_rerun.json": "2dbac61caf3d0fac3525502bd7f199cdbfd54f9f5c98017baeaf00422f00f288",
+    "persona_qwen_masks_s0.json": "53c2579a9b3f1a65d1a65bd2699516b893b26b9e886218bfdfa15aae94faaac3",
+    "persona_qwen_masks_s0_lightning.json": "e23dd8f06882aff14abb0fd80799f297eda6d7a6ba405b97c03035bc264a9cef",
+    "persona_qwen_masks_s1.json": "392f43adad4f4cec9e84a23e6aa1ff7c052ad08177bb02333b6dce70f26e85a1",
+    "persona_qwen_masks_s2.json": "f594938b006d7383da424a927a4827437ca97d0ee0eeb4dbbe884f3345c72ef4",
+    "persona_qwen_repeats.json": "0a3d19e22a6aac8c3a6650dec8f5e6dcf8e46ae66d546c240e4b3d3fd38de899"
+  },
+  "scope": "Local corpus, greedy generation, three seeds with four held-out queries each for the masks, one seed for the warm-up rerun. Lexical mention metric. Not the paper's full protocol; the masks are a new extension."
+}

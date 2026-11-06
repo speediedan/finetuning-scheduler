@@ -1,0 +1,9 @@
+# Named sets for the Persona Hierarchy tutorial (#187): the address phase thaws the MLP adapters of the top two
+# blocks, whatever the family calls them, through the model's venngram view.
+schema_version: 1
+name: persona-sets
+portability: family
+requires: {structure: vocabulary}
+sets:
+  mlp_top_adapters: "role:adapter & component:mlp.* & layers:-2:"
+  attn_rest_adapters: "role:adapter & component:attn.* & layers:0:-2"

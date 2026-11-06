@@ -1,0 +1,15 @@
+{
+  "source_commit": "9430fa2",
+  "model": "Qwen/Qwen3-4B",
+  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "registry": "hub-dataset:speediedan/venngram-registry/index@d927d8736e4b2681a1f4291784ef697a53710b2a",
+  "shared_helpers_commit": "db03979",
+  "torch": "2.15.0+rocm10.0",
+  "transformers": "5.17.0",
+  "lightning": "2.6.6",
+  "venngram": "0.1.0.dev0",
+  "dependency_scope": "Measured with the earlier role_rules view API. Later map/overlay API validation is a separate run.",
+  "recorded_utc_date": "2026-11-05",
+  "artifact_sha256": "0335ad66c002b6b7573b91e80b7c75bd664958ce08d0670211e1a5e0d57499f5",
+  "scope": "One seed, four held-out queries, 60 stage-2 updates, 64-token generation. Local data, not the full paper protocol."
+}

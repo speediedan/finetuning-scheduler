@@ -301,6 +301,22 @@ def test_selective_pirate_nb(tmpdir):
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+def test_persona_hierarchy_nb(tmpdir):
+    # the Persona Hierarchy notebook (#187), shortened through its parameters cell; its smoke model trains on CPU
+    out = _run_notebook("tunable_views/persona_hierarchy.ipynb",
+                        {"N_TRAIN": "8", "N_EVAL": "2", "STEPS_PER_EPOCH": "2"}, tmpdir.strpath)
+    assert "Lightning and PyTorch: identical initial state and phase tensors" in out
+    for arm in ("no_warmup", "default_warmup", "merchant_warmup"):
+        assert arm in out
+    assert "one held-out query under each context" in out
+    assert "paired donor, scores, phase tensors and physical coordinate manifests match" in out
+    assert "phased phase curve" in out and "one_phase phase curve" in out
+    for ranking in ("phased", "one_phase", "random", "gradient_base", "gradient_full"):
+        assert ranking in out
+    assert "phased selection at" in out
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 @RunIf(min_cuda_gpus=1, skip_windows=True)
 def test_tunable_views_lora_placement_nb(tmpdir):
     # the tunable views LoRA placement notebook, shortened through its parameters cell (#158)

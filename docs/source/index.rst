@@ -421,6 +421,8 @@ Footnotes
    Addressing across architectures (PyTorch API) <examples/notebooks/tunable_views/cross_architecture_addresses>
    The selective pirate: Matryoshka attribution (PyTorch and Lightning) <examples/notebooks/tunable_views/selective_pirate>
    Selective pirate pretrained results <examples/selective_pirate_results>
+   The goblin diplomat: Persona Hierarchy (PyTorch and Lightning) <examples/notebooks/tunable_views/persona_hierarchy>
+   Persona Hierarchy pretrained results <examples/persona_hierarchy_results>
 
 .. toctree::
    :maxdepth: 1

@@ -44,6 +44,13 @@ Notebooks
        run definition on both interfaces, score tensors thawed first by name regex and then by role, layer and component
        addresses, with matched one-phase, random and gradient controls. The shortened run trains a labeled smoke model.
        The :ref:`pretrained Qwen3-4B results <selective-pirate-results>` record what survives and what does not.
+   * - :doc:`The goblin diplomat: Persona Hierarchy<notebooks/tunable_views/persona_hierarchy>`
+     - PyTorch and Lightning
+     - A bounded goblin-mention comparison from the Persona Hierarchy paper (2026): context-specific mentions with
+       and without a default-context warm-up, one run definition on both interfaces, a first phase by name regex
+       and a second by role, layer and component addresses, and an explicitly labeled phased neuron-mask extension
+       with matched one-phase, random and gradient controls. The shortened run trains a labeled smoke model.
+       The :ref:`pretrained Qwen3-4B results <persona-hierarchy-pilot>` record what survives and what does not.
 
 Command Line
 ************
