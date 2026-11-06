@@ -419,6 +419,7 @@ Footnotes
    SuperGLUE with the LightningCLI <examples/cli/superglue_cli>
    LoRA placement by address (PyTorch API) <examples/notebooks/tunable_views/lora_placement>
    Addressing across architectures (PyTorch API) <examples/notebooks/tunable_views/cross_architecture_addresses>
+   interpretune <examples/integrations/interpretune>
 
 .. toctree::
    :maxdepth: 1

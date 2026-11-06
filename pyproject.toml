@@ -257,7 +257,10 @@ norecursedirs = [
     "docs",
 ]
 
+# the interpretune example imports interpretune when loaded, which a plain install lacks, so doctest collection must not
+# load it; tests/test_interpretune_example.py imports it where interpretune is installed
 addopts = """--strict-markers --doctest-modules --color=yes \
+--ignore=src/fts_examples/interpretune_phased_tuning.py \
 --disable-pytest-warnings"""
 
 junit_duration_report = "call"
