@@ -184,7 +184,8 @@ class BestCheckpoint:
     :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load` raises ``FileNotFoundError``, and any other
     kept checkpoint that has been removed is dropped with a warning. Checkpoints that an interrupted run wrote after the
     save being resumed are left in place, and so are the checkpoints of a state resumed from another directory: only
-    checkpoints under ``dirpath`` are ever removed.
+    checkpoints under ``dirpath`` are ever removed. A named state (a phase's ``restore: initial``) is kept for the whole
+    run.
 
     Args:
         dirpath: Where checkpoints are written.
@@ -214,6 +215,7 @@ class BestCheckpoint:
         self._entries: list[tuple[str, Tensor, int]] = []  # the kept checkpoints in saving order: (path, score, depth)
         self._seq = 0
         self._boundaries: dict[int, tuple[str | None, int | None]] = {}
+        self._states: dict[str, str] = {}  # the named states (a phase's ``restore: initial``), kept for the whole run
         # this process's view only: every checkpoint the policy has named or referred to, and those a resume needs
         self._known: set[str] = set()
         self._protected: set[str] = set()
@@ -300,8 +302,18 @@ class BestCheckpoint:
     def boundary_path(self, depth: int) -> str | None:
         return self._boundaries.get(depth, (None, None))[0]
 
+    def pin_state(self, name: str, path: str) -> None:
+        """Keep the checkpoint at ``path`` as the named state ``name``, for as long as the run lasts."""
+        self._known.add(path)
+        self._states[name] = path
+
+    def state_path(self, name: str) -> str | None:
+        """The checkpoint holding the named state ``name``."""
+        return self._states.get(name)
+
     def _referenced(self) -> set[str]:
-        return {path for path, _, _ in self._entries} | {path for path, _ in self._boundaries.values() if path}
+        return ({path for path, _, _ in self._entries} | {path for path, _ in self._boundaries.values() if path}
+                | set(self._states.values()))
 
     def _in_dirpath(self, path: str) -> bool:
         root = os.path.abspath(self.dirpath)
@@ -345,6 +357,9 @@ class BestCheckpoint:
             if path is not None and not os.path.exists(path):
                 raise FileNotFoundError(
                     f"The checkpoint a veto of phase {depth} rolls back to, {path!r}, no longer exists.{hint}")
+        for name, path in self._states.items():
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"The checkpoint holding the state {name!r}, {path!r}, no longer exists.{hint}")
         missing = [path for path, _, _ in self._entries if not os.path.exists(path)]
         if missing:
             rank_zero_warn(f"Dropping {len(missing)} kept checkpoint(s) that no longer exist: {missing}.")
@@ -352,11 +367,12 @@ class BestCheckpoint:
 
     def state_dict(self) -> dict[str, Any]:
         return {"entries": [{"path": path, "score": score, "depth": depth} for path, score, depth in self._entries],
-                "seq": self._seq, "boundaries": dict(self._boundaries)}
+                "seq": self._seq, "boundaries": dict(self._boundaries), "states": dict(self._states)}
 
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
         self._entries = [(e["path"], e["score"], e["depth"]) for e in state_dict["entries"]]
         self._seq, self._boundaries = state_dict["seq"], dict(state_dict["boundaries"])
+        self._states = dict(state_dict.get("states", {}))
         self._known |= self._referenced()
 
     def config(self) -> dict[str, Any]:
