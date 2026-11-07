@@ -83,6 +83,18 @@ def test_sampler_logps_match_a_fresh_forward_pass(model):
     assert torch.allclose(logp.detach(), expected, atol=5e-2)
 
 
+def test_sampler_keeps_its_cache_under_gradient_checkpointing(model):
+    """Gradient checkpointing turns the cache off in training mode, which once sampled every token without
+    context."""
+    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    model.train()
+    sampled = _sample(model, ["5 6 7", "8", "9 10 11 12 13"], max_new_tokens=40)
+    assert model.training
+    logp, _ = _response_logps(model, sampled.prompt_ids, sampled.response_ids, PAD)
+    expected = torch.tensor([lp for row in sampled.logps for lp in row])
+    assert torch.allclose(logp.detach(), expected, atol=5e-2)
+
+
 def test_sampler_drops_rows_and_keeps_the_stop_token(model):
     # bias the head so that the stop token dominates, then only the first sampled tokens differ
     with torch.no_grad():
@@ -92,7 +104,8 @@ def test_sampler_drops_rows_and_keeps_the_stop_token(model):
         assert len(response) == len(logps)
         if stopped:
             assert response[-1] == STOP and STOP not in response[:-1]
-    assert sampled.row_steps == sum(len(r) for r in sampled.response_ids)
+    # rows leave the batch only at synchronization points, so they may run past their stop
+    assert sampled.row_steps >= sum(len(r) for r in sampled.response_ids)
 
 
 def test_group_advantages_center_each_group():

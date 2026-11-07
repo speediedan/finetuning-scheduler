@@ -48,6 +48,11 @@ def _bf16(device: torch.device) -> torch.autocast:
     return torch.autocast(device_type=device.type, dtype=torch.bfloat16)
 
 
+#: Decode steps between host synchronizations. Stopped rows leave the batch only at these points, so a row may run this
+#: many steps past its stop, and those tokens are discarded. Synchronizing every step costs more than the extra rows.
+SYNC_EVERY = 32
+
+
 @torch.no_grad()
 def sample_batch(
     model: torch.nn.Module,
@@ -61,10 +66,30 @@ def sample_batch(
 ) -> Sampled:
     """Samples one response per prompt at temperature 1, with no top-k or top-p restriction.
 
-    Rows are dropped from the batch and its key-value cache as they stop, because a base model's longest sample sets the
-    number of steps, and a finished row would otherwise hold memory and compute for all of them. The stopping token
+    Stopped rows are dropped from the batch and its key-value cache, because a base model's longest sample sets the
+    number of steps, and a finished row would otherwise hold memory and compute for all of them. Its stopping token
     stays in the response, and a length-truncated response is kept as it is.
+
+    The model samples in evaluation mode: with gradient checkpointing on, ``transformers`` turns the key-value cache off
+    in training mode, and every token would then be sampled without its context.
     """
+    was_training = model.training
+    model.eval()
+    try:
+        return _sample_batch(
+            model,
+            tokenizer,
+            prompts,
+            max_new_tokens=max_new_tokens,
+            max_prompt_tokens=max_prompt_tokens,
+            stop_ids=stop_ids,
+            generator=generator,
+        )
+    finally:
+        model.train(was_training)
+
+
+def _sample_batch(model, tokenizer, prompts, *, max_new_tokens, max_prompt_tokens, stop_ids, generator) -> Sampled:
     device = next(model.parameters()).device
     enc = tokenizer(
         list(prompts),
@@ -77,17 +102,14 @@ def sample_batch(
     )
     input_ids, mask = enc["input_ids"].to(device), enc["attention_mask"].to(device)
     stop = torch.tensor(list(stop_ids), device=device)
-    positions = (mask.cumsum(-1) - 1).clamp(min=0)
     cache = DynamicCache(config=model.config)
+    tokens = torch.zeros((len(prompts), max_new_tokens), dtype=torch.long, device=device)
+    logps = torch.zeros((len(prompts), max_new_tokens), device=device)
+    stop_at = torch.full((len(prompts),), -1, dtype=torch.long, device=device)
     alive = torch.arange(len(prompts), device=device)
-    result = Sampled(
-        prompt_ids=[row[m.bool()].tolist() for row, m in zip(enc["input_ids"], enc["attention_mask"])],
-        response_ids=[[] for _ in prompts],
-        logps=[[] for _ in prompts],
-        stopped=[False for _ in prompts],
-    )
-    next_ids, next_positions = input_ids, positions
-    for _ in range(max_new_tokens):
+    next_ids, next_positions = input_ids, (mask.cumsum(-1) - 1).clamp(min=0)
+    steps = row_steps = 0
+    for step in range(max_new_tokens):
         with _bf16(device):
             out = model(
                 input_ids=next_ids,
@@ -97,27 +119,42 @@ def sample_batch(
                 use_cache=True,
                 logits_to_keep=1,
             )
+        if step == 0 and cache.get_seq_length() != input_ids.size(1):
+            raise RuntimeError("the key-value cache is not filling, so each token would be sampled without its context")
         logp = F.log_softmax(out.logits[:, -1].float(), dim=-1)
-        tokens = torch.multinomial(logp.exp(), 1, generator=generator)
-        chosen = logp.gather(-1, tokens).squeeze(-1)
-        result.decode_steps += 1
-        result.row_steps += len(alive)
-        for row, token, lp in zip(alive.tolist(), tokens.squeeze(-1).tolist(), chosen.tolist()):
-            result.response_ids[row].append(token)
-            result.logps[row].append(lp)
-        done = torch.isin(tokens.squeeze(-1), stop)
-        for row in alive[done].tolist():
-            result.stopped[row] = True
-        if done.all():
-            break
-        if done.any():
-            keep = (~done).nonzero().squeeze(-1)
-            cache.batch_select_indices(keep)
-            alive, mask, tokens, next_positions = alive[keep], mask[keep], tokens[keep], next_positions[keep]
+        sampled = torch.multinomial(logp.exp(), 1, generator=generator).squeeze(-1)
+        tokens[alive, step] = sampled
+        logps[alive, step] = logp.gather(-1, sampled.unsqueeze(-1)).squeeze(-1)
+        first_stop = torch.isin(sampled, stop) & (stop_at[alive] < 0)
+        stop_at[alive] = torch.where(first_stop, step, stop_at[alive])
+        steps, row_steps = step + 1, row_steps + len(alive)
+        if (step + 1) % SYNC_EVERY == 0:
+            running = stop_at[alive] < 0
+            if not running.any():
+                break
+            if not running.all():
+                keep = running.nonzero().squeeze(-1)
+                cache.batch_select_indices(keep)
+                alive, mask, sampled, next_positions = alive[keep], mask[keep], sampled[keep], next_positions[keep]
         mask = torch.cat([mask, mask.new_ones(len(alive), 1)], dim=-1)
-        next_ids = tokens
+        next_ids = sampled.unsqueeze(-1)
         next_positions = next_positions[:, -1:] + 1
-    return result
+    return _collect(enc, tokens.cpu(), logps.cpu(), stop_at.cpu(), steps, row_steps)
+
+
+def _collect(
+    enc, tokens: torch.Tensor, logps: torch.Tensor, stop_at: torch.Tensor, steps: int, row_steps: int
+) -> Sampled:
+    """Cuts each row at its first stopping token, or at the last step for a row that never stopped."""
+    lengths = [s + 1 if s >= 0 else steps for s in stop_at.tolist()]
+    return Sampled(
+        prompt_ids=[row[m.bool()].tolist() for row, m in zip(enc["input_ids"], enc["attention_mask"])],
+        response_ids=[tokens[i, :n].tolist() for i, n in enumerate(lengths)],
+        logps=[logps[i, :n].tolist() for i, n in enumerate(lengths)],
+        stopped=[s >= 0 for s in stop_at.tolist()],
+        decode_steps=steps,
+        row_steps=row_steps,
+    )
 
 
 def sample_responses(
