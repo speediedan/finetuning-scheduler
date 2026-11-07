@@ -44,6 +44,7 @@ from fts_examples.where_rl_learns.drgrpo import (
     sample_responses,
     StaticSampler,
 )
+from fts_examples.where_rl_learns.vllm_sampler import VLLMSampler
 
 MODEL = "Qwen/Qwen3-1.7B-Base"
 MODEL_REVISION = "ea980cb0a6c2ae4b936e82123acc929f1cec04c1"
@@ -218,6 +219,17 @@ def make_sampler(model, tokenizer, args, stop_ids) -> Callable[[Sequence[str], i
     the whole cache, and on an RTX 4090 that measured 60 ms per step against the eager sampler's 48.
     """
     lengths = dict(max_new_tokens=HORIZON, max_prompt_tokens=MAX_PROMPT_TOKENS, stop_ids=stop_ids)
+    if args.sampler == "vllm":
+        return VLLMSampler(
+            model,
+            tokenizer,
+            python=args.vllm_python,
+            model=MODEL,
+            revision=MODEL_REVISION,
+            snapshot_dir=args.vllm_dir,
+            log_path=args.output.with_suffix(".vllm.log"),
+            **lengths,
+        )
     if args.sampler == "static":
         offload = torch.cuda.is_available()
         return StaticSampler(model, tokenizer, batch_size=args.generation_batch, offload_policy=offload, **lengths)
@@ -268,7 +280,9 @@ def main() -> None:
     parser.add_argument("--eval-problems", type=int, default=125)
     parser.add_argument("--fisher-samples", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--sampler", choices=("eager", "static"), default="eager")
+    parser.add_argument("--sampler", choices=("eager", "static", "vllm"), default="eager")
+    parser.add_argument("--vllm-python", help="an interpreter with vLLM installed, for --sampler vllm")
+    parser.add_argument("--vllm-dir", type=Path, default=Path("/dev/shm/where_rl_learns"), help="weight snapshots")
     args = parser.parse_args()
 
     begin = time.perf_counter()
@@ -316,6 +330,8 @@ def main() -> None:
         write_report(args.output, report)
         print(json.dumps({k: v for k, v in update.items() if k != "lengths"}), flush=True)
     report["total_s"] = time.perf_counter() - begin
+    report["sampler_timings"] = getattr(draw, "timings", {})
+    getattr(draw, "close", lambda: None)()
     write_report(args.output, report)
     print(json.dumps(report["summary"], indent=1), flush=True)
 

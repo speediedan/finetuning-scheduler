@@ -37,6 +37,8 @@ class _Tokenizer:
 
     def __call__(self, prompts, **kwargs):
         rows = [[int(t) for t in p.split()] for p in prompts]
+        if "return_tensors" not in kwargs:
+            return {"input_ids": rows}
         width = max(len(r) for r in rows)
         ids = torch.tensor([[PAD] * (width - len(r)) + r for r in rows])
         mask = torch.tensor([[0] * (width - len(r)) + [1] * len(r) for r in rows])
@@ -212,3 +214,40 @@ def test_static_sampler_cuts_at_the_stop_and_follows_the_policy(model):
     )
     assert counts["backward_responses"] == 3
     assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in model.parameters())
+
+
+def test_vllm_sampler_hands_the_device_over_and_back(model, tmp_path):
+    import os
+    import sys
+    from pathlib import Path
+
+    from safetensors.torch import load_file
+
+    from fts_examples.where_rl_learns.vllm_sampler import VLLMSampler
+
+    ops = tmp_path / "ops.txt"
+    sampler = VLLMSampler(
+        model,
+        _Tokenizer(),
+        python=sys.executable,
+        model="fake",
+        revision=None,
+        max_new_tokens=8,
+        max_prompt_tokens=64,
+        stop_ids=[STOP],
+        snapshot_dir=tmp_path / "snapshot",
+        log_path=tmp_path / "worker.log",
+        env={**os.environ, "FAKE_VLLM_OPS": str(ops)},
+        worker=Path(__file__).parent / "helpers" / "fake_vllm_worker.py",
+    )
+    snapshot = load_file(str(tmp_path / "snapshot" / "model.safetensors"))
+    # the tied head is written once, and in BF16
+    assert "lm_head.weight" not in snapshot and snapshot["model.embed_tokens.weight"].dtype == torch.bfloat16
+    first = sampler(["5 6 7", "8"], seed=1)
+    second = sampler(["9"], seed=2)
+    sampler.close()
+    assert first.prompt_ids == [[5, 6, 7], [8]] and all(r[-1] == STOP for r in first.response_ids)
+    assert second.prompt_ids == [[9]] and second.stopped == [True]
+    assert ops.read_text().split() == ["generate", "sleep", "wake", "reload", "generate", "sleep", "exit"]
+    assert next(model.parameters()).device.type == "cpu"
+    assert "a log line" in (tmp_path / "worker.log").read_text()
