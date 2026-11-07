@@ -4,8 +4,9 @@ Overview
 ########
 
 End-to-end examples of scheduled fine-tuning, grouped by how they run: ``notebooks/`` holds the tutorial notebooks
-(each rendered here from an executed run, and runnable in Colab or locally) and ``cli/`` the examples driven from the
-command line. Each example names the interface it uses; the two interfaces share one schedule format.
+(each rendered here from an executed run, and runnable in Colab or locally), ``cli/`` the examples driven from the
+command line, and ``integrations/`` libraries that use Fine-Tuning Scheduler. Each example names the interface it uses;
+the two interfaces share one schedule format.
 
 Notebooks
 *********
@@ -53,3 +54,20 @@ Command Line
    * - :ref:`Scheduled fine-tuning on SuperGLUE<scheduled-fine-tuning-superglue>`
      - Lightning (``LightningCLI``)
      - Explicit, implicit and baseline scenarios for RTE and BoolQ, configured entirely in YAML.
+
+Integrations
+************
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 18 52
+   :class: fts-examples-table
+
+   * - Example
+     - Interface
+     - What it shows
+   * - :ref:`Scheduled fine-tuning in interpretune<example-interpretune>`
+     - Lightning and PyTorch (experimental)
+     - An AI interpretability research framework that declares a tunable view for each model composition, so
+       schedules use the backend's own parameter names and select adapters and latents by role. A runnable placeholder
+       example, until a research-based one replaces it, tunes a small model on a CPU in seconds.
