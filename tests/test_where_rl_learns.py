@@ -23,6 +23,7 @@ from fts_examples.where_rl_learns.drgrpo import (  # noqa: E402
     group_advantages,
     HostStateAdamW,
     sample_batch,
+    StaticSampler,
     token_budget_batches,
 )
 
@@ -185,3 +186,27 @@ def test_host_state_adamw_matches_torch():
         reference.step()
     for param, other in zip(ours, theirs):
         assert torch.allclose(param, other, atol=1e-6)
+
+
+def test_static_sampler_cuts_at_the_stop_and_follows_the_policy(model):
+    tokenizer = _Tokenizer()
+    tokenizer.pad_token_id = PAD
+    with torch.no_grad():
+        model.lm_head.weight[STOP] += 3.0
+    sampler = StaticSampler(model, tokenizer, batch_size=2, max_new_tokens=12, max_prompt_tokens=64, stop_ids=[STOP])
+    assert sampler.model.dtype == torch.bfloat16 and not sampler.model.training
+    sampled = sampler(["5 6 7", "8", "9 10"], seed=0)
+    assert sampled.prompt_ids == [[5, 6, 7], [8], [9, 10]]
+    for response, stopped in zip(sampled.response_ids, sampled.stopped):
+        assert 0 < len(response) <= 12
+        assert (response[-1] == STOP) == stopped and STOP not in response[:-1]
+    with torch.no_grad():
+        model.lm_head.weight.add_(1.0)
+    sampler.refresh(model)
+    assert torch.equal(sampler.model.lm_head.weight, model.lm_head.weight.to(torch.bfloat16))
+    # without the sampler's log probabilities the ratio is taken against the policy's own, detached
+    counts = accumulate_drgrpo_gradient(
+        model, sampled, [1.0, -0.5, -0.5], horizon=12, clip=0.2, token_budget=100, pad_id=PAD
+    )
+    assert counts["backward_responses"] == 3
+    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in model.parameters())

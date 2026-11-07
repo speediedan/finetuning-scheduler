@@ -18,6 +18,7 @@ On-policy sampling, the Dr. GRPO objective, a diagonal Fisher estimate and an Ad
 FP32 parameters and gradients with BF16 computation, as in the Fisher paper. Frozen parameters are whatever has
 ``requires_grad=False``, so a parameter selection works the same whichever tool made it.
 """
+import copy
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 
@@ -189,6 +190,88 @@ def sample_responses(
     return merged
 
 
+class StaticSampler:
+    """Samples from a BF16 copy of the policy through ``generate`` with a static key-value cache, which
+    ``transformers`` compiles.
+
+    For 16 rows of Qwen3-1.7B on an RTX 4090 a decode step takes 13 ms this way, against 48 ms for :func:`sample_batch`
+    on the FP32 policy under autocast. Shapes are held fixed so that the compiled step is reused: every batch has
+    ``batch_size`` rows (a short last batch is filled with repeats, which are dropped), and prompts are left-padded to a
+    multiple of :attr:`PROMPT_BUCKET` tokens.
+
+    The copy is the policy rounded to BF16, so sampling is off-policy by that rounding, as it is with any separate
+    inference engine. Call :meth:`refresh` after every optimizer step.
+    """
+
+    PROMPT_BUCKET = 256
+
+    def __init__(
+        self,
+        policy: torch.nn.Module,
+        tokenizer,
+        *,
+        batch_size: int,
+        max_new_tokens: int,
+        max_prompt_tokens: int,
+        stop_ids: Sequence[int],
+    ) -> None:
+        self.model = copy.deepcopy(policy).to(torch.bfloat16).eval()
+        self.model.gradient_checkpointing_disable()
+        self.model.requires_grad_(False)
+        self.tokenizer = tokenizer
+        self.batch_size, self.max_new_tokens, self.max_prompt_tokens = batch_size, max_new_tokens, max_prompt_tokens
+        self.stop_ids = list(stop_ids)
+
+    @torch.no_grad()
+    def refresh(self, policy: torch.nn.Module) -> None:
+        """Copies the policy's current weights into the sampling copy."""
+        for mine, theirs in zip(self.model.parameters(), policy.parameters()):
+            mine.copy_(theirs)
+
+    @torch.no_grad()
+    def __call__(self, prompts: Sequence[str], seed: int) -> Sampled:
+        """Samples one response per prompt at temperature 1, with no top-k or top-p restriction."""
+        merged = Sampled(prompt_ids=[], response_ids=[], logps=[], stopped=[])
+        for start in range(0, len(prompts), self.batch_size):
+            chunk = list(prompts[start : start + self.batch_size])
+            real = len(chunk)
+            chunk += [chunk[-1]] * (self.batch_size - real)
+            enc = self.tokenizer(
+                chunk,
+                return_tensors="pt",
+                padding=True,
+                padding_side="left",
+                truncation=True,
+                truncation_side="left",
+                max_length=self.max_prompt_tokens,
+                pad_to_multiple_of=self.PROMPT_BUCKET,
+            )
+            enc = {key: value.to(self.model.device) for key, value in enc.items()}
+            torch.manual_seed(seed + start)
+            out = self.model.generate(
+                **enc,
+                do_sample=True,
+                temperature=1.0,
+                top_k=0,
+                top_p=1.0,
+                max_new_tokens=self.max_new_tokens,
+                cache_implementation="static",
+                eos_token_id=self.stop_ids,
+                pad_token_id=self.tokenizer.pad_token_id,
+            )
+            new = out[:, enc["input_ids"].size(1) :].cpu()
+            merged.decode_steps += new.size(1)
+            merged.row_steps += new.size(0) * new.size(1)
+            for i in range(real):
+                row = new[i].tolist()
+                stop = next((t for t, token in enumerate(row) if token in self.stop_ids), None)
+                merged.prompt_ids.append(enc["input_ids"][i][enc["attention_mask"][i].bool()].tolist())
+                merged.response_ids.append(row if stop is None else row[: stop + 1])
+                merged.logps.append([])
+                merged.stopped.append(stop is not None)
+        return merged
+
+
 def group_advantages(rewards: Sequence[float], group_size: int) -> list[float]:
     """Subtracts each prompt group's mean reward, with no standard-deviation normalization."""
     advantages: list[float] = []
@@ -264,6 +347,10 @@ def accumulate_drgrpo_gradient(
     The token-summed objective is divided by the response count and the fixed horizon. A response with zero advantage
     contributes nothing, and is skipped rather than run: that includes every response of a prompt whose group got one
     reward, which at a low base accuracy is most of them.
+
+    The ratio is taken against the sampler's log probabilities when it kept them, and otherwise against the policy's
+    own, detached. With one optimizer update per fresh batch the two differ only by rounding, and at a ratio of 1 the
+    clipped objective's gradient is the policy gradient.
     """
     device = next(model.parameters()).device
     count = len(sampled.response_ids)
@@ -275,7 +362,8 @@ def accumulate_drgrpo_gradient(
         logp, row_of = _response_logps(
             model, [sampled.prompt_ids[i] for i in rows], [sampled.response_ids[i] for i in rows], pad_id
         )
-        old = torch.tensor([lp for i in rows for lp in sampled.logps[i]], device=device)
+        kept = all(len(sampled.logps[i]) == len(sampled.response_ids[i]) for i in rows)
+        old = torch.tensor([lp for i in rows for lp in sampled.logps[i]], device=device) if kept else logp.detach()
         advantage = torch.tensor([advantages[i] for i in rows], device=device)[row_of]
         ratio = (logp - old).exp()
         objective = torch.min(ratio * advantage, ratio.clamp(1 - clip, 1 + clip) * advantage).sum()

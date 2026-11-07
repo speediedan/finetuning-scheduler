@@ -40,7 +40,9 @@ from fts_examples.where_rl_learns.drgrpo import (
     diagonal_fisher_sample,
     group_advantages,
     HostStateAdamW,
+    Sampled,
     sample_responses,
+    StaticSampler,
 )
 
 MODEL = "Qwen/Qwen3-1.7B-Base"
@@ -108,24 +110,12 @@ def _length_summary(lengths: Sequence[int], stopped: Sequence[bool]) -> dict[str
     }
 
 
-def run_initial_eval(model, tokenizer, problems, args, stop_ids) -> dict[str, Any]:
+def run_initial_eval(tokenizer, problems, args, draw) -> dict[str, Any]:
     """Scores the initial model, and keeps a sample of what it wrote."""
     subset = problems[: args.eval_problems]
     prompts = [prompt for prompt, _ in subset for _ in range(EVAL_RESPONSES)]
     golds = [gold for _, gold in subset for _ in range(EVAL_RESPONSES)]
-    generator = torch.Generator(next(model.parameters()).device).manual_seed(300)
-    sampled, sample_s = _timed(
-        lambda: sample_responses(
-            model,
-            tokenizer,
-            prompts,
-            batch_size=args.generation_batch,
-            max_new_tokens=HORIZON,
-            max_prompt_tokens=MAX_PROMPT_TOKENS,
-            stop_ids=stop_ids,
-            generator=generator,
-        )
-    )
+    sampled, sample_s = _timed(lambda: draw(prompts, 300))
     texts = tokenizer.batch_decode(sampled.response_ids, skip_special_tokens=True)
     start = time.perf_counter()
     scores = [score_response(text, gold) for text, gold in zip(texts, golds)]
@@ -151,24 +141,11 @@ def run_initial_eval(model, tokenizer, problems, args, stop_ids) -> dict[str, An
     }
 
 
-def run_fisher_probe(model, tokenizer, problems, args, stop_ids, pad_id) -> dict[str, Any]:
+def run_fisher_probe(model, problems, args, draw, pad_id) -> dict[str, Any]:
     """Times one-response Fisher samples and the global selection of a 1% mask over them."""
-    device = next(model.parameters()).device
     fisher = {name: torch.zeros_like(p, device="cpu") for name, p in model.named_parameters() if p.requires_grad}
-    generator = torch.Generator(device).manual_seed(100)
     prompts = [prompt for prompt, _ in problems[: args.fisher_samples]]
-    sampled, sample_s = _timed(
-        lambda: sample_responses(
-            model,
-            tokenizer,
-            prompts,
-            batch_size=args.generation_batch,
-            max_new_tokens=HORIZON,
-            max_prompt_tokens=MAX_PROMPT_TOKENS,
-            stop_ids=stop_ids,
-            generator=generator,
-        )
-    )
+    sampled, sample_s = _timed(lambda: draw(prompts, 100))
 
     def accumulate() -> None:
         for prompt_ids, response_ids in zip(sampled.prompt_ids, sampled.response_ids):
@@ -191,24 +168,11 @@ def run_fisher_probe(model, tokenizer, problems, args, stop_ids, pad_id) -> dict
     }
 
 
-def run_update(model, tokenizer, optimizer, batch, seed, args, stop_ids, pad_id) -> dict[str, Any]:
+def run_update(model, tokenizer, optimizer, batch, seed, args, draw, pad_id) -> dict[str, Any]:
     """Runs one fresh batch through one optimizer update, and times each stage."""
-    device = next(model.parameters()).device
     prompts = [prompt for prompt, _ in batch for _ in range(RESPONSES_PER_PROMPT)]
     golds = [gold for _, gold in batch for _ in range(RESPONSES_PER_PROMPT)]
-    generator = torch.Generator(device).manual_seed(seed)
-    sampled, sample_s = _timed(
-        lambda: sample_responses(
-            model,
-            tokenizer,
-            prompts,
-            batch_size=args.generation_batch,
-            max_new_tokens=HORIZON,
-            max_prompt_tokens=MAX_PROMPT_TOKENS,
-            stop_ids=stop_ids,
-            generator=generator,
-        )
-    )
+    sampled, sample_s = _timed(lambda: draw(prompts, seed))
     texts = tokenizer.batch_decode(sampled.response_ids, skip_special_tokens=True)
     start = time.perf_counter()
     rewards = [score_response(text, gold) for text, gold in zip(texts, golds)]
@@ -229,12 +193,15 @@ def run_update(model, tokenizer, optimizer, batch, seed, args, stop_ids, pad_id)
     grad_norm = torch.nn.utils.clip_grad_norm_(trainable, GRAD_CLIP).item() if trainable else 0.0
     _, step_s = _timed(optimizer.step)
     optimizer.zero_grad()
+    refresh = getattr(draw, "refresh", None)
+    _, refresh_s = _timed(lambda: refresh(model)) if refresh else (None, 0.0)
     return {
         **counts,
         "sample_s": sample_s,
         "score_s": score_s,
         "backward_s": backward_s,
         "step_s": step_s,
+        "refresh_s": refresh_s,
         "mean_reward": sum(rewards) / len(rewards),
         "grad_norm": grad_norm,
         "tokens": sampled.row_steps,
@@ -244,12 +211,29 @@ def run_update(model, tokenizer, optimizer, batch, seed, args, stop_ids, pad_id)
     }
 
 
+def make_sampler(model, tokenizer, args, stop_ids) -> Callable[[Sequence[str], int], Sampled]:
+    """Returns ``draw(prompts, seed)``: the static-cache sampler by default, or the eager one that samples the
+    policy."""
+    lengths = dict(max_new_tokens=HORIZON, max_prompt_tokens=MAX_PROMPT_TOKENS, stop_ids=stop_ids)
+    if args.sampler == "static":
+        return StaticSampler(model, tokenizer, batch_size=args.generation_batch, **lengths)
+
+    def draw(prompts: Sequence[str], seed: int) -> Sampled:
+        generator = torch.Generator(next(model.parameters()).device).manual_seed(seed)
+        return sample_responses(
+            model, tokenizer, prompts, batch_size=args.generation_batch, generator=generator, **lengths
+        )
+
+    return draw
+
+
 def summarize(report: dict[str, Any]) -> dict[str, float]:
     """Extrapolates the measured stages to the paper's budget."""
     updates = report["updates"]
     if not updates:
         return {}
-    update_s = sum(u["sample_s"] + u["score_s"] + u["backward_s"] + u["step_s"] for u in updates) / len(updates)
+    update_s = sum(u["sample_s"] + u["score_s"] + u["backward_s"] + u["step_s"] + u["refresh_s"] for u in updates)
+    update_s /= len(updates)
     evaluate = report["initial_eval"]
     eval_s = (evaluate["sample_s"] + evaluate["score_s"]) * PAPER_EVAL_PROBLEMS * EVAL_RESPONSES / evaluate["responses"]
     return {
@@ -280,6 +264,7 @@ def main() -> None:
     parser.add_argument("--eval-problems", type=int, default=125)
     parser.add_argument("--fisher-samples", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--sampler", choices=("static", "eager"), default="static")
     args = parser.parse_args()
 
     begin = time.perf_counter()
@@ -307,9 +292,10 @@ def main() -> None:
         "updates": [],
     }
     model.train()
-    report["initial_eval"] = run_initial_eval(model, tokenizer, test, args, stop_ids)
+    draw = make_sampler(model, tokenizer, args, stop_ids)
+    report["initial_eval"] = run_initial_eval(tokenizer, test, args, draw)
     write_report(args.output, report)
-    report["fisher"] = run_fisher_probe(model, tokenizer, train, args, stop_ids, pad_id)
+    report["fisher"] = run_fisher_probe(model, train, args, draw, pad_id)
     write_report(args.output, report)
 
     optimizer = HostStateAdamW(model.parameters(), lr=LEARNING_RATE)
@@ -321,7 +307,7 @@ def main() -> None:
             break
         batch = [train[order[(index * PROMPTS_PER_UPDATE + i) % len(order)]] for i in range(PROMPTS_PER_UPDATE)]
         torch.cuda.reset_peak_memory_stats() if torch.cuda.is_available() else None
-        update = run_update(model, tokenizer, optimizer, batch, args.seed * 1000 + index, args, stop_ids, pad_id)
+        update = run_update(model, tokenizer, optimizer, batch, args.seed * 1000 + index, args, draw, pad_id)
         report["updates"].append(update)
         write_report(args.output, report)
         print(json.dumps({k: v for k, v in update.items() if k != "lengths"}), flush=True)
