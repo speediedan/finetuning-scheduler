@@ -193,7 +193,9 @@ def test_static_sampler_cuts_at_the_stop_and_follows_the_policy(model):
     tokenizer.pad_token_id = PAD
     with torch.no_grad():
         model.lm_head.weight[STOP] += 3.0
-    sampler = StaticSampler(model, tokenizer, batch_size=2, max_new_tokens=12, max_prompt_tokens=64, stop_ids=[STOP])
+    sampler = StaticSampler(
+        model, tokenizer, batch_size=2, max_new_tokens=12, max_prompt_tokens=64, stop_ids=[STOP], offload_policy=True
+    )
     assert sampler.model.dtype == torch.bfloat16 and not sampler.model.training
     sampled = sampler(["5 6 7", "8", "9 10"], seed=0)
     assert sampled.prompt_ids == [[5, 6, 7], [8], [9, 10]]

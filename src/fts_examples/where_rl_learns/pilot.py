@@ -216,7 +216,8 @@ def make_sampler(model, tokenizer, args, stop_ids) -> Callable[[Sequence[str], i
     policy."""
     lengths = dict(max_new_tokens=HORIZON, max_prompt_tokens=MAX_PROMPT_TOKENS, stop_ids=stop_ids)
     if args.sampler == "static":
-        return StaticSampler(model, tokenizer, batch_size=args.generation_batch, **lengths)
+        offload = torch.cuda.is_available()
+        return StaticSampler(model, tokenizer, batch_size=args.generation_batch, offload_policy=offload, **lengths)
 
     def draw(prompts: Sequence[str], seed: int) -> Sampled:
         generator = torch.Generator(next(model.parameters()).device).manual_seed(seed)

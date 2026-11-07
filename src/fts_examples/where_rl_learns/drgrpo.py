@@ -201,6 +201,10 @@ class StaticSampler:
 
     The copy is the policy rounded to BF16, so sampling is off-policy by that rounding, as it is with any separate
     inference engine. Call :meth:`refresh` after every optimizer step.
+
+    With ``offload_policy`` the FP32 policy waits in host memory while the copy samples. A 4,096-token static cache for
+    16 rows is about 8 GB on Qwen3-1.7B, and beside both sets of weights and the compiled step it exceeds 24 GB. The
+    policy holds no gradients between updates, so moving it costs a second or so each way.
     """
 
     PROMPT_BUCKET = 256
@@ -214,8 +218,10 @@ class StaticSampler:
         max_new_tokens: int,
         max_prompt_tokens: int,
         stop_ids: Sequence[int],
+        offload_policy: bool = False,
     ) -> None:
         self.model = copy.deepcopy(policy).to(torch.bfloat16).eval()
+        self.policy = policy if offload_policy else None
         self.model.gradient_checkpointing_disable()
         self.model.requires_grad_(False)
         self.tokenizer = tokenizer
@@ -228,9 +234,20 @@ class StaticSampler:
         for mine, theirs in zip(self.model.parameters(), policy.parameters()):
             mine.copy_(theirs)
 
-    @torch.no_grad()
     def __call__(self, prompts: Sequence[str], seed: int) -> Sampled:
         """Samples one response per prompt at temperature 1, with no top-k or top-p restriction."""
+        if self.policy is None:
+            return self._sample(prompts, seed)
+        device = next(self.policy.parameters()).device
+        self.policy.to("cpu")
+        torch.cuda.empty_cache()
+        try:
+            return self._sample(prompts, seed)
+        finally:
+            self.policy.to(device)
+
+    @torch.no_grad()
+    def _sample(self, prompts: Sequence[str], seed: int) -> Sampled:
         merged = Sampled(prompt_ids=[], response_ids=[], logps=[], stopped=[])
         for start in range(0, len(prompts), self.batch_size):
             chunk = list(prompts[start : start + self.batch_size])
