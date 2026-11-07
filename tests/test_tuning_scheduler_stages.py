@@ -546,7 +546,7 @@ def test_the_initial_state_outlives_pruning_and_a_resume(tmp_path):
     initial = fts._checkpoint.state_path("initial")
     for epoch in fts.epochs(6):
         _train_epoch(fts, epoch, _val(epoch), lr_step=True)
-        assert (tmp_path / "run" / initial.rsplit("/", 1)[1]).exists()
+        assert (tmp_path / "run" / os.path.basename(initial)).exists()
         if epoch == 2:
             saved = fts.save(tmp_path / "s.pt")
             break
