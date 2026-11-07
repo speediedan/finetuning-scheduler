@@ -35,6 +35,20 @@ ______________________________________________________________________
 - composition of early-stopping and manually-set epoch-driven fine-tuning phase transitions
 - an experimental PyTorch API ([TuningScheduler](https://finetuning-scheduler.readthedocs.io/en/latest/pytorch/plain_pytorch_loop.html)) that brings the same schedules to a plain PyTorch training loop, without Lightning
 
+### Phases as Stages
+
+Phases accumulate by default: each thaws more of the model. With the PyTorch API (experimental), a phase can also be a stage of an experiment. Its `refreeze` key takes what earlier phases trained out of training and out of the optimizer, and its `restore` key says what the phase starts from (the best checkpoint, the state the previous phase ended with, or the initial state). One schedule can then run several conditions from one starting point:
+
+```python
+schedule = {
+    0: {"params": ["layers.0.adapter.*"], "max_transition_epoch": 2},
+    # a second condition: refreeze the first adapter and train another, from the same initial state
+    1: {"params": ["layers.1.adapter.*"], "refreeze": ["layers.0.adapter.*"], "restore": "initial"},
+}
+```
+
+[Phases as Stages](https://finetuning-scheduler.readthedocs.io/en/latest/pytorch/plain_pytorch_loop.html#phase-stages) has the details.
+
 ______________________________________________________________________
 
 ## Setup

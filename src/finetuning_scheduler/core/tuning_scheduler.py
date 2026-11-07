@@ -108,8 +108,8 @@ class PhaseEvent:
         tuning_scheduler: The tuning scheduler, for access to the module, optimizer and schedule.
         physical_params: The physical parameters the phase thaws (its own, then its coupled ones).
         logical_params: The logical names the phase's schedule entries resolved to (role selectors excluded).
-        frozen_params: The physical parameters the phase's ``freeze`` key refreezes. Start hooks run before the phase's
-            thaw and freeze.
+        refrozen_params: The physical parameters the phase's ``refreeze`` key refreezes. Start hooks run before the
+            phase's thaw and refreeze.
     """
 
     depth: int
@@ -120,7 +120,7 @@ class PhaseEvent:
     tuning_scheduler: "TuningScheduler" = field(repr=False)
     physical_params: tuple[str, ...] = ()
     logical_params: tuple[str, ...] = ()
-    frozen_params: tuple[str, ...] = ()
+    refrozen_params: tuple[str, ...] = ()
 
 
 def _is_compiled(module: nn.Module) -> bool:
@@ -448,7 +448,7 @@ class TuningScheduler:
         if self._gates:
             raise FTSConfigurationError("Gates are not supported on an externally driven tuning scheduler in this"
                                         " release.")
-        core_schedule.refuse_direct_api_keys(dict(schedule), keys=("freeze", "restore"))
+        core_schedule.refuse_direct_api_keys(dict(schedule), keys=("refreeze", "restore"))
         self._executor, self._externally_driven = executor, True
         self._view = self._resolve_view()
         self._view_roles_at_setup = self._view.view_roles()
@@ -593,8 +593,8 @@ class TuningScheduler:
         for cp in self._compiled.phases:
             self._logical_params[cp.depth] = cp.logical
             schedule[cp.depth]["params"] = list(cp.thawed)
-            if cp.frozen:
-                schedule[cp.depth]["freeze"] = list(cp.frozen)
+            if cp.refrozen:
+                schedule[cp.depth]["refreeze"] = list(cp.refrozen)
         self._epoch_watermark = max_epoch_wm
         if not self._user_policies:
             final = core_schedule.resolve_max_depth(self._max_depth_arg, len(schedule))
@@ -956,7 +956,7 @@ class TuningScheduler:
     def _advance(self, reason: str | None) -> None:
         """Close phase ``k`` and open ``k + 1``: restore the best (if configured), run phase ``k``'s end hooks and
         its gates (a veto stops here), advance and pin the boundary best, restore a named state (if ``k + 1``
-        starts from one), run the new phase's start hooks, then thaw, freeze and configure the optimizer for it."""
+        starts from one), run the new phase's start hooks, then thaw, refreeze and configure the optimizer."""
         prev = self._depth
         restore = self._schedule[prev + 1].get("restore") or (
             core_schedule.RESTORE_BEST if self._restore_best else core_schedule.RESTORE_NONE)
@@ -1065,11 +1065,12 @@ class TuningScheduler:
                          pre_state: tuple[dict, list] | None) -> None:
         """Thaw ``depth``'s parameters (and, after a restore or an optimizer reinitialization, every phase the
         optimizer lacks), configure the optimizer and lr schedulers for them, as the callback's ``step_pg`` does,
-        and apply each such phase's ``freeze``.
+        and apply each such phase's ``refreeze``.
 
         Revisiting the phases in order leaves the same trainable set and parameter groups however the optimizer got
-        here. A phase's new groups come before its ``freeze``, which can empty every group it finds, and its ``freeze``
-        before an lr scheduler reinitialization, whose ``init_pg_lrs`` describes the groups the phase trains.
+        here. A phase's new groups come before its ``refreeze``, which can empty every group it finds, and its
+        ``refreeze`` before an lr scheduler reinitialization, whose ``init_pg_lrs`` describes the groups the phase
+        trains. A tensor a phase thaws again after a refreeze joins that phase's groups with fresh optimizer state.
         """
         # after any phase hooks and gates, which may have run a forward-only pass, and on `load_state_dict`'s replay
         core_phase.reshard_fsdp_modules(self.model)
@@ -1088,13 +1089,13 @@ class TuningScheduler:
                 continue
             if i == depth and depth > 0 and pre_state is not None:
                 core_optim.restore_latest_lr_state(optimizer, schedulers, *pre_state)
-            if phase["params"] or not phase.get("freeze"):  # a phase may only freeze
+            if phase["params"] or not phase.get("refreeze"):  # a phase may only refreeze
                 core_optim.add_optimizer_groups(
                     self.model, optimizer, phase["params"], no_decay=self.no_decay,
                     lr=phase.get("lr", optimizer.defaults["lr"]), apply_lambdas=self.apply_lambdas_new_pgs,
                     schedulers=schedulers, pg_overrides=phase.get("pg_overrides"),
                 )
-            self._freeze_phase(i, optimizer, schedulers)
+            self._refreeze_phase(i, optimizer, schedulers)
             new_scheduler_cfg = core_phase.lr_reinit_cfg_for(phase, depth, self.reinit_lr_cfg)
             if new_scheduler_cfg:
                 self._reinit_lr_scheduler(new_scheduler_cfg, optimizer)
@@ -1202,12 +1203,12 @@ class TuningScheduler:
                 if name in owners and isinstance(mod, nn.modules.batchnorm._BatchNorm):
                     mod.track_running_stats = True
 
-    def _freeze_phase(self, depth: int, optimizer: Optimizer, schedulers: Sequence[Any]) -> None:
-        names = self._schedule[depth].get("freeze")
+    def _refreeze_phase(self, depth: int, optimizer: Optimizer, schedulers: Sequence[Any]) -> None:
+        names = self._schedule[depth].get("refreeze")
         if not names:
             return
-        frozen = core_phase.freeze_params(self.model, names)
-        core_optim.drop_optimizer_params(optimizer, frozen, schedulers)
+        refrozen = core_phase.refreeze_params(self.model, names)
+        core_optim.drop_optimizer_params(optimizer, refrozen, schedulers)
         if not self.frozen_bn_track_running_stats:
             owners = {owner_module(n) for n in names}
             for name, mod in self.model.named_modules():
@@ -1534,9 +1535,9 @@ class TuningScheduler:
         if applies_to is None:
             archs = getattr(getattr(self.model, "config", None), "architectures", None)
             applies_to = {"architectures": list(archs)} if archs else None
-        # a phase that only freezes selects nothing
+        # a phase that only refreezes selects nothing
         book = schedule_book({d: {"params": p} for d, p in self._source_params.items()
-                              if p or not self._schedule[d].get("freeze")},
+                              if p or not self._schedule[d].get("refreeze")},
                              name=name or f"{type(self.model).__name__}-schedule", addresses=self._address_sets,
                              logical_names=[n for n, _ in self._view.logical_named_parameters()],
                              naming_scheme=self._view.support().naming_scheme, applies_to=applies_to,
@@ -1773,7 +1774,7 @@ class TuningScheduler:
                            phase_config=self._phase_configs.get(depth), metadata=self._metadata, tuning_scheduler=self,
                            physical_params=tuple(self._schedule[depth]["params"]),
                            logical_params=self._logical_params.get(depth, ()),
-                           frozen_params=tuple(self._schedule[depth].get("freeze", ())))
+                           refrozen_params=tuple(self._schedule[depth].get("refreeze", ())))
         for fn, isolate in list(self._hooks[when].values()):
             isolate = self.isolate_rng if isolate is None else isolate
             rngs = fork_rngs(self._interface.rng_devices()) if isolate else nullcontext()

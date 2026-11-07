@@ -123,7 +123,7 @@ Without any policy, every phase but the final one must set ``max_transition_epoc
 
 Schedule Keys for the PyTorch API
 *********************************
-These per-phase keys belong to the PyTorch API. The Lightning callback refuses ``max_transition_step``, ``freeze`` and
+These per-phase keys belong to the PyTorch API. The Lightning callback refuses ``max_transition_step``, ``refreeze`` and
 ``restore`` rather than ignoring them:
 
 - ``max_transition_step``: end the phase at a global optimizer-step count (call ``step_end()`` after each step);
@@ -132,13 +132,13 @@ These per-phase keys belong to the PyTorch API. The Lightning callback refuses `
   works);
 - ``pg_overrides``: optimizer options applied to the parameter group the phase adds, for example
   ``{"weight_decay": 0.0}`` (``params`` and ``lr`` have their own keys);
-- ``freeze`` and ``restore``: see :ref:`phase-stages`.
+- ``refreeze`` and ``restore``: see :ref:`phase-stages`.
 
 .. _phase-stages:
 
-Phases as Stages: ``freeze`` and ``restore``
-********************************************
-Phases accumulate by default: each thaws more, and nothing refreezes. Two keys let a phase stand for a stage of an
+Phases as Stages: ``refreeze`` and ``restore``
+**********************************************
+Phases accumulate by default: each thaws more, and nothing is refrozen. Two keys let a phase stand for a stage of an
 experiment, so a schedule can say "train something else" as well as "train more":
 
 .. code-block:: python
@@ -146,21 +146,24 @@ experiment, so a schedule can say "train something else" as well as "train more"
     schedule = {
         0: {"params": ["role:adapter"], "max_transition_epoch": 2},
         # hold the adapter fixed and train the masks over it, from the state the adapter phase ended with
-        1: {"params": ["role:latent:masks"], "freeze": ["role:adapter"], "restore": "none"},
+        1: {"params": ["role:latent:masks"], "refreeze": ["role:adapter"], "restore": "none"},
     }
 
-``freeze`` names what the phase refreezes when it starts, as names, regexes or addresses, resolved the way ``params`` is
-(with the view's coupled tensors that are still trainable). The tensors stop requiring grad, their gradients are
-cleared, and they and their state leave the optimizer. Setting ``requires_grad=False`` in a phase hook does not do this:
-the tensors stay in the optimizer, and a resumed run would not replay it. A parameter group left with no parameters is
-removed, with its entry in the lr schedulers' per-group state. A phase may freeze without thawing anything, as long as
-something stays trainable.
+``refreeze`` names what the phase refreezes when it starts, as names, regexes or addresses, resolved the way
+``params`` is (with the view's coupled tensors that are still trainable). The tensors stop requiring grad, their
+gradients are cleared, and they and their state leave the optimizer. Setting ``requires_grad=False`` in a phase hook
+does not do this: the tensors stay in the optimizer, and a resumed run would not replay it. A parameter group left with
+no parameters is removed, with its entry in the lr schedulers' per-group state. A phase may refreeze without thawing
+anything, as long as something stays trainable.
 
-A tensor is thawed by one phase and frozen by at most one. Freezing a tensor no earlier phase thawed, freezing one twice,
-thawing a frozen tensor again, and leaving nothing trainable are refused when the schedule compiles. The compiled
-schedule's :meth:`~finetuning_scheduler.core.compile.CompiledSchedule.trainable_at` says what each phase trains, and the
-schedule digest and configuration hash see the key. :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load`
-replays each phase's freeze, so a run resumed after one matches an uninterrupted run.
+A later phase may thaw a refrozen tensor again: it joins that phase's parameter groups with fresh optimizer state, and
+a phase after it may refreeze it again. What is refused, when the schedule compiles, is a step that does not change
+whether a tensor trains: thawing a tensor that is already trainable, refreezing one that is not (never thawed, or
+refrozen and not thawed since), a phase that both thaws and refreezes a tensor, and a phase that leaves nothing
+trainable. The compiled schedule's :meth:`~finetuning_scheduler.core.compile.CompiledSchedule.trainable_at` says what
+each phase trains, and the schedule digest and configuration hash see the key.
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load` replays each phase's thaw and refreeze in
+order, so a run resumed at any point matches an uninterrupted run.
 
 ``restore`` says what the phase starts from, overriding ``restore_best`` for that boundary:
 
@@ -183,11 +186,11 @@ replays each phase's freeze, so a run resumed after one matches an uninterrupted
 
 Without the key, a boundary follows ``restore_best``, which keeps its defaults: the Lightning callback restores the best
 checkpoint at every boundary, and ``TuningScheduler`` does when given a checkpoint policy. ``"best"`` and ``"initial"``
-need a ``checkpoint`` policy. Restoring does not unfreeze: the tensors a phase has frozen stay frozen at their restored
-values, and the phases since the restored state are replayed onto its parameter groups. The epoch and step counters and the
-random streams keep going, so ``max_transition_epoch`` still counts epochs of the whole run.
+need a ``checkpoint`` policy. Restoring does not thaw anything: the tensors a phase has refrozen stay frozen at their
+restored values, and the phases since the restored state are replayed onto its parameter groups. The epoch and step
+counters and the random streams keep going, so ``max_transition_epoch`` still counts epochs of the whole run.
 
-One starting point for several conditions, each frozen when the next starts, then needs one schedule rather than one
+One starting point for several conditions, each refrozen when the next starts, then needs one schedule rather than one
 process per condition:
 
 .. code-block:: python
@@ -196,17 +199,17 @@ process per condition:
         0: {"params": ["layers.0.adapter.*"], "max_transition_epoch": 2},
         1: {
             "params": ["layers.1.adapter.*"],
-            "freeze": ["layers.0.adapter.*"],
+            "refreeze": ["layers.0.adapter.*"],
             "restore": "initial",
             "max_transition_epoch": 4,
         },
-        2: {"params": ["layers.2.adapter.*"], "freeze": ["layers.1.adapter.*"], "restore": "initial"},
+        2: {"params": ["layers.2.adapter.*"], "refreeze": ["layers.1.adapter.*"], "restore": "initial"},
     }
     fts = TuningScheduler(model, schedule, optimizer=factory, checkpoint=BestCheckpoint("ckpts", monitor="val_loss"))
     fts.add_phase_hook(lambda event: record(event.depth, evaluate(model)), when="end")
 
-An end hook sees each condition's outcome before the next one restores. Both keys work under FSDP2 and tensor parallelism,
-through the same checkpoints as the best-checkpoint restore.
+An end hook sees each condition's outcome before the next one restores. Both keys work under FSDP2 and tensor
+parallelism, through the same checkpoints as the best-checkpoint restore.
 
 Phase Hooks and Gates
 *********************

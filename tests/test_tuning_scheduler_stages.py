@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tests for the per-phase ``freeze`` and ``restore`` schedule keys (#193).
+"""Tests for the per-phase ``refreeze`` and ``restore`` schedule keys (#193).
 
 These need only PyTorch and the scheduling core (the ``core-no-lightning`` job runs them with ``--noconftest``).
 """
@@ -31,17 +31,23 @@ SGD = partial(torch.optim.SGD, lr=0.1, momentum=0.9, weight_decay=0.01)
 HEAD = ["2.weight", "2.bias"]
 MID = ["1.weight", "1.bias"]
 BASE = ["0.weight", "0.bias"]
-# train the head, freeze it and train the middle, freeze that and train the base
+# train the head, refreeze it and train the middle, refreeze that and train the base
 STAGES = {
     0: {"params": HEAD, "max_transition_epoch": 2},
-    1: {"params": MID, "freeze": HEAD, "max_transition_epoch": 4, "lr": 0.05},
-    2: {"params": BASE, "freeze": ["1\\..*"], "lr": 0.02},
+    1: {"params": MID, "refreeze": HEAD, "max_transition_epoch": 4, "lr": 0.05},
+    2: {"params": BASE, "refreeze": ["1\\..*"], "lr": 0.02},
 }
 # each condition starts from the same state: the initial one
 SWEEP = {
     0: {"params": HEAD, "max_transition_epoch": 2},
-    1: {"params": MID, "freeze": HEAD, "restore": "initial", "max_transition_epoch": 4, "lr": 0.05},
-    2: {"params": BASE, "freeze": MID, "restore": "initial", "lr": 0.02},
+    1: {"params": MID, "refreeze": HEAD, "restore": "initial", "max_transition_epoch": 4, "lr": 0.05},
+    2: {"params": BASE, "refreeze": MID, "restore": "initial", "lr": 0.02},
+}
+# thaw the head, refreeze it while the middle trains, then thaw it again in place of the middle
+RETHAW = {
+    0: {"params": HEAD, "max_transition_epoch": 2},
+    1: {"params": MID, "refreeze": HEAD, "max_transition_epoch": 4, "lr": 0.05},
+    2: {"params": HEAD, "refreeze": MID, "lr": 0.02},
 }
 
 
@@ -109,74 +115,88 @@ def _run(fts, epochs=6, metrics=None, start=0, **kwargs):
     return _values(fts.model)
 
 
-def test_compile_resolves_freeze_like_params():
+def test_compile_resolves_refreeze_like_params():
     fts = _fts()
     compiled = fts.compiled_schedule
-    assert [cp.frozen for cp in compiled.phases] == [(), tuple(HEAD), tuple(MID)]
+    assert [cp.refrozen for cp in compiled.phases] == [(), tuple(HEAD), tuple(MID)]
     assert sorted(compiled.trainable_at(0)) == sorted(HEAD)
     assert sorted(compiled.trainable_at(1)) == sorted(MID)
     assert sorted(compiled.trainable_at(2)) == sorted(BASE)
     with pytest.raises(KeyError):
         compiled.trainable_at(3)
     # the schedule the hashes read carries the physical names
-    assert fts.schedule[2]["freeze"] == MID
+    assert fts.schedule[2]["refreeze"] == MID
 
 
-def test_freeze_entries_can_be_addresses(monkeypatch):
+def test_refreeze_entries_can_be_addresses(monkeypatch):
     model = _model()
     view = CanonicalView(model, roles={"2.weight": "latent:head", "2.bias": "latent:head"})
     schedule = {0: {"params": BASE, "max_transition_epoch": 1},
                 1: {"params": ["role:latent:head"], "max_transition_epoch": 2},
-                2: {"params": MID, "freeze": ["role:latent:head"]}}
+                2: {"params": MID, "refreeze": ["role:latent:head"]}}
     compiled = compile_schedule(schedule, view)
-    assert sorted(compiled.phases[2].frozen) == sorted(HEAD)
-    # a `freeze` address alone warns that addresses are experimental, once per process as for `params`
+    assert sorted(compiled.phases[2].refrozen) == sorted(HEAD)
+    # a `refreeze` address alone warns that addresses are experimental, once per process as for `params`
     monkeypatch.setattr(compile_mod, "_ADDRESSES_WARNED", False)
-    names_only = {0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "freeze": ["role:latent:head"]}}
+    names_only = {0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "refreeze": ["role:latent:head"]}}
     with pytest.warns(UserWarning, match="experimental"):
         compile_schedule(names_only, view)
 
 
-def test_freeze_takes_the_views_coupled_tensors_along():
+def test_refreeze_takes_the_views_coupled_tensors_along():
     class Coupled(CanonicalView):
         def coupled(self, names):
             return ["2.bias"] if "2.weight" in names else []
 
     model = _model()
     schedule = {0: {"params": ["2.weight"], "max_transition_epoch": 1},
-                1: {"params": MID, "freeze": ["2.weight"], "max_transition_epoch": 2},
-                2: {"params": BASE}}
+                1: {"params": MID, "refreeze": ["2.weight"], "max_transition_epoch": 2},
+                2: {"params": BASE, "max_transition_epoch": 3},
+                3: {"params": ["2.weight"]}}
     compiled = compile_schedule(schedule, Coupled(model))
     assert compiled.phases[0].thawed == ("2.weight", "2.bias")
-    assert compiled.phases[1].frozen == ("2.weight", "2.bias")
+    assert compiled.phases[1].refrozen == ("2.weight", "2.bias")
+    # thawed again, the tensor brings its coupled tensor back with it
+    assert compiled.phases[3].thawed == ("2.weight", "2.bias")
+    assert sorted(compiled.trainable_at(3)) == sorted(MID + BASE + HEAD)
 
 
-def test_digest_sees_freeze_only_when_present():
+def test_digest_sees_refreeze_only_when_present():
     view = CanonicalView(_model())
     without = compile_schedule({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID}}, view)
-    with_freeze = compile_schedule({0: {"params": HEAD, "max_transition_epoch": 1},
-                                    1: {"params": MID, "freeze": HEAD}}, view)
-    assert without.digest != with_freeze.digest
-    assert all(cp.frozen == () for cp in without.phases)
+    with_refreeze = compile_schedule({0: {"params": HEAD, "max_transition_epoch": 1},
+                                      1: {"params": MID, "refreeze": HEAD}}, view)
+    assert without.digest != with_refreeze.digest
+    assert all(cp.refrozen == () for cp in without.phases)
+
+
+def test_a_refrozen_tensor_can_be_thawed_again():
+    compiled = _fts(RETHAW).compiled_schedule
+    assert [cp.physical for cp in compiled.phases] == [tuple(HEAD), tuple(MID), tuple(HEAD)]
+    assert [sorted(compiled.trainable_at(d)) for d in range(3)] == [sorted(HEAD), sorted(MID), sorted(HEAD)]
+    # and refrozen again, once it is trainable again
+    again = {**RETHAW, 2: {**RETHAW[2], "max_transition_epoch": 6}, 3: {"params": BASE, "refreeze": HEAD}}
+    assert sorted(_fts(again).compiled_schedule.trainable_at(3)) == sorted(BASE)
 
 
 @pytest.mark.parametrize("schedule, match", [
-    ({0: {"params": HEAD, "freeze": HEAD}}, "Phase 0 may not `freeze`"),
-    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "freeze": BASE}},
+    ({0: {"params": HEAD, "refreeze": HEAD}}, "Phase 0 may not `refreeze`"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "refreeze": BASE}},
      "no earlier phase thawed"),
-    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "freeze": MID}},
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "refreeze": MID}},
      "no earlier phase thawed"),
-    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": HEAD, "freeze": HEAD}},
-     "both thaws and freezes"),
-    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "freeze": HEAD, "max_transition_epoch": 2},
-      2: {"params": BASE, "freeze": HEAD}}, "already froze"),
-    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "freeze": HEAD, "max_transition_epoch": 2},
-      2: {"params": HEAD}}, "an earlier phase froze"),
-    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"freeze": HEAD}}, "leaves nothing trainable"),
-    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "freeze": "2.weight"}}, "non-empty list"),
-    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "freeze": []}}, "non-empty list"),
-    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "freeze": [1]}}, "is not a string"),
-    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "freeze": ["nothing.*"]}}, "nothing"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": HEAD, "refreeze": HEAD}},
+     "both thaws and refreezes"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "refreeze": HEAD, "max_transition_epoch": 2},
+      2: {"params": BASE, "refreeze": HEAD}}, "an earlier phase refroze and no phase has thawed since"),
+    # a tensor thawed again is trainable: thawing it once more is a repeat, as it is without a refreeze
+    ({**RETHAW, 2: {**RETHAW[2], "max_transition_epoch": 6}, 3: {"params": HEAD}}, "Phases are not disjoint"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": HEAD}}, "Phases are not disjoint"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"refreeze": HEAD}}, "leaves nothing trainable"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "refreeze": "2.weight"}}, "non-empty list"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "refreeze": []}}, "non-empty list"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "refreeze": [1]}}, "is not a string"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "refreeze": ["nothing.*"]}}, "nothing"),
     ({0: {"params": HEAD, "restore": "none"}}, "Phase 0 may not set `restore`"),
     ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "restore": "latest"}},
      "must be one of"),
@@ -211,14 +231,14 @@ def test_named_state_needs_a_policy_that_can_keep_one(tmp_path):
 
 
 def test_lightning_refuses_the_keys():
-    with pytest.raises(FTSConfigurationError, match="freeze.*restore|restore.*freeze"):
+    with pytest.raises(FTSConfigurationError, match="refreeze.*restore|restore.*refreeze"):
         refuse_direct_api_keys(_schedule(SWEEP))
 
 
 def test_externally_driven_refuses_the_keys():
     model = _model()
     fts = TuningScheduler(model, optimizer=SGD)
-    with pytest.raises(FTSConfigurationError, match="freeze"):
+    with pytest.raises(FTSConfigurationError, match="refreeze"):
         fts.attach(object(), _schedule(STAGES))
 
 
@@ -226,8 +246,8 @@ def test_externally_driven_refuses_the_keys():
     SGD, partial(torch.optim.AdamW, lr=0.01, weight_decay=0.1), partial(torch.optim.Adam, lr=0.01),
     partial(torch.optim.RMSprop, lr=0.01, momentum=0.9, weight_decay=0.01),
 ], ids=["sgd", "adamw", "adam", "rmsprop"])
-def test_frozen_tensors_hold_and_leave_the_optimizer(optimizer):
-    """Momentum and weight decay would keep moving a frozen tensor left in the optimizer."""
+def test_refrozen_tensors_hold_and_leave_the_optimizer(optimizer):
+    """Momentum and weight decay would keep moving a refrozen tensor left in the optimizer."""
     fts = _fts(optimizer=optimizer)
     seen = []
     for epoch in fts.epochs(6):
@@ -236,16 +256,16 @@ def test_frozen_tensors_hold_and_leave_the_optimizer(optimizer):
         before = _values(fts.model)
         _train_epoch(fts, epoch)
         after = _values(fts.model)
-        frozen = {n for cp in fts.compiled_schedule.phases[:fts.curr_depth + 1] for n in cp.frozen}
+        refrozen = {n for cp in fts.compiled_schedule.phases[:fts.curr_depth + 1] for n in cp.refrozen}
         trainable = set(fts.compiled_schedule.trainable_at(fts.curr_depth))
         for n in after:
             assert torch.equal(before[n], after[n]) == (n not in trainable), n
             assert fts.model.get_parameter(n).grad is None
-        assert frozen.isdisjoint(trainable)
+        assert refrozen.isdisjoint(trainable)
     assert seen == [0, 0, 1, 1, 2, 2]
 
 
-def test_zeroed_gradients_do_not_move_a_frozen_tensor():
+def test_zeroed_gradients_do_not_move_a_refrozen_tensor():
     fts = _fts()
     for epoch in fts.epochs(4):
         x, y = _data(epoch)
@@ -264,10 +284,10 @@ def test_zeroed_gradients_do_not_move_a_frozen_tensor():
     assert torch.equal(held, fts.model.get_parameter("2.weight"))
 
 
-def test_a_partly_frozen_group_keeps_its_options():
-    """Freezing some of a group's parameters leaves the group, with its options, on the rest."""
+def test_a_partly_refrozen_group_keeps_its_options():
+    """Refreezing some of a group's parameters leaves the group, with its options, on the rest."""
     schedule = {0: {"params": HEAD, "max_transition_epoch": 1},
-                1: {"params": MID, "freeze": ["2.bias"], "lr": 0.05}}
+                1: {"params": MID, "refreeze": ["2.bias"], "lr": 0.05}}
     fts = _fts(schedule)
     _run(fts, 2)
     assert [(len(g["params"]), g["lr"]) for g in fts.optimizer.param_groups] == [(1, 0.1), (2, 0.05)]
@@ -276,8 +296,8 @@ def test_a_partly_frozen_group_keeps_its_options():
 
 def test_no_decay_groups_empty_one_at_a_time():
     schedule = {0: {"params": HEAD, "max_transition_epoch": 1},
-                1: {"params": MID, "freeze": ["2.bias"], "max_transition_epoch": 2, "lr": 0.05},
-                2: {"params": BASE, "freeze": ["2.weight"], "lr": 0.02}}
+                1: {"params": MID, "refreeze": ["2.bias"], "max_transition_epoch": 2, "lr": 0.05},
+                2: {"params": BASE, "refreeze": ["2.weight"], "lr": 0.02}}
     fts = _fts(schedule, no_decay=["bias"])
     _run(fts, 3)
     _assert_in_place(fts)
@@ -310,8 +330,8 @@ def test_reduce_on_plateau_stays_aligned_with_the_groups():
         assert len(fts.lr_scheduler.min_lrs) == len(fts.optimizer.param_groups) == 1
 
 
-def test_a_phase_can_only_freeze():
-    schedule = {0: {"params": HEAD + MID, "max_transition_epoch": 1}, 1: {"freeze": MID}}
+def test_a_phase_can_only_refreeze():
+    schedule = {0: {"params": HEAD + MID, "max_transition_epoch": 1}, 1: {"refreeze": MID}}
     fts = _fts(schedule)
     _run(fts, 2)
     assert fts.curr_depth == 1
@@ -322,33 +342,33 @@ def test_a_phase_can_only_freeze():
 def test_frozen_bn_stops_tracking_with_the_option_off():
     model = nn.Sequential(nn.Linear(4, 4), nn.BatchNorm1d(4), nn.Linear(4, 2))
     schedule = {0: {"params": ["2.weight", "2.bias", "1.weight", "1.bias"], "max_transition_epoch": 1},
-                1: {"params": ["0.weight", "0.bias"], "freeze": ["1.weight", "1.bias"]}}
+                1: {"params": ["0.weight", "0.bias"], "refreeze": ["1.weight", "1.bias"]}}
     fts = _fts(schedule, model=model, frozen_bn_track_running_stats=False)
     assert model[1].track_running_stats
     _run(fts, 2)
     assert fts.curr_depth == 1 and not model[1].track_running_stats
 
 
-def test_phase_event_names_what_the_phase_freezes():
+def test_phase_event_names_what_the_phase_refreezes():
     seen = {}
     fts = TuningScheduler(_model(), _schedule(STAGES), optimizer=SGD)
     fts.add_phase_hook(
-        lambda e: seen.update({e.depth: (e.frozen_params, fts.model.get_parameter("2.bias").requires_grad)}))
+        lambda e: seen.update({e.depth: (e.refrozen_params, fts.model.get_parameter("2.bias").requires_grad)}))
     fts.setup()
     _run(fts)
-    # start hooks run before the phase's thaw and freeze
+    # start hooks run before the phase's thaw and refreeze
     assert seen == {0: ((), True), 1: (tuple(HEAD), True), 2: (tuple(MID), False)}
 
 
 def test_hashes_see_both_keys():
     plain = {0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID}}
-    frozen = {0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "freeze": HEAD}}
+    refrozen = {0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "refreeze": HEAD}}
     restored = {0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "restore": "none"}}
-    hashes = {_fts(s).config_hash for s in (plain, frozen, restored)}
+    hashes = {_fts(s).config_hash for s in (plain, refrozen, restored)}
     assert len(hashes) == 3
 
 
-def test_a_state_from_another_freeze_is_refused(tmp_path):
+def test_a_state_from_another_refreeze_is_refused(tmp_path):
     fts = _fts()
     _train_epoch(fts, 0)
     saved = fts.save(tmp_path / "s.pt")
@@ -376,10 +396,12 @@ def _make(schedule, tmp_path, name, **kwargs):
     (STAGES, "best", False),
     (SWEEP, "best", False),
     (SWEEP, "best", None),
-], ids=["freeze", "freeze_best", "freeze_ckpt_only", "sweep", "sweep_best"])
+    (RETHAW, None, None),
+    (RETHAW, "best", None),
+], ids=["refreeze", "refreeze_best", "refreeze_ckpt_only", "sweep", "sweep_best", "rethaw", "rethaw_best"])
 def test_a_resumed_run_matches_an_uninterrupted_one(tmp_path, split, schedule, checkpoint, restore_best):
-    """The acceptance test: saved at any epoch (before, at or after a freeze or a restore), a resumed run ends where an
-    uninterrupted one does, with the same model, optimizer and lr scheduler state."""
+    """The acceptance test: saved at any epoch (before, at or after a refreeze, a thaw again or a restore), a
+    resumed run ends where an uninterrupted one does, with the same model, optimizer and lr scheduler state."""
     kwargs = {"checkpoint": checkpoint}
     if restore_best is not None:
         kwargs["restore_best"] = restore_best
@@ -410,18 +432,20 @@ def test_a_resumed_run_matches_an_uninterrupted_one(tmp_path, split, schedule, c
     assert ref.lr_scheduler.state_dict() == resumed.lr_scheduler.state_dict()
 
 
-@pytest.mark.parametrize("split", [1, 3])
-def test_resume_state_matches_an_uninterrupted_one(split):
-    """The same for a loop that checkpoints the model and optimizer itself."""
-    expected = _run(_fts(), lr_step=False)
-    first = _fts()
+@pytest.mark.parametrize("schedule", [STAGES, RETHAW], ids=["refreeze", "rethaw"])
+@pytest.mark.parametrize("split", [1, 3, 4])
+def test_resume_state_matches_an_uninterrupted_one(split, schedule):
+    """The same for a loop that checkpoints the model and optimizer itself, whose positional optimizer state needs
+    the replayed groups to line up with the saved ones."""
+    expected = _run(_fts(schedule), lr_step=False)
+    first = _fts(schedule)
     for epoch in first.epochs(6):
         _train_epoch(first, epoch)
         if epoch == split:
             state = first.resume_state()
             model_state, optim_state = first.model.state_dict(), first.optimizer.state_dict()
             break
-    resumed = _fts(model=_model(seed=7))
+    resumed = _fts(schedule, model=_model(seed=7))
     resumed.load_resume_state(state)
     resumed.optimizer.load_state_dict(optim_state)
     resumed.model.load_state_dict(model_state)
@@ -493,10 +517,11 @@ def test_restore_none_keeps_the_state_the_phase_ended_with(tmp_path):
     assert not torch.equal(after_first["2.weight"], fts.model.get_parameter("2.weight"))
 
 
-def test_a_best_from_before_a_freeze_replays_it(tmp_path):
-    """Restoring a best saved before the freeze brings back parameter groups holding the frozen tensors, and the
-    phases after it are replayed onto them."""
-    fts = _fts(checkpoint=BestCheckpoint(tmp_path, "loss"))
+@pytest.mark.parametrize("schedule", [STAGES, RETHAW], ids=["refreeze", "rethaw"])
+def test_a_best_from_before_a_refreeze_replays_it(tmp_path, schedule):
+    """Restoring a best saved before the refreeze brings back parameter groups holding the refrozen tensors, and
+    the phases after it are replayed onto them."""
+    fts = _fts(schedule, checkpoint=BestCheckpoint(tmp_path, "loss"))
     seen = []
     for epoch in fts.epochs(6):
         _assert_in_place(fts)
@@ -505,9 +530,9 @@ def test_a_best_from_before_a_freeze_replays_it(tmp_path):
     assert seen == [0, 0, 1, 1, 2, 2] and fts.restored_count == 2
 
 
-def test_new_optimizer_after_a_freeze_holds_only_what_trains():
+def test_new_optimizer_after_a_refreeze_holds_only_what_trains():
     schedule = {0: {"params": HEAD, "max_transition_epoch": 1},
-                1: {"params": MID, "freeze": HEAD, "max_transition_epoch": 2, "lr": 0.05},
+                1: {"params": MID, "refreeze": HEAD, "max_transition_epoch": 2, "lr": 0.05},
                 2: {"params": BASE, "lr": 0.02,
                     "new_optimizer": {"optimizer_init": {"class_path": "torch.optim.Adam", "init_args": {"lr": 0.01}}}}}
     fts = _fts(schedule)

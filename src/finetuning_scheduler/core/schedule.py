@@ -652,9 +652,9 @@ def final_phase_max_epochs(schedule: dict, max_phase: int, max_epoch_wm: int, ma
 
 
 # phase keys the PyTorch API adds
-DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides", "promote", "freeze", "restore")
+DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides", "promote", "refreeze", "restore")
 # those only the PyTorch API interprets in this release (the Lightning callback refuses them)
-LIGHTNING_UNSUPPORTED_PHASE_KEYS = ("max_transition_step", "promote", "freeze", "restore")
+LIGHTNING_UNSUPPORTED_PHASE_KEYS = ("max_transition_step", "promote", "refreeze", "restore")
 # what a phase's `restore` key can name: the best checkpoint, nothing, or a named state
 RESTORE_BEST, RESTORE_NONE = "best", "none"
 NAMED_STATES = ("initial",)
@@ -669,7 +669,7 @@ def parse_phase_extensions(schedule: dict) -> None:
       parameter group the phase adds.
     - ``promote``: tensors to promote from the ``instrument`` role to a ``latent:<name>`` role when the phase starts,
       as ``{selector_or_name: "latent:<name>"}`` (not in phase 0).
-    - ``freeze``: names, regexes or addresses of tensors an earlier phase thawed, refrozen when the phase starts and
+    - ``refreeze``: names, regexes or addresses of tensors an earlier phase thawed, refrozen when the phase starts and
       dropped from the optimizer (not in phase 0).
     - ``restore``: what the phase starts from: ``"best"``, ``"none"`` or a named state (``"initial"``), overriding the
       tuning scheduler's ``restore_best`` for this boundary (not in phase 0).
@@ -679,7 +679,7 @@ def parse_phase_extensions(schedule: dict) -> None:
     """
     for depth, phase in schedule.items():
         parse_promote(depth, phase.get("promote"))
-        parse_freeze(depth, phase.get("freeze"))
+        parse_refreeze(depth, phase.get("refreeze"))
         parse_restore(depth, phase.get("restore"))
         mts = phase.setdefault("max_transition_step", -1)
         if isinstance(mts, bool) or not isinstance(mts, int) or mts < -1:
@@ -739,23 +739,23 @@ def parse_promote(depth: int, promote: Any) -> None:
                 " role.")
 
 
-def parse_freeze(depth: int, freeze: Any) -> None:
-    """Validate phase ``depth``'s ``freeze`` list (``None`` when the phase has none).
+def parse_refreeze(depth: int, refreeze: Any) -> None:
+    """Validate phase ``depth``'s ``refreeze`` list (``None`` when the phase has none).
 
     Raises:
         FTSConfigurationError: If it is not a non-empty list of names, regexes or addresses, or phase 0 has one.
     """
-    if freeze is None:
+    if refreeze is None:
         return
-    if not isinstance(freeze, Sequence) or isinstance(freeze, str) or not freeze:
+    if not isinstance(refreeze, Sequence) or isinstance(refreeze, str) or not refreeze:
         raise FTSConfigurationError(
-            f"Phase {depth}'s `freeze` must be a non-empty list of names, regexes or addresses, got {freeze!r}.")
+            f"Phase {depth}'s `refreeze` must be a non-empty list of names, regexes or addresses, got {refreeze!r}.")
     if depth == 0:
-        raise FTSConfigurationError("Phase 0 may not `freeze` tensors: no earlier phase has thawed any.")
-    for entry in freeze:
+        raise FTSConfigurationError("Phase 0 may not `refreeze` tensors: no earlier phase has thawed any.")
+    for entry in refreeze:
         if not isinstance(entry, str) or not entry:
             raise FTSConfigurationError(
-                f"Phase {depth}'s `freeze` entry {entry!r} is not a string. Write a parameter name, a regex or an "
+                f"Phase {depth}'s `refreeze` entry {entry!r} is not a string. Write a parameter name, a regex or an "
                 "address in its string form; an address in mapping form goes in the schedule's `addresses` sets and is "
                 "referenced as `@<set>`.")
 

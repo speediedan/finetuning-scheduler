@@ -122,7 +122,7 @@ def _names(results: dict, patterns: list) -> list:
 
 
 def _assert_stages(result: dict) -> None:
-    """A frozen stage holds its values while the next trains, and the last stage starts over from the initial
+    """A refrozen stage holds its values while the next trains, and the last stage starts over from the initial
     state."""
     first, second, third = (_names(result, mp.STAGES[d]["params"]) for d in range(3))
     assert result["trainable"] == result["expected"]
@@ -137,8 +137,8 @@ def _assert_stages(result: dict) -> None:
 
 @GLOO
 @pytest.mark.parametrize("layout", ["fsdp", "tp"])
-def test_stages_freeze_restore_and_resume(gloo_pool, tmp_path, layout):
-    """``freeze`` and ``restore: initial`` match a single-process run under FSDP2 and tensor parallelism, through
+def test_stages_refreeze_restore_and_resume(gloo_pool, tmp_path, layout):
+    """``refreeze`` and ``restore: initial`` match a single-process run under FSDP2 and tensor parallelism, through
     DCP checkpoints, with momentum and weight decay; a save after any epoch resumes to the same end in a fresh
     model."""
     results = gloo_pool.run(mp.staged, layout=layout, ckpt_dir=str(tmp_path / "run"))
@@ -153,8 +153,26 @@ def test_stages_freeze_restore_and_resume(gloo_pool, tmp_path, layout):
 
 
 @GLOO
-def test_a_best_from_before_a_freeze_replays_it_when_sharded(gloo_pool, tmp_path):
-    """A best saved before the freeze brings back groups holding the frozen tensors; the phases after it are
+def test_a_refrozen_stage_thawed_again_resumes_when_sharded(gloo_pool, tmp_path):
+    """A stage refrozen and then thawed again trains with fresh optimizer state under FSDP2, matches a run in one
+    process, and a save on either side of the thaw resumes to the same end."""
+    results = gloo_pool.run(mp.staged, layout="fsdp", ckpt_dir=str(tmp_path / "run"), schedule="rethaw")
+    result = results[0]
+    assert result["trainable"] == result["expected"] and result["groups"] == [1, 1, 1]
+    first = _names(result, mp.RETHAW[0]["params"])
+    assert all(result["after"][0][n] == result["after"][1][n] for n in first)
+    assert all(result["after"][2][n] != result["after"][1][n] for n in first)
+    ref = mp.staged(None, "plain", str(tmp_path / "ref"), schedule="rethaw")
+    assert _close(result["params"], ref["params"])
+    for split in range(2):
+        resumed = gloo_pool.run(mp.staged, layout="fsdp", ckpt_dir=str(tmp_path / f"split{split}"), split=split,
+                                schedule="rethaw")
+        assert _close(resumed[0]["params"], result["params"], tol=1e-6)
+
+
+@GLOO
+def test_a_best_from_before_a_refreeze_replays_it_when_sharded(gloo_pool, tmp_path):
+    """A best saved before the refreeze brings back groups holding the refrozen tensors; the phases after it are
     replayed."""
     val = [1.0, 1.1, 1.2]  # the first epoch stays the best
     results = gloo_pool.run(mp.staged, layout="fsdp", ckpt_dir=str(tmp_path / "run"), restore_best=True, val=val)

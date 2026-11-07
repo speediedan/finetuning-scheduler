@@ -42,11 +42,17 @@ SCHEDULE = {
     2: {"params": [r"layers.0.(feed_forward|ffn_norm|attention.w.*|attention_norm).*",
                    r"(pos_embeddings|tok_embeddings).weight"], "lr": 0.1},
 }
-# the same stages, each frozen when the next starts, the last starting over from the initial state
+# the same stages, each refrozen when the next starts, the last starting over from the initial state
 STAGES = {
     0: {"params": SCHEDULE[0]["params"], "max_transition_epoch": 1},
-    1: {"params": SCHEDULE[1]["params"], "freeze": SCHEDULE[0]["params"], "max_transition_epoch": 2, "lr": 0.05},
-    2: {"params": SCHEDULE[2]["params"], "freeze": SCHEDULE[1]["params"], "restore": "initial", "lr": 0.05},
+    1: {"params": SCHEDULE[1]["params"], "refreeze": SCHEDULE[0]["params"], "max_transition_epoch": 2, "lr": 0.05},
+    2: {"params": SCHEDULE[2]["params"], "refreeze": SCHEDULE[1]["params"], "restore": "initial", "lr": 0.05},
+}
+# the first stage thawed again in place of the second, once the second has trained over it
+RETHAW = {
+    0: STAGES[0],
+    1: STAGES[1],
+    2: {"params": SCHEDULE[0]["params"], "refreeze": SCHEDULE[1]["params"], "lr": 0.05},
 }
 # the parameters whose state ``tests/model_parallel_expected_paths.py`` records each epoch
 SAMPLED = ["layers.0.feed_forward.w2.weight", "layers.0.feed_forward.w2.bias", "layers.1.feed_forward.w2.weight",
@@ -272,19 +278,22 @@ def _staged_model(ctx, seed: int, layout: str) -> nn.Module:
 
 
 def staged(ctx, layout: str, ckpt_dir: str, restore_best: bool = False, split: int | None = None, epochs: int = 3,
-           steps: int = 2, batch: int = 4, seed: int = 7, val: list | None = None, momentum: float = 0.9) -> dict:
-    """Train ``STAGES`` with momentum and weight decay under ``layout`` (``fsdp``, ``tp`` or ``plain``, which runs
-    one process on the full batch), with the parameters and optimizer groups recorded after each epoch; with
-    ``split``, save after that epoch and finish in a fresh model and tuning scheduler."""
+           steps: int = 2, batch: int = 4, seed: int = 7, val: list | None = None, momentum: float = 0.9,
+           schedule: str = "stages") -> dict:
+    """Train ``STAGES`` (or, with ``schedule="rethaw"``, ``RETHAW``) with momentum and weight decay under
+    ``layout`` (``fsdp``, ``tp`` or ``plain``, which runs one process on the full batch), with the parameters and
+    optimizer groups recorded after each epoch; with ``split``, save after that epoch and finish in a fresh model
+    and tuning scheduler."""
     device = ctx.device if ctx else torch.device("cpu")
     data = _data(epochs, steps, batch, seed)
     shard = _shard(ctx, batch) if layout == "fsdp" else slice(None)
     val = val or [1.0 - e / 10 for e in range(epochs)]
-    # DCP refuses the partial-placement momentum buffers tensor parallelism leaves, with or without a freeze
+    # DCP refuses the partial-placement momentum buffers tensor parallelism leaves, with or without a refreeze
     momentum = 0.0 if layout == "tp" else momentum
 
     def build(model, name):
-        fts = TuningScheduler(model, {k: dict(v) for k, v in STAGES.items()},
+        stages = RETHAW if schedule == "rethaw" else STAGES
+        fts = TuningScheduler(model, {k: dict(v) for k, v in stages.items()},
                               optimizer=partial(torch.optim.SGD, lr=0.05, momentum=momentum, weight_decay=0.01),
                               interface=TorchInterface(model), checkpoint=BestCheckpoint(os.path.join(ckpt_dir, name),
                                                                                          "val_loss"),
