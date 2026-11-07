@@ -123,7 +123,9 @@ def run_initial_eval(tokenizer, problems, args, draw) -> dict[str, Any]:
     cut_scores = [score_response(text.split("\nQuestion:")[0], gold) for text, gold in zip(texts, golds)]
     score_s = (time.perf_counter() - start) / 2
     accuracy = sum(scores) / len(scores)
+    check = _reload_check(draw, prompts, sampled) if hasattr(draw, "refresh") else {}
     return {
+        **check,
         "responses": len(scores),
         "accuracy_percent": 100 * accuracy,
         "standard_error_percent": 100 * math.sqrt(accuracy * (1 - accuracy) / len(scores)),
@@ -139,6 +141,21 @@ def run_initial_eval(tokenizer, problems, args, draw) -> dict[str, Any]:
             {"gold": gold, "score": score, "text": text[:1500]}
             for gold, score, text in list(zip(golds, scores, texts))[:: max(1, len(texts) // 12)]
         ],
+    }
+
+
+def _reload_check(draw, prompts: Sequence[str], first: Sampled, rows: int = 16) -> dict[str, float]:
+    """Samples the first ``rows`` prompts again with the same seeds, after the sampler has slept and reloaded.
+
+    With unchanged weights a correct reload gives the same tokens, up to where batch composition changes the numerics.
+    """
+    again = draw(prompts[:rows], 300)
+    pairs = list(zip(first.response_ids[:rows], again.response_ids))
+    prefix = [next((i for i, (a, b) in enumerate(zip(x, y)) if a != b), min(len(x), len(y))) for x, y in pairs]
+    return {
+        "reload_identical_fraction": sum(x == y for x, y in pairs) / rows,
+        "reload_mean_common_prefix": sum(prefix) / rows,
+        "reload_mean_length": sum(len(x) for x, _ in pairs) / rows,
     }
 
 
