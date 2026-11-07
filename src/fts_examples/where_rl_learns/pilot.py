@@ -212,8 +212,11 @@ def run_update(model, tokenizer, optimizer, batch, seed, args, draw, pad_id) -> 
 
 
 def make_sampler(model, tokenizer, args, stop_ids) -> Callable[[Sequence[str], int], Sampled]:
-    """Returns ``draw(prompts, seed)``: the static-cache sampler by default, or the eager one that samples the
-    policy."""
+    """Returns ``draw(prompts, seed)``: the eager sampler on the policy by default, or the static-cache one.
+
+    The static cache is faster only for short responses: sized for a 4,096-token horizon, every decode step attends over
+    the whole cache, and on an RTX 4090 that measured 60 ms per step against the eager sampler's 48.
+    """
     lengths = dict(max_new_tokens=HORIZON, max_prompt_tokens=MAX_PROMPT_TOKENS, stop_ids=stop_ids)
     if args.sampler == "static":
         offload = torch.cuda.is_available()
@@ -265,7 +268,7 @@ def main() -> None:
     parser.add_argument("--eval-problems", type=int, default=125)
     parser.add_argument("--fisher-samples", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--sampler", choices=("static", "eager"), default="static")
+    parser.add_argument("--sampler", choices=("eager", "static"), default="eager")
     args = parser.parse_args()
 
     begin = time.perf_counter()

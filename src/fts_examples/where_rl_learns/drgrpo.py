@@ -194,10 +194,13 @@ class StaticSampler:
     """Samples from a BF16 copy of the policy through ``generate`` with a static key-value cache, which
     ``transformers`` compiles.
 
-    For 16 rows of Qwen3-1.7B on an RTX 4090 a decode step takes 13 ms this way, against 48 ms for :func:`sample_batch`
-    on the FP32 policy under autocast. Shapes are held fixed so that the compiled step is reused: every batch has
-    ``batch_size`` rows (a short last batch is filled with repeats, which are dropped), and prompts are left-padded to a
-    multiple of :attr:`PROMPT_BUCKET` tokens.
+    For 16 rows of Qwen3-1.7B on an RTX 4090 a decode step takes 13 ms this way with a 512-token cache, against 48 ms
+    for :func:`sample_batch` on the FP32 policy under autocast, but 60 ms with the 4,352-token cache a 4,096-token
+    horizon needs: every step attends over the whole cache, finished rows included.
+
+    Shapes are held fixed so that the compiled step is reused: every batch has ``batch_size`` rows (a short last batch
+    is filled with repeats, which are dropped), and prompts are left-padded to a multiple of :attr:`PROMPT_BUCKET`
+    tokens.
 
     The copy is the policy rounded to BF16, so sampling is off-policy by that rounding, as it is with any separate
     inference engine. Call :meth:`refresh` after every optimizer step.
