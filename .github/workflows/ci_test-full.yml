@@ -68,6 +68,7 @@ jobs:
         python_version: ${{ matrix.python-version }}
         use_oldest: ${{ matrix.requires == 'oldest' }}
         use_commit_pin: "true"
+        install_interpretune: "true"
         show_pip_list: "true"
 
     # Note: UV caching is handled by setup-uv action in install-ci-dependencies
