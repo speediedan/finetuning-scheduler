@@ -22,6 +22,7 @@ from torch import nn
 
 from finetuning_scheduler import CanonicalView, TuningScheduler
 from finetuning_scheduler.core.checkpoint import BestCheckpoint
+from finetuning_scheduler.core import compile as compile_mod
 from finetuning_scheduler.core.compile import compile_schedule
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.schedule import refuse_direct_api_keys
@@ -121,14 +122,19 @@ def test_compile_resolves_freeze_like_params():
     assert fts.schedule[2]["freeze"] == MID
 
 
-def test_freeze_entries_can_be_addresses():
+def test_freeze_entries_can_be_addresses(monkeypatch):
     model = _model()
     view = CanonicalView(model, roles={"2.weight": "latent:head", "2.bias": "latent:head"})
-    schedule = {0: {"params": ["role:latent:head"], "max_transition_epoch": 1},
-                1: {"params": MID, "freeze": ["role:latent:head"]}}
+    schedule = {0: {"params": BASE, "max_transition_epoch": 1},
+                1: {"params": ["role:latent:head"], "max_transition_epoch": 2},
+                2: {"params": MID, "freeze": ["role:latent:head"]}}
+    compiled = compile_schedule(schedule, view)
+    assert sorted(compiled.phases[2].frozen) == sorted(HEAD)
+    # a `freeze` address alone warns that addresses are experimental, once per process as for `params`
+    monkeypatch.setattr(compile_mod, "_ADDRESSES_WARNED", False)
+    names_only = {0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "freeze": ["role:latent:head"]}}
     with pytest.warns(UserWarning, match="experimental"):
-        compiled = compile_schedule(schedule, view)
-    assert sorted(compiled.phases[1].frozen) == sorted(HEAD)
+        compile_schedule(names_only, view)
 
 
 def test_freeze_takes_the_views_coupled_tensors_along():
