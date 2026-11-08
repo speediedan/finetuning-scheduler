@@ -123,9 +123,7 @@ def run_initial_eval(tokenizer, problems, args, draw) -> dict[str, Any]:
     cut_scores = [score_response(text.split("\nQuestion:")[0], gold) for text, gold in zip(texts, golds)]
     score_s = (time.perf_counter() - start) / 2
     accuracy = sum(scores) / len(scores)
-    check = _reload_check(draw, prompts, sampled) if hasattr(draw, "refresh") else {}
     return {
-        **check,
         "responses": len(scores),
         "accuracy_percent": 100 * accuracy,
         "standard_error_percent": 100 * math.sqrt(accuracy * (1 - accuracy) / len(scores)),
@@ -144,19 +142,27 @@ def run_initial_eval(tokenizer, problems, args, draw) -> dict[str, Any]:
     }
 
 
-def _reload_check(draw, prompts: Sequence[str], first: Sampled, rows: int = 16) -> dict[str, float]:
-    """Samples the first ``rows`` prompts again with the same seeds, after the sampler has slept and reloaded.
-
-    With unchanged weights a correct reload gives the same tokens, up to where batch composition changes the numerics.
-    """
-    again = draw(prompts[:rows], 300)
-    pairs = list(zip(first.response_ids[:rows], again.response_ids))
+def _agreement(first: Sampled, second: Sampled) -> dict[str, float]:
+    pairs = list(zip(first.response_ids, second.response_ids))
     prefix = [next((i for i, (a, b) in enumerate(zip(x, y)) if a != b), min(len(x), len(y))) for x, y in pairs]
     return {
-        "reload_identical_fraction": sum(x == y for x, y in pairs) / rows,
-        "reload_mean_common_prefix": sum(prefix) / rows,
-        "reload_mean_length": sum(len(x) for x, _ in pairs) / rows,
+        "identical_fraction": sum(x == y for x, y in pairs) / len(pairs),
+        "mean_common_prefix": sum(prefix) / len(pairs),
+        "mean_length": sum(len(x) for x, _ in pairs) / len(pairs),
     }
+
+
+def reload_check(draw, prompts: Sequence[str], seed: int = 300) -> dict[str, Any]:
+    """Draws the same batch three times with the same seeds: from the engine's own load of the checkpoint, then
+    after each of two sleeps and reloads of the policy's snapshot.
+
+    Call it before anything else samples, while the policy still holds the checkpoint's weights. With unchanged weights
+    and an unchanged batch a correct reload gives identical tokens. The two comparisons separate a bad reload (the
+    first pair differs, the second agrees) from sampling that does not repeat (both differ).
+    """
+    loaded, first, second = (draw(prompts, seed) for _ in range(3))
+    checks = {"loaded_vs_reload": _agreement(loaded, first), "reload_vs_reload": _agreement(first, second)}
+    return {**checks, "rows": len(prompts), "passed": all(c["identical_fraction"] == 1.0 for c in checks.values())}
 
 
 def run_fisher_probe(model, problems, args, draw, pad_id) -> dict[str, Any]:
@@ -186,14 +192,14 @@ def run_fisher_probe(model, problems, args, draw, pad_id) -> dict[str, Any]:
     }
 
 
-def run_update(model, tokenizer, optimizer, batch, seed, args, draw, pad_id) -> dict[str, Any]:
+def run_update(model, tokenizer, optimizer, batch, seed, args, draw, pad_id, score=score_response) -> dict[str, Any]:
     """Runs one fresh batch through one optimizer update, and times each stage."""
     prompts = [prompt for prompt, _ in batch for _ in range(RESPONSES_PER_PROMPT)]
     golds = [gold for _, gold in batch for _ in range(RESPONSES_PER_PROMPT)]
     sampled, sample_s = _timed(lambda: draw(prompts, seed))
     texts = tokenizer.batch_decode(sampled.response_ids, skip_special_tokens=True)
     start = time.perf_counter()
-    rewards = [score_response(text, gold) for text, gold in zip(texts, golds)]
+    rewards = [score(text, gold) for text, gold in zip(texts, golds)]
     score_s = time.perf_counter() - start
     advantages = group_advantages(rewards, RESPONSES_PER_PROMPT)
     counts, backward_s = _timed(
@@ -229,7 +235,9 @@ def run_update(model, tokenizer, optimizer, batch, seed, args, draw, pad_id) -> 
     }
 
 
-def make_sampler(model, tokenizer, args, stop_ids) -> Callable[[Sequence[str], int], Sampled]:
+def make_sampler(
+    model, tokenizer, args, stop_ids, policy_is_checkpoint: bool = True
+) -> Callable[[Sequence[str], int], Sampled]:
     """Returns ``draw(prompts, seed)``: the eager sampler on the policy by default, or the static-cache one.
 
     The static cache is faster only for short responses: sized for a 4,096-token horizon, every decode step attends over
@@ -245,6 +253,7 @@ def make_sampler(model, tokenizer, args, stop_ids) -> Callable[[Sequence[str], i
             revision=MODEL_REVISION,
             snapshot_dir=args.vllm_dir,
             log_path=args.output.with_suffix(".vllm.log"),
+            policy_is_checkpoint=policy_is_checkpoint,
             **lengths,
         )
     if args.sampler == "static":
@@ -328,6 +337,9 @@ def main() -> None:
     }
     model.train()
     draw = make_sampler(model, tokenizer, args, stop_ids)
+    if hasattr(draw, "refresh"):
+        report["reload_check"] = reload_check(draw, [prompt for prompt, _ in test[:16]])
+        write_report(args.output, report)
     report["initial_eval"] = run_initial_eval(tokenizer, test, args, draw)
     write_report(args.output, report)
     report["fisher"] = run_fisher_probe(model, train, args, draw, pad_id)

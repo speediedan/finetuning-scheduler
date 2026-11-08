@@ -417,41 +417,52 @@ def diagonal_fisher_sample(
             param.grad = None
 
 
-class HostStateAdamW:
+class HostStateAdamW(torch.optim.Optimizer):
     """AdamW with constant learning rate and no weight decay, whose moment estimates live in host memory.
 
     Full training of a 1.7B model holds 27 GB in FP32 at the optimizer step, which a 24 GB device cannot hold. Moving
     each tensor's moments over only for its own step costs little beside sampling. The arithmetic is
     ``torch.optim.AdamW``'s, and a test holds it to that.
+
+    It is a ``torch.optim.Optimizer``, so a
+    :class:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler` can build it from its parameter groups and
+    count its steps. ``load_state_dict`` returns the moments to host memory, but casts them to each parameter's device
+    first, as every optimizer does: load it while the model is in host memory.
     """
 
     def __init__(
         self,
-        params: Iterable[torch.nn.Parameter],
+        params: Iterable[torch.nn.Parameter] | Iterable[dict],
         lr: float,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
     ) -> None:
-        self.params = [p for p in params if p.requires_grad]
-        self.lr, self.betas, self.eps = lr, betas, eps
-        self.steps = 0
-        self.m1 = [torch.zeros_like(p, device="cpu") for p in self.params]
-        self.m2 = [torch.zeros_like(p, device="cpu") for p in self.params]
+        super().__init__(params, dict(lr=lr, betas=betas, eps=eps))
 
     @torch.no_grad()
-    def step(self) -> None:
-        self.steps += 1
-        beta1, beta2 = self.betas
-        bias1, bias2 = 1 - beta1**self.steps, 1 - beta2**self.steps
-        for param, m1, m2 in zip(self.params, self.m1, self.m2):
-            grad = torch.zeros_like(param) if param.grad is None else param.grad
-            device_m1 = m1.to(param.device).mul_(beta1).add_(grad, alpha=1 - beta1)
-            device_m2 = m2.to(param.device).mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-            denominator = device_m2.sqrt().div_(bias2**0.5).add_(self.eps)
-            param.addcdiv_(device_m1, denominator, value=-self.lr / bias1)
-            m1.copy_(device_m1)
-            m2.copy_(device_m2)
+    def step(self, closure=None) -> None:
+        for group in self.param_groups:
+            beta1, beta2 = group["betas"]
+            for param in group["params"]:
+                if not param.requires_grad:
+                    continue
+                state = self.state[param]
+                if not state:
+                    state["step"] = 0
+                    state["exp_avg"] = torch.zeros_like(param, device="cpu")
+                    state["exp_avg_sq"] = torch.zeros_like(param, device="cpu")
+                state["step"] += 1
+                bias1, bias2 = 1 - beta1 ** state["step"], 1 - beta2 ** state["step"]
+                grad = torch.zeros_like(param) if param.grad is None else param.grad
+                m1 = state["exp_avg"].to(param.device).mul_(beta1).add_(grad, alpha=1 - beta1)
+                m2 = state["exp_avg_sq"].to(param.device).mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+                denominator = m2.sqrt().div_(bias2**0.5).add_(group["eps"])
+                param.addcdiv_(m1, denominator, value=-group["lr"] / bias1)
+                state["exp_avg"].copy_(m1)
+                state["exp_avg_sq"].copy_(m2)
 
-    def zero_grad(self) -> None:
-        for param in self.params:
-            param.grad = None
+    def load_state_dict(self, state_dict: dict) -> None:
+        super().load_state_dict(state_dict)
+        for state in self.state.values():
+            for key in ("exp_avg", "exp_avg_sq"):
+                state[key] = state[key].cpu()

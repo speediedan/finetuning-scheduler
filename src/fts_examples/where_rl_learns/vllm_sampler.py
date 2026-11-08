@@ -52,6 +52,8 @@ class VLLMSampler:
         model: The checkpoint vLLM loads at start; it must match the policy's architecture and initial weights.
         snapshot_dir: Where :meth:`refresh` writes the policy's weights for vLLM to reload.
         log_path: Where the worker's own output goes.
+        policy_is_checkpoint: Whether the policy still holds ``model``'s weights, so the first call can sample from the
+            engine's own load. A resumed policy does not, and the first call then reloads its snapshot.
     """
 
     def __init__(
@@ -70,6 +72,7 @@ class VLLMSampler:
         gpu_memory_utilization: float = 0.8,
         env: dict[str, str] | None = None,
         worker: Path = WORKER,
+        policy_is_checkpoint: bool = True,
     ) -> None:
         self.policy, self.tokenizer = policy, tokenizer
         self.max_new_tokens, self.max_prompt_tokens = max_new_tokens, max_prompt_tokens
@@ -93,6 +96,7 @@ class VLLMSampler:
         self.awake = True
         # the engine loaded the checkpoint itself; the snapshot is what it reloads after every sleep
         self.refresh(policy)
+        self.stale = not policy_is_checkpoint
 
     def _read(self) -> dict:
         for line in self.worker.stdout:
@@ -123,6 +127,7 @@ class VLLMSampler:
             seen.add(tensor.data_ptr())
             state[name] = tensor.detach().to("cpu", torch.bfloat16).contiguous()
         save_file(state, str(self.snapshot_dir / "model.safetensors"))
+        self.stale = True
 
     def _hand_over(self) -> None:
         start = time.perf_counter()
@@ -132,9 +137,12 @@ class VLLMSampler:
         self.timings["policy_out_s"] = time.perf_counter() - start
         if not self.awake:
             self._send("wake")
-            # a level 2 sleep discards the weights, so they always come back from the snapshot
-            self._send("reload", path=str(self.snapshot_dir))
             self.awake = True
+            # a level 2 sleep discards the weights, so they always come back from the snapshot
+            self.stale = True
+        if self.stale:
+            self._send("reload", path=str(self.snapshot_dir))
+            self.stale = False
 
     def _hand_back(self) -> None:
         self._send("sleep")

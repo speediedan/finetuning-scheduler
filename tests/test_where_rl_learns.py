@@ -251,3 +251,167 @@ def test_vllm_sampler_hands_the_device_over_and_back(model, tmp_path):
     assert ops.read_text().split() == ["generate", "sleep", "wake", "reload", "generate", "sleep", "exit"]
     assert next(model.parameters()).device.type == "cpu"
     assert "a log line" in (tmp_path / "worker.log").read_text()
+
+
+def test_host_state_adamw_is_an_optimizer_whose_moments_stay_in_host_memory():
+    params = [torch.nn.Parameter(torch.randn(4)), torch.nn.Parameter(torch.randn(3))]
+    params[1].requires_grad_(False)
+    optimizer = HostStateAdamW([{"params": params}], lr=1e-2)
+    steps = []
+    optimizer.register_step_post_hook(lambda *_: steps.append(1))
+    params[0].grad = torch.ones(4)
+    optimizer.step()
+    assert steps == [1] and params[1] not in optimizer.state
+    restored = HostStateAdamW([{"params": params}], lr=1e-2)
+    restored.load_state_dict(optimizer.state_dict())
+    state = restored.state[params[0]]
+    assert state["step"] == 1 and state["exp_avg"].device.type == "cpu"
+    assert torch.equal(state["exp_avg_sq"], optimizer.state[params[0]]["exp_avg_sq"])
+
+
+def _fake_sampler(model, tmp_path, **kwargs):
+    import os
+    import sys
+    from pathlib import Path
+
+    from fts_examples.where_rl_learns.vllm_sampler import VLLMSampler
+
+    return VLLMSampler(
+        model,
+        _Tokenizer(),
+        python=sys.executable,
+        model="fake",
+        revision=None,
+        max_new_tokens=8,
+        max_prompt_tokens=64,
+        stop_ids=[STOP],
+        snapshot_dir=tmp_path / "snapshot",
+        log_path=tmp_path / "worker.log",
+        env={**os.environ, "FAKE_VLLM_OPS": str(tmp_path / "ops.txt")},
+        worker=Path(__file__).parent / "helpers" / "fake_vllm_worker.py",
+        **kwargs,
+    )
+
+
+def test_vllm_sampler_reloads_first_when_the_policy_is_not_the_checkpoint(model, tmp_path):
+    """A resumed policy's weights are not the ones the engine loaded at start, so its first draw reloads them."""
+    sampler = _fake_sampler(model, tmp_path, policy_is_checkpoint=False)
+    sampler(["5"], seed=1)
+    sampler.refresh(model)
+    sampler(["6"], seed=2)
+    sampler.close()
+    expected = ["reload", "generate", "sleep", "wake", "reload", "generate", "sleep", "exit"]
+    assert (tmp_path / "ops.txt").read_text().split() == expected
+
+
+def _fixed_draw(prompts, seed):
+    from fts_examples.where_rl_learns.drgrpo import Sampled
+
+    generator = torch.Generator().manual_seed(seed)
+    responses = []
+    for i, _ in enumerate(prompts):
+        length = int(torch.randint(1, 6, (1,), generator=generator))
+        responses.append(torch.randint(STOP + 1, VOCAB, (length,), generator=generator).tolist() + [STOP])
+    return Sampled(
+        prompt_ids=_Tokenizer()(list(prompts))["input_ids"],
+        response_ids=responses,
+        logps=[[] for _ in responses],
+        stopped=[True] * len(responses),
+        decode_steps=max(len(r) for r in responses),
+        row_steps=sum(len(r) for r in responses),
+    )
+
+
+def test_reload_check_separates_a_bad_reload_from_unrepeatable_sampling():
+    from fts_examples.where_rl_learns.pilot import reload_check
+
+    prompts = ["5 6", "7", "8 9"]
+    assert reload_check(_fixed_draw, prompts)["passed"]
+    calls = []
+
+    def bad_reload(prompts, seed):
+        calls.append(seed)
+        return _fixed_draw(prompts, seed + (len(calls) > 1))
+
+    check = reload_check(bad_reload, prompts)
+    assert not check["passed"] and check["reload_vs_reload"]["identical_fraction"] == 1.0
+    assert check["loaded_vs_reload"]["identical_fraction"] < 1.0
+
+
+class _DecodingTokenizer(_Tokenizer):
+    pad_token_id = PAD
+
+    def batch_decode(self, rows, **kwargs):
+        return [" ".join(map(str, row)) for row in rows]
+
+
+def _even_first_token(text, gold):
+    return float(int(text.split()[0]) % 2 == 0)
+
+
+def _run_arm(tmp_path, out, monkeypatch, **overrides):
+    import argparse
+
+    from transformers import Qwen3Config, Qwen3ForCausalLM
+
+    from fts_examples.where_rl_learns import train
+
+    monkeypatch.setitem(train.ARMS, "layer1", ["layers:1"])
+    torch.manual_seed(0)
+    config = Qwen3Config(
+        vocab_size=VOCAB,
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=3,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=8,
+        max_position_embeddings=128,
+        tie_word_embeddings=True,
+    )
+    model = Qwen3ForCausalLM(config).float().train()
+    initial = {n: p.detach().clone() for n, p in model.named_parameters()}
+    problems = [(f"{i % 30 + 4} {i % 7 + 4}", "unused") for i in range(24)]
+    args = dict(arm="layer1", seed=0, updates=4, updates_per_epoch=2, eval_every=2, hours=10.0, token_budget=1000)
+    args = argparse.Namespace(**{**args, "allow_reload_mismatch": False, "output_dir": tmp_path / out, **overrides})
+    fresh = []
+
+    def make_draw(is_fresh):
+        fresh.append(is_fresh)
+        return _fixed_draw
+
+    status = train.run_arm(
+        model,
+        _DecodingTokenizer(),
+        problems,
+        problems[:6],
+        make_draw,
+        args,
+        pad_id=PAD,
+        device=torch.device("cpu"),
+        score=_even_first_token,
+    )
+    return model, initial, status, fresh
+
+
+@pytest.mark.filterwarnings("ignore:.*addresses.*experimental")
+def test_arm_runner_trains_its_addresses_and_resumes_exactly(tmp_path, monkeypatch):
+    import json
+
+    whole, initial, status, fresh = _run_arm(tmp_path, "whole", monkeypatch)
+    assert status["complete"] and status["updates"] == 4 and fresh == [True]
+    for name, param in whole.named_parameters():
+        changed = not torch.equal(param, initial[name])
+        assert changed == name.startswith("model.layers.1."), name
+
+    _, _, stopped, _ = _run_arm(tmp_path, "split", monkeypatch, hours=0.0)
+    assert stopped["stopped"] == "time limit" and stopped["updates"] == 2
+    resumed, _, status, fresh = _run_arm(tmp_path, "split", monkeypatch)
+    assert status["complete"] and status["resumed_at"] == 2 and fresh == [False]
+    for (name, a), b in zip(whole.named_parameters(), resumed.parameters()):
+        assert torch.equal(a, b), name
+    out = tmp_path / "split"
+    assert [json.loads(r)["update"] for r in (out / "updates.jsonl").read_text().splitlines()] == [0, 1, 2, 3]
+    evals = [json.loads(r) for r in (out / "evals.jsonl").read_text().splitlines()]
+    assert [e["update"] for e in evals] == [0, 2, 4] and len(evals[0]["scores"]) == 4
+    assert json.loads((out / "run.json").read_text())["trainable_tensors"] == 11
