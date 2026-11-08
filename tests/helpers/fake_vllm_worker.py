@@ -14,11 +14,13 @@
 Each completion is ``[seed % 7 + 5, stop]``, each scored token's log probability is -1, and every request's op is
 appended to the file ``FAKE_VLLM_OPS`` names, so a test can check the order of the hand-over. A log line goes to
 standard output first, which the sampler must skip.
+With ``FAKE_VLLM_HANG_ON`` naming an op, that request never gets a reply.
 """
 import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 MARKER = "@@where-rl-learns "
@@ -44,6 +46,8 @@ def main() -> None:
         request = json.loads(line)
         with ops.open("a") as fh:
             fh.write(request["op"] + "\n")
+        if request["op"] == os.environ.get("FAKE_VLLM_HANG_ON"):
+            time.sleep(3600)  # an engine that died without its process exiting
         if request["op"] == "generate":
             tokens = [[seed % 7 + 5, args.stop_ids[0]] for seed in request["seeds"]]
             reply(tokens=tokens, stopped=[True] * len(tokens), s=0.0)

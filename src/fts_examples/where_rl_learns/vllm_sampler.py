@@ -28,7 +28,9 @@ On an RTX 4090, Qwen3-1.7B-Base sampled one update's 32 responses in about 6 s t
 :func:`~fts_examples.where_rl_learns.drgrpo.sample_batch`.
 """
 import json
+import queue
 import subprocess
+import threading
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -51,7 +53,9 @@ class VLLMSampler:
         python: The interpreter with vLLM installed.
         model: The checkpoint vLLM loads at start; it must match the policy's architecture and initial weights.
         snapshot_dir: Where :meth:`refresh` writes the policy's weights for vLLM to reload.
-        log_path: Where the worker's own output goes.
+        log_path: Where the worker's own output goes, line by line, with the free device memory before every wake.
+        reply_timeout: Seconds to wait for any reply but the first. A worker whose engine died can stay alive without
+            replying, so the sampler stops it and raises rather than waiting forever.
         policy_is_checkpoint: Whether the policy still holds ``model``'s weights, so the first call can sample from the
             engine's own load. A resumed policy does not, and the first call then reloads its snapshot.
     """
@@ -73,6 +77,7 @@ class VLLMSampler:
         env: dict[str, str] | None = None,
         worker: Path = WORKER,
         policy_is_checkpoint: bool = True,
+        reply_timeout: float = 1800.0,
     ) -> None:
         self.policy, self.tokenizer = policy, tokenizer
         self.max_new_tokens, self.max_prompt_tokens = max_new_tokens, max_prompt_tokens
@@ -88,25 +93,42 @@ class VLLMSampler:
         policy.to("cpu")
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        self.log = open(log_path, "a")
+        self.reply_timeout = reply_timeout
+        self.log = open(log_path, "a", buffering=1)
         self.worker = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log, text=True, env=env
         )
-        self.timings["load_s"] = self._read()["load_s"]
+        self._lines: queue.Queue[str | None] = queue.Queue()
+        threading.Thread(target=self._pump, daemon=True).start()
+        self.timings["load_s"] = self._read(timeout=max(reply_timeout, 1800.0))["load_s"]
         self.awake = True
         # the engine loaded the checkpoint itself; the snapshot is what it reloads after every sleep
         self.refresh(policy)
         self.stale = not policy_is_checkpoint
 
-    def _read(self) -> dict:
+    def _pump(self) -> None:
+        assert self.worker.stdout is not None
         for line in self.worker.stdout:
+            self._lines.put(line)
+        self._lines.put(None)
+
+    def _read(self, timeout: float | None = None) -> dict:
+        deadline = time.monotonic() + (self.reply_timeout if timeout is None else timeout)
+        while True:
+            try:
+                line = self._lines.get(timeout=max(0.0, deadline - time.monotonic()))
+            except queue.Empty:
+                self.worker.kill()
+                self.worker.wait()
+                raise RuntimeError(f"vLLM worker gave no reply in time and was stopped; its log is {self.log.name}")
+            if line is None:
+                raise RuntimeError(f"vLLM worker exited with {self.worker.wait()}; its log is {self.log.name}")
             if line.startswith(MARKER):
                 payload = json.loads(line[len(MARKER) :])
                 if "error" in payload:
                     raise RuntimeError(f"vLLM worker: {payload['error']}")
                 return payload
             self.log.write(line)
-        raise RuntimeError(f"vLLM worker exited with {self.worker.wait()}; its log is {self.log.name}")
 
     def _send(self, op: str, **payload) -> dict:
         self.worker.stdin.write(json.dumps({"op": op, **payload}) + "\n")
@@ -135,6 +157,11 @@ class VLLMSampler:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         self.timings["policy_out_s"] = time.perf_counter() - start
+        if torch.cuda.is_available():
+            free, _ = torch.cuda.mem_get_info()
+            free_gib, reserved_gib = free / 2**30, torch.cuda.memory_reserved() / 2**30
+            self.timings["min_free_gib"] = min(self.timings.get("min_free_gib", free_gib), free_gib)
+            self.log.write(f"[sampler] {free_gib:.2f} GiB free, the trainer reserves {reserved_gib:.2f} GiB\n")
         if not self.awake:
             self._send("wake")
             self.awake = True
@@ -145,7 +172,9 @@ class VLLMSampler:
             self.stale = False
 
     def _hand_back(self) -> None:
-        self._send("sleep")
+        # after a failure the worker may be gone; the policy comes back either way
+        if self.worker.poll() is None:
+            self._send("sleep")
         self.awake = False
         start = time.perf_counter()
         self.policy.to(self.device)

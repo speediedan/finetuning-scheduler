@@ -344,6 +344,14 @@ def test_sampler_check_accepts_the_policys_own_weights_and_refuses_others(model)
     assert not sampler_check(_ScoringDraw(model, offset=0.5), model, ["5 6", "7"], pad_id=PAD)["passed"]
 
 
+def test_vllm_sampler_stops_a_worker_that_never_replies(model, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_VLLM_HANG_ON", "generate")
+    sampler = _fake_sampler(model, tmp_path, reply_timeout=1.0)
+    with pytest.raises(RuntimeError, match="no reply in time"):
+        sampler(["5"], seed=1)
+    assert sampler.worker.wait(timeout=10) != 0
+
+
 def test_vllm_sampler_scores_after_a_reload(model, tmp_path):
     sampler = _fake_sampler(model, tmp_path)
     sampled = sampler(["5 6", "7"], seed=1)
