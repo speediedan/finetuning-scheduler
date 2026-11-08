@@ -214,8 +214,8 @@ and will marginally outperform many explicit schedules.
 
 .. _specifying schedule:
 
-Specifying a Fine-Tuning Schedule
-*********************************
+Specifying a Schedule
+*********************
 
 To specify a schedule, it's convenient to first generate the default schedule and then alter the
 thawed/unfrozen parameter groups associated with each fine-tuning phase as desired. Fine-tuning phases are zero-indexed

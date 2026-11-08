@@ -2,7 +2,7 @@
 
 <img src="docs/source/_static/images/logos/logo_fts.png" width="401px">
 
-**A PyTorch Lightning extension that enhances model experimentation with flexible fine-tuning schedules.**
+**A PyTorch Lightning extension that enhances model experimentation with flexible, multi-phase schedules.**
 
 ______________________________________________________________________
 
@@ -28,7 +28,7 @@ ______________________________________________________________________
 
 [FinetuningScheduler](https://finetuning-scheduler.readthedocs.io/en/stable/api/finetuning_scheduler.fts.html#finetuning_scheduler.fts.FinetuningScheduler) is simple to use yet powerful, offering a number of features that facilitate model research and exploration:
 
-- easy specification of flexible fine-tuning schedules with explicit or regex-based parameter selection
+- easy specification of flexible schedules with explicit or regex-based parameter selection
   - implicit schedules for initial/naive model exploration
   - explicit schedules for performance tuning, fine-grained behavioral experimentation and computational efficiency
 - automatic restoration of best per-phase checkpoints driven by iterative application of early-stopping criteria to each fine-tuning phase
