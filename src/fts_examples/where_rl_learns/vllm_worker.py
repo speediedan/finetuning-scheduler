@@ -17,8 +17,9 @@ Runs under a separate interpreter that has vLLM installed, because vLLM pins its
 trainer over standard input and output, one JSON object per line. Replies carry a :data:`MARKER` prefix so that log
 lines vLLM writes to standard output cannot be mistaken for them.
 
-Requests: ``generate`` (prompt token ids, one seed per prompt), ``sleep`` (level 2: weights and cache freed, so the
-trainer has the device), ``wake``, ``reload`` (weights from a directory of safetensors files) and ``exit``.
+Requests: ``generate`` (prompt token ids, one seed per prompt), ``score`` (each response token's log probability given
+its prompt and the response before it), ``sleep`` (level 2: weights and cache freed, so the trainer has the device),
+``wake``, ``reload`` (weights from a directory of safetensors files) and ``exit``.
 
 This file imports nothing from ``fts_examples``, so it can run from any environment with vLLM.
 """
@@ -86,6 +87,16 @@ def main() -> None:
             results = llm.generate(prompts, params, use_tqdm=False)
             pairs = [_completion(r.outputs[0], args.stop_ids) for r in results]
             reply(tokens=[t for t, _ in pairs], stopped=[s for _, s in pairs], s=time.perf_counter() - start)
+        elif op == "score":
+            # one forward pass per sequence, so unlike sampling the result does not depend on earlier tokens' draws
+            params = SamplingParams(temperature=1.0, max_tokens=1, prompt_logprobs=0)
+            rows = [p + r for p, r in zip(request["prompt_ids"], request["response_ids"])]
+            results = llm.generate([{"prompt_token_ids": row} for row in rows], params, use_tqdm=False)
+            logps = [
+                [result.prompt_logprobs[i][row[i]].logprob for i in range(len(prompt), len(row))]
+                for result, row, prompt in zip(results, rows, request["prompt_ids"])
+            ]
+            reply(logps=logps, s=time.perf_counter() - start)
         elif op == "sleep":
             llm.sleep(level=2)
             reply(ok=True, s=time.perf_counter() - start)

@@ -11,8 +11,9 @@
 # limitations under the License.
 """A stand-in for the vLLM sampling worker that needs no vLLM: the same protocol, with fixed completions.
 
-Each completion is ``[seed % 7 + 5, stop]``, and every request's op is appended to the file ``FAKE_VLLM_OPS`` names,
-so a test can check the order of the hand-over. A log line goes to standard output first, which the sampler must skip.
+Each completion is ``[seed % 7 + 5, stop]``, each scored token's log probability is -1, and every request's op is
+appended to the file ``FAKE_VLLM_OPS`` names, so a test can check the order of the hand-over. A log line goes to
+standard output first, which the sampler must skip.
 """
 import argparse
 import json
@@ -46,6 +47,8 @@ def main() -> None:
         if request["op"] == "generate":
             tokens = [[seed % 7 + 5, args.stop_ids[0]] for seed in request["seeds"]]
             reply(tokens=tokens, stopped=[True] * len(tokens), s=0.0)
+        elif request["op"] == "score":
+            reply(logps=[[-1.0] * len(r) for r in request["response_ids"]], s=0.0)
         elif request["op"] == "reload":
             reply(ok=(Path(request["path"]) / "model.safetensors").exists(), s=0.0)
         elif request["op"] == "exit":

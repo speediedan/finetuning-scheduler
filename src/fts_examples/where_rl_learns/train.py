@@ -22,7 +22,9 @@ An epoch is ``--updates-per-epoch`` updates. At each epoch's end the runner writ
 the optimizer's moments and the tuning scheduler's
 :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.resume_state`), so a run stopped by ``--hours`` or by
 a failure resumes from the last one when started again with the same arguments. Each update's record goes to
-``updates.jsonl``. MATH-500 is evaluated before training and every ``--eval-every`` updates (4 responses per problem,
+``updates.jsonl``. A sampler with its own weights (vLLM) is checked against the policy before training and after every
+epoch (:func:`~fts_examples.where_rl_learns.pilot.sampler_check`), and the run stops if the check fails. MATH-500 is
+evaluated before training and every ``--eval-every`` updates (4 responses per problem,
 seeds 300 to 303, mean response accuracy), to ``evals.jsonl`` with every response's score, so arms compare problem by
 problem.
 
@@ -60,8 +62,8 @@ from fts_examples.where_rl_learns.pilot import (
     MODEL,
     MODEL_REVISION,
     PROMPTS_PER_UPDATE,
-    reload_check,
     run_update,
+    sampler_check,
     score_response,
 )
 
@@ -263,11 +265,11 @@ def run_arm(
             "mask": mask_meta if masked else None,
             "args": {k: str(v) for k, v in vars(args).items()},
         }
-        if hasattr(draw, "refresh"):
-            info["reload_check"] = reload_check(draw, [prompt for prompt, _ in test[:16]])
-            if not (info["reload_check"]["passed"] or args.allow_reload_mismatch):
+        if hasattr(draw, "score"):
+            info["sampler_check"] = sampler_check(draw, model, [prompt for prompt, _ in test[:8]], pad_id=pad_id)
+            if not (info["sampler_check"]["passed"] or args.allow_sampler_mismatch):
                 (out / "run.json").write_text(json.dumps(info, indent=1))
-                raise RuntimeError(f"A sleep and reload changed the sampled tokens: {info['reload_check']}.")
+                raise RuntimeError(f"The sampler's weights do not match the policy's: {info['sampler_check']}.")
         (out / "run.json").write_text(json.dumps(info, indent=1))
         _append(out / "evals.jsonl", {"update": 0, **evaluate(tokenizer, test, draw, score)})
 
@@ -294,6 +296,11 @@ def run_arm(
             result = evaluate(tokenizer, test, draw, score)
             _append(out / "evals.jsonl", {"update": fts.global_step, **result})
             metrics["math500_percent"] = result["accuracy_percent"]
+        if hasattr(draw, "score"):
+            check = sampler_check(draw, model, [prompt for prompt, _ in test[:4]], pad_id=pad_id)
+            metrics["sampler_mean_abs_logp_gap"] = check["mean_abs_logp_gap"]
+            if not (check["passed"] or args.allow_sampler_mismatch):
+                raise RuntimeError(f"After update {fts.global_step} the sampler's weights do not match: {check}.")
         if masked:
             metrics["outside_mask_drift"] = _outside_mask_drift(model, indices, reference)
             if metrics["outside_mask_drift"]:
@@ -326,7 +333,7 @@ def main() -> None:
     parser.add_argument("--vllm-python", help="an interpreter with vLLM installed, for --sampler vllm")
     parser.add_argument("--vllm-dir", type=Path, default=Path("/dev/shm/where_rl_learns"), help="weight snapshots")
     parser.add_argument("--mask", type=Path, help="the mask a fisher1 or random1 arm trains, from .masks")
-    parser.add_argument("--allow-reload-mismatch", action="store_true", help="train even if the reload check fails")
+    parser.add_argument("--allow-sampler-mismatch", action="store_true", help="train even if the sampler check fails")
     args = parser.parse_args()
     args.output = args.output_dir / "run.json"  # the sampler's log goes beside it
 

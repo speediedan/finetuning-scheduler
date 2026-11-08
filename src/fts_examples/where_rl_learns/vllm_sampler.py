@@ -175,6 +175,16 @@ class VLLMSampler:
             row_steps=sum(len(t) for t in tokens),
         )
 
+    def score(self, prompt_ids: Sequence[Sequence[int]], response_ids: Sequence[Sequence[int]]) -> list[list[float]]:
+        """Each response token's log probability under the engine's current weights (the latest snapshot)."""
+        self._hand_over()
+        try:
+            rows = dict(prompt_ids=[list(p) for p in prompt_ids], response_ids=[list(r) for r in response_ids])
+            reply = self._send("score", **rows)
+        finally:
+            self._hand_back()
+        return reply["logps"]
+
     def close(self) -> None:
         if self.worker.poll() is None:
             self._send("exit")

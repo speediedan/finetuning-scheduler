@@ -36,6 +36,7 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from fts_examples.where_rl_learns.drgrpo import (
+    _response_logps,
     accumulate_drgrpo_gradient,
     diagonal_fisher_sample,
     group_advantages,
@@ -63,6 +64,9 @@ EVAL_RESPONSES = 4
 #: The Fisher paper's estimate uses this many one-response prompts, and its evaluation this many problems.
 PAPER_FISHER_SAMPLES = 800
 PAPER_EVAL_PROBLEMS = 500
+#: The largest mean absolute difference, in nats per token, between the sampler's and the policy's log probabilities of
+#: the same responses that :func:`sampler_check` accepts. BF16 rounding stays far below it; wrong weights do not.
+SAMPLER_TOLERANCE = 0.1
 
 
 def load_problems(split: str) -> list[tuple[str, str]]:
@@ -142,27 +146,27 @@ def run_initial_eval(tokenizer, problems, args, draw) -> dict[str, Any]:
     }
 
 
-def _agreement(first: Sampled, second: Sampled) -> dict[str, float]:
-    pairs = list(zip(first.response_ids, second.response_ids))
-    prefix = [next((i for i, (a, b) in enumerate(zip(x, y)) if a != b), min(len(x), len(y))) for x, y in pairs]
-    return {
-        "identical_fraction": sum(x == y for x, y in pairs) / len(pairs),
-        "mean_common_prefix": sum(prefix) / len(pairs),
-        "mean_length": sum(len(x) for x, _ in pairs) / len(pairs),
-    }
+@torch.no_grad()
+def sampler_check(draw, model, prompts: Sequence[str], *, pad_id: int, seed: int = 300) -> dict[str, Any]:
+    """Compares the sampler's log probabilities of freshly sampled responses with the policy's own.
 
-
-def reload_check(draw, prompts: Sequence[str], seed: int = 300) -> dict[str, Any]:
-    """Draws the same batch three times with the same seeds: from the engine's own load of the checkpoint, then
-    after each of two sleeps and reloads of the policy's snapshot.
-
-    Call it before anything else samples, while the policy still holds the checkpoint's weights. With unchanged weights
-    and an unchanged batch a correct reload gives identical tokens. The two comparisons separate a bad reload (the
-    first pair differs, the second agrees) from sampling that does not repeat (both differ).
+    Free sampling does not repeat from call to call in vLLM, even with the same seeds and batch, so a reload cannot be
+    checked by comparing tokens. Scoring fixed sequences is one forward pass each, so the two sides differ only by the
+    sampler's BF16 weights and kernels, and wrong or missing weights show as a large gap. It cannot tell a stale
+    snapshot from a fresh one when an update moves the weights less than the rounding does.
     """
-    loaded, first, second = (draw(prompts, seed) for _ in range(3))
-    checks = {"loaded_vs_reload": _agreement(loaded, first), "reload_vs_reload": _agreement(first, second)}
-    return {**checks, "rows": len(prompts), "passed": all(c["identical_fraction"] == 1.0 for c in checks.values())}
+    sampled = draw(prompts, seed)
+    theirs = torch.tensor([lp for row in draw.score(sampled.prompt_ids, sampled.response_ids) for lp in row])
+    ours, _ = _response_logps(model, sampled.prompt_ids, sampled.response_ids, pad_id)
+    gap = (ours.float().cpu() - theirs).abs()
+    return {
+        "rows": len(prompts),
+        "tokens": gap.numel(),
+        "mean_abs_logp_gap": gap.mean().item(),
+        "max_abs_logp_gap": gap.max().item(),
+        "tolerance": SAMPLER_TOLERANCE,
+        "passed": gap.mean().item() <= SAMPLER_TOLERANCE,
+    }
 
 
 def run_fisher_probe(model, problems, args, draw, pad_id) -> dict[str, Any]:
@@ -337,8 +341,8 @@ def main() -> None:
     }
     model.train()
     draw = make_sampler(model, tokenizer, args, stop_ids)
-    if hasattr(draw, "refresh"):
-        report["reload_check"] = reload_check(draw, [prompt for prompt, _ in test[:16]])
+    if hasattr(draw, "score"):
+        report["sampler_check"] = sampler_check(draw, model, [prompt for prompt, _ in test[:8]], pad_id=pad_id)
         write_report(args.output, report)
     report["initial_eval"] = run_initial_eval(tokenizer, test, args, draw)
     write_report(args.output, report)

@@ -322,20 +322,36 @@ def _fixed_draw(prompts, seed):
     )
 
 
-def test_reload_check_separates_a_bad_reload_from_unrepeatable_sampling():
-    from fts_examples.where_rl_learns.pilot import reload_check
+class _ScoringDraw:
+    """Samples from the policy and scores with it, optionally with every log probability shifted by ``offset``."""
 
-    prompts = ["5 6", "7", "8 9"]
-    assert reload_check(_fixed_draw, prompts)["passed"]
-    calls = []
+    def __init__(self, model, offset=0.0):
+        self.model, self.offset = model, offset
 
-    def bad_reload(prompts, seed):
-        calls.append(seed)
-        return _fixed_draw(prompts, seed + (len(calls) > 1))
+    def __call__(self, prompts, seed):
+        return _sample(self.model, list(prompts), max_new_tokens=8, seed=seed)
 
-    check = reload_check(bad_reload, prompts)
-    assert not check["passed"] and check["reload_vs_reload"]["identical_fraction"] == 1.0
-    assert check["loaded_vs_reload"]["identical_fraction"] < 1.0
+    def score(self, prompt_ids, response_ids):
+        logp, row_of = _response_logps(self.model, prompt_ids, response_ids, PAD)
+        return [[v + self.offset for v in logp[row_of == i].tolist()] for i in range(len(prompt_ids))]
+
+
+def test_sampler_check_accepts_the_policys_own_weights_and_refuses_others(model):
+    from fts_examples.where_rl_learns.pilot import sampler_check
+
+    check = sampler_check(_ScoringDraw(model), model, ["5 6", "7", "8 9"], pad_id=PAD)
+    assert check["passed"] and check["mean_abs_logp_gap"] < 1e-5 and check["tokens"] > 3
+    assert not sampler_check(_ScoringDraw(model, offset=0.5), model, ["5 6", "7"], pad_id=PAD)["passed"]
+
+
+def test_vllm_sampler_scores_after_a_reload(model, tmp_path):
+    sampler = _fake_sampler(model, tmp_path)
+    sampled = sampler(["5 6", "7"], seed=1)
+    logps = sampler.score(sampled.prompt_ids, sampled.response_ids)
+    sampler.close()
+    assert logps == [[-1.0] * len(r) for r in sampled.response_ids]
+    expected = ["generate", "sleep", "wake", "reload", "score", "sleep", "exit"]
+    assert (tmp_path / "ops.txt").read_text().split() == expected
 
 
 class _DecodingTokenizer(_Tokenizer):
@@ -373,7 +389,7 @@ def _run_arm(tmp_path, out, monkeypatch, **overrides):
     initial = {n: p.detach().clone() for n, p in model.named_parameters()}
     problems = [(f"{i % 30 + 4} {i % 7 + 4}", "unused") for i in range(24)]
     args = dict(arm="layer1", seed=0, updates=4, updates_per_epoch=2, eval_every=2, hours=10.0, token_budget=1000)
-    args = {**args, "allow_reload_mismatch": False, "mask": None, "output_dir": tmp_path / out, **overrides}
+    args = {**args, "allow_sampler_mismatch": False, "mask": None, "output_dir": tmp_path / out, **overrides}
     args = argparse.Namespace(**args)
     fresh = []
 
