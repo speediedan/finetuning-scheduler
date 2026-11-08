@@ -388,6 +388,11 @@ class TuningScheduler:
         if self._compiled.promotions:
             self._refuse_unsupported_promotion()
         self._refuse_unsupported_restore()
+        if self._checkpoint is not None:
+            for phase in self._schedule.values():
+                target = core_schedule.restore_best_depth(phase.get("restore"))
+                if target is not None:
+                    getattr(self._checkpoint, "keep_phase_best")(target)
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
         self._refuse_unschedulable_params()
         core_phase.reshard_fsdp_modules(self.model)
@@ -964,7 +969,13 @@ class TuningScheduler:
         schedulers = [s for s, _ in self._interface.get_lr_schedulers()]
         pre_state = core_optim.capture_lr_state(schedulers[0] if schedulers else None, self.optimizer)
         # restore before the end hooks, so they see the best state under either interface
-        restored_depth = self._restore_best_state() if restore == core_schedule.RESTORE_BEST else None
+        best_depth = core_schedule.restore_best_depth(restore)
+        if restore == core_schedule.RESTORE_BEST:
+            restored_depth = self._restore_best_state()
+        elif best_depth is not None:
+            restored_depth = self._restore_best_state(best_depth)
+        else:
+            restored_depth = None
         self._end_phase(prev)
         if not self._run_gates(prev, final=False):
             return
@@ -1043,8 +1054,8 @@ class TuningScheduler:
                 " includes the tensors it promotes.")
 
     def _refuse_unsupported_restore(self) -> None:
-        """A phase restoring ``best`` or a named state needs a checkpoint policy to restore from, and a named state
-        one that can keep it."""
+        """A phase restoring ``best`` or a named state needs a checkpoint policy to restore from, a named state one
+        that can keep it, and one phase's best (``best:<depth>``) one that can keep each phase's best."""
         restores = {d: p["restore"] for d, p in self._schedule.items() if p.get("restore")}
         saved = sorted(d for d, r in restores.items() if r != core_schedule.RESTORE_NONE)
         if saved and self._checkpoint is None:
@@ -1054,6 +1065,12 @@ class TuningScheduler:
             raise FTSConfigurationError(
                 f"Phases {named} `restore` a named state, but {type(self._checkpoint).__name__} cannot keep one (it"
                 " needs `pin_state` and `state_path`, as `BestCheckpoint` has).")
+        per_phase = sorted(d for d, r in restores.items() if core_schedule.restore_best_depth(r) is not None)
+        if per_phase and not (hasattr(self._checkpoint, "keep_phase_best")
+                              and hasattr(self._checkpoint, "best_path_for_depth")):
+            raise FTSConfigurationError(
+                f"Phases {per_phase} `restore` one phase's best, but {type(self._checkpoint).__name__} cannot keep"
+                " one (it needs `keep_phase_best` and `best_path_for_depth`, as `BestCheckpoint` has).")
 
     def _restore_named_state(self, name: str) -> int:
         """Restore the named state's model, optimizer and lr scheduler state; return the depth it was saved at."""
@@ -1484,19 +1501,23 @@ class TuningScheduler:
             self._checkpoint.load_state_dict(state)
         return bool(improved)
 
-    def _restore_best_state(self) -> int | None:
+    def _restore_best_state(self, depth: int | None = None) -> int | None:
         """Restore the best checkpoint's model, optimizer and lr scheduler state (as the callback does at a phase
-        boundary); return the depth it was saved at, or ``None`` when there is none yet."""
+        boundary), or phase ``depth``'s own best when given; return the depth it was saved at, or ``None`` when
+        there is none yet."""
         cp = self._checkpoint
-        restore = getattr(cp, "restore", None) if self._externally_driven else None
+        restore = getattr(cp, "restore", None) if self._externally_driven and depth is None else None
         if restore is not None:  # a policy whose interface reads its own checkpoints restores the best itself
-            depth = restore()
-            self._restored_count += depth is not None
-            return depth
-        if cp is None or cp.best_path is None:
+            restored = restore()
+            self._restored_count += restored is not None
+            return restored
+        if cp is None:
+            return None
+        path = cp.best_path if depth is None else getattr(cp, "best_path_for_depth")(depth)
+        if path is None:
             return None
         self._interface.barrier("fts_restore_best")
-        meta = self._restore_checkpoint(cp.best_path, restore_optimizer=True)
+        meta = self._restore_checkpoint(path, restore_optimizer=True)
         self._restored_count += 1
         return meta["depth"]
 

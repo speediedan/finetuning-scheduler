@@ -176,6 +176,11 @@ order, so a run resumed at any point matches an uninterrupted run.
    * - ``"best"``
      - The best checkpoint, as ``restore_best=True`` does at every boundary. It is restored before the ended phase's end
        hooks and gates, so they see it. The lr state stays the latest, as it does under ``restore_best``.
+   * - ``"best:<depth>"``
+     - The best checkpoint saved in phase ``<depth>``, which must be an earlier phase. The checkpoint policy keeps
+       that phase's own best even when it never is the run's best, so a stage can continue from the phase that just
+       ended (``"best:1"`` in phase 2) at its best rather than at its last state, without an earlier phase's better
+       score discarding it. Restored the way ``"best"`` is.
    * - ``"none"``
      - The state the previous phase ended with.
    * - ``"initial"``
@@ -185,8 +190,12 @@ order, so a run resumed at any point matches an uninterrupted run.
        new phase's start hooks.
 
 Without the key, a boundary follows ``restore_best``, which keeps its defaults: the Lightning callback restores the best
-checkpoint at every boundary, and ``TuningScheduler`` does when given a checkpoint policy. ``"best"`` and ``"initial"``
-need a ``checkpoint`` policy. Restoring does not thaw anything: the tensors a phase has refrozen stay frozen at their
+checkpoint at every boundary, and ``TuningScheduler`` does when given a checkpoint policy. ``"best"``,
+``"best:<depth>"`` and ``"initial"`` need a ``checkpoint`` policy (``"best:<depth>"`` one that can keep each phase's
+best, as :class:`~finetuning_scheduler.core.checkpoint.BestCheckpoint` does). Judging stages has the same shape: a
+:class:`~finetuning_scheduler.core.transitions.PlateauTransition` keeps its best score across phases by default, and
+``reset_best_on_phase=True`` judges each phase against its own best instead, for a stage that starts worse than an
+earlier stage's best. Restoring does not thaw anything: the tensors a phase has refrozen stay frozen at their
 restored values, and the phases since the restored state are replayed onto its parameter groups. The epoch and step
 counters and the random streams keep going, so ``max_transition_epoch`` still counts epochs of the whole run.
 

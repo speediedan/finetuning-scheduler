@@ -655,9 +655,18 @@ def final_phase_max_epochs(schedule: dict, max_phase: int, max_epoch_wm: int, ma
 DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides", "promote", "refreeze", "restore")
 # those only the PyTorch API interprets in this release (the Lightning callback refuses them)
 LIGHTNING_UNSUPPORTED_PHASE_KEYS = ("max_transition_step", "promote", "refreeze", "restore")
-# what a phase's `restore` key can name: the best checkpoint, nothing, or a named state
+# what a phase's `restore` key can name: the best checkpoint, one phase's best (`best:<depth>`), nothing, or a
+# named state
 RESTORE_BEST, RESTORE_NONE = "best", "none"
 NAMED_STATES = ("initial",)
+
+
+def restore_best_depth(restore: Any) -> int | None:
+    """The phase depth a ``restore`` value of the form ``best:<depth>`` names, or ``None`` for any other value."""
+    if not isinstance(restore, str) or not restore.startswith(f"{RESTORE_BEST}:"):
+        return None
+    digits = restore[len(RESTORE_BEST) + 1:]
+    return int(digits) if digits.isdigit() else None
 
 
 def parse_phase_extensions(schedule: dict) -> None:
@@ -671,8 +680,9 @@ def parse_phase_extensions(schedule: dict) -> None:
       as ``{selector_or_name: "latent:<name>"}`` (not in phase 0).
     - ``refreeze``: names, regexes or addresses of tensors an earlier phase thawed, refrozen when the phase starts and
       dropped from the optimizer (not in phase 0).
-    - ``restore``: what the phase starts from: ``"best"``, ``"none"`` or a named state (``"initial"``), overriding the
-      tuning scheduler's ``restore_best`` for this boundary (not in phase 0).
+    - ``restore``: what the phase starts from: ``"best"``, one earlier phase's best (``"best:<depth>"``), ``"none"``
+      or a named state (``"initial"``), overriding the tuning scheduler's ``restore_best`` for this boundary (not in
+      phase 0).
 
     Raises:
         FTSConfigurationError: If a key has the wrong type.
@@ -771,8 +781,16 @@ def parse_restore(depth: int, restore: Any) -> None:
     if depth == 0:
         raise FTSConfigurationError("Phase 0 may not set `restore`: no earlier state exists when it starts.")
     known = (RESTORE_BEST, RESTORE_NONE, *NAMED_STATES)
-    if restore not in known:
-        raise FTSConfigurationError(f"Phase {depth}'s `restore` must be one of {list(known)}, got {restore!r}.")
+    if restore in known:
+        return
+    target = restore_best_depth(restore)
+    if target is None:
+        raise FTSConfigurationError(
+            f"Phase {depth}'s `restore` must be one of {list(known)} or `best:<depth>` for an earlier phase, got"
+            f" {restore!r}.")
+    if target >= depth:
+        raise FTSConfigurationError(
+            f"Phase {depth}'s `restore` names phase {target}'s best, which is not an earlier phase.")
 
 
 def refuse_direct_api_keys(schedule: dict, keys: Sequence[str] = LIGHTNING_UNSUPPORTED_PHASE_KEYS) -> None:
