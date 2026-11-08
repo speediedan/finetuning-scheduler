@@ -509,3 +509,28 @@ def test_mask_arm_trains_its_mask_and_resumes_exactly(tmp_path, monkeypatch):
     save_mask(mask, indices, {"kind": "fisher"})
     with pytest.raises(ValueError, match="takes a random mask"):
         _run_arm(tmp_path, "wrong", monkeypatch, arm="random1", mask=mask)
+
+
+def test_paired_difference_is_taken_problem_by_problem(tmp_path):
+    import json
+
+    from fts_examples.where_rl_learns.compare import compare
+
+    def write(name, rows):
+        run = tmp_path / name
+        run.mkdir()
+        records = [
+            {"update": u, "seeds": [300, 301], "accuracy_percent": 100 * sum(map(sum, s)) / 8, "scores": s}
+            for u, s in rows
+        ]
+        (run / "evals.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
+        return run
+
+    a = write("a", [(0, [[1, 0, 0, 0], [1, 0, 0, 0]]), (4, [[1, 1, 0, 0], [1, 1, 1, 0]])])
+    b = write("b", [(0, [[1, 0, 0, 0], [1, 0, 0, 0]]), (4, [[1, 0, 0, 0], [1, 0, 1, 0]])])
+    result = compare([a, b])
+    assert result["update"] == 4
+    # a gains problem 1 on both seeds and problem 2 on one: (1 + 0.5) / 4 problems
+    assert result["gain_over_initial"]["a"]["difference_points"] == 37.5
+    pair = result["pairs"]["a - b"]
+    assert pair["difference_points"] == 25.0 and pair["problems"] == 4 and pair["standard_error_points"] == 25.0
