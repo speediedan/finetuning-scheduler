@@ -9,15 +9,15 @@
 Scheduled Fine-Tuning with Lightning
 ####################################
 
-The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback runs a fine-tuning schedule under Lightning's
+The :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback runs a schedule under Lightning's
 :py:class:`~lightning.pytorch.trainer.trainer.Trainer`: the ``Trainer`` runs the loop, and the callback thaws each
 phase's parameters, grows the optimizer's parameter groups and decides when each phase ends. Schedules use the same
 format as the :ref:`PyTorch API<plain-pytorch-loop>` (see :ref:`specifying schedule`).
 
 Basic Usage
 ***********
-If no fine-tuning schedule is user-provided, :class:`~finetuning_scheduler.fts.FinetuningScheduler` will generate a
-:ref:`default schedule<index:The Default Fine-Tuning Schedule>` and proceed to fine-tune
+If no schedule is user-provided, :class:`~finetuning_scheduler.fts.FinetuningScheduler` will generate a
+:ref:`default schedule<default schedule>` and proceed to fine-tune
 according to the generated schedule, using default
 :class:`~finetuning_scheduler.fts_supporters.FTSEarlyStopping`
 and :class:`~finetuning_scheduler.fts_supporters.FTSCheckpoint` callbacks with
@@ -71,7 +71,7 @@ Once you have altered it as desired (see :ref:`specifying schedule`), pass it to
     initialized the optimizer with parameters that are non-trainable or otherwise altered the parameter trainability
     states from that expected of the configured phase ``0``. By default, FTS ensures the optimizer configured in
     ``configure_optimizers`` will optimize the parameters (and only those parameters) scheduled to be optimized in phase
-    ``0`` of the current fine-tuning schedule. This auto-configuration can be disabled if desired by setting
+    ``0`` of the current schedule. This auto-configuration can be disabled if desired by setting
     :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.enforce_phase0_params` to ``False``.
 
 .. note::

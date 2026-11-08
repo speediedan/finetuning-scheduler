@@ -54,12 +54,12 @@ interested.
     python fts_superglue.py fit --config config/fts_explicit.yaml
 
 
-All three training scenarios use identical configurations with the exception of the provided fine-tuning schedule. See
+All three training scenarios use identical configurations with the exception of the provided schedule. See
 the table below for a characterization of the relative computational and performance tradeoffs associated with these
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` configurations.
 
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` expands the space of possible
-fine-tuning schedules and the composition of more sophisticated schedules can yield marginal fine-tuning performance
+schedules and the composition of more sophisticated schedules can yield marginal fine-tuning performance
 gains. That stated, it should be emphasized the primary utility of
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` is to grant greater fine-tuning
 flexibility for model exploration in research. For example, glancing at DeBERTa-v3's implicit training run, a critical
@@ -83,7 +83,7 @@ easily.
      - | **nofts_baseline**
      - | **fts_implicit**
      - | **fts_explicit**
-   * - | Fine-Tuning Schedule
+   * - | Schedule
      - None
      - Default
      - User-defined
