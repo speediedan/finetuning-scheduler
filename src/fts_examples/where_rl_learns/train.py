@@ -26,6 +26,10 @@ a failure resumes from the last one when started again with the same arguments. 
 seeds 300 to 303, mean response accuracy), to ``evals.jsonl`` with every response's score, so arms compare problem by
 problem.
 
+The mask arms (``fisher1`` and ``random1``) schedule every tensor and train only the coordinates of a mask written by
+:mod:`.masks` (``--mask``), whose digest is part of the run's identity. At every epoch's end they check that a few
+tensors' coordinates outside the mask still hold their pretrained values.
+
 .. code-block:: bash
 
     python -m fts_examples.where_rl_learns.train --arm layer10 --output-dir runs/layer10 --sampler vllm \
@@ -46,6 +50,7 @@ import torch
 
 from finetuning_scheduler import TuningScheduler
 from fts_examples.where_rl_learns.drgrpo import HostStateAdamW
+from fts_examples.where_rl_learns.masks import load_mask, MaskedGradients
 from fts_examples.where_rl_learns.pilot import (
     _timed,
     DATASET_REVISION,
@@ -61,7 +66,15 @@ from fts_examples.where_rl_learns.pilot import (
 )
 
 #: Each arm's schedule: the addresses its one phase trains. ``role:base`` is every tensor of the model.
-ARMS = {"full": ["role:base"], "layer10": ["layers:10"], "layer24": ["layers:24"]}
+ARMS = {
+    "full": ["role:base"],
+    "layer10": ["layers:10"],
+    "layer24": ["layers:24"],
+    "fisher1": ["role:base"],
+    "random1": ["role:base"],
+}
+#: The arms that train only a mask's coordinates, and the kind of mask each takes.
+MASK_ARMS = {"fisher1": "fisher", "random1": "random"}
 #: The evaluation's sampling seeds, one response per problem for each.
 EVAL_SEEDS = (300, 301, 302, 303)
 CHECKPOINT = "checkpoint.pt"
@@ -69,7 +82,7 @@ CHECKPOINT = "checkpoint.pt"
 
 def expected_trainable(arm: str, names: Sequence[str]) -> list[str]:
     """The parameter names an arm should train, by name, to check what its addresses selected."""
-    if arm == "full":
+    if arm == "full" or arm in MASK_ARMS:
         return list(names)
     block = int(arm.removeprefix("layer"))
     return [n for n in names if n.startswith(f"model.layers.{block}.")]
@@ -151,6 +164,19 @@ def load_checkpoint(path: Path, model, fts: TuningScheduler, run: dict[str, Any]
     fts.optimizer.load_state_dict(payload["optimizer"])
 
 
+def _outside_mask_drift(model, indices, reference: dict[str, torch.Tensor]) -> float:
+    """The largest change, since ``reference`` was taken, of a reference tensor's coordinates outside the mask."""
+    params = dict(model.named_parameters())
+    drift = 0.0
+    for name, before in reference.items():
+        outside = torch.ones(before.numel(), dtype=torch.bool)
+        outside[indices[name].long()] = False
+        now = params[name].detach().cpu().flatten()
+        if outside.any():
+            drift = max(drift, (now - before.flatten())[outside].abs().max().item())
+    return drift
+
+
 def run_arm(
     model,
     tokenizer,
@@ -185,6 +211,12 @@ def run_arm(
         use_seed_registry()
         view = venngram.view(model)
     run = {"arm": args.arm, "seed": args.seed, "updates_per_epoch": args.updates_per_epoch}
+    masked = None
+    if args.arm in MASK_ARMS:
+        indices, mask_meta = load_mask(args.mask)
+        if mask_meta["kind"] != MASK_ARMS[args.arm]:
+            raise ValueError(f"The {args.arm} arm takes a {MASK_ARMS[args.arm]} mask, not {mask_meta['kind']}.")
+        run["mask_digest"] = mask_meta["digest"]
     fts = TuningScheduler(
         model,
         {0: {"params": ARMS[args.arm]}},
@@ -197,6 +229,11 @@ def run_arm(
     trainable = [n for n, p in model.named_parameters() if p.requires_grad]
     if trainable != expected_trainable(args.arm, names):
         raise RuntimeError(f"The {args.arm} arm's addresses selected {len(trainable)} tensors, not its own.")
+    if args.arm in MASK_ARMS:
+        masked = MaskedGradients(model, indices)
+        # pretrained values, taken before any resume, so the check spans every run of the arm
+        reference = {n: p.detach().cpu().clone() for n, p in model.named_parameters() if n in indices}
+        reference = {n: reference[n] for n in (trainable[1], trainable[len(trainable) // 2], trainable[-1])}
     checkpoint = out / CHECKPOINT
     resumed = checkpoint.exists()
     if resumed:
@@ -223,6 +260,7 @@ def run_arm(
             "host": platform.node(),
             "torch": torch.__version__,
             "config_hash": fts.config_hash,
+            "mask": mask_meta if masked else None,
             "args": {k: str(v) for k, v in vars(args).items()},
         }
         if hasattr(draw, "refresh"):
@@ -256,6 +294,10 @@ def run_arm(
             result = evaluate(tokenizer, test, draw, score)
             _append(out / "evals.jsonl", {"update": fts.global_step, **result})
             metrics["math500_percent"] = result["accuracy_percent"]
+        if masked:
+            metrics["outside_mask_drift"] = _outside_mask_drift(model, indices, reference)
+            if metrics["outside_mask_drift"]:
+                raise RuntimeError(f"Coordinates outside the mask moved: {metrics['outside_mask_drift']}.")
         fts.epoch_end(metrics)
         save_s = save_checkpoint(checkpoint, model, fts, run)
         epoch_s.append(time.perf_counter() - epoch_start + save_s)
@@ -263,6 +305,8 @@ def run_arm(
     status.update(updates=fts.global_step, complete=fts.global_step >= args.updates)
     status["seconds"] = time.perf_counter() - begin
     getattr(draw, "close", lambda: None)()
+    if masked:
+        masked.remove()
     (out / "status.json").write_text(json.dumps(status, indent=1))
     return status
 
@@ -281,6 +325,7 @@ def main() -> None:
     parser.add_argument("--sampler", choices=("eager", "static", "vllm"), default="vllm")
     parser.add_argument("--vllm-python", help="an interpreter with vLLM installed, for --sampler vllm")
     parser.add_argument("--vllm-dir", type=Path, default=Path("/dev/shm/where_rl_learns"), help="weight snapshots")
+    parser.add_argument("--mask", type=Path, help="the mask a fisher1 or random1 arm trains, from .masks")
     parser.add_argument("--allow-reload-mismatch", action="store_true", help="train even if the reload check fails")
     args = parser.parse_args()
     args.output = args.output_dir / "run.json"  # the sampler's log goes beside it

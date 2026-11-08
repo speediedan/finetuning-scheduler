@@ -373,7 +373,8 @@ def _run_arm(tmp_path, out, monkeypatch, **overrides):
     initial = {n: p.detach().clone() for n, p in model.named_parameters()}
     problems = [(f"{i % 30 + 4} {i % 7 + 4}", "unused") for i in range(24)]
     args = dict(arm="layer1", seed=0, updates=4, updates_per_epoch=2, eval_every=2, hours=10.0, token_budget=1000)
-    args = argparse.Namespace(**{**args, "allow_reload_mismatch": False, "output_dir": tmp_path / out, **overrides})
+    args = {**args, "allow_reload_mismatch": False, "mask": None, "output_dir": tmp_path / out, **overrides}
+    args = argparse.Namespace(**args)
     fresh = []
 
     def make_draw(is_fresh):
@@ -415,3 +416,71 @@ def test_arm_runner_trains_its_addresses_and_resumes_exactly(tmp_path, monkeypat
     evals = [json.loads(r) for r in (out / "evals.jsonl").read_text().splitlines()]
     assert [e["update"] for e in evals] == [0, 2, 4] and len(evals[0]["scores"]) == 4
     assert json.loads((out / "run.json").read_text())["trainable_tensors"] == 11
+
+
+def test_top_fraction_keeps_the_global_top_coordinates():
+    from fts_examples.where_rl_learns.masks import top_fraction
+
+    kept = top_fraction({"a": torch.tensor([5.0, 1.0, 2.0]), "b": torch.tensor([[9.0, 0.0], [3.0, 4.0]])}, 3 / 7)
+    assert kept["a"].tolist() == [0] and kept["b"].tolist() == [0, 3] and kept["b"].dtype == torch.int32
+
+
+def test_masked_gradients_hold_every_coordinate_outside_the_mask(model):
+    from fts_examples.where_rl_learns.masks import MaskedGradients, random_scores, top_fraction
+
+    indices = top_fraction(random_scores(model.named_parameters(), seed=0), 0.1)
+    before = {n: p.detach().clone() for n, p in model.named_parameters()}
+    masked = MaskedGradients(model, indices)
+    optimizer = HostStateAdamW(model.parameters(), lr=1e-2)
+    for seed in range(2):
+        sampled = _sample(model, ["5 6 7", "8 9"], max_new_tokens=6, seed=seed)
+        accumulate_drgrpo_gradient(model, sampled, [1.0, -1.0], horizon=6, clip=0.2, token_budget=4, pad_id=PAD)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        optimizer.zero_grad()
+    masked.remove()
+    moved = 0
+    for name, param in model.named_parameters():
+        inside = torch.zeros(param.numel(), dtype=torch.bool)
+        inside[indices[name].long()] = True
+        change = (param.detach() - before[name]).flatten()
+        assert torch.all(change[~inside] == 0), name
+        moved += int((change[inside] != 0).sum())
+    assert moved > 0
+
+
+@pytest.mark.filterwarnings("ignore:.*addresses.*experimental")
+def test_mask_arm_trains_its_mask_and_resumes_exactly(tmp_path, monkeypatch):
+    from transformers import Qwen3Config, Qwen3ForCausalLM
+
+    from fts_examples.where_rl_learns.masks import random_scores, save_mask, top_fraction
+
+    torch.manual_seed(0)
+    config = Qwen3Config(
+        vocab_size=VOCAB,
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=3,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=8,
+        max_position_embeddings=128,
+        tie_word_embeddings=True,
+    )
+    indices = top_fraction(random_scores(Qwen3ForCausalLM(config).named_parameters(), seed=0), 0.1)
+    mask = tmp_path / "random.pt"
+    save_mask(mask, indices, {"kind": "random", "seed": 0})
+    whole, initial, status, _ = _run_arm(tmp_path, "whole", monkeypatch, arm="random1", mask=mask)
+    assert status["complete"]
+    for name, param in whole.named_parameters():
+        inside = torch.zeros(param.numel(), dtype=torch.bool)
+        inside[indices[name].long()] = True
+        assert torch.equal(param.detach().flatten()[~inside], initial[name].flatten()[~inside]), name
+    _run_arm(tmp_path, "split", monkeypatch, arm="random1", mask=mask, hours=0.0)
+    resumed, _, status, _ = _run_arm(tmp_path, "split", monkeypatch, arm="random1", mask=mask)
+    assert status["resumed_at"] == 2 and status["complete"]
+    for (name, a), b in zip(whole.named_parameters(), resumed.parameters()):
+        assert torch.equal(a, b), name
+    save_mask(mask, indices, {"kind": "fisher"})
+    with pytest.raises(ValueError, match="takes a random mask"):
+        _run_arm(tmp_path, "wrong", monkeypatch, arm="random1", mask=mask)
