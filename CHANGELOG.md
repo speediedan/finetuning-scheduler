@@ -156,7 +156,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
-- The docs and README say *schedule* rather than *fine-tuning schedule*, as the evolution page's terminology note sets out: a schedule may train adapters, fit a latent model or promote an instrument as well as fine-tune. Prose only: API names, file names and code keep their names, and the default schedule's section keeps its title, which a docstring names ([#171](https://github.com/speediedan/finetuning-scheduler/issues/171)).
+- The docs and README say *schedule* rather than *fine-tuning schedule*, as the evolution page's terminology note sets out: a schedule may train adapters, fit a latent model or promote an instrument as well as fine-tune. Prose only: API names, file names and code keep their names, and two of the introduction's section titles, which docstrings name by title, are left for a change to those docstrings ([#171](https://github.com/speediedan/finetuning-scheduler/issues/171)).
 
 - The examples' seed registry pin (`fts_examples.tunable_views.SEED_REGISTRY`) moves to venngram's registry rebuild in the schema 2 rules shape, and the two tunable view notebooks are re-rendered against it; their component maps and results are unchanged [#180](https://github.com/speediedan/finetuning-scheduler/issues/180).
 
