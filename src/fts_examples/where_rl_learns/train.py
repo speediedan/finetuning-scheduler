@@ -337,7 +337,8 @@ def main() -> None:
     parser.add_argument("--arm", choices=sorted(ARMS), required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--updates", type=int, default=1000)
-    parser.add_argument("--updates-per-epoch", type=int, default=50, help="updates between checkpoints")
+    # a full model's checkpoint is 20.6 GB and took about 100 s to write on the RTX 4090's host
+    parser.add_argument("--updates-per-epoch", type=int, default=125, help="updates between checkpoints")
     parser.add_argument("--eval-every", type=int, default=250)
     parser.add_argument("--hours", type=float, default=11.5, help="start no epoch that would end after this long")
     parser.add_argument("--seed", type=int, default=0)
