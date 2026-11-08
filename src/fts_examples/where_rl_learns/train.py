@@ -38,11 +38,13 @@ tensors' coordinates outside the mask still hold their pretrained values.
         --vllm-python /path/to/vllm/bin/python
 """
 import argparse
+import faulthandler
 import json
 import math
 import os
 import platform
 import random
+import sys
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -179,6 +181,13 @@ def _outside_mask_drift(model, indices, reference: dict[str, torch.Tensor]) -> f
     return drift
 
 
+def _arm_stall_dump(args: argparse.Namespace) -> None:
+    """With ``--stall-dump-s``, writes every thread's stack to standard error if the next step outlasts it; each
+    call replaces the previous timer."""
+    if getattr(args, "stall_dump_s", 0):
+        faulthandler.dump_traceback_later(args.stall_dump_s, file=sys.stderr)
+
+
 def run_arm(
     model,
     tokenizer,
@@ -271,6 +280,7 @@ def run_arm(
                 (out / "run.json").write_text(json.dumps(info, indent=1))
                 raise RuntimeError(f"The sampler's weights do not match the policy's: {info['sampler_check']}.")
         (out / "run.json").write_text(json.dumps(info, indent=1))
+        _arm_stall_dump(args)
         _append(out / "evals.jsonl", {"update": 0, **evaluate(tokenizer, test, draw, score)})
 
     order = list(range(len(train)))
@@ -283,6 +293,7 @@ def run_arm(
         epoch_start = time.perf_counter()
         rewards = []
         for _ in range(args.updates_per_epoch):
+            _arm_stall_dump(args)
             update = fts.global_step
             batch = [train[order[(update * PROMPTS_PER_UPDATE + i) % len(order)]] for i in range(PROMPTS_PER_UPDATE)]
             if torch.cuda.is_available():
@@ -293,6 +304,7 @@ def run_arm(
             _append(out / "updates.jsonl", {"update": update, **record})
         metrics = {"mean_reward": sum(rewards) / len(rewards)}
         if fts.global_step % args.eval_every == 0:
+            _arm_stall_dump(args)
             result = evaluate(tokenizer, test, draw, score)
             _append(out / "evals.jsonl", {"update": fts.global_step, **result})
             metrics["math500_percent"] = result["accuracy_percent"]
@@ -306,11 +318,13 @@ def run_arm(
             if metrics["outside_mask_drift"]:
                 raise RuntimeError(f"Coordinates outside the mask moved: {metrics['outside_mask_drift']}.")
         fts.epoch_end(metrics)
+        _arm_stall_dump(args)
         save_s = save_checkpoint(checkpoint, model, fts, run)
         epoch_s.append(time.perf_counter() - epoch_start + save_s)
         print(json.dumps({"update": fts.global_step, **metrics, "epoch_s": epoch_s[-1]}), flush=True)
     status.update(updates=fts.global_step, complete=fts.global_step >= args.updates)
     status["seconds"] = time.perf_counter() - begin
+    faulthandler.cancel_dump_traceback_later()
     getattr(draw, "close", lambda: None)()
     if masked:
         masked.remove()
@@ -332,6 +346,7 @@ def main() -> None:
     parser.add_argument("--sampler", choices=("eager", "static", "vllm"), default="vllm")
     parser.add_argument("--vllm-python", help="an interpreter with vLLM installed, for --sampler vllm")
     parser.add_argument("--vllm-dir", type=Path, default=Path("/dev/shm/where_rl_learns"), help="weight snapshots")
+    parser.add_argument("--stall-dump-s", type=float, default=0, help="dump every stack when a step outlasts this")
     parser.add_argument("--mask", type=Path, help="the mask a fisher1 or random1 arm trains, from .masks")
     parser.add_argument("--allow-sampler-mismatch", action="store_true", help="train even if the sampler check fails")
     args = parser.parse_args()

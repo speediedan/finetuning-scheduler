@@ -396,7 +396,8 @@ def _run_arm(tmp_path, out, monkeypatch, **overrides):
     model = Qwen3ForCausalLM(config).float().train()
     initial = {n: p.detach().clone() for n, p in model.named_parameters()}
     problems = [(f"{i % 30 + 4} {i % 7 + 4}", "unused") for i in range(24)]
-    args = dict(arm="layer1", seed=0, updates=4, updates_per_epoch=2, eval_every=2, hours=10.0, token_budget=1000)
+    args = dict(arm="layer1", seed=0, updates=4, updates_per_epoch=2, eval_every=2, hours=10.0, token_budget=1000,
+                stall_dump_s=300.0)
     args = {**args, "allow_sampler_mismatch": False, "mask": None, "output_dir": tmp_path / out, **overrides}
     args = argparse.Namespace(**args)
     fresh = []
