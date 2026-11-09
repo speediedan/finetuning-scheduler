@@ -440,6 +440,7 @@ def test_arm_runner_trains_its_addresses_and_resumes_exactly(tmp_path, monkeypat
     assert [json.loads(r)["update"] for r in (out / "updates.jsonl").read_text().splitlines()] == [0, 1, 2, 3]
     evals = [json.loads(r) for r in (out / "evals.jsonl").read_text().splitlines()]
     assert [e["update"] for e in evals] == [0, 2, 4] and len(evals[0]["scores"]) == 4
+    assert [x["problem"] for x in evals[0]["examples"]] == [0] and evals[0]["examples"][0]["text"]
     assert json.loads((out / "run.json").read_text())["trainable_tensors"] == 11
 
 

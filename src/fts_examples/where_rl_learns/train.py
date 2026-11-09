@@ -82,6 +82,9 @@ MASK_ARMS = {"fisher1": "fisher", "random1": "random"}
 #: The evaluation's sampling seeds, one response per problem for each.
 EVAL_SEEDS = (300, 301, 302, 303)
 CHECKPOINT = "checkpoint.pt"
+#: Every evaluation keeps the first seed's response to every this-many-th problem, the same problems in every arm, so
+#: what training changed can be read and not only scored.
+EXAMPLE_EVERY = 25
 
 
 def expected_trainable(arm: str, names: Sequence[str]) -> list[str]:
@@ -101,7 +104,7 @@ def evaluate(tokenizer, problems, draw, score=score_response, seeds: Sequence[in
     """Samples one response per problem for each seed and scores them; the standard error is over problems."""
     prompts = [prompt for prompt, _ in problems]
     golds = [gold for _, gold in problems]
-    scores, sample_s, lengths, stopped = [], 0.0, [], []
+    scores, sample_s, lengths, stopped, examples = [], 0.0, [], [], []
     for seed in seeds:
         sampled, seconds = _timed(lambda: draw(prompts, seed))
         sample_s += seconds
@@ -109,6 +112,11 @@ def evaluate(tokenizer, problems, draw, score=score_response, seeds: Sequence[in
         scores.append([int(score(text, gold)) for text, gold in zip(texts, golds)])
         lengths += [len(r) for r in sampled.response_ids]
         stopped += sampled.stopped
+        if not examples:
+            examples = [
+                {"problem": i, "gold": golds[i], "score": scores[0][i], "text": texts[i][:2000]}
+                for i in range(0, len(texts), EXAMPLE_EVERY)
+            ]
     per_problem = [sum(column) / len(seeds) for column in zip(*scores)]
     mean = sum(per_problem) / len(per_problem)
     variance = sum((x - mean) ** 2 for x in per_problem) / max(1, len(per_problem) - 1)
@@ -121,6 +129,7 @@ def evaluate(tokenizer, problems, draw, score=score_response, seeds: Sequence[in
         "mean_length": sum(lengths) / len(lengths),
         "stopped_fraction": sum(stopped) / len(stopped),
         "scores": scores,
+        "examples": examples,
     }
 
 
