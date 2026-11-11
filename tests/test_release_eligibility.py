@@ -10,8 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """CPU tests for the release eligibility check: the shared checker (``gpu_epsilon.release_eligibility``) over this
-project's own evidence, as ``tests/gpu_ci/phase_manifest.py`` writes it, with this project's configuration
-(``tests/gpu_ci/release.json``).
+project's own evidence, as ``gpu_epsilon.phase_evidence`` writes it under ``[tool.gpu-epsilon.phase-evidence]``,
+with this project's configuration (``tests/gpu_ci/release.json``).
 
 The shared checker's rules are tested in gpu-epsilon. These cases are the contract: they run it over reports built by
 this project's report writer, and check that the configuration agrees with the phases and the pipelines.
@@ -21,12 +21,12 @@ import json
 from pathlib import Path
 
 import pytest
+from gpu_epsilon import phase_evidence as pe
 from gpu_epsilon import release_eligibility as re_
-
-from tests.gpu_ci import phase_manifest as pm
 
 CONFIG_PATH = Path(__file__).parent / "gpu_ci" / "release.json"
 CONFIG = re_.ReleaseConfig.load(CONFIG_PATH)
+EVIDENCE = pe.EvidenceConfig.load(Path(__file__).resolve().parents[1] / "pyproject.toml")
 
 REVISION = "0" * 40
 IMAGES = {"nvidia": "fts:cuda@sha256:" + "a" * 64, "amd": "fts:rocm@sha256:" + "b" * 64}
@@ -37,7 +37,7 @@ COVERAGE_EXPORT = b'{"totals": {"covered_lines": 10}}'
 
 def _manifest(phase):
     return {
-        "repository": pm.REPOSITORY,
+        "repository": EVIDENCE.repository,
         "revision": REVISION,
         "phase": phase,
         "scope": "full",
@@ -57,7 +57,7 @@ def _session(outcomes):
 
 
 def _coverage(phase):
-    if not pm.PHASES[phase].measured:
+    if not EVIDENCE.phase(phase).measured:
         return {"measured": False}
     sha = hashlib.sha256(COVERAGE_EXPORT).hexdigest()
     return {
@@ -81,7 +81,8 @@ def _leg(vendor, outcomes=None, reviewed=None):
     leg = {}
     for phase in CONFIG.phases:
         manifest = _manifest(phase)
-        report = pm.build_report(
+        report = pe.build_report(
+            EVIDENCE,
             manifest,
             [_session(outcomes or dict.fromkeys(NODES, "passed"))],
             vendor=vendor,
@@ -98,7 +99,7 @@ def _leg(vendor, outcomes=None, reviewed=None):
 
 
 def _legs():
-    return {vendor: _leg(vendor) for vendor in pm.VENDORS}
+    return {vendor: _leg(vendor) for vendor in EVIDENCE.vendors}
 
 
 def _check(legs, results=None):
@@ -119,16 +120,16 @@ def _write(root, vendor, leg, attempt=1):
 
 def test_required_phases_are_the_release_phases():
     assert CONFIG.phases == ("gpu-nonstandalone", "standalone", "examples", "examples-multigpu")
-    assert CONFIG.phases == tuple(name for name, phase in pm.PHASES.items() if phase.release)
+    assert CONFIG.phases == tuple(phase.name for phase in EVIDENCE.phases if phase.release)
 
 
-def test_config_agrees_with_the_phase_manifest():
-    assert CONFIG.repository == pm.REPOSITORY
-    assert CONFIG.vendors == pm.VENDORS
-    assert set(CONFIG.measured_phases) == {p for p in CONFIG.phases if pm.PHASES[p].measured}
-    # the counts phase_manifest.classify fails a phase on, beyond the outcome counts
-    report = pm.build_report(_manifest("standalone"), [], vendor="nvidia", evidence_class="pipeline")
-    assert set(CONFIG.failure_counts) == {"rank_failures", "missing_rank_completions"} <= set(report)
+def test_config_agrees_with_the_phase_evidence_config():
+    assert CONFIG.repository == EVIDENCE.repository
+    assert CONFIG.vendors == EVIDENCE.vendors
+    assert set(CONFIG.measured_phases) == {p for p in CONFIG.phases if EVIDENCE.phase(p).measured}
+    # the counts the writer fails a phase on, beyond the outcome counts
+    report = pe.build_report(EVIDENCE, _manifest("standalone"), [], vendor="nvidia", evidence_class="pipeline")
+    assert tuple(CONFIG.failure_counts) == pe.FAILURE_COUNTS and set(pe.FAILURE_COUNTS) <= set(report)
 
 
 def test_config_agrees_with_the_pipelines():
@@ -155,7 +156,7 @@ def _set(vendor, phase, key, value, doc="report"):
         docs[doc][key] = value
         if doc == "manifest":
             # a run that really collected this way: its report carries the changed manifest's digest
-            docs["report"]["manifest_sha256"] = pm.manifest_digest(docs["manifest"])
+            docs["report"]["manifest_sha256"] = pe.manifest_digest(docs["manifest"])
 
     return mutate
 
@@ -184,7 +185,7 @@ def _other_selection(legs):
     manifest["raw_node_ids"].append("tests/test_x.py::test_amd_only")
     report = legs["amd"]["standalone"]["report"]
     report["collection"].update(raw=len(manifest["raw_node_ids"]), deselected=report["collection"]["deselected"] + 1)
-    report["manifest_sha256"] = pm.manifest_digest(manifest)
+    report["manifest_sha256"] = pe.manifest_digest(manifest)
 
 
 def _flip_node(legs):
@@ -280,7 +281,7 @@ def test_unclean_phase_is_ineligible(outcome, classification):
 
 def test_reviewed_skip_is_eligible():
     outcomes = {**dict.fromkeys(NODES, "passed"), NODES[0]: "skipped"}
-    legs = {v: _leg(v, outcomes, {NODES[0]: "reviewed"}) for v in pm.VENDORS}
+    legs = {v: _leg(v, outcomes, {NODES[0]: "reviewed"}) for v in EVIDENCE.vendors}
     assert _check(legs)["eligible"]
 
 

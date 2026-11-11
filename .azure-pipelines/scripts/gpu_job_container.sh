@@ -14,7 +14,8 @@
 # The steps of the any-vendor GPU job (.azure-pipelines/templates/gpu-job.yml, #57), run INSIDE its container with the
 # checkout at the working directory. They are the GPU phases of every pipeline that uses the template (gpu-tests.yml,
 # gpu-proof.yml), on whichever vendor's image and devices the agent's GPU_VENDOR chose. Phase manifests, records and
-# reports go to /evidence.
+# reports (python -m gpu_epsilon.phase_evidence, configured by [tool.gpu-epsilon.phase-evidence] in pyproject.toml)
+# go to /evidence.
 #
 #   gpu_job_container.sh install | collect | verify | lease | phase <name> | coverage | report | release
 set -eo pipefail
@@ -41,9 +42,9 @@ case "${1:?command}" in
     phases=(--phase gpu-nonstandalone --phase examples --phase examples-multigpu)
     # the template passes the boolean parameter as written (True/False)
     [[ "${FTS_POOL_REVERSE,,}" == true ]] && phases+=(--phase pool-reverse)
-    CUDA_VISIBLE_DEVICES= HIP_VISIBLE_DEVICES= python -m tests.gpu_ci.phase_manifest collect "${phases[@]}" \
+    CUDA_VISIBLE_DEVICES= HIP_VISIBLE_DEVICES= python -m gpu_epsilon.phase_evidence collect "${phases[@]}" \
       --out-dir "$out"
-    CUDA_VISIBLE_DEVICES= HIP_VISIBLE_DEVICES= python -m tests.gpu_ci.phase_manifest collect --phase standalone \
+    CUDA_VISIBLE_DEVICES= HIP_VISIBLE_DEVICES= python -m gpu_epsilon.phase_evidence collect --phase standalone \
       --scope "${FTS_STANDALONE_SCOPE:?}" --out-dir "$out"
     ;;
   lease)
@@ -72,7 +73,7 @@ PY
   phase)
     venv
     phase="${2:?phase}"
-    eval "$(python -m tests.gpu_ci.phase_manifest run-env --phase "$phase" --out-dir "$out")"
+    eval "$(python -m gpu_epsilon.phase_evidence run-env --phase "$phase" --out-dir "$out")"
     case "$phase" in
       gpu-nonstandalone)
         FTS_CUDA_TESTS_ONLY=1 python -m coverage run --source src/finetuning_scheduler -m pytest \
@@ -150,7 +151,7 @@ PY
         status=1
         continue
       fi
-      python -m tests.gpu_ci.phase_manifest report --phase "$phase" --out-dir "$out" --vendor "${FTS_GPU_VENDOR:?}" \
+      python -m gpu_epsilon.phase_evidence report --phase "$phase" --out-dir "$out" --vendor "${FTS_GPU_VENDOR:?}" \
         --evidence-class pipeline --lease-mode "$(cat "${pid}.mode" 2>/dev/null)" --image "${FTS_IMAGE:?}" \
         --reviewed-exclusions tests/gpu_ci/reviewed_exclusions.json \
         || { echo "##vso[task.logissue type=error]phase ${phase}: report is not clean"; status=1; }
