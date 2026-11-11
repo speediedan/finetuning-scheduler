@@ -49,6 +49,12 @@ RETHAW = {
     1: {"params": MID, "refreeze": HEAD, "max_transition_epoch": 4, "lr": 0.05},
     2: {"params": HEAD, "refreeze": MID, "lr": 0.02},
 }
+# continue from the phase that just ended, at its own best rather than the run's best (#196)
+PHASE_BEST = {
+    0: {"params": HEAD, "max_transition_epoch": 2},
+    1: {"params": MID, "refreeze": HEAD, "max_transition_epoch": 5, "lr": 0.05},
+    2: {"params": HEAD, "refreeze": MID, "restore": "best:1", "lr": 0.02},
+}
 
 
 def _model(seed=0):
@@ -204,6 +210,12 @@ def test_a_refrozen_tensor_can_be_thawed_again():
     ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "restore": "best"}}, "`checkpoint` policy"),
     ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "restore": "initial"}},
      "`checkpoint` policy"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "restore": "best:0"}},
+     "`checkpoint` policy"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "restore": "best:1"}},
+     "not an earlier phase"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "restore": "best:"}}, "must be one of"),
+    ({0: {"params": HEAD, "max_transition_epoch": 1}, 1: {"params": MID, "restore": "best:last"}}, "must be one of"),
 ])
 def test_refused_schedules(schedule, match):
     with pytest.raises(FTSConfigurationError, match=match):
@@ -228,6 +240,20 @@ def test_named_state_needs_a_policy_that_can_keep_one(tmp_path):
 
     with pytest.raises(FTSConfigurationError, match="cannot keep one"):
         _fts(SWEEP, checkpoint=Plain(BestCheckpoint(tmp_path, "loss")))
+
+
+def test_a_phase_best_needs_a_policy_that_can_keep_one(tmp_path):
+    class Plain:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __getattr__(self, name):
+            if name in ("keep_phase_best", "best_path_for_depth"):
+                raise AttributeError(name)
+            return getattr(self.inner, name)
+
+    with pytest.raises(FTSConfigurationError, match="cannot keep one"):
+        _fts(PHASE_BEST, checkpoint=Plain(BestCheckpoint(tmp_path, "loss")))
 
 
 def test_lightning_refuses_the_keys():
@@ -398,7 +424,9 @@ def _make(schedule, tmp_path, name, **kwargs):
     (SWEEP, "best", None),
     (RETHAW, None, None),
     (RETHAW, "best", None),
-], ids=["refreeze", "refreeze_best", "refreeze_ckpt_only", "sweep", "sweep_best", "rethaw", "rethaw_best"])
+    (PHASE_BEST, "best", False),
+], ids=["refreeze", "refreeze_best", "refreeze_ckpt_only", "sweep", "sweep_best", "rethaw", "rethaw_best",
+        "phase_best"])
 def test_a_resumed_run_matches_an_uninterrupted_one(tmp_path, split, schedule, checkpoint, restore_best):
     """The acceptance test: saved at any epoch (before, at or after a refreeze, a thaw again or a restore), a
     resumed run ends where an uninterrupted one does, with the same model, optimizer and lr scheduler state."""
@@ -562,4 +590,42 @@ def test_a_missing_initial_state_is_named_on_resume(tmp_path):
     os.remove(initial)
     resumed = _make(SWEEP, tmp_path, "run", checkpoint="best", restore_best=False)
     with pytest.raises(FileNotFoundError, match="the state 'initial'"):
+        resumed.load(saved)
+
+
+def test_restore_best_of_a_phase_starts_from_that_phases_best(tmp_path):
+    """``best:1`` starts phase 2 from phase 1's own best, though phase 1 never beat phase 0, so the run's best
+    would discard phase 1, and ``none`` would keep its last state rather than its best (#196)."""
+    checkpoint = BestCheckpoint(tmp_path, "loss")
+    fts = TuningScheduler(_model(), _schedule(PHASE_BEST), optimizer=SGD, checkpoint=checkpoint,
+                          restore_best=False)
+    starts = {}
+    fts.add_phase_hook(lambda e: starts.update({e.depth: _values(fts.model)}), when="start")
+    fts.setup()
+    losses = [1.0, 0.5, 0.9, 0.8, 0.85, 0.7]  # the run's best is epoch 1; phase 1's own best is epoch 3
+    after = {}
+    for epoch in fts.epochs(6):
+        _assert_in_place(fts)
+        _train_epoch(fts, epoch, {"loss": losses[epoch]})
+        after[epoch] = _values(fts.model)
+    assert fts.curr_depth == 2 and fts.restored_count == 1
+    assert checkpoint.best_depth == 0 and float(checkpoint.best_score) == pytest.approx(0.5)
+    assert float(checkpoint.best_score_for_depth(1)) == pytest.approx(0.8)
+    _assert_same(after[3], starts[2])  # phase 1's best epoch, not its last (epoch 4) and not the run's best
+    assert not torch.equal(after[4]["1.weight"], starts[2]["1.weight"])
+    assert not torch.equal(after[1]["1.weight"], starts[2]["1.weight"])
+
+
+def test_a_missing_phase_best_is_named_on_resume(tmp_path):
+    fts = _make(PHASE_BEST, tmp_path, "run", checkpoint="best", restore_best=False)
+    for epoch in fts.epochs(6):
+        _train_epoch(fts, epoch, {"loss": [1.0, 0.5, 0.9][epoch]})
+        if epoch == 2:
+            saved = fts.save(tmp_path / "s.pt")
+            break
+    phase_best = fts._checkpoint.best_path_for_depth(1)
+    assert phase_best is not None
+    os.remove(phase_best)
+    resumed = _make(PHASE_BEST, tmp_path, "run", checkpoint="best", restore_best=False)
+    with pytest.raises(FileNotFoundError, match="phase 1's best"):
         resumed.load(saved)
