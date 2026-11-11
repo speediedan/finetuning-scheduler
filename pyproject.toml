@@ -332,6 +332,68 @@ name = "exp_patch"
 optional = true
 special-tests = ["--mark_type=exp_patch", "--filter_pattern=test_f", "--experiment_patch_mask=1 0 0 1"]
 
+[tool.gpu-epsilon.phase-evidence]
+# gpu-epsilon's phase-evidence writer (python -m gpu_epsilon.phase_evidence) reads this table: the GPU job collects each
+# phase's manifest with no device visible (.azure-pipelines/scripts/gpu_job_container.sh collect), records every pytest
+# process the phase starts (its `phase` step, through run-env) and reports each phase against its manifest. Only a clean
+# phase passes: a skip or xfail needs a reason in tests/gpu_ci/reviewed_exclusions.json.
+repository = "speediedan/finetuning-scheduler"
+# the variables tests/conftest.py and tests/helpers/runif.py select or order on, stripped before every collection
+selection-vars = ["PL_RUN_STANDALONE_TESTS", "FTS_EXPERIMENTAL_PATCH_TESTS", "FTS_CUDA_TESTS_ONLY", "FTS_REVERSE_ORDER"]
+# set for every GPU phase (the pipeline's job variable): it gates skips, never selection
+collect-env = { PL_RUN_CUDA_TESTS = "1" }
+device-vars = ["CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES"]
+# the phase commands below set no selection variables themselves, so run-env exports them
+run-env-exports-selection = true
+gate = { empty = "never", unreviewed-exclusions = "never" }
+
+[tool.gpu-epsilon.phase-evidence.versions]
+lightning = "module:lightning"
+finetuning_scheduler = "module:finetuning_scheduler"
+lightning_commit = "vcs:lightning"
+torch_record_sha256 = "record:torch"
+
+# a pull request into main runs the standalone smoke set (.azure-pipelines/scripts/standalone_scope.sh)
+[tool.gpu-epsilon.phase-evidence.scopes.smoke]
+select-file = "tests/.standalone_smoke"
+phases = ["standalone"]
+
+[[tool.gpu-epsilon.phase-evidence.phase]]
+name = "gpu-nonstandalone"
+paths = ["src/finetuning_scheduler", "tests"]
+selection-env = { FTS_CUDA_TESTS_ONLY = "1" }
+command = "python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v"
+measured = true
+
+[[tool.gpu-epsilon.phase-evidence.phase]]
+name = "standalone"
+paths = ["tests"]
+selection-env = { PL_RUN_STANDALONE_TESTS = "1" }
+command = "python -m gpu_epsilon.special_tests --mark_type=standalone"
+measured = true
+
+[[tool.gpu-epsilon.phase-evidence.phase]]
+name = "examples"
+paths = ["src/fts_examples"]
+command = "python -m pytest src/fts_examples -v"
+
+[[tool.gpu-epsilon.phase-evidence.phase]]
+name = "examples-multigpu"
+paths = ["src/fts_examples"]
+selection-env = { PL_RUN_STANDALONE_TESTS = "1" }
+args = ["-k", "model_parallel_examples"]
+command = """python -m gpu_epsilon.special_tests --mark_type=standalone --collect_dir=src/fts_examples \
+--filter_pattern=model_parallel_examples"""
+measured = true
+
+# the scheduled reverse-order leg: in cross-host parity, never in release eligibility
+[[tool.gpu-epsilon.phase-evidence.phase]]
+name = "pool-reverse"
+paths-from = { glob = "tests/test_*.py", contains = "dist_pool_fixture" }
+selection-env = { FTS_REVERSE_ORDER = "1" }
+command = "python -m pytest <pool modules> -v"
+release = false
+
 [tool.notebook-publishing]
 # The tutorial notebooks, read by the publisher and docs-artifact renderer vendored from interpretune
 # (scripts/vendored/notebook_tooling; shims scripts/publish_notebooks.py and scripts/render_notebook_docs.py).

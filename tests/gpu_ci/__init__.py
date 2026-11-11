@@ -9,4 +9,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Phase manifests and phase reports for the GPU CI phases (see ``phase_manifest.py``)."""
+"""The GPU CI configuration: release eligibility (``release.json``) and reviewed exclusions.
+
+Phase manifests and reports are written by ``gpu_epsilon.phase_evidence``, configured by
+``[tool.gpu-epsilon.phase-evidence]`` in ``pyproject.toml``.
+"""
