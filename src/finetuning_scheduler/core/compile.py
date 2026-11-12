@@ -37,7 +37,7 @@ from typing import Any, Literal
 
 from torch import Tensor
 
-from finetuning_scheduler.core.dist import rank_zero_debug, rank_zero_warn
+from finetuning_scheduler.core.dist import rank_zero_debug, rank_zero_info, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 import venngram
 from venngram import is_address, ParamSpace, select
@@ -47,7 +47,8 @@ from venngram.errors import VenngramError
 from venngram.support import SupportRecord
 
 from finetuning_scheduler.core.roles import is_frozen_role, role_kind
-from finetuning_scheduler.core.schedule import parse_promote, resolve_param_entries, shared_params_ref
+from finetuning_scheduler.core.schedule import (parse_promote, requires_grad_capable, resolve_param_entries,
+                                                 shared_params_ref)
 from finetuning_scheduler.core.views import as_view, BoundView, ScheduleUnresolvable, Unresolvable
 
 
@@ -281,6 +282,16 @@ def _check_phase_tensors(cp: CompiledPhase, roles: Mapping[str, str], tensors: M
             raise FTSConfigurationError(
                 f"Phase {cp.depth} schedules quantized or packed tensors through logical names that are views of them,"
                 f" which cannot be thawed safely: {packed}.")
+    # a physical name thaws its own tensor: refuse only storage torch cannot make require gradients, which would
+    # otherwise fail when the phase starts, possibly after earlier phases have trained
+    untrainable = {n: str(tensors[n].dtype).removeprefix("torch.") for n in cp.thawed
+                   if not requires_grad_capable(tensors[n])}
+    if untrainable:
+        shown = ", ".join(f"{n} ({dtype})" for n, dtype in untrainable.items())
+        raise FTSConfigurationError(
+            f"Phase {cp.depth} schedules tensors whose storage cannot require gradients (quantized or packed): {shown}."
+            " A frozen quantized base under trainable adapters (QLoRA, for example) is supported: schedule the"
+            " adapters, or other floating-point tensors, rather than the packed ones.")
 
 
 def _repeats(lists: Sequence[Sequence[Any]]) -> list[Any]:
@@ -461,8 +472,9 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
             to nothing or an address does not resolve; phases share storage
             (unless ``legacy``); a phase schedules a ``fitted`` or ``instrument`` tensor; a phase promotes a tensor
             that is not an ``instrument`` one; a phase schedules quantized or packed tensors through logical names
-            that are views of them; or a phase refreezes a tensor that is not trainable when it starts, both thaws and
-            refreezes a tensor, or leaves nothing trainable.
+            that are views of them, or thaws a tensor whose storage cannot require gradients (see
+            :func:`~finetuning_scheduler.core.schedule.requires_grad_capable`); or a phase refreezes a tensor that is
+            not trainable when it starts, both thaws and refreezes a tensor, or leaves nothing trainable.
     """
     _warn_addresses_experimental(schedule, addresses)
     bound: BoundView = as_view(view)
@@ -571,8 +583,9 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
 def view_default_schedule(view: Any, order: Literal["output_first", "input_first"] = "output_first") -> dict:
     """Generate a default schedule over a view's logical names.
 
-    Logical names standing for a tensor whose role is never thawed (``fitted`` or ``instrument``) are left out (with a
-    warning when they also stand for trainable tensors), and groups left empty are dropped.
+    Logical names standing for a tensor whose role is never thawed (``fitted`` or ``instrument``), or for a tensor whose
+    storage cannot require gradients (a quantized or packed base under trainable adapters, for example), are left out
+    (with a warning when they also stand for trainable tensors), and groups left empty are dropped.
 
     Args:
         view: A tunable view (bound or not).
@@ -587,16 +600,26 @@ def view_default_schedule(view: Any, order: Literal["output_first", "input_first
     bound = as_view(view)
     groups = bound.depth_groups()
     roles = bound.roles()
-    if any(is_frozen_role(r) for r in roles.values()):
+    tensors = dict(bound.root.named_parameters())
+    packed = {n for n, t in tensors.items() if not requires_grad_capable(t)}
+    if packed or any(is_frozen_role(r) for r in roles.values()):
         names = list(dict.fromkeys(n for g in groups for n in g))
         mapped = bound.to_physical(names)
-        frozen = {n for n in names if any(is_frozen_role(roles.get(p, "base")) for p in mapped[n])}
-        # a name standing for frozen and trainable tensors alike cannot be scheduled (compilation refuses it)
-        mixed = sorted(n for n in frozen if not all(is_frozen_role(roles.get(p, "base")) for p in mapped[n]))
+
+        def _excluded(p: str) -> bool:
+            return is_frozen_role(roles.get(p, "base")) or p in packed
+
+        excluded = {n for n in names if any(_excluded(p) for p in mapped[n])}
+        # a name standing for excluded and trainable tensors alike cannot be scheduled (compilation refuses it)
+        mixed = sorted(n for n in excluded if not all(_excluded(p) for p in mapped[n]))
         if mixed:
             rank_zero_warn(f"The generated schedule leaves out {mixed}: each stands for tensors whose role is never"
-                           " thawed (`fitted` or `instrument`) as well as trainable ones, so it cannot be scheduled.")
-        groups = [kept for g in groups if (kept := [n for n in g if n not in frozen])]
+                           " thawed (`fitted` or `instrument`), or whose storage cannot require gradients, as well as"
+                           " trainable ones, so it cannot be scheduled.")
+        if left_packed := sorted(n for n in excluded if n not in mixed and any(p in packed for p in mapped[n])):
+            rank_zero_info(f"The generated schedule leaves out {len(left_packed)} names whose storage cannot require"
+                           f" gradients (quantized or packed), such as {left_packed[0]!r}.")
+        groups = [kept for g in groups if (kept := [n for n in g if n not in excluded])]
     if order == "input_first":
         groups = [list(reversed(g)) for g in reversed(groups)]
     return {depth: {"params": list(g)} for depth, g in enumerate(groups)}
