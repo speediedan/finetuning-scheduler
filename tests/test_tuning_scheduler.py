@@ -341,8 +341,9 @@ def test_phase_config_validation():
 @pytest.mark.parametrize(
     "mutate, match",
     [
+        # refused when the schedule compiles, before the scheduler's own check of what it was given
         (lambda m: setattr(m.l2, "weight", nn.Parameter(torch.zeros(1, 4, dtype=torch.int8), requires_grad=False)),
-         "must be floating point"),
+         r"storage cannot require gradients .*l2\.weight \(int8\)"),
         (lambda m: setattr(m.l0, "weight", nn.Parameter(torch.empty(4, 4, device="meta"))), "meta device"),
     ],
     ids=["int8", "meta"],
