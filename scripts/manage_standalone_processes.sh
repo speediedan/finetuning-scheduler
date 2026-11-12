@@ -5,6 +5,10 @@
 #   ./manage_standalone_processes.sh /path/to/script.sh --arg1 value1 --arg2 value2
 #   ./manage_standalone_processes.sh python -m pytest tests/some_test.py
 #   ./manage_standalone_processes.sh --use-nohup /path/to/script.sh --arg1 value1
+#
+# Kept byte-identical between interpretune and finetuning-scheduler (interpretune's
+# scripts/check_shared_scripts_sync.py fails on drift); what differs per project is the
+# manage_standalone_regex.cfg beside it.
 set -eo pipefail
 
 # Directory of this script (so we can find the config file next to it)
@@ -45,11 +49,27 @@ done
 # Get current date/time for log file naming
 d=`date +%Y%m%d%H%M%S`
 
+# Emit this process' PID followed by every ancestor PID, one per line.
+#
+# These can never be a conflicting run: they are, by construction, whatever launched us. They DO
+# match the configured patterns though, because a launcher spells the wrapped command out on its own
+# command line (`manage_standalone_processes.sh .../gen_it_coverage.sh ...`, a `bash -c` wrapper, an
+# editor task, an agent shell). Excluding only $$ therefore made the guard refuse to start whenever
+# the caller's own cmdline contained a configured pattern -- the same self-match trap CLAUDE.md
+# documents for hand-written `pgrep -f` watchers.
+self_and_ancestor_pids() {
+  local pid=$$ depth=0
+  while [ -n "$pid" ] && [ "$pid" -gt 0 ] && [ "$depth" -lt 64 ]; do
+    printf '%s\n' "$pid"
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]')
+    depth=$((depth + 1))
+  done
+}
+
 # Validate no conflicting processes are running. Reads regex patterns from
 # $REGEX_CFG_FILE (one pattern per line). Lines starting with '#' or blank
 # lines are ignored. The patterns are OR-joined into a single pgrep regex.
 validate_process_not_running() {
-  current_pid=$$
 
   if [ ! -f "$REGEX_CFG_FILE" ]; then
     echo "Error: regex config file not found: $REGEX_CFG_FILE"
@@ -69,9 +89,16 @@ validate_process_not_running() {
   # Join patterns with | for pgrep -f
   IFS='|'; pgrep_pattern="${patterns[*]}"; unset IFS
 
-  if pgrep -f "$pgrep_pattern" | grep -v "^${current_pid}$" > /dev/null; then
+  # Exempt ourselves and our whole ancestor chain (see self_and_ancestor_pids above).
+  mapfile -t exempt_pids < <(self_and_ancestor_pids)
+  IFS='|'; exempt_alt="${exempt_pids[*]}"; unset IFS
+
+  # `pgrep -f` prints bare PIDs; `pgrep -fa` prints "PID cmdline". Filter each with the matching
+  # anchor -- the previous "^PID$" filter silently matched nothing in the -fa listing, so the error
+  # output could name the exempt process it had just decided to ignore.
+  if pgrep -f "$pgrep_pattern" | grep -Ev "^(${exempt_alt})$" > /dev/null; then
     echo "Error: Found running processes that may conflict:"
-    pgrep -fa "$pgrep_pattern" | grep -v "^${current_pid}$"
+    pgrep -fa "$pgrep_pattern" | grep -Ev "^(${exempt_alt}) "
     exit 1
   fi
 
@@ -80,7 +107,7 @@ validate_process_not_running() {
 
 if [ -z "$1" ]; then
   echo "Usage: $0 command [arguments]"
-  echo "Example: $0 ./gen_fts_coverage.sh --arg1 value1"
+  echo "Example: $0 ./scripts/run_coverage.sh --arg1 value1"
   echo ""
   echo "This script will check for potentially conflicting processes before running."
   echo "It reads process-match patterns from the config file located next to this script:"
