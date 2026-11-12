@@ -341,8 +341,9 @@ def test_phase_config_validation():
 @pytest.mark.parametrize(
     "mutate, match",
     [
+        # refused at compile, naming the phase, before setup's own scheduled-parameter check (#208)
         (lambda m: setattr(m.l2, "weight", nn.Parameter(torch.zeros(1, 4, dtype=torch.int8), requires_grad=False)),
-         "must be floating point"),
+         r"schedules quantized or packed.*\['l2\.weight'\]"),
         (lambda m: setattr(m.l0, "weight", nn.Parameter(torch.empty(4, 4, device="meta"))), "meta device"),
     ],
     ids=["int8", "meta"],
