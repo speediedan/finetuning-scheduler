@@ -100,6 +100,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- A schedule that thaws a tensor whose storage cannot require gradients (integer or boolean storage, such as bitsandbytes' packed 4-bit and 8-bit weights or torch's quantized dtypes) is refused when it compiles, naming the tensor, its dtype and the phase, for every view. It previously compiled through a physical-name view and failed at the thaw, with a torch error naming no tensor, possibly after earlier phases had trained. A frozen quantized base under trainable adapters (QLoRA) still compiles, and quantized formats that keep a floating-point dtype (float8, or a tensor subclass reporting one) still thaw. Generated schedules (`view_default_schedule` and the default schedule without a view) leave such tensors out ([interpretune#758](https://github.com/speediedan/interpretune/issues/758))
+
 - `MemProfiler`'s `FSDP2MemTracker` text reports (`fsdp_mem_rank_<n>_<fn>_<iter>.log`) printed the peak of the last profiled call for every call, since the tracker resets its peak each time it is entered; each report now prints its own call's peak, recorded as the call exits, and in `fsdp_mem_tracker_units` rather than bytes ([#164](https://github.com/speediedan/finetuning-scheduler/issues/164))
 
 - Fixed the release workflow's TestPyPI job publishing to PyPI: `pypa/gh-action-pypi-publish` defaults to PyPI, so the job meant to stage a release on TestPyPI uploaded it to PyPI, and the delay before it guarded nothing. It now names `https://test.pypi.org/legacy/`, and each publish job has its own environment (`testpypi`, `pypi`) so each index's trusted publisher can be scoped to one [#156](https://github.com/speediedan/finetuning-scheduler/issues/156).

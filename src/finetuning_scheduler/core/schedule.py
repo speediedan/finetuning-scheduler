@@ -27,7 +27,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any
 
 import yaml
-from torch import nn
+from torch import nn, Tensor
 from venngram import AddressBook
 from venngram.errors import VenngramError
 from venngram.store import fetch as fetch_document
@@ -106,6 +106,16 @@ def save_schedule(schedule_name: str, layer_config: dict, dump_loc: str | os.Pat
     return ft_schedule_yaml
 
 
+def requires_grad_capable(t: Tensor) -> bool:
+    """Whether ``t`` can require gradients: torch allows it for floating-point and complex storage only.
+
+    Integer and boolean storage (bitsandbytes' packed 4-bit and 8-bit weights, torch's quantized dtypes) cannot be
+    thawed. Quantized formats that keep a floating-point dtype (float8, or a tensor subclass reporting one) can, so they
+    are not counted here.
+    """
+    return t.is_floating_point() or t.is_complex()
+
+
 def build_default_schedule(module: nn.Module) -> dict:
     """Build the default fine-tuning schedule for ``module``: parameters are thawed in pairs, starting from the
     last registered parameter.
@@ -122,7 +132,8 @@ def build_default_schedule(module: nn.Module) -> dict:
     # specific architectures if the callback proves sufficiently useful.
     param_lists: list = []
     cur_group: list = []
-    model_params = list(module.named_parameters())[::-1]
+    # storage that cannot require gradients (a quantized or packed base under adapters) cannot be scheduled
+    model_params = [(n, p) for n, p in module.named_parameters() if requires_grad_capable(p)][::-1]
     for i, (n, _) in enumerate(model_params):
         if i % 2 == 0:
             cur_group = []
