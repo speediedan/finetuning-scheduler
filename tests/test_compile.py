@@ -185,6 +185,20 @@ def test_support_refusals():
         compile_schedule({0: {"params": ["q"]}}, view)
 
 
+def test_packed_thaw_refused_through_physical_names_too():
+    """A quantized or packed tensor cannot require gradients however the schedule names it, so compiling a phase
+    that thaws one refuses by name (and phase) through a physical-name view as well, not only through logical
+    names that are views of it: the externally driven and Lightning paths compile without the self-driven
+    setup's own check (interpretune#758). A packed tensor no phase thaws (a frozen quantized base) is fine."""
+    net = _net()
+    net.q = nn.Parameter(torch.zeros(2, dtype=torch.int8), requires_grad=False)
+    compile_schedule({0: {"params": ["0.weight"]}}, CanonicalView(net))  # packed but unscheduled: compiles
+    with pytest.raises(FTSConfigurationError, match=r"Phase 1 schedules quantized or packed.*\['q'\]"):
+        compile_schedule({0: {"params": ["0.weight"]}, 1: {"params": ["q"]}}, CanonicalView(net))
+    with pytest.raises(FTSConfigurationError, match=r"quantized or packed.*\['q'\]"):
+        compile_schedule({0: {"params": ["q"]}}, CanonicalView(net), legacy=True)
+
+
 def test_view_default_schedule():
     net = _net()
     assert view_default_schedule(BlockView(net)) == {0: {"params": ["head", "block2"]}, 1: {"params": ["block0"]}}

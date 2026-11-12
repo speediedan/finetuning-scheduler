@@ -275,12 +275,16 @@ def _check_phase_tensors(cp: CompiledPhase, roles: Mapping[str, str], tensors: M
         if not legacy:
             raise FTSConfigurationError(msg)
         rank_zero_warn(msg)
-    if views_of_logical:
-        packed = [n for n in cp.thawed if tensors[n].is_quantized or not tensors[n].is_floating_point()]
-        if packed:
-            raise FTSConfigurationError(
-                f"Phase {cp.depth} schedules quantized or packed tensors through logical names that are views of them,"
-                f" which cannot be thawed safely: {packed}.")
+    packed = [n for n in cp.thawed
+              if tensors[n].is_quantized or not (tensors[n].is_floating_point() or tensors[n].is_complex())]
+    if packed and views_of_logical:
+        raise FTSConfigurationError(
+            f"Phase {cp.depth} schedules quantized or packed tensors through logical names that are views of them,"
+            f" which cannot be thawed safely: {packed}.")
+    if packed:
+        raise FTSConfigurationError(
+            f"Phase {cp.depth} schedules quantized or packed (non-floating-point) tensors, which cannot require"
+            f" gradients: {packed}. Leave quantized base weights out of the schedule and schedule their adapters.")
 
 
 def _repeats(lists: Sequence[Sequence[Any]]) -> list[Any]:
@@ -460,9 +464,9 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
         FTSConfigurationError: If an address book requires another naming scheme than the view's; an entry resolves
             to nothing or an address does not resolve; phases share storage
             (unless ``legacy``); a phase schedules a ``fitted`` or ``instrument`` tensor; a phase promotes a tensor
-            that is not an ``instrument`` one; a phase schedules quantized or packed tensors through logical names
-            that are views of them; or a phase refreezes a tensor that is not trainable when it starts, both thaws and
-            refreezes a tensor, or leaves nothing trainable.
+            that is not an ``instrument`` one; a phase schedules a quantized or packed tensor, through logical names
+            that are views of it or by its own name; or a phase refreezes a tensor that is not trainable when it
+            starts, both thaws and refreezes a tensor, or leaves nothing trainable.
     """
     _warn_addresses_experimental(schedule, addresses)
     bound: BoundView = as_view(view)
