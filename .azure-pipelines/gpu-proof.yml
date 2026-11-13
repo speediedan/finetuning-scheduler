@@ -1,4 +1,4 @@
-# The any-vendor template's admission proof (#57): one full run of .azure-pipelines/templates/gpu-job.yml with every
+# The any-vendor template's admission proof (#57): one full run of .azure-pipelines/templates/fts-gpu-job.yml with every
 # phase reported clean, before an agent's `ci` mode may be used. Admitted only by `ci-proof`, a capability the operator
 # gives the agent under proof and no other, so the run cannot land on the always-on CI agent and no ordinary job can
 # land on the agent under proof. Queued by hand only; the project's Approval check gates every run.
@@ -19,7 +19,7 @@ resources:
       type: github
       name: speediedan/gpu-epsilon
       endpoint: speediedan
-      ref: refs/heads/924-gpu-job-template
+      ref: refs/tags/gpu-job-v1
 
 jobs:
   - template: templates/fts-gpu-job.yml

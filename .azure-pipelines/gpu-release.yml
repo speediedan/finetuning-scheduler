@@ -1,8 +1,8 @@
 # Release validation on both GPU vendors (#57): a release needs one demanded, full, clean run per vendor at the release
-# candidate's revision. One leg per vendor runs through .azure-pipelines/templates/gpu-job.yml under the `ci-release`
-# class, and a CPU job then checks both legs' phase evidence (`gpu_epsilon.release_eligibility`, configured by
-# tests/gpu_ci/release.json). Its verdict, published as `fts-release-eligibility`, is the release's GPU gate; the legs'
-# own results are necessary, not sufficient.
+# candidate's revision. One leg per vendor runs through .azure-pipelines/templates/fts-gpu-job.yml under the
+# `ci-release` class, and a CPU job then checks both legs' phase evidence (`gpu_epsilon.release_eligibility`, configured
+# by tests/gpu_ci/release.json). Its verdict, published as `fts-release-eligibility`, is the release's GPU gate; the
+# legs' own results are necessary, not sufficient.
 #
 # Queued by hand on the candidate's branch or tag, never triggered: a vendor-demanded job queued while no agent in the
 # pool matches its demands fails at once instead of waiting, and the AMD agent takes release work only in its release
@@ -28,7 +28,7 @@ resources:
       type: github
       name: speediedan/gpu-epsilon
       endpoint: speediedan
-      ref: refs/heads/924-gpu-job-template
+      ref: refs/tags/gpu-job-v1
 
 jobs:
   - template: templates/fts-gpu-job.yml

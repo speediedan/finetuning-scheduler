@@ -11,11 +11,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# The steps of the any-vendor GPU job (.azure-pipelines/templates/gpu-job.yml, #57), run INSIDE its container with the
-# checkout at the working directory. They are the GPU phases of every pipeline that uses the template (gpu-tests.yml,
-# gpu-proof.yml), on whichever vendor's image and devices the agent's GPU_VENDOR chose. Phase manifests, records and
-# reports (python -m gpu_epsilon.phase_evidence, configured by [tool.gpu-epsilon.phase-evidence] in pyproject.toml)
-# go to /evidence.
+# The steps of the any-vendor GPU job (.azure-pipelines/templates/fts-gpu-job.yml, #57), run INSIDE its container with
+# the checkout at the working directory. They are the GPU phases of every pipeline that uses the template
+# (gpu-tests.yml, gpu-proof.yml), on whichever vendor's image and devices the agent's GPU_VENDOR chose. Phase manifests,
+# records and reports (python -m gpu_epsilon.phase_evidence, configured by [tool.gpu-epsilon.phase-evidence] in
+# pyproject.toml) go to /evidence.
 #
 #   gpu_job_container.sh install | collect | verify | lease | phase <name> | coverage | report | release
 set -eo pipefail

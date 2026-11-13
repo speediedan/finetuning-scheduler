@@ -69,7 +69,7 @@ resources:
       type: github
       name: speediedan/gpu-epsilon
       endpoint: speediedan
-      ref: refs/heads/924-gpu-job-template
+      ref: refs/tags/gpu-job-v1
 
 # One job, on whichever GPU agent is free (#57): the any-vendor template picks the image and device options from the
 # vendor the agent declares, runs the GPU phases under the host leases, uploads the GPU coverage, and fails when a
