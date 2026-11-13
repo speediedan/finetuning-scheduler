@@ -535,3 +535,45 @@ def test_paired_difference_is_taken_problem_by_problem(tmp_path):
     assert result["gain_over_initial"]["a"]["difference_points"] == 37.5
     pair = result["pairs"]["a - b"]
     assert pair["difference_points"] == 25.0 and pair["problems"] == 4 and pair["standard_error_points"] == 25.0
+
+
+def test_a_summary_compares_exactly_like_its_runs(tmp_path):
+    import json
+
+    from fts_examples.where_rl_learns.compare import compare, load_summary, summarize_run
+
+    def write(name, rows):
+        run = tmp_path / name
+        run.mkdir()
+        records = [
+            {"update": u, "seeds": [300, 301], "accuracy_percent": 100 * sum(map(sum, s)) / 8,
+             "standard_error_percent": 0.0, "mean_length": 10.0, "scores": s}
+            for u, s in rows
+        ]
+        (run / "evals.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
+        (run / "run.json").write_text(json.dumps({"arm": name, "seed": 0}))
+        (run / "updates.jsonl").write_text("".join(json.dumps({"update": i, "mean_reward": i / 100}) + "\n"
+                                                   for i in range(60)))
+        return run
+
+    a = write("a", [(0, [[1, 0, 0, 0], [1, 0, 0, 0]]), (4, [[1, 1, 0, 0], [1, 1, 1, 0]])])
+    b = write("b", [(0, [[1, 0, 0, 0], [1, 0, 0, 0]]), (4, [[1, 0, 0, 0], [1, 0, 1, 0]])])
+    summary = {name: summarize_run(run) for name, run in (("a", a), ("b", b))}
+    assert summary["a"]["evals"][1]["correct"] == "2210"  # each problem's correct responses over both seeds
+    assert summary["a"]["reward_per_50_updates"] == [0.245, 0.545]
+    (tmp_path / "summary.json").write_text(json.dumps({"arms": summary}))
+    assert compare(load_summary(tmp_path / "summary.json")) == compare([a, b])
+
+
+def test_the_packaged_results_cover_every_arm_on_the_same_problems():
+    from fts_examples.where_rl_learns.compare import compare, load_summary
+
+    arms = load_summary()
+    assert set(arms) == {"full", "layer10", "layer24", "fisher1", "random1"}
+    for arm in arms.values():
+        assert [e["update"] for e in arm["evals"]] == [0, 250, 500, 750, 1000]
+        assert all(len(e["correct"]) == 500 and e["seeds"] == [300, 301, 302, 303] for e in arm["evals"])
+    result = compare(arms)
+    # the masks keep the same budget, and Fisher's choice of it beats a random one by far more than its error
+    pair = result["pairs"]["fisher1 - random1"]
+    assert pair["difference_points"] > 10 * pair["standard_error_points"]

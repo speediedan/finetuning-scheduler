@@ -313,6 +313,16 @@ def test_tunable_views_cross_architecture_nb(tmpdir):
 
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+@RunIf(min_cuda_gpus=1, skip_windows=True)
+def test_where_rl_learns_nb(tmpdir):
+    # runs on CPU (a meta-device model and the packaged results), but downloads a model configuration from the Hub, so
+    # it runs with the other notebook tests rather than on every hosted matrix leg (#194)
+    out = _run_notebook("where_rl_learns/where_rl_learns.ipynb", {}, tmpdir.strpath)
+    assert re.search(r"^layer10  layers:10    11 tensors,     50\.3M parameters", out, flags=re.M), out
+    assert re.search(r"^  fisher1 - random1  \+28\.00 \+- 1\.40$", out, flags=re.M), out
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 def test_tunable_view_generator_skill_reference(tmp_path):
     """The view-generator skill's reference (a synthetic decoder no map covers, and its map) still verifies, the
     drafter's named rows agree with it and its unnamed ones are left for review, and a label swap is refused
