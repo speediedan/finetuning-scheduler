@@ -54,7 +54,6 @@ jobs:
       artifactPrefix: fts
       # up to 60 minutes waiting for the host leases, then about 60 minutes of install and tests with the full suite
       timeoutInMinutes: 150
-      fetchDepth: 0
       workspaceClean: all
       hostPrep: |
         scope="${{ parameters.scope }}"
