@@ -20,8 +20,18 @@ parameters:
       nvidia: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-azpl-init@sha256:b736deaecaa51b3a9de03186c8d81db050bc649a2d474d29cd9a216e61e2e3cb"
       amd: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-rocm10.0-azpl-init@sha256:07bc4bb6f937e801b3289dfd5f83ae36dda3bdc5a56006f7e092e19143188b17"
 
+# The any-vendor GPU job template shared with interpretune, pinned to a gpu-epsilon tag (move it with
+# requirements/ci/gpu-epsilon.txt). templates/fts-gpu-job.yml passes finetuning-scheduler's settings to it.
+resources:
+  repositories:
+    - repository: ci
+      type: github
+      name: speediedan/gpu-epsilon
+      endpoint: speediedan
+      ref: refs/heads/924-gpu-job-template
+
 jobs:
-  - template: templates/gpu-job.yml
+  - template: templates/fts-gpu-job.yml
     parameters:
       jobName: release_nvidia
       vendor: nvidia
@@ -29,7 +39,7 @@ jobs:
       scope: full
       images: ${{ parameters.images }}
 
-  - template: templates/gpu-job.yml
+  - template: templates/fts-gpu-job.yml
     parameters:
       jobName: release_amd
       vendor: amd

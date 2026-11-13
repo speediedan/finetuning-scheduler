@@ -11,8 +11,18 @@ parameters:
     default: full
     values: [smoke, full]
 
+# The any-vendor GPU job template shared with interpretune, pinned to a gpu-epsilon tag (move it with
+# requirements/ci/gpu-epsilon.txt). templates/fts-gpu-job.yml passes finetuning-scheduler's settings to it.
+resources:
+  repositories:
+    - repository: ci
+      type: github
+      name: speediedan/gpu-epsilon
+      endpoint: speediedan
+      ref: refs/heads/924-gpu-job-template
+
 jobs:
-  - template: templates/gpu-job.yml
+  - template: templates/fts-gpu-job.yml
     parameters:
       jobName: proof_any_vendor
       vendor: any

@@ -61,6 +61,16 @@ parameters:
     default: any
     values: [any, nvidia, amd]
 
+# The any-vendor GPU job template shared with interpretune, pinned to a gpu-epsilon tag (move it with
+# requirements/ci/gpu-epsilon.txt). templates/fts-gpu-job.yml passes finetuning-scheduler's settings to it.
+resources:
+  repositories:
+    - repository: ci
+      type: github
+      name: speediedan/gpu-epsilon
+      endpoint: speediedan
+      ref: refs/heads/924-gpu-job-template
+
 # One job, on whichever GPU agent is free (#57): the any-vendor template picks the image and device options from the
 # vendor the agent declares, runs the GPU phases under the host leases, uploads the GPU coverage, and fails when a
 # phase's report is not clean. A release's green on each vendor is not this pipeline's: release legs demand their
@@ -74,7 +84,7 @@ parameters:
 #   - on the nightly run only, the persistent distributed pool's modules in reverse order (FTS_REVERSE_ORDER), so a
 #     case that leaves state for the next one in its pool fails.
 jobs:
-  - template: templates/gpu-job.yml
+  - template: templates/fts-gpu-job.yml
     parameters:
       jobName: pytest
       vendor: ${{ parameters.vendor }}
