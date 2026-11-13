@@ -62,7 +62,7 @@ In addition to all valid ``fully_shard`` API keyword arguments, ``fsdp_plan`` (a
 ``TransformerBlock`` (subclasses included), as ``ModuleWrapPolicy({TransformerBlock})`` would;
 ``class:my_pkg.blocks.TransformerBlock`` names the class unambiguously.
 
-**ignored_params**: a parameter name or regex (matched from the start of each name, as fine-tuning schedule entries
+**ignored_params**: a parameter name or regex (matched from the start of each name, as schedule entries
 are), or a list of them, naming the parameters ``fully_shard`` should leave unsharded. They are resolved among the
 module's own parameters (those ``fully_shard`` can ignore) when the plan is applied. FSDP2 does not reduce the gradients
 of ignored parameters either, so a schedule that thaws one trains it independently on each rank unless something else
@@ -331,7 +331,7 @@ needs no entry for it):
         <img alt="FSDP2 and FTS dynamic subclasses, NCAC adapted user module"
             src="../_static/images/fts/example_mixed_pg_feedback.png" style="width: 90%; position: relative; left: 5%;">
 
-    FTS will inspect the provided fine-tuning schedule and FSDP plan for this condition and if it is detected provide
+    FTS will inspect the provided schedule and FSDP plan for this condition and if it is detected provide
     the user ``INFO``-level feedback like the above.
 
 In the next section, we'll cover Tensor Parallel (TP) training with FTS.
@@ -343,7 +343,8 @@ FTS TP Plan
 
 FTS works with Tensor Parallel (TP) training without any special accommodation by overriding LightningModule's
 ``configure_model`` method and manually applying the relevant parallelism plan. Unlike the enhanced FSDP2 API, the
-current version of FTS does not provide any auto-configuration enhancements for Tensor Parallel. For more on
+Lightning interface has no plan configuration for Tensor Parallel. The PyTorch API does, through
+:func:`~finetuning_scheduler.strategies.plan.parallelize_model` (see :ref:`model-parallel-plain-loop`). For more on
 constructing TP plans, see this
 `Lightning TP guide <https://lightning.ai/docs/pytorch/stable/advanced/model_parallel/tp.html>`_.
 
@@ -375,7 +376,7 @@ As you can observe in (``./mp_examples.py``) our TP plan in this example is appl
 Resuming an FSDP1 Checkpoint under FSDP2
 ****************************************
 A fine-tuning run checkpointed under FSDP1 (:py:class:`~lightning.pytorch.strategies.fsdp.FSDPStrategy`) can resume
-under ``ModelParallelStrategy`` with an ``fsdp_plan``, carrying over the model, optimizer and fine-tuning schedule state:
+under ``ModelParallelStrategy`` with an ``fsdp_plan``, carrying over the model, optimizer and schedule state:
 
 - A full checkpoint (``state_dict_type="full"``, FSDP1's default) resumes directly: pass its path as ``ckpt_path``.
 - A sharded checkpoint (``state_dict_type="sharded"``, a directory) resumes after consolidation into a full one:

@@ -12,7 +12,7 @@ FSDP1 (PyTorch's wrapper-based ``FullyShardedDataParallel``, Lightning's
 ``DTensor`` and composes with tensor parallelism. For scheduled fine-tuning, the per-parameter layout removes most of
 the module-wrapping work FSDP1 needed to keep phases apart.
 
-This guide maps an FTS FSDP1 configuration to its FSDP2 equivalent, covering strategy configuration, fine-tuning
+This guide maps an FTS FSDP1 configuration to its FSDP2 equivalent, covering strategy configuration,
 schedules and checkpoints. It assumes the :doc:`FSDP1 guide <fsdp_scheduled_fine_tuning>` and the
 :doc:`model-parallel guide <model_parallel_scheduled_fine_tuning>`, which documents ``fsdp_plan`` in full.
 
@@ -117,10 +117,10 @@ literal translation of the overrides) works too.
 
 .. _fsdp1-to-fsdp2-schedules:
 
-Fine-Tuning Schedules
-*********************
+Schedules
+*********
 
-A fine-tuning schedule needs no change: it names the same parameters under FSDP2. What changes is which module
+A schedule needs no change: it names the same parameters under FSDP2. What changes is which module
 layouts a schedule allows.
 
 **Under FSDP1** (with ``use_orig_params=False``), all the parameters flattened into one ``FlatParameter`` share
@@ -151,7 +151,7 @@ plain PyTorch model for :class:`~finetuning_scheduler.TuningScheduler`.
 Checkpoints
 ***********
 
-A run checkpointed under FSDP1 can resume under FSDP2 with its model, optimizer and fine-tuning schedule state: a full
+A run checkpointed under FSDP1 can resume under FSDP2 with its model, optimizer and schedule state: a full
 checkpoint directly, a sharded one after consolidation with Lightning's ``consolidate_checkpoint`` utility. See
 :ref:`model-parallel-fsdp1-resume` for the procedure, including how the FSDP1 run's best checkpoint is restored.
 

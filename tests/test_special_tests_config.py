@@ -37,7 +37,7 @@ def test_marks_set_the_variables_conftest_selects_on():
 
 
 def test_every_node_runs_under_coverage_of_the_package():
-    # the measured GPU phases (tests/gpu_ci/phase_manifest.py) take their coverage from these runs
+    # the measured GPU phases ([tool.gpu-epsilon.phase-evidence]) take their coverage from these runs
     assert CONFIG.exec[:3] == ("-m", "coverage", "run")
     assert ("--source", "src/finetuning_scheduler") in zip(CONFIG.exec, CONFIG.exec[1:])
     assert "--append" in CONFIG.exec

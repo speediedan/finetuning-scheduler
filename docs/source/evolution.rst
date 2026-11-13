@@ -66,6 +66,11 @@ step, and each leaves existing schedules alone.
   Fine-Tuning Scheduler is one consumer. `interpretune <https://github.com/speediedan/interpretune>`_ is another: it
   supplies the views and site resolvers that make one address mean the same thing across interpretability backends, so
   Fine-Tuning Scheduler can tune and interpretune can steer and analyse the same named slices of a model.
+- **Phases as stages.** A phase no longer has to thaw more than the one before it. It can
+  :ref:`refreeze<phase-stages>` what earlier phases trained and restore the state it starts from, so a schedule can
+  describe the stages of an experiment (train an adapter, hold it fixed and train a latent model over it, or run
+  several conditions from one starting point) rather than only a growing trainable set. The PyTorch API interprets both
+  keys; the Lightning callback refuses them.
 
 Interpretability-driven examples are becoming the reference workloads, beside the phased fine-tuning examples, because
 they exercise what is new: tuning adapters, latent models and units, scheduled by role and address, through several

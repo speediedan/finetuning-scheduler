@@ -27,7 +27,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any
 
 import yaml
-from torch import nn
+from torch import nn, Tensor
 from venngram import AddressBook
 from venngram.errors import VenngramError
 from venngram.store import fetch as fetch_document
@@ -106,6 +106,16 @@ def save_schedule(schedule_name: str, layer_config: dict, dump_loc: str | os.Pat
     return ft_schedule_yaml
 
 
+def requires_grad_capable(t: Tensor) -> bool:
+    """Whether ``t`` can require gradients: torch allows it for floating-point and complex storage only.
+
+    Integer and boolean storage (bitsandbytes' packed 4-bit and 8-bit weights, torch's quantized dtypes) cannot be
+    thawed. Quantized formats that keep a floating-point dtype (float8, or a tensor subclass reporting one) can, so they
+    are not counted here.
+    """
+    return t.is_floating_point() or t.is_complex()
+
+
 def build_default_schedule(module: nn.Module) -> dict:
     """Build the default fine-tuning schedule for ``module``: parameters are thawed in pairs, starting from the
     last registered parameter.
@@ -122,7 +132,8 @@ def build_default_schedule(module: nn.Module) -> dict:
     # specific architectures if the callback proves sufficiently useful.
     param_lists: list = []
     cur_group: list = []
-    model_params = list(module.named_parameters())[::-1]
+    # storage that cannot require gradients (a quantized or packed base under adapters) cannot be scheduled
+    model_params = [(n, p) for n, p in module.named_parameters() if requires_grad_capable(p)][::-1]
     for i, (n, _) in enumerate(model_params):
         if i % 2 == 0:
             cur_group = []
@@ -652,9 +663,21 @@ def final_phase_max_epochs(schedule: dict, max_phase: int, max_epoch_wm: int, ma
 
 
 # phase keys the PyTorch API adds
-DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides", "promote")
+DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides", "promote", "refreeze", "restore")
 # those only the PyTorch API interprets in this release (the Lightning callback refuses them)
-LIGHTNING_UNSUPPORTED_PHASE_KEYS = ("max_transition_step", "promote")
+LIGHTNING_UNSUPPORTED_PHASE_KEYS = ("max_transition_step", "promote", "refreeze", "restore")
+# what a phase's `restore` key can name: the best checkpoint, one phase's best (`best:<depth>`), nothing, or a
+# named state
+RESTORE_BEST, RESTORE_NONE = "best", "none"
+NAMED_STATES = ("initial",)
+
+
+def restore_best_depth(restore: Any) -> int | None:
+    """The phase depth a ``restore`` value of the form ``best:<depth>`` names, or ``None`` for any other value."""
+    if not isinstance(restore, str) or not restore.startswith(f"{RESTORE_BEST}:"):
+        return None
+    digits = restore[len(RESTORE_BEST) + 1:]
+    return int(digits) if digits.isdigit() else None
 
 
 def parse_phase_extensions(schedule: dict) -> None:
@@ -666,12 +689,19 @@ def parse_phase_extensions(schedule: dict) -> None:
       parameter group the phase adds.
     - ``promote``: tensors to promote from the ``instrument`` role to a ``latent:<name>`` role when the phase starts,
       as ``{selector_or_name: "latent:<name>"}`` (not in phase 0).
+    - ``refreeze``: names, regexes or addresses of tensors an earlier phase thawed, refrozen when the phase starts and
+      dropped from the optimizer (not in phase 0).
+    - ``restore``: what the phase starts from: ``"best"``, one earlier phase's best (``"best:<depth>"``), ``"none"``
+      or a named state (``"initial"``), overriding the tuning scheduler's ``restore_best`` for this boundary (not in
+      phase 0).
 
     Raises:
         FTSConfigurationError: If a key has the wrong type.
     """
     for depth, phase in schedule.items():
         parse_promote(depth, phase.get("promote"))
+        parse_refreeze(depth, phase.get("refreeze"))
+        parse_restore(depth, phase.get("restore"))
         mts = phase.setdefault("max_transition_step", -1)
         if isinstance(mts, bool) or not isinstance(mts, int) or mts < -1:
             raise FTSConfigurationError(
@@ -728,6 +758,50 @@ def parse_promote(depth: int, promote: Any) -> None:
             raise FTSConfigurationError(
                 f"Phase {depth} promotes {source!r} to {target!r}: tensors can be promoted only to a `latent:<name>`"
                 " role.")
+
+
+def parse_refreeze(depth: int, refreeze: Any) -> None:
+    """Validate phase ``depth``'s ``refreeze`` list (``None`` when the phase has none).
+
+    Raises:
+        FTSConfigurationError: If it is not a non-empty list of names, regexes or addresses, or phase 0 has one.
+    """
+    if refreeze is None:
+        return
+    if not isinstance(refreeze, Sequence) or isinstance(refreeze, str) or not refreeze:
+        raise FTSConfigurationError(
+            f"Phase {depth}'s `refreeze` must be a non-empty list of names, regexes or addresses, got {refreeze!r}.")
+    if depth == 0:
+        raise FTSConfigurationError("Phase 0 may not `refreeze` tensors: no earlier phase has thawed any.")
+    for entry in refreeze:
+        if not isinstance(entry, str) or not entry:
+            raise FTSConfigurationError(
+                f"Phase {depth}'s `refreeze` entry {entry!r} is not a string. Write a parameter name, a regex or an "
+                "address in its string form; an address in mapping form goes in the schedule's `addresses` sets and is "
+                "referenced as `@<set>`.")
+
+
+def parse_restore(depth: int, restore: Any) -> None:
+    """Validate phase ``depth``'s ``restore`` key (``None`` when the phase has none).
+
+    Raises:
+        FTSConfigurationError: If it names nothing a phase can start from, or phase 0 has one.
+    """
+    if restore is None:
+        return
+    if depth == 0:
+        raise FTSConfigurationError("Phase 0 may not set `restore`: no earlier state exists when it starts.")
+    known = (RESTORE_BEST, RESTORE_NONE, *NAMED_STATES)
+    if restore in known:
+        return
+    target = restore_best_depth(restore)
+    if target is None:
+        raise FTSConfigurationError(
+            f"Phase {depth}'s `restore` must be one of {list(known)} or `best:<depth>` for an earlier phase, got"
+            f" {restore!r}.")
+    if target >= depth:
+        raise FTSConfigurationError(
+            f"Phase {depth}'s `restore` names phase {target}'s best, which is not an earlier phase.")
 
 
 def refuse_direct_api_keys(schedule: dict, keys: Sequence[str] = LIGHTNING_UNSUPPORTED_PHASE_KEYS) -> None:

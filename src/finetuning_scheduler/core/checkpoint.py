@@ -114,6 +114,8 @@ class CheckpointPolicy(Protocol):
       ``keep_previous=True``), to keep the checkpoints that state refers to;
     - ``verify_resume()``, when a saved state is loaded, to raise ``FileNotFoundError`` if a checkpoint the state
       needs no longer exists;
+    - ``keep_phase_best(depth)`` and ``best_path_for_depth(depth)``, to keep a phase's own best checkpoint for a
+      later phase's ``restore: best:<depth>``, as :class:`BestCheckpoint` does;
     - ``restore() -> int | None``, on an externally driven tuning scheduler
       (:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.attach`) at a phase boundary with
       ``restore_best``, to restore the best checkpoint itself and return the depth it was saved at (``None`` when
@@ -184,7 +186,8 @@ class BestCheckpoint:
     :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.load` raises ``FileNotFoundError``, and any other
     kept checkpoint that has been removed is dropped with a warning. Checkpoints that an interrupted run wrote after the
     save being resumed are left in place, and so are the checkpoints of a state resumed from another directory: only
-    checkpoints under ``dirpath`` are ever removed.
+    checkpoints under ``dirpath`` are ever removed. A named state (a phase's ``restore: initial``) is kept for the whole
+    run.
 
     Args:
         dirpath: Where checkpoints are written.
@@ -212,8 +215,13 @@ class BestCheckpoint:
         self.save_initial = save_initial
         self.metadata = dict(metadata or {})
         self._entries: list[tuple[str, Tensor, int]] = []  # the kept checkpoints in saving order: (path, score, depth)
+        # phases whose own best is kept (a later phase's ``restore: best:<depth>``), and each one's best so far
+        self._keep_phase_best: set[int] = set()
+        self._phase_best: dict[int, tuple[str, Tensor]] = {}
+        self._pending_path: str | None = None  # the checkpoint the last `observe` kept, for `path_for("best")`
         self._seq = 0
         self._boundaries: dict[int, tuple[str | None, int | None]] = {}
+        self._states: dict[str, str] = {}  # the named states (a phase's ``restore: initial``), kept for the whole run
         # this process's view only: every checkpoint the policy has named or referred to, and those a resume needs
         self._known: set[str] = set()
         self._protected: set[str] = set()
@@ -230,15 +238,30 @@ class BestCheckpoint:
         current = torch.as_tensor(metrics[self.monitor], dtype=torch.float32).detach().squeeze().cpu()
         if not torch.isfinite(current):
             current = torch.tensor(torch.inf if self.mode == "min" else -torch.inf)
+        better = torch.lt if self.mode == "min" else torch.gt
+        saved = True
         if self.save_top_k != -1 and len(self._entries) >= self.save_top_k:
             worst = self._worst()
-            better = torch.lt if self.mode == "min" else torch.gt
             if not bool(better(current, worst[1])):
-                return False
-            self._entries.remove(worst)  # its file is removed by `prune`, once the new checkpoint is written
-        self._seq += 1
-        self._entries.append((self._unique_path(f"best-{self._seq}"), current, depth))
-        return True
+                saved = False
+            else:
+                self._entries.remove(worst)  # its file is removed by `prune`, once the new checkpoint is written
+        if saved:
+            self._seq += 1
+            self._entries.append((self._unique_path(f"best-{self._seq}"), current, depth))
+            self._pending_path = self._entries[-1][0]
+        if depth in self._keep_phase_best:
+            phase_best = self._phase_best.get(depth)
+            if phase_best is None or bool(better(current, phase_best[1])):
+                if saved:
+                    self._phase_best[depth] = (self._entries[-1][0], current)
+                else:
+                    # the phase's own best is kept even when the run's best checkpoints do not keep it
+                    self._seq += 1
+                    self._phase_best[depth] = (self._unique_path(f"best-phase{depth}-{self._seq}"), current)
+                    self._pending_path = self._phase_best[depth][0]
+                    saved = True
+        return saved
 
     def _unique_path(self, stem: str) -> str:
         path = os.path.join(self.dirpath, f"{stem}-{uuid.uuid4().hex[:8]}.pt")
@@ -257,10 +280,25 @@ class BestCheckpoint:
         """The path to write the checkpoint ``tag`` to: for ``"best"``, the one :meth:`observe` just kept; for any
         other tag (``"initial"``), a new unique path."""
         if tag == "best":
-            if not self._entries:
+            if self._pending_path is None:
                 raise ValueError("No checkpoint is kept yet: save a best only after `observe` returns `True`.")
-            return self._entries[-1][0]
+            return self._pending_path
         return self._unique_path(tag)
+
+    def keep_phase_best(self, depth: int) -> None:
+        """Also keep phase ``depth``'s own best checkpoint, even one the run's best checkpoints would not keep, for
+        a later phase's ``restore: best:<depth>``."""
+        self._keep_phase_best.add(depth)
+
+    def best_path_for_depth(self, depth: int) -> str | None:
+        """The best checkpoint saved in phase ``depth`` (one :meth:`keep_phase_best` named), or ``None``."""
+        phase_best = self._phase_best.get(depth)
+        return phase_best[0] if phase_best else None
+
+    def best_score_for_depth(self, depth: int) -> Tensor | None:
+        """The best monitored value in phase ``depth`` (one :meth:`keep_phase_best` named), or ``None``."""
+        phase_best = self._phase_best.get(depth)
+        return phase_best[1] if phase_best else None
 
     @property
     def best_path(self) -> str | None:
@@ -300,8 +338,18 @@ class BestCheckpoint:
     def boundary_path(self, depth: int) -> str | None:
         return self._boundaries.get(depth, (None, None))[0]
 
+    def pin_state(self, name: str, path: str) -> None:
+        """Keep the checkpoint at ``path`` as the named state ``name``, for as long as the run lasts."""
+        self._known.add(path)
+        self._states[name] = path
+
+    def state_path(self, name: str) -> str | None:
+        """The checkpoint holding the named state ``name``."""
+        return self._states.get(name)
+
     def _referenced(self) -> set[str]:
-        return {path for path, _, _ in self._entries} | {path for path, _ in self._boundaries.values() if path}
+        return ({path for path, _, _ in self._entries} | {path for path, _ in self._boundaries.values() if path}
+                | set(self._states.values()) | {path for path, _ in self._phase_best.values()})
 
     def _in_dirpath(self, path: str) -> bool:
         root = os.path.abspath(self.dirpath)
@@ -345,6 +393,13 @@ class BestCheckpoint:
             if path is not None and not os.path.exists(path):
                 raise FileNotFoundError(
                     f"The checkpoint a veto of phase {depth} rolls back to, {path!r}, no longer exists.{hint}")
+        for name, path in self._states.items():
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"The checkpoint holding the state {name!r}, {path!r}, no longer exists.{hint}")
+        for depth, (path, _) in self._phase_best.items():
+            if not os.path.exists(path):
+                raise FileNotFoundError(
+                    f"The checkpoint holding phase {depth}'s best, {path!r}, no longer exists.{hint}")
         missing = [path for path, _, _ in self._entries if not os.path.exists(path)]
         if missing:
             rank_zero_warn(f"Dropping {len(missing)} kept checkpoint(s) that no longer exist: {missing}.")
@@ -352,11 +407,18 @@ class BestCheckpoint:
 
     def state_dict(self) -> dict[str, Any]:
         return {"entries": [{"path": path, "score": score, "depth": depth} for path, score, depth in self._entries],
-                "seq": self._seq, "boundaries": dict(self._boundaries)}
+                "seq": self._seq, "boundaries": dict(self._boundaries), "states": dict(self._states),
+                "keep_phase_best": sorted(self._keep_phase_best),
+                "phase_best": {d: {"path": path, "score": score} for d, (path, score) in self._phase_best.items()},
+                "pending_path": self._pending_path}
 
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
         self._entries = [(e["path"], e["score"], e["depth"]) for e in state_dict["entries"]]
         self._seq, self._boundaries = state_dict["seq"], dict(state_dict["boundaries"])
+        self._states = dict(state_dict.get("states", {}))
+        self._keep_phase_best = set(state_dict.get("keep_phase_best", ()))
+        self._phase_best = {int(d): (e["path"], e["score"]) for d, e in state_dict.get("phase_best", {}).items()}
+        self._pending_path = state_dict.get("pending_path", self._entries[-1][0] if self._entries else None)
         self._known |= self._referenced()
 
     def config(self) -> dict[str, Any]:

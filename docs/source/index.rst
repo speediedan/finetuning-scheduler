@@ -76,6 +76,14 @@ latent models or chosen units rather than successive layers, often in interpreta
 therefore also address a model through a :ref:`tunable view<tunable-views>`, by role and structure (experimental in
 2.15). :ref:`fts-evolution` says why, and when names and regexes are still the better tool.
 
+Phases as Stages
+****************
+Phases accumulate by default: each thaws more of the model. Under the PyTorch API (experimental in 2.15), a phase can
+also be a stage of an experiment. Its ``refreeze`` key takes what earlier phases trained out of training and out of the
+optimizer, and its ``restore`` key says what the phase starts from: the best checkpoint, the state the previous phase
+ended with, or the initial state. One schedule can then run several conditions from one starting point, with a phase
+hook recording each one's outcome. :ref:`phase-stages` has the details.
+
 .. _basic-usage:
 
 Basic Usage
@@ -419,6 +427,7 @@ Footnotes
    SuperGLUE with the LightningCLI <examples/cli/superglue_cli>
    LoRA placement by address (PyTorch API) <examples/notebooks/tunable_views/lora_placement>
    Addressing across architectures (PyTorch API) <examples/notebooks/tunable_views/cross_architecture_addresses>
+   interpretune <examples/integrations/interpretune>
 
 .. toctree::
    :maxdepth: 1

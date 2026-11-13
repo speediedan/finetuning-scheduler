@@ -22,7 +22,7 @@ from torch import nn
 from finetuning_scheduler import CanonicalView, TunableSupport
 from finetuning_scheduler.core.compile import compile_schedule, view_default_schedule
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.core.schedule import resolve_phase_params, shared_params_ref
+from finetuning_scheduler.core.schedule import build_default_schedule, resolve_phase_params, shared_params_ref
 from finetuning_scheduler.core.views import Unresolvable
 
 
@@ -183,6 +183,53 @@ def test_support_refusals():
     view.support = lambda: TunableSupport(trainable=True, logical_names_are_views=True)  # type: ignore[method-assign]
     with pytest.raises(FTSConfigurationError, match=r"quantized or packed tensors.*\['q'\]"):
         compile_schedule({0: {"params": ["q"]}}, view)
+
+
+def _packed_net():
+    """``_net`` with a frozen packed (``uint8``, bitsandbytes' 4-bit storage) base weight and a trainable adapter
+    beside it, as a QLoRA layout has."""
+    net = _net()
+    net.packed = nn.Parameter(torch.zeros(4, dtype=torch.uint8), requires_grad=False)
+    net.adapter = nn.Parameter(torch.zeros(4))
+    return net
+
+
+def test_thawing_packed_storage_refuses_at_compile():
+    """A physical-name view: a phase naming a tensor whose storage cannot require gradients is refused at compile,
+    naming the tensor, its dtype and the phase, rather than failing when the phase thaws it. The positive control
+    for the check."""
+    with pytest.raises(FTSConfigurationError, match=r"Phase 1 schedules tensors whose storage cannot require gradients"
+                       r".*packed \(uint8\)"):
+        compile_schedule({0: {"params": ["adapter"]}, 1: {"params": ["packed"]}}, CanonicalView(_packed_net()))
+    with pytest.raises(FTSConfigurationError, match=r"packed \(uint8\)"):  # a regex reaching it is refused too
+        compile_schedule({0: {"params": ["pack.*"]}}, CanonicalView(_packed_net()))
+
+
+def test_packed_storage_left_frozen_compiles():
+    """A frozen packed base under trainable tensors (QLoRA's layout) compiles: the check refuses a selection, never
+    the presence of packed storage."""
+    compiled = compile_schedule({0: {"params": ["adapter"]}, 1: {"params": [r"4\..*"]}}, CanonicalView(_packed_net()))
+    assert compiled.physical_for(0) == ("adapter",)
+
+
+def test_floating_point_quantized_storage_thaws():
+    """Quantized formats that keep a floating-point dtype (float8 here) can require gradients, so they are not
+    refused."""
+    net = _net()
+    net.f8 = nn.Parameter(torch.zeros(4, dtype=torch.float8_e4m3fn), requires_grad=False)
+    assert compile_schedule({0: {"params": ["f8"]}}, CanonicalView(net)).physical_for(0) == ("f8",)
+
+
+def test_default_schedules_leave_packed_storage_out():
+    """Generated schedules never name storage that cannot require gradients, so they compile over a QLoRA
+    layout."""
+    view = CanonicalView(_packed_net())
+    generated = view_default_schedule(view)
+    names = [n for phase in generated.values() for n in phase["params"]]
+    assert "packed" not in names and "adapter" in names
+    compile_schedule(generated, view)
+    legacy = [n for phase in build_default_schedule(_packed_net()).values() for n in phase["params"]]
+    assert "packed" not in legacy and "adapter" in legacy
 
 
 def test_view_default_schedule():
