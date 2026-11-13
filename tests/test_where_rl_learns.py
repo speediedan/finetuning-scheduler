@@ -13,8 +13,10 @@ import pytest
 import torch
 
 pytest.importorskip("transformers")
-
-from transformers import Qwen3Config, Qwen3ForCausalLM  # noqa: E402
+try:
+    from transformers import Qwen3Config, Qwen3ForCausalLM
+except ImportError:  # the oldest supported transformers predates Qwen3
+    pytest.skip("this transformers has no Qwen3", allow_module_level=True)
 
 from fts_examples.where_rl_learns.drgrpo import (  # noqa: E402
     _response_logps,
