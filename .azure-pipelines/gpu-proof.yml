@@ -1,4 +1,4 @@
-# The any-vendor template's admission proof (#57): one full run of .azure-pipelines/templates/gpu-job.yml with every
+# The any-vendor template's admission proof (#57): one full run of .azure-pipelines/templates/fts-gpu-job.yml with every
 # phase reported clean, before an agent's `ci` mode may be used. Admitted only by `ci-proof`, a capability the operator
 # gives the agent under proof and no other, so the run cannot land on the always-on CI agent and no ordinary job can
 # land on the agent under proof. Queued by hand only; the project's Approval check gates every run.
@@ -11,8 +11,18 @@ parameters:
     default: full
     values: [smoke, full]
 
+# The any-vendor GPU job template shared with interpretune, pinned to a gpu-epsilon tag (move it with
+# requirements/ci/gpu-epsilon.txt). templates/fts-gpu-job.yml passes finetuning-scheduler's settings to it.
+resources:
+  repositories:
+    - repository: ci
+      type: github
+      name: speediedan/gpu-epsilon
+      endpoint: speediedan
+      ref: refs/tags/gpu-job-v1
+
 jobs:
-  - template: templates/gpu-job.yml
+  - template: templates/fts-gpu-job.yml
     parameters:
       jobName: proof_any_vendor
       vendor: any

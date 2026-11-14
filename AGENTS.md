@@ -387,12 +387,14 @@ the `fts-development-branch-version-upgrade` skill.
     schedule, so any change to `main` counts. Like every build on the shared agent it waits for its gate to be
     approved, and only a successful scheduled run resets "changed": a nightly left unapproved is followed by another
     the next night, so reject the stale one.
-- `.azure-pipelines/templates/gpu-job.yml`: the any-vendor GPU job, a host job that reads the agent's `GPU_VENDOR` and
-  starts its own container from a digest-pinned image (CUDA or `dockers/base-rocm`), running the same phases through
-  `.azure-pipelines/scripts/gpu_job_container.sh`. Its phase reports gate the job: a skip or xfail is clean only when
-  `tests/gpu_ci/reviewed_exclusions.json` gives its reason, so **a new skip on the GPU phases needs an entry there**
-  or every GPU build goes red. Agents are admitted to it by `ci-*` user capabilities; `.azure-pipelines/gpu-proof.yml`
-  (manual, `ci-proof`) is the run that admits an agent before its `ci` mode is used.
+- `.azure-pipelines/templates/fts-gpu-job.yml`: the any-vendor GPU job, gpu-epsilon's `templates/gpu-job.yml` (shared
+  with interpretune, pinned to a tag in each GPU pipeline's `resources`) with this repository's settings and steps: a
+  host job that reads the agent's `GPU_VENDOR` and starts its own container from a digest-pinned image (CUDA or
+  `dockers/base-rocm`), running the same phases through `.azure-pipelines/scripts/gpu_job_container.sh`. Its phase
+  reports gate the job: a skip or xfail is clean only when `tests/gpu_ci/reviewed_exclusions.json` gives its reason, so
+  **a new skip on the GPU phases needs an entry there** or every GPU build goes red. Agents are admitted to it by `ci-*`
+  user capabilities; `.azure-pipelines/gpu-proof.yml` (manual, `ci-proof`) is the run that admits an agent before its
+  `ci` mode is used.
 
 ## Known stale references
 
