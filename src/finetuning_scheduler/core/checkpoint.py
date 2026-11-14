@@ -176,9 +176,10 @@ class BestCheckpoint:
     worst kept, which it replaces. A non-finite value counts as the worst possible. With the default
     ``save_top_k=1``, the first observation saves and later ones only on strict improvement.
 
-    Every checkpoint gets a new, unique name and is never rewritten, so a saved training state always refers to the
-    checkpoints it was saved with. The best as of each phase's start is pinned by reference as the rollback point for a
-    gate's veto, and kept until the next phase starts. A sharded model's checkpoints are directories.
+    Every checkpoint gets a new, unique name and keeps its saved training state, so a saved training state always
+    refers to the checkpoints it was saved with. Terminal gates refresh only the surviving checkpoint's audit
+    metadata with their verdicts. The best as of each phase's start is pinned by reference as the rollback point for
+    a gate's veto, and kept until the next phase starts. A sharded model's checkpoints are directories.
 
     When resuming, the checkpoints the latest :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save`
     refers to are kept until the next save, so a resume from the latest save always finds them. An older save can be

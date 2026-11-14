@@ -58,6 +58,25 @@ def test_fsdp2_gate_veto_on_one_rank(gloo_pool, tmp_path):
     assert _close(results[0]["params"], results[1]["params"], tol=0.0)
 
 
+@GLOO
+@pytest.mark.parametrize("sharded", [False, True], ids=["unsharded", "sharded"])
+@pytest.mark.parametrize("accept", [False, True], ids=["rank_one_veto", "accept"])
+def test_terminal_gate_records_are_written_by_rank_zero(gloo_pool, tmp_path, sharded, accept):
+    results = gloo_pool.run(fts_tuning_scheduler.terminal_gate, ckpt_dir=str(tmp_path / "terminal"),
+                            sharded=sharded, accept=accept)
+    assert [r["terminal_writes"] for r in results] == [1, 0]
+    agreed = assert_ranks_agree([{k: v for k, v in r.items() if k != "terminal_writes"} for r in results])
+    assert agreed["shards_unchanged"] and agreed["config_hash"]
+    assert agreed["records"] == agreed["memory_records"]
+    assert [(r["depth"], r["final"], r["accept"], r["best_depth"]) for r in agreed["records"]] == [
+        (0, False, True, 0), (1, True, accept, 1)]
+    final = agreed["records"][-1]
+    assert [r["record"]["rank"] for r in final["rank_results"]] == [0, 1]
+    assert agreed["stop"] is not accept
+    if not accept:
+        assert final["reason"] == "rank one veto"
+
+
 @RunIf(min_cuda_gpus=2)
 def test_fsdp2_matches_single_process_nccl(nccl_pool, tmp_path):
     results = nccl_pool.run(fts_tuning_scheduler.phases, ckpt_dir=str(tmp_path / "sharded"), restore_best=True)
