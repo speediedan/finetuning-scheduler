@@ -15,7 +15,9 @@ With equal per-rank shards of each batch, FSDP2's gradient averaging makes a sha
 single-process run on the full batch, so the phase path must match exactly and the parameters to float tolerance.
 """
 import os
+import hashlib
 from functools import partial
+from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
@@ -23,7 +25,7 @@ from torch import nn
 from torch.distributed.fsdp import fully_shard
 
 from finetuning_scheduler import TuningScheduler, GateResult, PlateauTransition, TorchInterface
-from finetuning_scheduler.core.checkpoint import BestCheckpoint
+from finetuning_scheduler.core.checkpoint import BestCheckpoint, load_payload, save_payload
 
 SCHEDULE = {0: {"params": ["4.weight", "4.bias"]}, 1: {"params": ["2.weight", "2.bias"], "lr": 0.05},
             2: {"params": ["0.weight", "0.bias"]}}
@@ -122,6 +124,42 @@ def veto_on_rank(ctx, ckpt_dir: str, veto_rank: int = 1, epochs: int = 7, steps:
     shard = slice(ctx.rank * batch // ctx.world_size, (ctx.rank + 1) * batch // ctx.world_size)
     path = _train(fts, model, x, y, shard, ctx.device, epochs)
     return {"path": path, "depth": fts.curr_depth, "stop": fts.stop_reason, "params": _params(model)}
+
+
+def terminal_gate(ctx, ckpt_dir: str, sharded: bool, accept: bool, seed: int = 7) -> dict:
+    """Rank one's final veto reaches the surviving file; only rank zero writes, leaving DCP shards intact."""
+    model = _sharded_model(ctx, seed) if sharded else _model(seed).to(ctx.device)
+    gate = lambda e: GateResult(accept=accept or not e.final or ctx.rank == 0,
+                               reason="rank one veto" if e.final and ctx.rank == 1 and not accept else None,
+                               record={"rank": ctx.rank})
+    fts = _tuning_scheduler(model, ckpt_dir, True, gate=gate)
+    before = {}
+
+    def remember(event):
+        if event.depth == 1 and sharded:
+            for root, _, files in os.walk(ckpt_dir):
+                for name in files:
+                    if name != "fts_meta.pt":
+                        path = os.path.join(root, name)
+                        with open(path, "rb") as stream:
+                            before[path] = hashlib.sha256(stream.read()).hexdigest()
+
+    fts.add_phase_hook(remember, when="end")
+    x, y = _data(4, 2, 8, seed)
+    shard = slice(ctx.rank * 8 // ctx.world_size, (ctx.rank + 1) * 8 // ctx.world_size)
+    with patch("finetuning_scheduler.core.tuning_scheduler.save_payload", wraps=save_payload) as writes:
+        _train(fts, model, x, y, shard, ctx.device, 4)
+    terminal_writes = sum(bool(call.args[0].get("metadata", {}).get("gate_records"))
+                          and call.args[0]["metadata"]["gate_records"][-1]["final"] for call in writes.call_args_list)
+    target = fts._checkpoint.best_path if accept else fts._checkpoint.boundary_path(1)
+    payload = load_payload(os.path.join(target, "fts_meta.pt") if sharded else target)
+    shards_unchanged = True
+    for path, digest in before.items():
+        with open(path, "rb") as stream:
+            shards_unchanged &= hashlib.sha256(stream.read()).hexdigest() == digest
+    return {"records": payload["metadata"]["gate_records"], "memory_records": fts.gate_records,
+            "stop": fts.should_stop, "terminal_writes": terminal_writes, "shards_unchanged": shards_unchanged,
+            "config_hash": payload["config_hash"] == fts.config_hash}
 
 
 def unsynced_metrics(ctx, ckpt_dir: str, epochs: int = 5, steps: int = 2, batch: int = 8, seed: int = 7) -> dict:
