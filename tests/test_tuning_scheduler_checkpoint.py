@@ -114,6 +114,78 @@ def test_final_gate_and_bool_result(tmp_path):
     handle.remove()
 
 
+@pytest.mark.parametrize("accept", [True, False], ids=["accept", "veto"])
+@pytest.mark.parametrize("restore_best", [True, False], ids=["restore", "latest"])
+def test_terminal_gate_history_is_durable_without_changing_the_snapshot(tmp_path, accept, restore_best):
+    """Both final verdicts survive process exit; rollback stamps the survivor, preserving its resume snapshot."""
+    model = Net()
+    cp = BestCheckpoint(tmp_path, "val_loss", save_initial=True, metadata={"probe": "reference"})
+    fts = TuningScheduler(model, {0: {"params": ["l2.weight", "l2.bias"]}},
+                          optimizer=partial(torch.optim.SGD, lr=0.1, momentum=0.9), checkpoint=cp,
+                          restore_best=restore_best, metadata={"run": "terminal"})
+    fts.add_gate(lambda e: GateResult(accept=accept, reason="probe verdict", record={"score": 0.3}))
+    fts.setup()
+    _train_epoch(fts, model)
+    fts.epoch_end({"val_loss": 1.0})
+    target = cp.best_path if accept else cp.boundary_path(0)
+    before = load_payload(target)
+    assert before["metadata"]["gate_records"] == []
+    fts.train_end()
+    after = load_payload(target)
+    assert after["metadata"]["gate_records"] == fts.gate_records
+    assert [(r["depth"], r["final"], r["accept"], r["best_depth"]) for r in fts.gate_records] == [
+        (0, True, accept, 0)]
+    assert after["metadata"]["run"] == "terminal" and after["metadata"]["probe"] == "reference"
+    # These fields describe the saved training snapshot, not the later audit history.
+    for key in ("config_hash", "schedule_hash", "depth", "scheduler", "param_groups", "rng", "statefuls"):
+        assert after.get(key) == before.get(key)
+    assert all(torch.equal(after["model"][k], v) for k, v in before["model"].items())
+    assert after["optimizer"]["param_groups"] == before["optimizer"]["param_groups"]
+    for param_id, state in before["optimizer"]["state"].items():
+        assert all(torch.equal(after["optimizer"]["state"][param_id][k], v) for k, v in state.items())
+    stamped = open(target, "rb").read()
+    fts.train_end()
+    assert open(target, "rb").read() == stamped  # ending twice neither reruns gates nor rewrites the checkpoint
+
+
+def test_boundary_veto_stamps_the_rollback_checkpoint(tmp_path):
+    """An early veto ends the run without a final gate; its records must still reach the rollback file."""
+    model = Net()
+    cp = BestCheckpoint(tmp_path, "val_loss", save_initial=True)
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), checkpoint=cp)
+    fts.add_gate(lambda e: GateResult(accept=e.depth == 0, reason="regression"))
+    fts.setup()
+    _run(fts, model, 6, metrics_fn=lambda e: {"val_loss": 1.0 - 0.1 * e})
+    records = load_payload(cp.boundary_path(1))["metadata"]["gate_records"]
+    assert records == fts.gate_records
+    assert [(r["depth"], r["final"], r["accept"]) for r in records] == [(0, False, True), (1, False, False)]
+
+
+@pytest.mark.parametrize("accept", [True, False], ids=["accept", "veto"])
+def test_terminal_gate_without_a_best_can_stamp_the_initial_checkpoint(tmp_path, accept):
+    model = Net()
+    cp = BestCheckpoint(tmp_path, "val_loss", save_initial=True)
+    fts = TuningScheduler(model, {0: {"params": ["l2.weight", "l2.bias"]}}, optimizer=partial(torch.optim.SGD, lr=0.1),
+                          checkpoint=cp)
+    fts.add_gate(lambda e: accept)
+    fts.setup()
+    assert cp.best_path is None
+    fts.train_end()
+    assert load_payload(cp.boundary_path(0))["metadata"]["gate_records"] == fts.gate_records
+
+
+@pytest.mark.parametrize("checkpoint", [False, True], ids=["no_policy", "no_save"])
+def test_terminal_gate_without_a_checkpoint_keeps_in_memory_records(tmp_path, checkpoint):
+    model = Net()
+    fts = TuningScheduler(model, {0: {"params": ["l2.weight", "l2.bias"]}}, optimizer=partial(torch.optim.SGD, lr=0.1),
+                          checkpoint=BestCheckpoint(tmp_path, "val_loss") if checkpoint else None)
+    fts.add_gate(lambda e: False)
+    fts.setup()
+    fts.train_end()
+    assert fts.should_stop and fts.gate_records[0]["accept"] is False
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_statefuls_and_public_restore_best(tmp_path):
     model = Net()
     counter, on_best = Counter(), Counter()
