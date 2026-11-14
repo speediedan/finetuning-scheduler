@@ -1511,8 +1511,8 @@ class TuningScheduler:
             restored = restore()
             self._restored_count += restored is not None
             return restored
-        if cp is None:
-            return None
+        # setup refuses `restore_best`, a `restore: best` key and `best:<depth>` without a checkpoint policy
+        assert cp is not None
         path = cp.best_path if depth is None else getattr(cp, "best_path_for_depth")(depth)
         if path is None:
             return None

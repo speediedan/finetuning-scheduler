@@ -72,6 +72,23 @@ def test_capture_restore_round_trip():
     assert set(state) == {"torch", "python", "numpy"}
 
 
+@pytest.mark.parametrize("available, initialized", [(False, False), (True, False)],
+                         ids=["cuda_unavailable", "cuda_uninitialized"])
+def test_capture_reads_no_cuda_generator_until_cuda_is_initialized(monkeypatch, available, initialized):
+    """CUDA devices named before CUDA is initialized (or on a host without it) are skipped: reading a generator
+    would initialize CUDA, so the state holds no `cuda` entry and no CUDA generator is read."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
+    monkeypatch.setattr(torch.cuda, "is_initialized", lambda: initialized)
+
+    def _read(*args):
+        raise AssertionError("a CUDA generator was read")
+
+    monkeypatch.setattr(torch.cuda, "get_rng_state", _read)
+    state = capture_rng_state([0, "cuda:1", torch.device("cuda", 0)])
+    assert set(state) == {"torch", "python", "numpy"}
+    restore_rng_state(state)
+
+
 @RunIf(min_cuda_gpus=1)
 def test_fork_rngs_isolates_cuda():
     torch.cuda.init()
