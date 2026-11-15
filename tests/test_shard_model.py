@@ -91,6 +91,12 @@ def test_a_module_the_caller_sharded_is_left_alone():
     assert out["fsdp_modules"] == ["", *BLOCKS, "norm", "output"] and out["plain"] == []
 
 
+def test_a_module_under_one_the_caller_sharded_is_refused():
+    """A child cannot be sharded after its ancestor: the refusal names both, rather than ``fully_shard`` failing."""
+    out = _agreed(plan={"layers.1.attention": {}}, pre_shard="layers.1")
+    assert "cannot shard 'layers.1.attention': its ancestor 'layers.1' is already sharded" in out["error"]
+
+
 @pytest.mark.parametrize("plan, default_kwargs, match", [
     ({"class:NoSuchBlock": {}}, None, "The class 'class:NoSuchBlock' specified in `fsdp_plan`"),
     ({"output": {"ignored_params": "norm.weight"}}, None, "'norm.weight' in the `ignored_params`"),
@@ -98,8 +104,9 @@ def test_a_module_the_caller_sharded_is_left_alone():
     ({"": {"act_ckpt": ["wrapped"]}}, None, "cannot wrap the root module itself"),
     ({"output": {"act_ckpt": {"mode": "composable"}}}, None, "must be a mode or a [mode, kwargs] list"),
     ({"output": {"mp_policy": {"param_dtype": "float99"}}}, None, "names no torch dtype"),
+    ({"output": {"mp_policy": "bfloat16"}}, None, "`fsdp_plan` entry for 'output' must be a mapping"),
 ], ids=["unmatched_class", "ignored_outside_module", "unknown_act_ckpt_mode", "wrapped_root", "act_ckpt_mapping",
-        "mp_policy_bad_dtype"])
+        "mp_policy_bad_dtype", "mp_policy_not_a_mapping"])
 def test_refusals(plan, default_kwargs, match):
     out = _agreed(plan=plan, default_kwargs=default_kwargs)
     assert match in out["error"]

@@ -11,11 +11,16 @@
 # limitations under the License.
 """The framework-neutral MemProfiler core (``finetuning_scheduler.profiling``), driven by a plain PyTorch loop."""
 import json
+import os
+import pickle
 import subprocess
 import sys
+from dataclasses import asdict
+from types import SimpleNamespace
 
 import pytest
 import torch
+import yaml
 
 pytest.importorskip("psutil")
 
@@ -23,6 +28,9 @@ from finetuning_scheduler.core.exceptions import FTSConfigurationError  # noqa: 
 from finetuning_scheduler.profiling import (MemProfiler, MemProfilerCfg, MemProfilerFuncs,  # noqa: E402
                                             MemProfilerSchedule, aggregate_fsdp_mem_reports,
                                             collector_availability)
+from finetuning_scheduler.profiling import fsdp_report  # noqa: E402
+from finetuning_scheduler.profiling.config import MemProfilerHooks, resolve_funcs  # noqa: E402
+from finetuning_scheduler.profiling.fsdp_report import fsdp_mem_entry  # noqa: E402
 from tests.helpers.allocator import recorded_allocations  # noqa: E402
 from tests.helpers.runif import RunIf  # noqa: E402
 
@@ -130,6 +138,84 @@ def test_the_log_dir_is_read_when_needed_and_refused_when_unset(tmp_path):
     assert memprofiler.memprof_log_dir == tmp_path / "explicit"
 
 
+def _profile_plain_loop(module: _PlainModule, steps: int = 3, **connect_kwargs) -> MemProfiler:
+    module.memprofiler = MemProfiler()
+    module.memprofiler.connect(module, **connect_kwargs)
+    for _ in range(steps):
+        module.training_step(torch.ones(2, 4)).backward()
+    return module.memprofiler
+
+
+def test_memory_stats_dump_as_a_pickle_once_the_artifact_directory_exists(no_accelerator, tmp_path):
+    """Collection needs no artifact directory, but dumping does: dumping before `init_memprof_log_dir` is refused,
+    naming the call, and afterwards the pickle holds exactly the collected statistics."""
+    module = _PlainModule(_cpu_cfg(dump_memorystats_pickle=True, dump_memorystats_yaml=False))
+    memprofiler = _profile_plain_loop(module, log_dir=tmp_path)
+    assert memprofiler.memory_stats
+    with pytest.raises(FTSConfigurationError, match="no artifact directory yet; call `init_memprof_log_dir`"):
+        memprofiler.dump_memory_stats()
+    memprofiler.init_memprof_log_dir()
+    memprofiler.dump_memory_stats()
+    assert [p.name for p in (tmp_path / "memprofiler").iterdir()] == ["rank_0_memory_stats.pickle"]
+    with open(tmp_path / "memprofiler" / "rank_0_memory_stats.pickle", "rb") as f:
+        assert pickle.load(f) == memprofiler.memory_stats
+
+
+def test_a_module_without_a_profiler_runs_its_profilable_methods_unprofiled(no_accelerator):
+    module = _PlainModule(_cpu_cfg())
+    batch = torch.ones(2, 4)
+    assert module.memprofiler is None
+    assert torch.equal(module.training_step(batch), module.layer(batch).sum())
+
+
+def test_a_profiler_config_dumps_as_a_plain_yaml_mapping(no_accelerator):
+    """Importing the profiler registers ``MemProfilerCfg`` with ``yaml.safe_dump``: it dumps as a mapping of its
+    fields, with no Python tag, so it loads back as its fields."""
+    cfg = _cpu_cfg(save_dir="profiles")
+    dumped = yaml.safe_dump(cfg)
+    assert "!!python" not in dumped
+    assert yaml.safe_load(dumped) == asdict(cfg)
+
+
+def test_connecting_without_psutil_names_it(monkeypatch):
+    monkeypatch.setitem(sys.modules, "psutil", None)  # an import of psutil now fails as if it were not installed
+    with pytest.raises(ModuleNotFoundError, match="tracks host memory with `psutil`; install it"):
+        MemProfiler().connect(_PlainModule(_cpu_cfg()))
+
+
+def _hook(module, *args):
+    return None
+
+
+@pytest.mark.parametrize("hooks, expected", [
+    (_hook, [_hook]),  # a single hook need not be listed
+    ([_hook, "os.path.join"], [_hook, os.path.join]),
+], ids=["single_callable", "callable_and_qualified_name"])
+def test_hooks_resolve_from_callables_and_qualified_names(hooks, expected):
+    assert resolve_funcs(MemProfilerHooks(pre_forward_hooks=hooks), "pre_forward_hooks") == expected
+
+
+@pytest.mark.parametrize("hook, match", [
+    ("join", "`join` is not a qualified function name"),
+    ("os.sep", "Custom function sep from module os is not callable"),
+    ("fts_no_such_module.hook", "Unable to import and resolve specified function hook from module fts_no_such_module"),
+], ids=["unqualified", "not_callable", "unimportable"])
+def test_hooks_that_do_not_resolve_to_a_callable_are_refused(hook, match):
+    with pytest.raises(FTSConfigurationError, match=match):
+        resolve_funcs(MemProfilerHooks(pre_forward_hooks=[hook]), "pre_forward_hooks")
+
+
+def test_the_fsdp_tracker_root_resolves_only_when_fsdp_memory_is_tracked(no_accelerator):
+    memprofiler = MemProfiler()
+    memprofiler.connect(_PlainModule(_cpu_cfg()))
+    assert memprofiler.fsdp_mem_tracker_root_module is None
+    memprofiler = MemProfiler()
+    memprofiler.connect(_PlainModule(_cpu_cfg(track_fsdp_mem=True, fsdp_mem_tracker_root_module="encoder")))
+    with pytest.raises(FTSConfigurationError, match="Could not find the specified ``fsdp_mem_tracker_root_module``: "
+                       "encoder"):
+        memprofiler.fsdp_mem_tracker_root_module
+
+
 class _ShardedModule(torch.nn.Module):
     """A two-layer module whose input width sets its activation memory, so calls given different batches peak
     differently."""
@@ -207,12 +293,47 @@ def test_fsdp2_reports_record_each_calls_peak_and_phase(no_accelerator, single_p
     assert peak_text[2] != peak_text[3].replace("Iteration 3", "Iteration 2")
 
 
-def _write_rank_report(report_dir, rank: int, world_size: int, peaks: dict, version: int = 1) -> None:
+def test_the_fsdp2_context_tracks_the_inputs_it_is_given(no_accelerator, single_process_pg, tmp_path):
+    """Inputs passed to ``memprofile_fsdp_ctx`` are attributed to the tracker's ``Inputs`` category."""
+    from torch.distributed.device_mesh import init_device_mesh
+    from torch.distributed.fsdp import fully_shard
+
+    mesh = init_device_mesh("cpu", (1,))
+    module = _ShardedModule(_fsdp_cfg(tmp_path, fsdp_mem_tracker_units="B"))
+    for layer in module.layers:
+        fully_shard(layer, mesh=mesh)
+    fully_shard(module, mesh=mesh)
+    memprofiler = MemProfiler()
+    memprofiler.connect(module, optimizer=torch.optim.SGD(module.parameters(), lr=0.1), log_dir=tmp_path)
+    memprofiler.maybe_init_fsdp_mem_tracker()
+    for _ in range(2):  # the first call is the warmup
+        batch = torch.ones(16, 8)
+        with MemProfiler.memprofile_meta_ctx(memprofiler, fn_name="training_step"), \
+                MemProfiler.memprofile_fsdp_ctx(memprofiler, fn_name="training_step", track_inputs_target=(batch,)):
+            module.layers(batch).sum().backward()
+    (peak,) = memprofiler.fsdp_peak_mem_stats.values()
+    (cats,) = fsdp_report.device_snapshot_json(peak).values()
+    assert cats["Inputs"] == batch.nelement() * batch.element_size()
+
+
+def test_fsdp2_entries_omit_modules_deeper_than_the_tracked_depth():
+    snapshots = {"Peak Forward": [{"cpu": {"Total": 8}}]}
+    tracking = {name: SimpleNamespace(mod_fqn=name, snapshots=snapshots)
+                for name in ("Model", "Model.layers", "Model.layers.0")}
+    entry = fsdp_mem_entry("training_step", 2, 1, {"cpu": {"Total": 8}}, tracking, depth=2)
+    assert list(entry["modules"]) == ["Model", "Model.layers"]
+    assert entry["modules"]["Model"] == {"Peak Forward": [{"cpu": {"Total": 8}}]}
+    assert (entry["iter"], entry["phase"], entry["peak"]) == (2, 1, {"cpu": {"Total": 8}})
+
+
+def _write_rank_report(report_dir, rank: int, world_size: int, peaks: dict, version: int = 1,
+                       file_rank: int | None = None) -> None:
     entries = [{"fn_name": "training_step", "iter": it, "phase": None, "modules": {},
                 "peak": {f"cuda:{rank}": {"Total": total, "Activation": total // 2}}} for it, total in peaks.items()]
     report = {"version": version, "rank": rank, "world_size": world_size, "backend": "cuda", "collectors": {},
               "units": "B", "entries": entries}
-    (report_dir / f"rank_{rank}_fsdp_memory_report.json").write_text(json.dumps(report))
+    name_rank = rank if file_rank is None else file_rank
+    (report_dir / f"rank_{name_rank}_fsdp_memory_report.json").write_text(json.dumps(report))
 
 
 def test_fsdp2_reports_aggregate_across_ranks(tmp_path):
@@ -225,18 +346,17 @@ def test_fsdp2_reports_aggregate_across_ranks(tmp_path):
     assert json.loads((tmp_path / "fsdp_memory_report_aggregate.json").read_text()) == aggregate
 
 
-@pytest.mark.parametrize("setup, match", [
-    ({0: {2: 1}}, r"ranks \[1\] are missing"),
-    ({0: {2: 1}, 1: {2: 1, 3: 1}}, "Rank 1 profiled different calls"),
-    ({0: {2: 1}, "v": {2: 1}}, "this reader understands version 1 only"),
-    ({}, "No `rank_<n>_fsdp_memory_report.json`"),
-], ids=["missing_rank", "different_calls", "unknown_version", "no_reports"])
-def test_fsdp2_report_aggregation_refuses_what_it_cannot_compare(tmp_path, setup, match):
-    for rank, peaks in setup.items():
-        if rank == "v":
-            _write_rank_report(tmp_path, 1, 2, peaks, version=2)
-        else:
-            _write_rank_report(tmp_path, rank, 2, peaks)
+@pytest.mark.parametrize("reports, match", [
+    ([(0, 2, {2: 1})], r"ranks \[1\] are missing"),
+    ([(0, 2, {2: 1}), (1, 2, {2: 1, 3: 1})], "Rank 1 profiled different calls"),
+    ([(0, 2, {2: 1}), (1, 2, {2: 1}, 2)], "this reader understands version 1 only"),
+    ([], "No `rank_<n>_fsdp_memory_report.json`"),
+    ([(0, 2, {2: 1}), (0, 2, {2: 1}, 1, 1)], "Two FSDP2 reports in .* claim rank 0"),
+    ([(0, 2, {2: 1}), (1, 3, {2: 1})], r"disagree on the world size: \{2, 3\}"),
+], ids=["missing_rank", "different_calls", "unknown_version", "no_reports", "duplicate_rank", "world_sizes_differ"])
+def test_fsdp2_report_aggregation_refuses_what_it_cannot_compare(tmp_path, reports, match):
+    for report in reports:  # each a `_write_rank_report` argument tuple
+        _write_rank_report(tmp_path, *report)
     with pytest.raises(FTSConfigurationError, match=match):
         aggregate_fsdp_mem_reports(tmp_path)
 
@@ -250,3 +370,17 @@ def test_collector_availability_is_measured(no_accelerator):
     availability = collector_availability()
     assert availability == {"accelerator_memory_stats": False, "allocator_history": availability["allocator_history"],
                             "fsdp_mem_tracker": torch.distributed.is_available(), "host_memory": True}
+
+
+def _no_memory_stats():
+    raise RuntimeError("The `fakeacc` backend provides no memory statistics.")
+
+
+@pytest.mark.parametrize("memory_stats, expected", [
+    (lambda: {}, True),  # an allocator that has not allocated yet answers with no statistics, which still counts
+    (_no_memory_stats, False),
+], ids=["answers", "no_memory_stats"])
+def test_accelerator_memory_stats_availability_is_what_the_backend_answers(monkeypatch, memory_stats, expected):
+    monkeypatch.setattr(fsdp_report, "accelerator_backend", lambda: "fakeacc")
+    monkeypatch.setattr(fsdp_report, "accelerator_memory_stats", memory_stats)
+    assert collector_availability()["accelerator_memory_stats"] is expected

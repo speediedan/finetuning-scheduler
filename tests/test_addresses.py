@@ -106,6 +106,17 @@ def test_tuning_scheduler_reads_address_books_relative_to_the_schedule_file(tmp_
     assert fts.compiled_schedule.phases[0].physical == ("blocks.3.adapter.weight",)
 
 
+def test_address_books_listed_together_must_not_share_a_set_name(tmp_path):
+    books = {"upper": {"upper": {"role": "adapter", "layers": -1}, "adapters": {"role": "adapter"}},
+             "lower": {"lower": {"role": "adapter", "layers": 0}, "adapters": {"role": "adapter"}},
+             "mid": {"mid": {"role": "adapter", "layers": 1}}}
+    for name, sets in books.items():
+        (tmp_path / f"{name}.yaml").write_text(yaml.safe_dump({"schema_version": 1, "sets": sets}))
+    with pytest.raises(FTSConfigurationError, match=r"both define \['adapters'\]; import one of them"):
+        load_address_sets(["upper.yaml", "lower.yaml"], tmp_path)
+    assert set(load_address_sets(["upper.yaml", "mid.yaml"], tmp_path)) == {"upper", "adapters", "mid"}
+
+
 @pytest.mark.parametrize("schedule, match", [
     ({0: {"params": ["role:adapter & units:[0, 1]"]}}, "unit adapter"),
     ({0: {"params": ["point:resid_post & layers:1"]}}, "site resolver"),

@@ -134,10 +134,18 @@ def test_config_agrees_with_the_phase_evidence_config():
 
 def test_config_agrees_with_the_pipelines():
     root = Path(__file__).resolve().parents[1]
-    job = (root / ".azure-pipelines" / "templates" / "gpu-job.yml").read_text()
+    job = (root / ".azure-pipelines" / "templates" / "fts-gpu-job.yml").read_text()
     release = (root / ".azure-pipelines" / "gpu-release.yml").read_text()
     container = (root / ".azure-pipelines" / "scripts" / "gpu_job_container.sh").read_text()
-    assert f"artifact: {CONFIG.artifact_prefix}-${{{{ parameters.vendor }}}}-$(System.JobAttempt)" in job
+    # the shared GPU job template (gpu-epsilon's templates/gpu-job.yml) names a release leg's evidence artifact
+    # `<artifactPrefix>-release-<vendor>-<attempt>`
+    assert f"artifactPrefix: {CONFIG.artifact_prefix.removesuffix('-release')}\n" in job
+    assert CONFIG.artifact_prefix.endswith("-release")
+    for name in ("gpu-tests.yml", "gpu-release.yml", "gpu-proof.yml"):
+        # pinned to a tag, which stays where it was cut, where a branch would move the job under every pipeline
+        assert "      name: speediedan/gpu-epsilon\n      endpoint: speediedan\n      ref: refs/tags/gpu-job-v1\n" in (
+            root / ".azure-pipelines" / name
+        ).read_text(), name
     assert f"out=/evidence/{CONFIG.phases_dir}" in container
     assert "--config tests/gpu_ci/release.json" in release
     assert all(f"--{vendor}-result" in release for vendor in CONFIG.vendors)

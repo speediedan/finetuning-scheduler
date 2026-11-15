@@ -886,7 +886,13 @@ class TuningScheduler:
 
     def train_end(self) -> None:
         """End training (once): with gates registered, restore the best (if configured) and run the gates on the
-        last phase, after its end hooks; a veto rolls back to the best as of the phase's start."""
+        last phase, after its end hooks; a veto rolls back to the best as of the phase's start.
+
+        The terminal gate history is written to that rollback checkpoint on a veto, otherwise to the policy's best
+        (or initial rollback checkpoint when no best exists). Only audit metadata changes, leaving the saved training
+        state and its configuration hash intact. A sharded checkpoint updates only ``fts_meta.pt``, on rank zero.
+        Without a checkpoint policy, records remain available through :attr:`gate_records`.
+        """
         if not self._is_setup or self._finished:
             return
         self._finished = True
@@ -1318,13 +1324,23 @@ class TuningScheduler:
             if rank_zero_only:
                 result = self._interface.broadcast_object(result)
             assert result is not None
-            self._gate_records.append({"depth": depth, "final": final, "gate": describe_callable(fn),
-                                       "accept": result.accept, "reason": result.reason,
-                                       "record": dict(result.record)})
-            if not result.accept:
+            record = {"depth": depth, "final": final, "gate": describe_callable(fn),
+                      "best_depth": event.best_depth, "accept": result.accept, "reason": result.reason,
+                      "record": dict(result.record)}
+            if not rank_zero_only and self._interface.world_size > 1:
+                # A veto on any rank is the verdict on every rank, including the one writing audit metadata.
+                rank_results = self._interface.all_gather_object(record)
+                record = dict(rank_results[0])
+                record["accept"] = all(r["accept"] for r in rank_results)
+                record["reason"] = "; ".join(dict.fromkeys(r["reason"] for r in rank_results if r["reason"])) or None
+                record["rank_results"] = rank_results
+            self._gate_records.append(record)
+            if not record["accept"]:
                 accepted = False
-                reasons.append(result.reason or describe_callable(fn))
+                reasons.append(record["reason"] or describe_callable(fn))
         if not self._interface.reduce_any(not accepted):
+            if final and cp is not None:
+                self._stamp_gate_records(cp.best_path or cp.boundary_path(depth))
             return True
         # every rank reports the same reasons, whichever rank vetoed
         gathered = [r for rank_reasons in self._interface.all_gather_object(reasons) for r in rank_reasons]
@@ -1335,7 +1351,20 @@ class TuningScheduler:
         self._ended_depths.add(depth)
         self._stop(f"veto: phase {depth} was rejected ({'; '.join(reasons)})"
                    + ("" if boundary else "; no earlier checkpoint to restore"))
+        # A boundary veto is terminal too: train_end will not run gates for this ended phase again.
+        self._stamp_gate_records(boundary or (cp.best_path if cp else None))
         return False
+
+    def _stamp_gate_records(self, path: str | None) -> None:
+        """Atomically update only a terminal checkpoint's audit history, never its tensors or resume state."""
+        if path is None:
+            return
+        if self._interface.is_global_zero:
+            target = os.path.join(path, META_FILE) if os.path.isdir(path) else path
+            payload = load_payload(target)
+            payload["metadata"] = {**payload["metadata"], "gate_records": deepcopy(self._gate_records)}
+            save_payload(payload, target)
+        self._interface.barrier("fts_gate_records_written")
 
     @property
     def _sharded(self) -> bool:
@@ -1511,8 +1540,8 @@ class TuningScheduler:
             restored = restore()
             self._restored_count += restored is not None
             return restored
-        if cp is None:
-            return None
+        # setup refuses `restore_best`, a `restore: best` key and `best:<depth>` without a checkpoint policy
+        assert cp is not None
         path = cp.best_path if depth is None else getattr(cp, "best_path_for_depth")(depth)
         if path is None:
             return None
