@@ -112,14 +112,14 @@ Lightning:
 
 Promotion
 *********
-A phase can promote ``instrument`` tensors to a ``latent`` role when it starts, so that phase, or a later one, trains
+A phase can promote ``artifact`` tensors to a ``latent`` role when it starts, so that phase, or a later one, trains
 them (the PyTorch API only):
 
 .. code-block:: python
 
     schedule = {
         0: {"params": ["role:adapter"], "max_transition_epoch": 2},
-        1: {"params": ["role:latent:transcoder"], "promote": {"role:instrument": "latent:transcoder"}},
+        1: {"params": ["role:latent:transcoder"], "promote": {"role:artifact": "latent:transcoder"}},
     }
 
 A ``promote`` source is a selector or an address. The promotion happens after the phase's start hooks and before it

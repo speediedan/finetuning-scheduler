@@ -57,7 +57,7 @@ from finetuning_scheduler.core.roles import (is_frozen_role, is_role_selector, r
                                              selector_matches)
 from finetuning_scheduler.strategies.base import DistributedAdapter, select_distributed_adapter
 from finetuning_scheduler.strategies.dtensor import DTensorAdapter
-from finetuning_scheduler.core.views import (BoundView, canonical_fqn, CanonicalView, instrument_state_keys,
+from finetuning_scheduler.core.views import (artifact_state_keys, BoundView, canonical_fqn, CanonicalView,
                                              resolve_view)
 from venngram.tuning.errors import TunableViewError
 from finetuning_scheduler.core.transitions import (AnyOf, as_decision, Decision, epoch_transition_due, GateEvent,
@@ -1034,13 +1034,13 @@ class TuningScheduler:
                     " them out, so they would never be checkpointed.")
             for k in added:
                 self._promoted_values[k] = state[k].detach().to("cpu", copy=True)
-            self._promotions.append({"depth": depth, "names": sorted(names), "from": "instrument", "to": role,
+            self._promotions.append({"depth": depth, "names": sorted(names), "from": "artifact", "to": role,
                                      "materialized": sorted(n for n in names if after[n] is not before[n])})
-            rank_zero_info(f"Phase {depth} promoted {sorted(names)} from `instrument` to `{role}`.")
+            rank_zero_info(f"Phase {depth} promoted {sorted(names)} from `artifact` to `{role}`.")
 
     def _with_promoted_values(self, model_state: Mapping[str, Any]) -> Mapping[str, Any]:
         """``model_state`` (a checkpoint's), completed with the value at promotion of each tensor promoted since
-        the checkpoint was saved: an ``instrument`` tensor then, it was not checkpointed."""
+        the checkpoint was saved: an ``artifact`` tensor then, it was not checkpointed."""
         missing = [k for k in self._promoted_values if k not in model_state]
         return {**model_state, **{k: self._promoted_values[k] for k in missing}} if missing else model_state
 
@@ -1240,7 +1240,7 @@ class TuningScheduler:
                     mod.track_running_stats = False
 
     def _refuse_frozen_roles_in(self, optimizer: Optimizer) -> None:
-        """An optimizer instance may not hold a `fitted` or `instrument` parameter, even with
+        """An optimizer instance may not hold a `fitted` or `artifact` parameter, even with
         ``enforce_phase0_params=False``."""
         roles = self.roles
         names = {id(p): n for n, p in self.model.named_parameters()}
@@ -1248,16 +1248,16 @@ class TuningScheduler:
                       if id(p) in names and is_frozen_role(roles.get(names[id(p)], "base")))
         if held:
             raise FTSConfigurationError(
-                f"The optimizer holds parameters whose role is never optimized (`fitted` or `instrument`): {held}.")
+                f"The optimizer holds parameters whose role is never optimized (`fitted` or `artifact`): {held}.")
 
     def _refuse_trainable_frozen_roles(self) -> None:
-        """Guard: no `fitted` or `instrument` tensor may require grad (a view's coupled tensors could leak one)."""
+        """Guard: no `fitted` or `artifact` tensor may require grad (a view's coupled tensors could leak one)."""
         roles = self.roles
         leaked = sorted(n for n, p in self.model.named_parameters()
                         if p.requires_grad and is_frozen_role(roles.get(n, "base")))
         if leaked:
             raise FTSConfigurationError(
-                f"Tensors whose role is never thawed (`fitted` or `instrument`) require grad: {leaked}.")
+                f"Tensors whose role is never thawed (`fitted` or `artifact`) require grad: {leaked}.")
 
     # ------------------------------------------------------------------------------------------------------------------
     # checkpoints, gates and registered state
@@ -1380,8 +1380,8 @@ class TuningScheduler:
                 raise FTSConfigurationError(feedback.message)
             (rank_zero_warn if feedback.level == "warning" else rank_zero_info)(feedback.message)
 
-    def _instrument_keys(self, keys: Any) -> set[str]:
-        return instrument_state_keys(self.model, self.roles, keys)
+    def _artifact_keys(self, keys: Any) -> set[str]:
+        return artifact_state_keys(self.model, self.roles, keys)
 
     def _training_payload(self, with_tensors: bool) -> dict[str, Any]:
         named = dict(self.model.named_parameters())
@@ -1436,7 +1436,7 @@ class TuningScheduler:
             if self._interface.is_global_zero:
                 remove_checkpoint(tmp)
             self._interface.barrier("fts_checkpoint_tmp")
-            model_sd, optim_sd = self._distributed.state_dict(self.model, self.optimizer, exclude=self._instrument_keys,
+            model_sd, optim_sd = self._distributed.state_dict(self.model, self.optimizer, exclude=self._artifact_keys,
                                                               quiesce=self._suspend_step_counting)
             optim_saved = optim_sd is not None
             self._distributed.save({"model": model_sd, "optim": optim_sd}, tmp)
@@ -1492,11 +1492,11 @@ class TuningScheduler:
             if with_optimizer:
                 optimizer.state.clear()  # a checkpoint saved before any step restores an optimizer with no state
             # a sharded checkpoint loads through DCP whatever this model's layout (an unsharded model included), and
-            # instrument tensors are never saved, so they are the only model keys a load may miss
+            # artifact tensors are never saved, so they are the only model keys a load may miss
             reader = self._distributed if self._distributed.sharded else DTensorAdapter()
             reader.load_state(path, self.model, optimizer,
                               load_optimizer=with_optimizer and meta.get("optim_saved", True),
-                              exclude=self._instrument_keys, quiesce=self._suspend_step_counting)
+                              exclude=self._artifact_keys, quiesce=self._suspend_step_counting)
         else:
             if with_optimizer:
                 optimizer.load_state_dict(meta["optimizer"])
@@ -1620,7 +1620,7 @@ class TuningScheduler:
 
         Raises:
             FTSConfigurationError: If there is no best checkpoint yet, no tensor matches ``roles``, a matched tensor is
-                never checkpointed (``instrument``) or absent from the best checkpoint, or the view translates
+                never checkpointed (``artifact``) or absent from the best checkpoint, or the view translates
                 checkpoint keys. Every rank raises whatever fails on global rank zero.
         """
         self._require_setup()
@@ -1639,9 +1639,9 @@ class TuningScheduler:
                  if any(selector_matches(sel, effective.get(n, "base")) for sel in selectors)]
         if not names:
             raise FTSConfigurationError(f"No tensor's role matches {list(roles)}.")
-        never_saved = sorted(n for n in names if role_kind(effective.get(n, "base")) == "instrument")
+        never_saved = sorted(n for n in names if role_kind(effective.get(n, "base")) == "artifact")
         if never_saved:
-            raise FTSConfigurationError(f"`instrument` tensors are never checkpointed, so they cannot be exported: "
+            raise FTSConfigurationError(f"`artifact` tensors are never checkpointed, so they cannot be exported: "
                                         f"{never_saved}.")
         # exported under wrapper-free names (without torch.compile's or activation checkpointing's segments)
         export_roles = {canonical_fqn(n): effective.get(n, "base") for n in names}

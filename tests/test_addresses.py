@@ -153,8 +153,8 @@ def test_address_books_written_in_another_naming_scheme_are_refused_through_the_
 
 def test_promotion_sources_take_addresses():
     model = Blocks()
-    roles = {"blocks.3.adapter.weight": "instrument", "blocks.2.adapter.weight": "instrument"}
-    promote = {"role:instrument & layers:-1:": "latent:t"}
+    roles = {"blocks.3.adapter.weight": "artifact", "blocks.2.adapter.weight": "artifact"}
+    promote = {"role:artifact & layers:-1:": "latent:t"}
     compiled = compile_schedule({0: {"params": ["module:head"]}, 1: {"params": ["role:latent:t"], "promote": promote}},
                                 CanonicalView(model, roles=roles))
     assert compiled.promotions[1] == {"blocks.3.adapter.weight": "latent:t"}

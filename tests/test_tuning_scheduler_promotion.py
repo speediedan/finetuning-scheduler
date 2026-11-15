@@ -9,7 +9,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tests for promoting ``instrument`` tensors to ``latent`` roles at a phase boundary (``promote``, #53).
+"""Tests for promoting ``artifact`` tensors to ``latent`` roles at a phase boundary (``promote``, #53).
 
 These need only PyTorch and the scheduling core (the ``core-no-lightning`` job runs them with ``--noconftest``).
 """
@@ -32,7 +32,7 @@ SGD = partial(torch.optim.SGD, lr=0.1)
 LENS = ["lens.bias", "lens.weight"]
 PROMOTE_SCHEDULE = {
     0: {"params": ["role:latent"], "max_transition_epoch": 1},
-    1: {"params": ["role:latent:lens"], "promote": {"role:instrument": "latent:lens"}, "max_transition_epoch": 3},
+    1: {"params": ["role:latent:lens"], "promote": {"role:artifact": "latent:lens"}, "max_transition_epoch": 3},
     2: {"params": ["role:adapter:char"]},
 }
 
@@ -64,20 +64,20 @@ def _lens(model):
     return {n: p.detach().clone() for n, p in model.named_parameters() if n in LENS}
 
 
-def test_promotion_makes_an_instrument_trainable_from_its_phase():
+def test_promotion_makes_an_artifact_trainable_from_its_phase():
     """The promoted lens stays frozen and out of the optimizer until its phase starts, then trains as a latent."""
     model, view = _model()
     fts = _tuning_scheduler(model, view)
-    assert fts.roles["lens.weight"] == "instrument" and sorted(fts.compiled_schedule.physical_for(1)) == LENS
+    assert fts.roles["lens.weight"] == "artifact" and sorted(fts.compiled_schedule.physical_for(1)) == LENS
     initial, seen = _lens(model), []
     for epoch in fts.epochs(4):
         seen.append((fts.curr_depth, sorted(n for n in LENS if dict(model.named_parameters())[n].requires_grad)))
         _epoch(fts, epoch)
     assert seen == [(0, []), (1, LENS), (1, LENS), (2, LENS)]
-    assert fts.roles["lens.weight"] == "latent:lens" and fts.compiled_schedule.roles["lens.weight"] == "instrument"
+    assert fts.roles["lens.weight"] == "latent:lens" and fts.compiled_schedule.roles["lens.weight"] == "artifact"
     assert all(not torch.equal(initial[n], t) for n, t in _lens(model).items())
     assert fts.state_dict()["promotions"] == [
-        {"depth": 1, "names": LENS, "from": "instrument", "to": "latent:lens", "materialized": []}]
+        {"depth": 1, "names": LENS, "from": "artifact", "to": "latent:lens", "materialized": []}]
 
 
 def test_promoted_tensors_are_checkpointed_from_their_promotion(tmp_path):
@@ -129,7 +129,7 @@ def test_vetoing_the_promoting_phase_restores_the_values_at_promotion(tmp_path):
     assert all(torch.equal(initial[n], t) for n, t in _lens(model).items())
 
 
-def test_promoting_a_tied_instrument_gives_it_its_own_storage():
+def test_promoting_a_tied_artifact_gives_it_its_own_storage():
     """A promoted parameter that shares storage with another tensor is replaced by a copy, so training it leaves
     the other tensor unchanged."""
     model, view = _model()
@@ -145,9 +145,9 @@ def test_promoting_a_tied_instrument_gives_it_its_own_storage():
 
 
 @pytest.mark.parametrize("promote, match", [
-    ({"role:latent:transcoder": "latent:lens"}, "whose role is not `instrument`"),
-    ({"role:instrument": "adapter:lens"}, "only to a `latent:<name>` role"),
-    ({"role:instrument": "latent"}, "needs a name"),
+    ({"role:latent:transcoder": "latent:lens"}, "whose role is not `artifact`"),
+    ({"role:artifact": "adapter:lens"}, "only to a `latent:<name>` role"),
+    ({"role:artifact": "latent"}, "needs a name"),
     ({}, "non-empty mapping"),
 ])
 def test_invalid_promotions_refuse(promote, match):
@@ -159,7 +159,7 @@ def test_invalid_promotions_refuse(promote, match):
 
 def test_phase_zero_promotion_and_the_lightning_callback_refuse():
     model, view = _model()
-    schedule = {**PROMOTE_SCHEDULE, 0: {**PROMOTE_SCHEDULE[0], "promote": {"role:instrument": "latent:lens"}}}
+    schedule = {**PROMOTE_SCHEDULE, 0: {**PROMOTE_SCHEDULE[0], "promote": {"role:artifact": "latent:lens"}}}
     with pytest.raises(FTSConfigurationError, match="Phase 0 may not `promote`"):
         _tuning_scheduler(model, view, schedule)
     with pytest.raises(FTSConfigurationError, match="phase 1: promote"):
@@ -182,10 +182,10 @@ def test_a_view_that_renames_on_promotion_refuses():
 def test_promotions_change_the_compiled_digest():
     model, view = _model()
     plain = {0: dict(PROMOTE_SCHEDULE[0]), 1: {"params": ["role:adapter:char"]}}
-    promoting = {**plain, 1: {"params": ["role:adapter:char"], "promote": {"role:instrument": "latent:lens"}}}
+    promoting = {**plain, 1: {"params": ["role:adapter:char"], "promote": {"role:artifact": "latent:lens"}}}
     a, b = compile_schedule(plain, view), compile_schedule(promoting, view)
     assert a.digest != b.digest and b.promotions == {1: dict.fromkeys(LENS, "latent:lens")}
-    assert b.roles_at(0)["lens.weight"] == "instrument" and b.roles_at(1)["lens.weight"] == "latent:lens"
+    assert b.roles_at(0)["lens.weight"] == "artifact" and b.roles_at(1)["lens.weight"] == "latent:lens"
 
 
 def _tied_model():
@@ -308,7 +308,7 @@ def test_a_frozen_role_tensor_made_trainable_by_hand_is_refused_at_the_next_thaw
     model, view = _model()
     fts = _tuning_scheduler(model, view, schedule={0: {"params": ["role:adapter"], "max_transition_epoch": 1},
                                                    1: {"params": ["role:latent"]}})
-    model.lens.weight.requires_grad_(True)  # an `instrument` tensor, never promoted here
+    model.lens.weight.requires_grad_(True)  # an `artifact` tensor, never promoted here
     with pytest.raises(FTSConfigurationError, match=r"never thawed .* require grad: \['lens.weight'\]"):
         for epoch in fts.epochs(3):
             _epoch(fts, epoch)
