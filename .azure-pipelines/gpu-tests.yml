@@ -81,8 +81,9 @@ resources:
 #   - the standalone tests: on a pull request into main, the smoke set unless it carries the `full-gpu-suite` label,
 #     and otherwise all of them (.azure-pipelines/scripts/standalone_scope.sh);
 #   - the examples and the multi-GPU examples;
-#   - on the nightly run only, the persistent distributed pool's modules in reverse order (FTS_REVERSE_ORDER), so a
-#     case that leaves state for the next one in its pool fails.
+#   - on builds of main (merge and scheduled alike), the persistent distributed pool's modules in reverse order
+#     (FTS_REVERSE_ORDER), so a case that leaves state for the next one in its pool fails. A green merge build then
+#     covers everything a scheduled build of the same tree would run.
 jobs:
   - template: templates/fts-gpu-job.yml
     parameters:
@@ -90,6 +91,6 @@ jobs:
       vendor: ${{ parameters.vendor }}
       jobClass: ci-any-vendor
       scope: auto
-      poolReverse: ${{ eq(variables['Build.Reason'], 'Schedule') }}
+      poolReverse: ${{ or(eq(variables['Build.Reason'], 'Schedule'), eq(variables['Build.SourceBranch'], 'refs/heads/main')) }}
       uploadCoverage: true
       images: ${{ parameters.images }}
