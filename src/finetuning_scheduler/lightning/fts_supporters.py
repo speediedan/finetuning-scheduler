@@ -46,7 +46,7 @@ from venngram import is_address
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import schedule as core_schedule
 from finetuning_scheduler.core import transitions as core_transitions
-from finetuning_scheduler.core.compile import compile_schedule, resolves_exactly
+from finetuning_scheduler.core.compile import compile_schedule, gradient_entries, resolves_exactly
 from finetuning_scheduler.core.views import BoundView
 from finetuning_scheduler.core.state import FTSState
 from finetuning_scheduler.strategy_adapters import StrategyAdapter, FSDPStrategyAdapter, ModelParallelStrategyAdapter
@@ -849,6 +849,12 @@ class ScheduleParsingMixin(ABC):
         if not core_schedule.ensure_contiguous_phase_keys(self.ft_schedule):
             self._rewrite_schedule(err_msg=core_schedule.NON_CONTIGUOUS_KEYS_MSG)
         core_schedule.refuse_direct_api_keys(self.ft_schedule)
+        if grads := gradient_entries(self.ft_schedule, self._address_sets):
+            detail = "; ".join(f"phase {depth}: {entries}" for depth, entries in grads.items())
+            raise MisconfigurationException(
+                f"The schedule addresses gradients (`of: grad`), whose masks only the PyTorch API (`TuningScheduler`)"
+                f" applies in this release ({detail}). Address the tensors without `of: grad` to thaw them whole with"
+                " the Lightning callback.")
         core_schedule.validate_phase_options(self.ft_schedule)
         if self.ft_schedule.get(0, {}).get("pg_overrides"):
             raise MisconfigurationException(

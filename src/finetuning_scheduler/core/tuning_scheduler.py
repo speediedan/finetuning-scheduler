@@ -51,6 +51,7 @@ from finetuning_scheduler.core.dist import rank_zero_info, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.executor import TuningSchedulerExecutor, PhaseExecutor
 from finetuning_scheduler.core.fingerprint import batch_fingerprint
+from finetuning_scheduler.core.grad_masks import GradientMasks
 from finetuning_scheduler.core.interface import LRStepConfig, TorchInterface, TrainingInterface
 from finetuning_scheduler.core.rng import capture_rng_state, fork_rngs, restore_rng_state
 from finetuning_scheduler.core.roles import (is_frozen_role, is_role_selector, role_kind, SELECTOR_PREFIX,
@@ -312,6 +313,8 @@ class TuningScheduler:
         # promotions applied so far, and each promoted tensor's value when it was promoted (on the CPU)
         self._promotions: list[dict[str, Any]] = []
         self._promoted_values: dict[str, Tensor] = {}
+        # the gradient masks in effect, when the schedule has any (`of: grad` addresses)
+        self._grad_masks: GradientMasks | None = None
 
         self._schedule: dict = {}
         self._phase_configs: dict[int, Any] = {}
@@ -388,6 +391,7 @@ class TuningScheduler:
         if self._compiled.promotions:
             self._refuse_unsupported_promotion()
         self._refuse_unsupported_restore()
+        self._refuse_unsupported_masks()
         if self._checkpoint is not None:
             for phase in self._schedule.values():
                 target = core_schedule.restore_best_depth(phase.get("restore"))
@@ -406,6 +410,10 @@ class TuningScheduler:
         for i, sched in enumerate(schedulers):
             self._interface.set_lr_scheduler(i, sched, self._lr_step_cfg)
         self._step_hook = optimizer.register_step_post_hook(self._on_optimizer_step)
+        if any(cp.masks for cp in self._compiled.phases):
+            self._grad_masks = GradientMasks(self.model)
+            self._grad_masks.attach(optimizer)
+            self._sync_grad_masks(0)
         self._check_schedule_agreement()
         self._fingerprints.setdefault(0, [])
         self._is_setup = True
@@ -1078,6 +1086,32 @@ class TuningScheduler:
                 f"Phases {per_phase} `restore` one phase's best, but {type(self._checkpoint).__name__} cannot keep"
                 " one (it needs `keep_phase_best` and `best_path_for_depth`, as `BestCheckpoint` has).")
 
+    def _refuse_unsupported_masks(self) -> None:
+        """Gradient masks need an unsharded model: a sharded parameter's gradient is a shard, set by the sharding
+        rather than accumulated, so a hook on it would not see it."""
+        assert self._compiled is not None
+        masked = sorted(cp.depth for cp in self._compiled.phases if cp.masks)
+        if masked and self._sharded:
+            raise FTSConfigurationError(
+                f"Phases {masked} mask the gradients (`of: grad` with `units`) of a sharded model, which this release"
+                " does not support.")
+
+    def _sync_grad_masks(self, depth: int) -> None:
+        """Put the gradient masks in effect at ``depth`` in place (after its thaw and refreeze), reporting the masks
+        that change: each masked tensor and how many of its rows train."""
+        if self._grad_masks is None:
+            return
+        assert self._compiled is not None
+        before = self._grad_masks.masks
+        masks = self._compiled.masks_at(depth)
+        self._grad_masks.sync(masks)
+        changed = {n: kept for n, kept in masks.items() if before.get(n) != kept}
+        if changed:
+            named = dict(self.model.named_parameters())
+            rows = {n: named[n].shape[0] if named[n].dim() else 1 for n in changed}
+            rank_zero_info(f"Phase {depth} trains part of {len(changed)} tensors through gradient masks (rows kept of"
+                           f" rows): {', '.join(f'{n} ({len(k)} of {rows[n]})' for n, k in changed.items())}.")
+
     def _restore_named_state(self, name: str) -> int:
         """Restore the named state's model, optimizer and lr scheduler state; return the depth it was saved at."""
         self._interface.barrier("fts_restore_named")
@@ -1125,6 +1159,7 @@ class TuningScheduler:
                 schedulers = [s for s, _ in self._interface.get_lr_schedulers()]
             else:
                 core_optim.warn_unapplied_lr_lambdas(schedulers, self.apply_lambdas_new_pgs)
+        self._sync_grad_masks(depth)
 
     def _pin_boundary(self, depth: int, initial_path: str | None = None) -> None:
         assert self._checkpoint is not None
@@ -1173,6 +1208,8 @@ class TuningScheduler:
         self._retire_optimizer(self.optimizer)
         self._interface.set_optimizer(0, optimizer)
         self._step_hook = optimizer.register_step_post_hook(self._on_optimizer_step)  # type: ignore[attr-defined]
+        if self._grad_masks is not None:
+            self._grad_masks.attach(optimizer)  # type: ignore[arg-type]
         for sched, _ in self._interface.get_lr_schedulers():
             sched.optimizer = optimizer
         rank_zero_info(f"Optimizer reinitialized at phase {self._depth}: {optimizer_class.__name__}.")
@@ -2055,6 +2092,12 @@ class TuningScheduler:
         self._require_setup()
         assert self._compiled is not None
         return self._compiled
+
+    @property
+    def gradient_masks(self) -> dict[str, tuple[int, ...]]:
+        """The gradient masks in effect: each masked parameter's kept first-axis indices (see
+        :meth:`~finetuning_scheduler.core.compile.CompiledSchedule.masks_at`)."""
+        return self._grad_masks.masks if self._grad_masks is not None else {}
 
     @property
     def roles(self) -> dict[str, str]:

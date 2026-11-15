@@ -19,12 +19,14 @@ Compile a schedule's logical names, once, into the physical parameters each phas
 addresses (`venngram <https://github.com/speediedan/venngram>`_ addresses, ``role:`` selectors among them) select
 physical tensors through the view's roles, its structure and the schedule's named sets; names and regexes resolve
 against the view's logical names and then map to physical names; and the view's coupled tensors (for example a block's
-norms) join the first phase that pulls them. It refuses a schedule whose phases share storage, that schedules a
-``fitted`` or ``instrument`` tensor, or that names anything the view cannot resolve, naming the offending input. The
-schedule itself keeps its logical names.
+norms) join the first phase that pulls them. An address of gradients (``of: grad``) thaws what it selects and compiles
+to a gradient mask over each tensor's first axis (:attr:`CompiledPhase.masks`). It refuses a schedule whose phases share
+storage, that schedules a ``fitted`` or ``instrument`` tensor, or that names anything the view cannot resolve, naming
+the offending input. The schedule itself keeps its logical names.
 
 .. warning:: This is an experimental API and may change in a future release.
 """
+import dataclasses
 import functools
 import hashlib
 import itertools
@@ -44,7 +46,8 @@ from venngram import is_address, ParamSpace, select
 from venngram.address import parse as parse_address
 from venngram.address import references
 from venngram.errors import VenngramError
-from venngram.support import SupportRecord
+from venngram.resolve import gradient_masks, gradient_of
+from venngram.support import SupportRecord, TuningSupport
 
 from finetuning_scheduler.core.roles import is_frozen_role, role_kind
 from finetuning_scheduler.core.schedule import (parse_promote, requires_grad_capable, resolve_param_entries,
@@ -63,6 +66,11 @@ class CompiledPhase:
         coupled: The physical parameters thawed with them that no earlier phase claimed.
         refrozen: The physical parameters the phase refreezes when it starts, with the view's coupled tensors among
             those still trainable.
+        masks: The gradient masks the phase sets (its ``of: grad`` entries): each tensor's kept indices along its first
+            axis (a weight's output rows), or ``None`` for a tensor an earlier phase masked that this phase trains
+            whole. A tensor whose every index is kept has no mask. A masked tensor an earlier phase thawed and this
+            phase selects again widens its mask: it is listed here, not in ``physical``, and stays in the earlier
+            phase's parameter groups.
     """
 
     depth: int
@@ -70,6 +78,7 @@ class CompiledPhase:
     physical: tuple[str, ...]
     coupled: tuple[str, ...] = ()
     refrozen: tuple[str, ...] = ()
+    masks: Mapping[str, tuple[int, ...] | None] = field(default_factory=dict)
 
     @property
     def thawed(self) -> tuple[str, ...]:
@@ -127,6 +136,23 @@ class CompiledSchedule:
             for n in cp.refrozen:
                 trainable.pop(n, None)
         return tuple(trainable)
+
+    def masks_at(self, depth: int) -> dict[str, tuple[int, ...]]:
+        """The gradient masks in effect once phase ``depth`` is in place: each masked tensor's kept first-axis
+        indices, after the phases' masks, widenings and ``refreeze`` entries through ``depth``, applied in order (a
+        refrozen tensor loses its mask)."""
+        if not any(cp.depth == depth for cp in self.phases):
+            raise KeyError(f"The compiled schedule has no phase {depth}.")
+        masks: dict[str, tuple[int, ...]] = {}
+        for cp in (cp for cp in self.phases if cp.depth <= depth):
+            for n, kept in cp.masks.items():
+                if kept is None:
+                    masks.pop(n, None)
+                else:
+                    masks[n] = kept
+            for n in cp.refrozen:
+                masks.pop(n, None)
+        return masks
 
     def physical_of(self, logical: Sequence[str]) -> list[str]:
         """The physical parameters compiled logical names stand for, in order and without duplicates."""
@@ -221,6 +247,7 @@ class _Addressing:
     bound: BoundView
     physical: Sequence[str]
     sets: Mapping[str, Any]
+    widths: Mapping[str, int] = field(default_factory=dict)  # each tensor's first-axis length, for gradient masks
     _aliases: dict[str, tuple[str, ...]] | None = None
     _structure: Any = None
 
@@ -239,8 +266,54 @@ class _Addressing:
         try:
             return select(entry, self.space(roles), self.sets)
         except VenngramError as err:
-            detail = str(err).partition(" does not resolve: ")[2] or str(err)
-            raise FTSConfigurationError(f"The address '{entry}' in phase {depth} does not resolve: {detail}") from err
+            raise _unresolved(entry, depth, err) from err
+
+    def of_grad(self, entry: Any, depth: int) -> bool:
+        """Whether ``entry`` is an address of gradients (``of: grad``, written in it or in a set it references)."""
+        if not is_address(entry):
+            return False
+        try:
+            return gradient_of(entry, self.sets) == "grad"
+        except VenngramError as err:
+            raise _unresolved(entry, depth, err) from err
+
+    def masks(self, entry: Any, depth: int, roles: Mapping[str, str]) -> dict[str, tuple[int, ...]]:
+        """The kept first-axis indices of each tensor an ``of: grad`` address selects."""
+        try:
+            return gradient_masks(entry, self.space(roles), self.sets, widths=self.widths)
+        except VenngramError as err:
+            raise _unresolved(entry, depth, err) from err
+
+
+def _unresolved(entry: Any, depth: int, err: VenngramError) -> FTSConfigurationError:
+    detail = str(err).partition(" does not resolve: ")[2] or str(err)
+    return FTSConfigurationError(f"The address '{entry}' in phase {depth} does not resolve: {detail}")
+
+
+def _phase_masks(entries: Sequence[Any], resolved: Sequence[tuple[bool, list[str]]],
+                 mapped: Mapping[str, Sequence[str]], depth: int, roles: Mapping[str, str],
+                 addressing: _Addressing) -> dict[str, tuple[int, ...]]:
+    """Phase ``depth``'s gradient masks: for each tensor its ``of: grad`` entries select, the union of their kept
+    indices, unless another of its entries selects the whole tensor or the union keeps every index (no mask)."""
+    kept: dict[str, set[int]] = {}
+    whole: set[str] = set()
+    for entry, (is_sel, names) in zip(entries, resolved):
+        if addressing.of_grad(entry, depth):
+            for p, rows in addressing.masks(entry, depth, roles).items():
+                kept.setdefault(p, set()).update(rows)
+        else:
+            whole.update(names if is_sel else (q for n in names for q in mapped[n]))
+    return {p: tuple(sorted(rows)) for p, rows in kept.items()
+            if p not in whole and len(rows) < addressing.widths[p]}
+
+
+def _refuse_gradient_entries(entries: Sequence[Any], depth: int, key: str, addressing: _Addressing) -> None:
+    """``refreeze`` and ``promote`` act on whole tensors, so an ``of: grad`` address there is refused by name."""
+    grads = [e for e in entries if addressing.of_grad(e, depth)]
+    if grads:
+        raise FTSConfigurationError(
+            f"Phase {depth}'s `{key}` addresses gradients (`of: grad`): {grads}. `{key}` acts on whole tensors, so"
+            " address them without `of: grad`; a gradient mask belongs in a phase's `params`.")
 
 
 def _expand(entries: Sequence[Any], depth: int, bound: BoundView, logical_names: Sequence[str],
@@ -327,6 +400,9 @@ def _digest(phases: Sequence[CompiledPhase], roles: Mapping[str, str],
         payload["promotions"] = [[d, sorted(p.items())] for d, p in sorted(promotions.items())]
     if any(cp.refrozen for cp in phases):  # likewise for a schedule that refreezes nothing
         payload["refrozen"] = [[cp.depth, list(cp.refrozen)] for cp in phases if cp.refrozen]
+    if any(cp.masks for cp in phases):  # and for one that masks no gradients
+        payload["masks"] = [[cp.depth, [[n, None if m is None else list(m)] for n, m in sorted(cp.masks.items())]]
+                            for cp in phases if cp.masks]
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
@@ -335,6 +411,7 @@ def _compile_promotions(depth: int, promote: Mapping[str, str], bound: BoundView
     """Resolve phase ``depth``'s ``promote`` mapping to physical tensors and their new roles, checking each is an
     ``instrument`` tensor promoted once."""
     parse_promote(depth, promote)
+    _refuse_gradient_entries(list(promote), depth, "promote", addressing)
     promoted: dict[str, str] = {}
     for source, target in promote.items():
         ((is_sel, names),) = _expand([source], depth, bound, logical_names, roles, shared, addressing)
@@ -359,6 +436,7 @@ def _compile_refreeze(depth: int, entries: Sequence[str], bound: BoundView, logi
     refreezes (with the view's coupled tensors that are still trainable) and each logical name's physical tensors,
     checking each is trainable: ``live`` maps the tensors trainable so far to the phase that thawed them, and
     ``refrozen`` those refrozen since to the phase that refroze them."""
+    _refuse_gradient_entries(entries, depth, "refreeze", addressing)
     resolved = _expand(entries, depth, bound, logical_names, roles, shared, addressing)
     logical = list(dict.fromkeys(n for is_sel, names in resolved if not is_sel for n in names))
     try:
@@ -426,17 +504,58 @@ def referenced_sets(schedule: Mapping[int, Mapping[str, Any]]) -> set[str]:
     return out
 
 
+def _is_gradient(entry: Any, sets: Mapping[str, Any]) -> bool:
+    try:
+        return gradient_of(entry, sets) == "grad"
+    except VenngramError:  # a missing set, or terms that disagree on `of`: compilation names it
+        return False
+
+
+def gradient_entries(schedule: Mapping[int, Mapping[str, Any]],
+                     sets: Mapping[str, Any] | None = None) -> dict[int, list[str]]:
+    """Each phase's ``params`` entries that address gradients (``of: grad``, written in the entry or in a set of
+    ``sets`` it references), for the phases that have any."""
+    out: dict[int, list[str]] = {}
+    for depth, phase in schedule.items():
+        grads = [e for e in phase.get("params") or [] if isinstance(e, str) and is_address(e)
+                 and _is_gradient(e, sets or {})]
+        if grads:
+            out[depth] = grads
+    return out
+
+
+@functools.cache
+def _mask_support(tuning: TuningSupport) -> TuningSupport:
+    """``tuning`` as it judges the sets a schedule uses under ``of: grad``, where a unit set is a gradient mask
+    rather than units to tune.
+
+    venngram's support check reads every unit set as units to tune, which the record refuses (it honours no ``units``
+    field, and declares ``units: none``), and its unit patterns name no gradient mask, so the refusal is lifted here
+    for those sets only.
+    """
+    return dataclasses.replace(tuning, fields=tuning.fields | {"units"}, units="unit-adapter")
+
+
 def _check_book_requirements(addresses: Mapping[str, Any] | None, naming_scheme: str,
-                             used: Collection[str] = ()) -> None:
+                             used: Collection[str] = (), used_as_grad: Collection[str] = ()) -> None:
     """Refuse address books written in another vocabulary than the view's (``requires.naming_scheme``), and books
-    whose sets in ``used`` (and the sets those reference) ask for something :func:`support_record` does not
-    honour."""
+    whose sets in ``used`` and ``used_as_grad`` (and the sets those reference) ask for something
+    :func:`support_record` does not honour.
+
+    A set in ``used_as_grad`` is referenced by an ``of: grad`` entry, so its unit sets are gradient masks.
+    """
+    record = support_record()
+    assert record.tuning is not None
     for book in getattr(addresses, "books", ()):
         try:
             book.check_requires(naming_scheme=naming_scheme)
         except VenngramError as err:
             raise FTSConfigurationError(f"The schedule's `addresses` do not apply through this view: {err}") from err
-        refusals = support_record().check_book(book, sets=sorted(set(used) & set(book.sets())))
+        own = set(book.sets())
+        refusals = record.check_book(book, sets=sorted(set(used) & own))
+        if set(used_as_grad) & own:
+            masked = _mask_support(record.tuning).check_book(book, sets=sorted(set(used_as_grad) & own))
+            refusals += [r for r in masked if r not in refusals]
         if refusals:
             raise FTSConfigurationError("The schedule's `addresses` ask for what Fine-Tuning Scheduler does not tune:"
                                         "\n  " + "\n  ".join(refusals))
@@ -456,6 +575,13 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     A phase's ``refreeze`` entries resolve the same way, to tensors still trainable when it starts. A refrozen tensor
     can be thawed again by a later phase; the checks above count a tensor's thaws only while it is trainable.
 
+    An address of gradients (``of: grad``) thaws what it selects, as any address does, and compiles to a gradient mask
+    over each tensor's first axis (venngram's :func:`~venngram.resolve.gradient_masks`): the union of the phase's
+    masks of that tensor, or none when another of the phase's entries selects it whole. A later phase may select a
+    masked tensor again, which widens its mask (to the whole tensor, when it selects it whole) rather than thawing it a
+    second time; a ``refreeze`` drops the mask with the tensor. A book's unit sets are judged as gradient masks in the
+    sets an ``of: grad`` entry uses, and as units to tune (refused) elsewhere.
+
     Args:
         schedule: The schedule (phase depth mapped to its configuration; only ``params``, ``promote`` and ``refreeze``
             are read).
@@ -474,7 +600,8 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
             that is not an ``instrument`` one; a phase schedules quantized or packed tensors through logical names
             that are views of them, or thaws a tensor whose storage cannot require gradients (see
             :func:`~finetuning_scheduler.core.schedule.requires_grad_capable`); or a phase refreezes a tensor that is
-            not trainable when it starts, both thaws and refreezes a tensor, or leaves nothing trainable.
+            not trainable when it starts, both thaws and refreezes a tensor, or leaves nothing trainable; or a
+            ``refreeze`` or ``promote`` entry addresses gradients.
     """
     _warn_addresses_experimental(schedule, addresses)
     bound: BoundView = as_view(view)
@@ -482,9 +609,14 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     if not support.trainable:
         raise FTSConfigurationError(f"The model cannot be fine-tuned through {type(bound.view).__name__}: "
                                     f"{support.reason}")
-    _check_book_requirements(addresses, support.naming_scheme, referenced_sets(schedule))
+    grads = gradient_entries(schedule, addresses)
+    by_value = {d: {**p, "params": [e for e in p.get("params") or [] if e not in grads.get(d, ())]}
+                for d, p in schedule.items()}
+    _check_book_requirements(addresses, support.naming_scheme, referenced_sets(by_value),
+                             referenced_sets({d: {"params": es} for d, es in grads.items()}))
     root = bound.root
     tensors = dict(root.named_parameters())
+    widths = {n: t.shape[0] if t.dim() else 1 for n, t in tensors.items()}
     roles = bound.roles()
     logical_names = [n for n, _ in bound.logical_named_parameters()]
     shared = shared_params_ref(root) if support.naming_scheme == "physical" else ([], set())
@@ -494,20 +626,21 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     across: list[list[tuple[str, int]]] = []
     live_coupled: dict[str, int] = {}
     refrozen: dict[str, int] = {}  # the tensors refrozen and not thawed since, with the phase that refroze each
+    masked: dict[str, tuple[int, ...]] = {}  # the trainable tensors' gradient masks so far
     lives: Counter[str] = Counter()  # how often each tensor has been refrozen: a thaw after a refreeze is a new one
     logical_to_physical: dict[str, tuple[str, ...]] = {}
     phases: list[CompiledPhase] = []
     overlaps: list[tuple[str, str]] = []
     roles_now = dict(roles)  # the view's roles plus the promotions so far
     promotions: dict[int, dict[str, str]] = {}
-    addressing = _Addressing(bound, list(tensors), addresses or {})
+    addressing = _Addressing(bound, list(tensors), addresses or {}, widths)
     for depth in sorted(schedule):
         if schedule[depth].get("promote"):
             promotions[depth] = _compile_promotions(depth, schedule[depth]["promote"], bound, logical_names, roles_now,
                                                     shared, addressing)
             roles_now.update(promotions[depth])
-        resolved = _expand(schedule[depth].get("params", []), depth, bound, logical_names, roles_now, shared,
-                           addressing)
+        entries = schedule[depth].get("params", [])
+        resolved = _expand(entries, depth, bound, logical_names, roles_now, shared, addressing)
         logical = list(dict.fromkeys(n for is_sel, names in resolved if not is_sel for n in names))
         try:
             mapped = dict(bound.to_physical(logical)) if logical else {}
@@ -537,16 +670,27 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
         if dropped:
             rank_zero_debug(f"Phase {depth}: {dropped} were already thawed with an earlier phase's coupled tensors.")
             primary = [p for p in primary if p not in live_coupled]
+        kept = _phase_masks(entries, resolved, mapped, depth, roles_now, addressing)
+        # a tensor an earlier phase masked that this phase selects again keeps training in its earlier groups, with
+        # the union of the two masks (no mask once this phase trains it whole)
+        phase_masks: dict[str, tuple[int, ...] | None] = {}
+        reselected = [p for p in primary if p in masked]
+        for p in reselected:
+            union = tuple(sorted(set(masked[p]) | set(kept.get(p, range(widths[p])))))
+            if union != masked[p]:
+                phase_masks[p] = union if len(union) < widths[p] else None
+        primary = [p for p in primary if p not in masked]
+        phase_masks.update({p: kept[p] for p in primary if p in kept})
         coupled = [c for c in dict.fromkeys(bound.coupled(primary))
                    if c not in primary and c not in live_primary and c not in live_coupled]
         unknown = [c for c in coupled if c not in tensors]
         if unknown:
             raise FTSConfigurationError(
                 f"The view's coupled tensors for phase {depth} are not parameters of its root module: {unknown}.")
-        both = sorted(set(refreeze) & (set(primary) | set(coupled)))
+        both = sorted(set(refreeze) & (set(primary) | set(coupled) | set(reselected)))
         if both:
             raise FTSConfigurationError(f"Phase {depth} both thaws and refreezes these tensors: {both}.")
-        cp = CompiledPhase(depth, tuple(logical), tuple(primary), tuple(coupled), tuple(refreeze))
+        cp = CompiledPhase(depth, tuple(logical), tuple(primary), tuple(coupled), tuple(refreeze), phase_masks)
         _check_phase_tensors(cp, roles_now, tensors, support.logical_names_are_views, legacy)
         # storage is shared only with what is trainable when the phase starts: a refrozen tensor no longer counts
         tagged = list(live_primary.items()) + [(p, depth) for p in primary if p not in live_primary]
@@ -564,9 +708,15 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
         live_coupled.update(dict.fromkeys(coupled, depth))
         for p in [*primary, *coupled]:
             refrozen.pop(p, None)
+        for p, m in phase_masks.items():
+            if m is None:
+                masked.pop(p, None)
+            else:
+                masked[p] = m
         for p in refreeze:
             live_primary.pop(p, None)
             live_coupled.pop(p, None)
+            masked.pop(p, None)
             refrozen[p] = depth
             lives[p] += 1
         if refreeze and not (live_primary or live_coupled):
@@ -625,4 +775,5 @@ def view_default_schedule(view: Any, order: Literal["output_first", "input_first
     return {depth: {"params": list(g)} for depth, g in enumerate(groups)}
 
 
-__all__ = ["CompiledPhase", "CompiledSchedule", "compile_schedule", "owner_module", "view_default_schedule"]
+__all__ = ["CompiledPhase", "CompiledSchedule", "compile_schedule", "gradient_entries", "owner_module",
+           "view_default_schedule"]

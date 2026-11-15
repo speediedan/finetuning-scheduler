@@ -222,6 +222,18 @@ def test_the_lightning_callback_refuses_an_unresolvable_address(tmp_path):
         _trainer(tmp_path, [fts], max_epochs=1).fit(_lightning_module())
 
 
+def test_the_lightning_callback_refuses_gradient_addresses_by_name(tmp_path):
+    """Gradient masks are the PyTorch API's in this release (#198); a set of gradients is refused by name, whether
+    written in the entry or in a set it references."""
+    schedule = {"addresses": {"sets": {"rows": {"role": "adapter", "layers": -1, "units": [0, 1], "of": "grad"}}},
+                0: {"params": ["@rows"], "max_transition_epoch": 1},
+                1: {"params": ["role:base & of:grad"]}}
+    fts = FinetuningScheduler(ft_schedule=schedule, epoch_transitions_only=True)
+    with pytest.raises(MisconfigurationException,
+                       match=r"addresses gradients .*only the PyTorch API .*phase 0: \['@rows'\]; phase 1:"):
+        _trainer(tmp_path, [fts], max_epochs=1).fit(_lightning_module())
+
+
 def test_addresses_warn_once_that_they_are_experimental_and_names_never_do(monkeypatch, recwarn):
     import finetuning_scheduler.core.compile as compile_mod
 
