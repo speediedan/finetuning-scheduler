@@ -111,6 +111,8 @@ class TunableViewConformance(ViewConformance):
             ConformanceCase("frozen_roles_refuse", "roles", lambda s, v: s.trainable and _has_frozen_parameter(v),
                             self._frozen_roles_refuse),
             protocol["promotion"],
+            protocol["cooperative_roles_merge"],
+            protocol["cooperative_roles_conflict"],
             ConformanceCase("parametrization_mapping", "parametrization",
                             lambda s, v: s.trainable and any(parametrize.is_parametrized(m) for m in v.root.modules()),
                             self._parametrization_mapping),
