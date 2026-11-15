@@ -383,9 +383,10 @@ the `fts-development-branch-version-upgrade` skill.
     switched to release mode BEFORE the run is queued.
   - **Nightly** (`schedules:`, 06:00 UTC, only when `main` changed since the last scheduled run): the full standalone
     suite and examples, plus the persistent distributed pool's modules in reverse order (`FTS_REVERSE_ORDER=1`,
-    `tests/conftest.py`), which catches a pool case that leaves state for the next. Path filters do not apply to a
-    schedule, so any change to `main` counts. Like every build on the shared agent it waits for its gate to be
-    approved, and only a successful scheduled run resets "changed": a nightly left unapproved is followed by another
+    `tests/conftest.py`), which catches a pool case that leaves state for the next. Merge builds of `main` run that
+    reverse-order pass too, so a green merge build covers what a nightly of the same tree would run. Path filters do not
+    apply to a schedule, so any change to `main` counts. Like every build on the shared agent it waits for its gate to
+    be approved, and only a successful scheduled run resets "changed": a nightly left unapproved is followed by another
     the next night, so reject the stale one.
 - `.azure-pipelines/templates/fts-gpu-job.yml`: the any-vendor GPU job, gpu-epsilon's `templates/gpu-job.yml` (shared
   with interpretune, pinned to a tag in each GPU pipeline's `resources`) with this repository's settings and steps: a
