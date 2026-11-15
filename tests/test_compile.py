@@ -119,8 +119,23 @@ def test_unresolvable_and_unmatched_entries_refuse():
 
     with pytest.raises(Unresolvable, match=r"\['block7'\]. \(phase 1\)"):
         compile_schedule({0: {"params": ["head"]}, 1: {"params": ["block7"]}}, ListsMoreThanItMaps(net))
+    # a `refreeze` entry resolves as a `params` entry does, and is refused naming the key
+    with pytest.raises(Unresolvable, match=r"\['block7'\]. \(phase 1's `refreeze`\)"):
+        compile_schedule({0: {"params": ["head"], "max_transition_epoch": 1},
+                          1: {"params": ["block2"], "refreeze": ["block7"]}}, ListsMoreThanItMaps(net))
     with pytest.raises(FTSConfigurationError, match="'nothing.*' specified in phase 0"):
         compile_schedule({0: {"params": ["nothing.*"]}}, CanonicalView(net))
+
+
+def test_name_terms_select_by_a_logical_views_names():
+    """Through a view with its own naming scheme, a `name` term matches the logical names as well as the physical
+    ones: `block2` names no physical tensor, so only its logical name selects it."""
+    net = _net()
+    compiled = compile_schedule({0: {"params": ['name:"block2"'], "max_transition_epoch": 1},
+                                 1: {"params": ['name:"block0|head"']}}, BlockView(net))
+    assert compiled.phases[0].physical == ("2.weight", "2.bias")
+    assert compiled.phases[0].coupled == ("3.weight", "3.bias")
+    assert compiled.phases[1].physical == ("0.weight", "0.bias", "4.weight", "4.bias")
 
 
 def test_role_selectors():
