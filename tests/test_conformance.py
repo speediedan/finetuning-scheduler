@@ -33,24 +33,29 @@ from finetuning_scheduler.testing.fixtures import (ALL_FIXTURES, D, Intervention
 
 EXPECTED_CASES = {
     "identity": {"mapping_completeness", "default_schedule_compiles", "thaw_is_exact_and_deterministic",
-                 "step_changes_only_thawed", "checkpoint_round_trip", "unmatched_rule_refuses"},
+                 "step_changes_only_thawed", "checkpoint_round_trip", "unmatched_rule_refuses",
+                 "cooperative_roles_merge"},
     "one_to_many": {"mapping_completeness", "mapping_round_trip", "default_schedule_compiles",
                     "thaw_is_exact_and_deterministic", "step_changes_only_thawed", "checkpoint_round_trip",
-                    "unmatched_rule_refuses"},
+                    "unmatched_rule_refuses", "cooperative_roles_merge"},
     "roles": {"mapping_completeness", "default_schedule_compiles", "thaw_is_exact_and_deterministic",
               "step_changes_only_thawed", "checkpoint_round_trip", "unmatched_rule_refuses", "roles_valid",
-              "frozen_roles_refuse", "promotion"},
+              "frozen_roles_refuse", "promotion", "cooperative_roles_merge", "cooperative_roles_conflict"},
     "parametrized": {"mapping_completeness", "default_schedule_compiles", "thaw_is_exact_and_deterministic",
                      "step_changes_only_thawed", "checkpoint_round_trip", "unmatched_rule_refuses",
-                     "parametrization_mapping"},
+                     "parametrization_mapping", "cooperative_roles_merge"},
 }
+# Cases the pinned venngram fails on a conforming fixture: speediedan/venngram#83 (`cooperative_roles_merge` fails a
+# view that already assigns a role of the kind it declares, as `roles` does with `intervention:jspace`). Asserted
+# exactly, so the pin that brings the fix fails here until the entry is removed.
+UPSTREAM_FAILURES = {"roles": {"cooperative_roles_merge"}}
 
 
 @pytest.mark.parametrize("fixture", list(ALL_FIXTURES), ids=list(ALL_FIXTURES))
 def test_fixture_views_conform(fixture):
-    report = TunableViewConformance(ALL_FIXTURES[fixture]).run(raise_on_failure=True)
+    report = TunableViewConformance(ALL_FIXTURES[fixture]).run()
     assert set(report.ran) == EXPECTED_CASES[fixture]
-    assert report.ok
+    assert set(report.failures) == UPSTREAM_FAILURES.get(fixture, set()), report.failures
 
 
 class DocsBlockView:
@@ -197,6 +202,19 @@ class KeepsTiedStorage(CanonicalView):
         return {n: n for n in physical}
 
 
+class RolesChangeAfterTheFirstRead(CanonicalView):
+    """Reports ``first`` as its roles on the first read and ``later`` afterwards, so a cooperative declaration is
+    merged with, or checked against, roles the view no longer reports."""
+
+    def __init__(self, root, first, later):
+        super().__init__(root)
+        self.first, self.later, self.reads = first, later, 0
+
+    def roles(self):
+        self.reads += 1
+        return dict(self.first if self.reads == 1 else self.later)
+
+
 def _tied_lens_model():
     model = InterventionModel()
     model.lens_alias = nn.Linear(D, V)
@@ -240,6 +258,11 @@ MUTANTS = {
     "roles_valid": lambda: UndeclaredRoles(InterventionModel(), roles=ROLES),
     "frozen_roles_refuse": lambda: LaundersAFrozenTensor(InterventionModel(), roles=ROLES),
     "promotion": lambda: KeepsTiedStorage(_tied_lens_model(), roles=ROLES),
+    # later claims every tensor, so the declared tensor is reported with the view's role instead
+    "cooperative_roles_merge": lambda: RolesChangeAfterTheFirstRead(
+        nn.Linear(2, 2), {}, {"weight": "adapter:late", "bias": "adapter:late"}),
+    # later reports no roles, so a declaration that conflicts with the first read is accepted
+    "cooperative_roles_conflict": lambda: RolesChangeAfterTheFirstRead(InterventionModel(), ROLES, {}),
     "parametrization_mapping": lambda: PhysicalOnlyView(_ParamNet()),
 }
 

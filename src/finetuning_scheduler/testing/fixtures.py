@@ -142,7 +142,7 @@ def one_to_many_view() -> OneToManyView:
 
 
 class InterventionModel(nn.Module):
-    """A base model plus modules that live beside it: adapters, an intervention, a latent dictionary, an instrument
+    """A base model plus modules that live beside it: adapters, an intervention, a latent dictionary, an artifact
     lens and fitted state."""
 
     def __init__(self) -> None:
@@ -164,8 +164,8 @@ ROLES = {
     "jspace": "intervention:jspace",
     "transcoder.weight": "latent:transcoder",
     "transcoder.bias": "latent:transcoder",
-    "lens.weight": "instrument",
-    "lens.bias": "instrument",
+    "lens.weight": "artifact",
+    "lens.bias": "artifact",
     "procrustes": "fitted",
     "enforce_mean": "fitted",
     "enforce_mask": "fitted",

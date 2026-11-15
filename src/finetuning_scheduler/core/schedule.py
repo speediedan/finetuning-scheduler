@@ -687,7 +687,7 @@ def parse_phase_extensions(schedule: dict) -> None:
     - ``phase_config``: an opaque mapping handed to phase hooks and gates.
     - ``pg_overrides``: optimizer options (other than ``params`` and ``lr``, which have their own keys) applied to the
       parameter group the phase adds.
-    - ``promote``: tensors to promote from the ``instrument`` role to a ``latent:<name>`` role when the phase starts,
+    - ``promote``: tensors to promote from the ``artifact`` role to a ``latent:<name>`` role when the phase starts,
       as ``{selector_or_name: "latent:<name>"}`` (not in phase 0).
     - ``refreeze``: names, regexes or addresses of tensors an earlier phase thawed, refrozen when the phase starts and
       dropped from the optimizer (not in phase 0).

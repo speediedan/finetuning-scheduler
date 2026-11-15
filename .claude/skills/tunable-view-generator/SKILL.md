@@ -6,7 +6,7 @@ description: Find, verify or create the tunable view a finetuning-scheduler sche
 # Finding or generating a tunable view
 
 A tunable view (protocol in `venngram.tuning`) tells finetuning-scheduler what a model's tensors are: their roles
-(`adapter`, `latent:<name>`, `instrument`, ...), their layers, and their architecture-neutral components (`attn.q`,
+(`adapter`, `latent:<name>`, `artifact`, ...), their layers, and their architecture-neutral components (`attn.q`,
 `mlp.out`, `ln2`, ...). Schedules can then use addresses such as `role:adapter & layers:-4:` or
 `component:mlp.* & layers:-1:`, which mean the same tensors on every architecture the view describes.
 

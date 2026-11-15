@@ -14,6 +14,7 @@
 These need only PyTorch and the scheduling core (the ``core-no-lightning`` job runs them with ``--noconftest``).
 """
 import copy
+import warnings
 
 import pytest
 import torch
@@ -152,10 +153,10 @@ def test_role_selectors():
 
 def test_frozen_roles_refuse():
     net = _net()
-    view = CanonicalView(net, roles={"0.weight": "fitted", "1.weight": "instrument"})
+    view = CanonicalView(net, roles={"0.weight": "fitted", "1.weight": "artifact"})
     with pytest.raises(FTSConfigurationError, match=r"Phase 1 schedules tensors whose role is never thawed.*0.weight"):
         compile_schedule({0: {"params": ["4.weight"]}, 1: {"params": [r"0\..*"]}}, view)
-    leaky = BlockView(net, roles={"1.weight": "instrument"})
+    leaky = BlockView(net, roles={"1.weight": "artifact"})
     sched = {0: {"params": ["head"]}, 1: {"params": ["block0"]}}
     with pytest.raises(FTSConfigurationError, match="coupled tensors include tensors whose role is never thawed"):
         compile_schedule(sched, leaky)
@@ -328,10 +329,26 @@ def test_physical_for_takes_a_phase_depth():
 @pytest.mark.parametrize("target", ["adapter", "bogus-role", "latent"])
 def test_compiling_refuses_an_invalid_promotion_target(target):
     net = _net()
-    view = CanonicalView(net, roles={"0.weight": "instrument"})
+    view = CanonicalView(net, roles={"0.weight": "artifact"})
     with pytest.raises(FTSConfigurationError):
         compile_schedule({0: {"params": ["4.weight"]}, 1: {"params": ["2.weight"], "promote": {"0.weight": target}}},
                          view)
+
+
+def test_the_retired_instrument_role_reads_as_artifact():
+    """``instrument``, the earlier name of ``artifact``, still reads as ``artifact`` through venngram 0.1.
+
+    It does so (warning once per process that it is deprecated) in a view's roles and in a ``role:`` selector, so
+    promotion accepts it.
+    """
+    net = _net()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        view = CanonicalView(net, roles={"0.weight": "instrument"})
+        compiled = compile_schedule(
+            {0: {"params": ["4.weight"]}, 1: {"params": ["role:latent:a"], "promote": {"role:instrument": "latent:a"}}},
+            view)
+    assert compiled.roles_at(0)["0.weight"] == "artifact" and compiled.roles_at(1)["0.weight"] == "latent:a"
 
 
 def test_a_regex_through_a_view_that_indexes_a_mapping_refuses_by_name():
@@ -361,14 +378,14 @@ def test_view_default_schedule_leaves_out_a_name_standing_for_frozen_and_trainab
 @pytest.mark.parametrize(
     "promote, match",
     [
-        ({"0.weight": "latent:a", "role:instrument": "latent:b"}, "names these tensors more than once"),
+        ({"0.weight": "latent:a", "role:artifact": "latent:b"}, "names these tensors more than once"),
         ({"": "latent:a"}, "keys must be selectors or names"),
     ],
     ids=["twice", "empty_key"],
 )
 def test_compiling_refuses_an_invalid_promotion_source(promote, match):
     net = _net()
-    view = CanonicalView(net, roles={"0.weight": "instrument"})
+    view = CanonicalView(net, roles={"0.weight": "artifact"})
     with pytest.raises(FTSConfigurationError, match=match):
         compile_schedule({0: {"params": ["4.weight"]}, 1: {"params": ["2.weight"], "promote": promote}}, view)
 

@@ -50,7 +50,7 @@ and the Lightning callback (attach the view to the ``LightningModule``). A model
    Views and addresses exist for what names do badly:
 
    - **interpretability experiments**, which tune, freeze and promote adapters, interventions, latent models and
-     instruments by role, often through several wrappers of one model;
+     artifacts by role, often through several wrappers of one model;
    - **composable, shareable model components**: named sets of parameters or units, defined once for a model family
      and reused, sliced and recombined;
    - **experiments defined once and run across models**: conditions written as addresses depend far less on any one
@@ -188,16 +188,18 @@ A role says what a tensor *is*, and so what Fine-Tuning Scheduler may do with it
      - never
      - yes
      - the only role checkpointed but never trained: a resumed run needs its values, and no optimizer may touch them
-   * - ``instrument``
-     - a published artifact loaded for analysis (a pretrained SAE, for example)
+   * - ``artifact``
+     - a published, re-loadable object applied in the forward pass (a pretrained SAE, a frozen steering vector or a
+       loaded weight patch, for example)
      - never (until promoted)
      - no
      - reloaded from its source rather than checkpointed; the only role that can be promoted
 
 The trained roles behave alike in Fine-Tuning Scheduler; they are separate kinds rather than names of one kind so that
 the common selector (``role:adapter``) means what it says when a model carries several kinds of added tensors, and so
-that tools reading a view can tell them apart. ``fitted`` and ``instrument`` exist for interpretability work, where
-interpretune's views use them.
+that tools reading a view can tell them apart. ``fitted`` and ``artifact`` exist for interpretability work, where
+interpretune's views use them. ``instrument``, the earlier name of ``artifact``, is still read as ``artifact`` (in a
+view's roles and in a ``role:`` selector) with a deprecation warning through venngram 0.1, and refused from venngram 0.2.
 
 Selectors and Addresses
 ***********************
@@ -282,6 +284,6 @@ adapter that renames parameters takes precedence over an attached view (see :ref
 
 Going Further
 *************
-:ref:`tunable-views-advanced` covers writing and testing a view of your own, promotion (an ``instrument`` becoming a
+:ref:`tunable-views-advanced` covers writing and testing a view of your own, promotion (an ``artifact`` becoming a
 trainable ``latent``), address books by reference, what a book may ask of Fine-Tuning Scheduler, and exporting a
 schedule as a book.

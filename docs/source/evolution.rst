@@ -36,7 +36,7 @@ What Changed
 - **Training loops vary.** Many training loops are written directly in PyTorch, often distributed with FSDP2 or tensor
   parallelism, rather than in a framework.
 - **A schedule is no longer only a fine-tuning schedule.** It may train adapters, fit or freeze a latent model, or
-  promote an instrument, as steps of an experiment. These docs therefore say *schedule*, or *experiment schedule* where
+  promote an artifact, as steps of an experiment. These docs therefore say *schedule*, or *experiment schedule* where
   a qualifier helps, rather than *fine-tuning schedule*, which remains only in the names of existing APIs
   (``ft_schedule``, :class:`~finetuning_scheduler.fts.FinetuningScheduler`).
 
@@ -97,7 +97,7 @@ a schedule by hand:
      - names and regexes
    * - train a subset of a role (some adapters, not all) across several wrappers of one model
      - a view and addresses
-   * - tune or freeze latent models, interventions and instruments, and promote them between phases
+   * - tune or freeze latent models, interventions and artifacts, and promote them between phases
      - a view, with roles
    * - share or reuse a named set of parameters or units across models of a family
      - addresses and address books
