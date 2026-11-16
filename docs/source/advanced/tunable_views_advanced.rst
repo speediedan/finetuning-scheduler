@@ -131,6 +131,53 @@ checkpoint, or the rollback point of a vetoed phase) puts the promoted tensors b
 values are kept on the CPU and saved with :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save`.
 Promotion is not yet supported on a sharded model, and a view that overrides its checkpoint state must define ``promote``.
 
+.. _tunable-views-gradient-masks:
+
+Training Part of a Tensor
+*************************
+An address of gradients (``of: grad``) trains part of each tensor it selects (the PyTorch API only): the tensor is
+thawed, and its gradient is masked to the indices along its first axis (a weight's output rows, a bias's entries) that
+the address's ``units`` keep. Here a model's middle ``Linear`` trains only output units 0 and 2, then unit 5 as well,
+beside its head's weight trained whole:
+
+.. code-block:: python
+
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 8), nn.ReLU(), nn.Linear(8, 2))
+    schedule = {
+        0: {"params": ["module:2 & units:[0, 2] & of:grad"], "max_transition_epoch": 2},
+        1: {"params": ["4.weight", "module:2 & units:[5] & of:grad"]},
+    }
+    fts = TuningScheduler(model, schedule, optimizer=partial(torch.optim.AdamW, lr=1e-3))
+    fts.setup()
+    fts.gradient_masks  # {'2.weight': (0, 2), '2.bias': (0, 2)}; from phase 1, (0, 2, 5) for each
+
+The rules:
+
+- **A phase's mask for a tensor is the union of its entries.** An entry that selects the tensor whole, or a mask that
+  keeps every index, trains it unmasked. A later phase that selects a masked tensor again widens its mask (unit 5 above)
+  or trains it whole.
+- **A phase may mix whole tensors and gradient addresses**, as phase 1 does: each entry resolves on its own.
+- **The masked indices stay put.** The mask is applied to each step's accumulated gradient, before clipping and the
+  optimizer step, and the masked indices are also held through the step, so weight decay and momentum do not move
+  them, for any optimizer. Masks follow the schedule through refreezing, promotion, optimizer reinitialization and
+  resume; each phase logs its masked tensors, and
+  :attr:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.gradient_masks` gives the masks in effect.
+- **Unit sets are written like any other field**, in an entry or in a named set, where an architecture-neutral
+  component makes the same schedule apply to every model its view maps:
+
+  .. code-block:: yaml
+
+      addresses:
+        sets:
+          q_rows: {component: attn.q, layers: "-4:", units: [0, 17, 42], of: grad}
+      0:
+        params: ["@q_rows"]
+
+``of: grad`` is refused by name in a ``refreeze`` or ``promote`` entry, on the Lightning callback (its strategy adapters
+shard and checkpoint parameters themselves), and on a sharded model (FSDP2 sets a parameter's gradient directly, so the
+mask's hook would not run). A mask is so far the only operation on the gradients a schedule addresses; scaling,
+projecting or a function of your own are `#219 <https://github.com/speediedan/finetuning-scheduler/issues/219>`_.
+
 Address Books Through venngram
 ******************************
 venngram defines how address books are published, referenced and checked (`Address books
@@ -174,7 +221,12 @@ per phase (``phase_0``, ``phase_1``, ...), so a tuning setup can be published, i
     fts.export_book("books/my_schedule.yaml")
 
 Names and regexes become ``name`` terms (a regex keeps Fine-Tuning Scheduler's prefix match), the book declares the
-view's naming scheme, and books fetched by reference are recorded under ``derived_from``.
+view's naming scheme, and books fetched by reference are recorded under ``derived_from``. A phase of gradient addresses
+becomes a set of gradients, in an address book of schema 2. A venngram set is either values or gradients, and takes a
+gradient mask from one conjunction, so two kinds of phase that train as written cannot yet be exported: one mixing
+whole tensors and gradient addresses (phase 1 of the :ref:`example above<tunable-views-gradient-masks>`), and one of
+several gradient entries with a unit set among them. Each is refused by name;
+`venngram#91 <https://github.com/speediedan/venngram/issues/91>`_ would let one set hold either.
 
 .. _tunable-views-refusals:
 
@@ -183,7 +235,8 @@ Refusals
 An address that does not resolve is refused: it matches nothing, references a set no book
 defines, names a layer outside the model, needs architecture knowledge the view does not supply (``component:`` needs a
 vocabulary-backed structure provider, such as :class:`~venngram.maps.view.MappedView`'s), addresses an activation site
-(``point:``), or addresses units of a tensor (``units:``, which are tuned through a unit adapter of their own).
+(``point:``), or addresses units of a tensor's value (``units:`` outside an ``of: grad`` address; units are trained in
+place through a :ref:`gradient mask<tunable-views-gradient-masks>`, or tuned through a unit adapter of their own).
 venngram's ``venngram-addressing`` agent skill (`Agent skill <https://github.com/speediedan/venngram#agent-skill>`_)
 explains how to read each one.
 

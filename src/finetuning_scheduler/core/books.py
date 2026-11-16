@@ -27,9 +27,12 @@ Each phase's set is the union of its ``params`` entries, as written:
   the view's vocabulary, so a book with any declares ``requires.naming_scheme``.
 
 A phase of gradient addresses (``of: grad``) becomes a set of gradients, in an address book of schema 2 (the first that
-can hold ``of``); a book without one keeps schema 1. A set is either values or gradients, so a phase mixing the two
-cannot be written as one set and is refused, as is a phase of several gradient entries with a unit set among them
-(venngram takes a gradient mask from one conjunction, so their union would not resolve to the phase's masks).
+can hold ``of``); a book without one keeps schema 1. Two kinds of phase train as written but cannot yet be exported,
+because a venngram set is either values or gradients and takes a gradient mask from one conjunction: a phase mixing
+whole tensors and gradient addresses (training some tensors whole beside part of others is allowed, each entry resolving
+on its own), and a phase of several gradient entries with a unit set among them (their union would not resolve to the
+phase's masks). Both are refused by name until venngram lets one set hold either
+(`venngram#91 <https://github.com/speediedan/venngram/issues/91>`_).
 
 A book derived from address books fetched by reference records their exact references under ``derived_from``.
 
@@ -114,11 +117,13 @@ def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addre
         if any(grads) and not all(grads):
             raise FTSConfigurationError(
                 f"Phase {depth} mixes gradient (`of: grad`) and value entries, which one set cannot hold (a set is"
-                " either values or gradients), so it cannot be exported as a book.")
+                " either values or gradients), so it cannot be exported as a book. It trains as written; export waits"
+                " on speediedan/venngram#91.")
         if len(exprs) > 1 and any(grads) and any(t.units is not None for e in exprs for t in terms(e)):
             raise FTSConfigurationError(
                 f"Phase {depth} has several gradient entries with a unit set among them, whose union cannot be one set:"
-                " venngram takes a gradient mask from one conjunction, so it cannot be exported as a book.")
+                " venngram takes a gradient mask from one conjunction, so it cannot be exported as a book. It trains as"
+                " written; export waits on speediedan/venngram#91.")
         uses_of |= any(t.of is not None for e in exprs for t in terms(e))
         out_sets[f"phase_{depth}"] = to_mapping(exprs[0] if len(exprs) == 1 else Or(tuple(exprs)))
     book: dict[str, Any] = {"schema_version": 2 if uses_of else 1, "name": name}
