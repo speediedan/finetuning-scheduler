@@ -22,10 +22,11 @@ import torch
 
 from finetuning_scheduler.core.compile import compile_schedule
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
+from finetuning_scheduler.core.executor import TuningSchedulerExecutor
 from finetuning_scheduler.core.grad_transforms import Clamp, Project, Reject, Scale
 from finetuning_scheduler.core.schedule import refuse_direct_api_keys
 from finetuning_scheduler.strategies.dtensor import DTensorAdapter
-from finetuning_scheduler import CanonicalView, TuningScheduler
+from finetuning_scheduler import CanonicalView, TorchInterface, TuningScheduler
 from tests.test_tuning_scheduler_grad_masks import _backward, _run, _train_epoch, _val, MID_ROWS
 from tests.test_tuning_scheduler_stages import _assert_same, _model, _schedule
 
@@ -243,6 +244,13 @@ def test_a_reinitialized_optimizer_keeps_the_transforms():
 def test_the_lightning_callback_refuses_grad_transforms():
     with pytest.raises(FTSConfigurationError, match=r"phase 0: grad_transforms"):
         refuse_direct_api_keys({0: {"params": ["x"], "grad_transforms": {"x": HALF}}})
+
+
+def test_an_externally_driven_tuning_scheduler_refuses_grad_transforms():
+    model = _model()
+    fts = TuningScheduler(model, optimizer=torch.optim.SGD, interface=TorchInterface(model))
+    with pytest.raises(FTSConfigurationError, match=r"phase 0: grad_transforms"):
+        fts.attach(TuningSchedulerExecutor(fts), {0: {"params": ["module:1"], "grad_transforms": {"module:1": HALF}}})
 
 
 def test_a_sharded_model_refuses_gradient_transforms():
