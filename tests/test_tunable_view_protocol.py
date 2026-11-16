@@ -29,16 +29,10 @@ from finetuning_scheduler.testing import TunableViewConformance
 from finetuning_scheduler.testing.fixtures import ALL_FIXTURES
 
 
-# Cases the pinned venngram fails on a conforming fixture: speediedan/venngram#83 (`cooperative_roles_merge` fails a
-# view that already assigns a role of the kind it declares, as `roles` does with `intervention:jspace`). Asserted
-# exactly, so the pin that brings the fix fails here until the entry is removed.
-UPSTREAM_FAILURES = {"roles": {"cooperative_roles_merge"}}
-
-
 @pytest.mark.parametrize("name", sorted(ALL_FIXTURES))
 def test_fixture_views_conform_to_the_protocol(name):
     report = venngram.tuning.ViewConformance(ALL_FIXTURES[name]).run()
-    assert set(report.failures) == UPSTREAM_FAILURES.get(name, set()), report.failures
+    assert report.ok, report.failures
 
 
 def test_fts_suite_extends_the_protocol_suite():

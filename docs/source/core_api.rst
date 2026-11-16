@@ -20,6 +20,7 @@ are not documented as public API.
     core.roles
     core.compile
     core.books
+    core.grad_masks
     strategies.base
     strategies.unsharded
     strategies.dtensor

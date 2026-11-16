@@ -6,12 +6,16 @@ kind: support_record
 name: finetuning-scheduler
 description: >-
   A schedule thaws tensors: its sets select parameters by role, name, module, layer, block stack, component (through a
-  view with a component vocabulary) and leaf. It tunes no sites, features or subspaces directly (an adapter or latent
-  model holding them is tuned through its own tensors), and no unit sets yet. Naming schemes are whatever the view
-  provides, checked against each book's `requires.naming_scheme`.
+  view with a component vocabulary) and leaf. A set of gradients (`of: grad`) thaws what it selects and, with `units`,
+  masks each tensor's gradient to those indices along its first axis (the PyTorch API, `TuningScheduler`, applies the
+  masks; the Lightning callback refuses them). It tunes no sites, features or subspaces directly (an adapter or latent
+  model holding them is tuned through its own tensors), and no unit sets as values (`units: none`; a unit set under
+  `of: grad` is a gradient mask, which venngram's support check does not yet tell apart, so Fine-Tuning Scheduler
+  judges those sets itself). Naming schemes are whatever the view provides, checked against each book's
+  `requires.naming_scheme`.
 sections:
   tuning:
-    fields: [role, name, module, layers, stack, component, leaf]
+    fields: [role, name, module, layers, stack, component, leaf, of]
     targets: [param]
     units: none
     structure: [physical, vocabulary]

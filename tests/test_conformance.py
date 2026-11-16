@@ -45,17 +45,13 @@ EXPECTED_CASES = {
                      "step_changes_only_thawed", "checkpoint_round_trip", "unmatched_rule_refuses",
                      "parametrization_mapping", "cooperative_roles_merge"},
 }
-# Cases the pinned venngram fails on a conforming fixture: speediedan/venngram#83 (`cooperative_roles_merge` fails a
-# view that already assigns a role of the kind it declares, as `roles` does with `intervention:jspace`). Asserted
-# exactly, so the pin that brings the fix fails here until the entry is removed.
-UPSTREAM_FAILURES = {"roles": {"cooperative_roles_merge"}}
 
 
 @pytest.mark.parametrize("fixture", list(ALL_FIXTURES), ids=list(ALL_FIXTURES))
 def test_fixture_views_conform(fixture):
-    report = TunableViewConformance(ALL_FIXTURES[fixture]).run()
+    report = TunableViewConformance(ALL_FIXTURES[fixture]).run(raise_on_failure=True)
     assert set(report.ran) == EXPECTED_CASES[fixture]
-    assert set(report.failures) == UPSTREAM_FAILURES.get(fixture, set()), report.failures
+    assert report.ok
 
 
 class DocsBlockView:
