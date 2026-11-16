@@ -39,6 +39,13 @@ Notebooks
        (Qwen3, Llama, OPT, GPT-2) built on the meta device from their configurations alone, showing what each address
        resolves to per family, the refusal of an address a family cannot provide, and each condition's parameter counts
        side by side: an experiment defined once and orchestrated across models. No training; runs on a CPU.
+   * - :doc:`Where does RL learn? One block, or one percent, of Qwen3-1.7B<notebooks/where_rl_learns/where_rl_learns>`
+     - PyTorch (experimental)
+     - Which parameters reinforcement learning needs: five Dr. GRPO arms on Qwen3-1.7B-Base (the whole model, one middle
+       block, one late block, a Fisher 1% mask and a random 1% mask), each a one-phase address schedule, reproducing a
+       2026 result on Fisher-selected sparse updates and carrying a single-block contrast over to its recipe. Rebuilds
+       the schedules on a meta-device model and analyzes the runs' packaged results problem by problem; the training
+       commands are included. Runs on a CPU.
 
 Command Line
 ************

@@ -427,6 +427,7 @@ Footnotes
    SuperGLUE with the LightningCLI <examples/cli/superglue_cli>
    LoRA placement by address (PyTorch API) <examples/notebooks/tunable_views/lora_placement>
    Addressing across architectures (PyTorch API) <examples/notebooks/tunable_views/cross_architecture_addresses>
+   Where does RL learn? (PyTorch API) <examples/notebooks/where_rl_learns/where_rl_learns>
    interpretune <examples/integrations/interpretune>
 
 .. toctree::
