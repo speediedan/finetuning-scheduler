@@ -387,7 +387,11 @@ the `fts-development-branch-version-upgrade` skill.
     reverse-order pass too, so a green merge build covers what a nightly of the same tree would run. Path filters do not
     apply to a schedule, so any change to `main` counts. Like every build on the shared agent it waits for its gate to
     be approved, and only a successful scheduled run resets "changed": a nightly left unapproved is followed by another
-    the next night, so reject the stale one.
+    the next night, so reject the stale one. Once approved, its "Scheduled-run coverage" step cancels it when a green
+    full run (one whose standalone phase ran every standalone test) already ran its exact tree, and runs it otherwise
+    (gpu-epsilon's `gpu_epsilon.scheduled_runs --in-job`, configured by `[tool.gpu-epsilon.scheduled-runs]`). For the
+    gate itself, `python -m gpu_epsilon.scheduled_runs --build <id>` prints a verdict (release when uncovered and the
+    pool is quiet, reject when covered or stale, hold otherwise); `--help` names its Azure, pool and lease options.
 - `.azure-pipelines/templates/fts-gpu-job.yml`: the any-vendor GPU job, gpu-epsilon's `templates/gpu-job.yml` (shared
   with interpretune, pinned to a tag in each GPU pipeline's `resources`) with this repository's settings and steps: a
   host job that reads the agent's `GPU_VENDOR` and starts its own container from a digest-pinned image (CUDA or

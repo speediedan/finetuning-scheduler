@@ -68,6 +68,17 @@ jobs:
         - bash: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh install
           displayName: 'Install dependencies'
 
+        # A scheduled build whose tree a green full run already covered cancels itself here, before it takes the host's
+        # leases (#210). The step's variables are the predefined ones the check reads; the token needs mapping.
+        - bash: >-
+            docker exec -e BUILD_REASON -e BUILD_CRONSCHEDULE_DISPLAYNAME -e SYSTEM_COLLECTIONURI -e SYSTEM_TEAMPROJECT
+            -e SYSTEM_ACCESSTOKEN -e BUILD_BUILDID -e BUILD_SOURCEVERSION "$(FTS_CTR)"
+            bash .azure-pipelines/scripts/gpu_job_container.sh scheduled-coverage
+          env:
+            SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+          condition: and(succeeded(), eq(variables['Build.Reason'], 'Schedule'))
+          displayName: 'Scheduled-run coverage'
+
         - bash: |
             set -e
             docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh collect
