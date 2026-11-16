@@ -639,7 +639,7 @@ class FSDPStrategyAdapter(StrategyAdapter):
             return ("ERROR", fts_p0_err)
 
     def _frozen_role_params(self) -> list:
-        """The parameters an attached view gives a role that is never thawed (``fitted``, ``instrument``), counted
+        """The parameters an attached view gives a role that is never thawed (``fitted``, ``artifact``), counted
         as unscheduled parameter by parameter: without ``use_orig_params``, one sharing an FSDP-flattened parameter
         with a scheduled parameter of its own module would be thawed with it."""
         if self.compiled_schedule is None or self._allow_mixed_req_grad:

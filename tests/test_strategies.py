@@ -72,7 +72,7 @@ def test_feedback_is_a_record():
 @pytest.mark.parametrize("explicit", [False, True], ids=["detected", "explicit"])
 def test_roles_view_on_fsdp2_matches_single_process(gloo_pool, tmp_path, explicit):
     """A view with roles schedules an FSDP2 model as it does a single-process one; frozen roles never train, and
-    the sharded best checkpoint holds fitted tensors but not instrument ones."""
+    the sharded best checkpoint holds fitted tensors but not artifact ones."""
     results = gloo_pool.run(fts_views.roles, ckpt_dir=str(tmp_path / "sharded"), explicit=explicit)
     agreed = assert_ranks_agree([{k: v for k, v in r.items() if k != "params"} for r in results])
     ref = fts_views.reference(ckpt_dir=str(tmp_path / "ref"))
@@ -114,9 +114,9 @@ def test_a_sharded_checkpoint_loads_into_an_unsharded_model(gloo_pool, tmp_path)
     assert fts._distributed.name == "unsharded"
     fts.load(results[0]["saved"])
     loaded = fts_views._params(model)
-    instrument = {"0.weight", "0.bias"}  # never saved: they keep the fresh model's values
-    assert _close({k: v for k, v in loaded.items() if k not in instrument},
-                  {k: v for k, v in results[0]["params"].items() if k not in instrument}, tol=0.0)
+    artifact = {"0.weight", "0.bias"}  # never saved: they keep the fresh model's values
+    assert _close({k: v for k, v in loaded.items() if k not in artifact},
+                  {k: v for k, v in results[0]["params"].items() if k not in artifact}, tol=0.0)
 
 
 @GLOO

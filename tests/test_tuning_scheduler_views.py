@@ -121,7 +121,7 @@ def test_roles_select_and_frozen_roles_never_train():
     seen = _run(fts, 2)
     assert seen[0][2] == ["transcoder.bias", "transcoder.weight"]
     assert seen[1][2] == ["adapter_char.weight", "transcoder.bias", "transcoder.weight"]
-    assert fts.roles["lens.weight"] == "instrument"
+    assert fts.roles["lens.weight"] == "artifact"
     assert not {n for n, p in model.named_parameters() if p.requires_grad} & {"lens.weight", "procrustes"}
 
 
@@ -251,7 +251,7 @@ def test_the_setup_rank_agreement_check_covers_roles():
         return fts
 
     tuning_scheduler(ROLES).setup()
-    tuning_scheduler({**ROLES, "procrustes": "instrument"}).setup()
+    tuning_scheduler({**ROLES, "procrustes": "artifact"}).setup()
     assert gathered[0] != gathered[1]  # the same physical schedule, different roles
     with pytest.raises(FTSConfigurationError, match="different schedules or roles"):
         tuning_scheduler(ROLES, other_rank=gathered[1]).setup()

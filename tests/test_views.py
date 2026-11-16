@@ -80,7 +80,7 @@ class LogicalViewWithNames(LogicalView):
 @pytest.mark.parametrize("role, expected", [
     ("base", ("base", None)), ("adapter", ("adapter", None)), ("adapter:char", ("adapter", "char")),
     ("intervention:steer.v1", ("intervention", "steer.v1")), ("latent:transcoder", ("latent", "transcoder")),
-    ("fitted", ("fitted", None)), ("instrument", ("instrument", None)),
+    ("fitted", ("fitted", None)), ("artifact", ("artifact", None)),
 ])
 def test_parse_role(role, expected):
     assert R.parse_role(role) == expected
@@ -116,7 +116,7 @@ def test_selectors():
     roles = {"b": "adapter:char", "c": "adapter", "d": "fitted"}
     assert R.select("role:adapter", names, roles) == ["b", "c"]
     assert R.select("role:base", names, roles) == ["a"]  # unlisted names are `base`
-    assert R.is_frozen_role("fitted") and R.is_frozen_role("instrument") and not R.is_frozen_role("latent:x")
+    assert R.is_frozen_role("fitted") and R.is_frozen_role("artifact") and not R.is_frozen_role("latent:x")
 
 
 def test_validate_roles_covers_parameters_and_buffers():
@@ -263,12 +263,12 @@ def test_resolve_view_refusals():
         resolve_view(_net(), BadSupport(_net())).support()
 
 
-def test_instrument_keys_cover_aliases_and_wrapper_prefixes():
-    from finetuning_scheduler.core.views import canonical_fqn, instrument_state_keys
+def test_artifact_keys_cover_aliases_and_wrapper_prefixes():
+    from finetuning_scheduler.core.views import artifact_state_keys, canonical_fqn
     from finetuning_scheduler.testing.fixtures import TiedNet
 
     tied = TiedNet()
-    view = CanonicalView(tied, roles={"embed.weight": "instrument"})
+    view = CanonicalView(tied, roles={"embed.weight": "artifact"})
     assert {"embed.weight", "out.weight"} <= set(tied.state_dict())
     assert not {"embed.weight", "out.weight"} & set(view.checkpoint_state_dict())
     with pytest.raises(RuntimeError, match="unexpected keys"):
@@ -280,16 +280,16 @@ def test_instrument_keys_cover_aliases_and_wrapper_prefixes():
             self._orig_mod = inner
 
     wrapped = Wrapper(nn.Linear(2, 2))
-    roles = {"_orig_mod.weight": "instrument"}
-    assert instrument_state_keys(wrapped, roles, ["weight", "bias"]) == {"weight"}  # a DSD-style unprefixed key
+    roles = {"_orig_mod.weight": "artifact"}
+    assert artifact_state_keys(wrapped, roles, ["weight", "bias"]) == {"weight"}  # a DSD-style unprefixed key
     assert canonical_fqn("_orig_mod.weight") == "weight"
 
 
 def test_a_member_set_to_a_value_is_refused():
     """``roles = {...}`` rather than a method would otherwise be silently replaced by the default (``{}``),
-    compiling an ``instrument`` tensor into a phase."""
+    compiling an ``artifact`` tensor into a phase."""
     view = CanonicalView(_net())
-    view.roles = {"0.weight": "instrument"}  # type: ignore[assignment]
+    view.roles = {"0.weight": "artifact"}  # type: ignore[assignment]
     with pytest.raises(TunableViewError, match="`roles` must be methods"):
         BoundView(view)
 
@@ -303,9 +303,9 @@ def test_a_member_set_on_the_instance_is_used_and_counts_as_an_override():
     assert bound.overrides("checkpoint_state_dict") and list(bound.checkpoint_state_dict()) == ["own"]
 
 
-@pytest.mark.parametrize("role", ["adapter", "bogus-role", "latent", "instrument"])
+@pytest.mark.parametrize("role", ["adapter", "bogus-role", "latent", "artifact"])
 def test_promote_refuses_a_target_that_is_not_a_named_latent_role(role):
-    bound = BoundView(CanonicalView(_net(), roles={"0.weight": "instrument"}))
+    bound = BoundView(CanonicalView(_net(), roles={"0.weight": "artifact"}))
     with pytest.raises(VenngramError):  # a role error for an invalid role, a view error for a valid non-latent one
         bound.promote(["0.weight"], role)
     assert bound.promoted == {}

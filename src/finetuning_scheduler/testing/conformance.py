@@ -147,7 +147,7 @@ class TunableViewConformance(ViewConformance):
 
     def _step_changes_only_thawed(self) -> None:
         """An optimizer step over phase 0 of the default schedule changes only phase 0's tensors (and never a
-        ``fitted`` or ``instrument`` tensor)."""
+        ``fitted`` or ``artifact`` tensor)."""
         view = self._fresh()
         compiled = compile_schedule(view_default_schedule(view), view)
         _freeze(view.root)
@@ -170,7 +170,7 @@ class TunableViewConformance(ViewConformance):
         _check(not unexpected, f"An optimizer step over phase 0 changed tensors phase 0 does not thaw: {unexpected}.")
         roles = view.roles()
         frozen_changed = sorted(n for n in changed if is_frozen_role(roles.get(n, "base")))
-        _check(not frozen_changed, f"An optimizer step changed `fitted` or `instrument` tensors: {frozen_changed}.")
+        _check(not frozen_changed, f"An optimizer step changed `fitted` or `artifact` tensors: {frozen_changed}.")
 
     def _unmatched_rule_refuses(self) -> None:
         """A schedule entry that matches nothing is refused."""
@@ -193,7 +193,7 @@ class TunableViewConformance(ViewConformance):
         raise ConformanceError("A view declaring `trainable=False` was not refused.")
 
     def _frozen_roles_refuse(self) -> None:
-        """Scheduling a ``fitted`` or ``instrument`` parameter, through its logical name, is refused."""
+        """Scheduling a ``fitted`` or ``artifact`` parameter, through its logical name, is refused."""
         view = self._fresh()
         params = {n for n, _ in view.root.named_parameters()}
         frozen = [n for n, r in view.roles().items() if n in params and is_frozen_role(r)]

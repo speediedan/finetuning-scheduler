@@ -21,7 +21,7 @@ physical tensors through the view's roles, its structure and the schedule's name
 against the view's logical names and then map to physical names; and the view's coupled tensors (for example a block's
 norms) join the first phase that pulls them. An address of gradients (``of: grad``) thaws what it selects and compiles
 to a gradient mask over each tensor's first axis (:attr:`CompiledPhase.masks`). It refuses a schedule whose phases share
-storage, that schedules a ``fitted`` or ``instrument`` tensor, or that names anything the view cannot resolve, naming
+storage, that schedules a ``fitted`` or ``artifact`` tensor, or that names anything the view cannot resolve, naming
 the offending input. The schedule itself keeps its logical names.
 
 .. warning:: This is an experimental API and may change in a future release.
@@ -343,7 +343,7 @@ def _check_phase_tensors(cp: CompiledPhase, roles: Mapping[str, str], tensors: M
     leaked = [n for n in cp.coupled if is_frozen_role(roles.get(n, "base"))]
     if frozen:
         raise FTSConfigurationError(
-            f"Phase {cp.depth} schedules tensors whose role is never thawed (`fitted` or `instrument`): {frozen}.")
+            f"Phase {cp.depth} schedules tensors whose role is never thawed (`fitted` or `artifact`): {frozen}.")
     if leaked:
         msg = f"Phase {cp.depth}'s coupled tensors include tensors whose role is never thawed: {leaked}."
         if not legacy:
@@ -409,18 +409,18 @@ def _digest(phases: Sequence[CompiledPhase], roles: Mapping[str, str],
 def _compile_promotions(depth: int, promote: Mapping[str, str], bound: BoundView, logical_names: Sequence[str],
                         roles: Mapping[str, str], shared: tuple, addressing: _Addressing) -> dict[str, str]:
     """Resolve phase ``depth``'s ``promote`` mapping to physical tensors and their new roles, checking each is an
-    ``instrument`` tensor promoted once."""
+    ``artifact`` tensor promoted once."""
     parse_promote(depth, promote)
     _refuse_gradient_entries(list(promote), depth, "promote", addressing)
     promoted: dict[str, str] = {}
     for source, target in promote.items():
         ((is_sel, names),) = _expand([source], depth, bound, logical_names, roles, shared, addressing)
         physical = list(dict.fromkeys(names if is_sel else (q for qs in bound.to_physical(names).values() for q in qs)))
-        not_instrument = {p: roles.get(p, "base") for p in physical if role_kind(roles.get(p, "base")) != "instrument"}
-        if not_instrument:
+        not_artifact = {p: roles.get(p, "base") for p in physical if role_kind(roles.get(p, "base")) != "artifact"}
+        if not_artifact:
             raise FTSConfigurationError(
-                f"Phase {depth} promotes tensors whose role is not `instrument` (an earlier phase may already have"
-                f" promoted them): {dict(sorted(not_instrument.items()))}. Only `instrument` tensors can be promoted,"
+                f"Phase {depth} promotes tensors whose role is not `artifact` (an earlier phase may already have"
+                f" promoted them): {dict(sorted(not_artifact.items()))}. Only `artifact` tensors can be promoted,"
                 " to a `latent:<name>` role.")
         twice = sorted(p for p in physical if p in promoted)
         if twice:
@@ -565,7 +565,7 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
                      addresses: Mapping[str, Any] | None = None) -> CompiledSchedule:
     """Compile ``schedule`` through ``view`` into the physical parameters each phase thaws.
 
-    Per phase, in depth order: the phase's ``promote`` mapping changes the roles of the ``instrument`` tensors it names
+    Per phase, in depth order: the phase's ``promote`` mapping changes the roles of the ``artifact`` tensors it names
     (to ``latent:<name>`` roles, from then on); addresses (``role:`` selectors among them) select through the roles in
     effect, the view's ``structure()`` and the named sets in ``addresses``; names and
     regexes resolve against the view's logical names (shared-parameter copies are pruned, as for the Lightning
@@ -596,8 +596,8 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     Raises:
         FTSConfigurationError: If an address book requires another naming scheme than the view's; an entry resolves
             to nothing or an address does not resolve; phases share storage
-            (unless ``legacy``); a phase schedules a ``fitted`` or ``instrument`` tensor; a phase promotes a tensor
-            that is not an ``instrument`` one; a phase schedules quantized or packed tensors through logical names
+            (unless ``legacy``); a phase schedules a ``fitted`` or ``artifact`` tensor; a phase promotes a tensor
+            that is not an ``artifact`` one; a phase schedules quantized or packed tensors through logical names
             that are views of them, or thaws a tensor whose storage cannot require gradients (see
             :func:`~finetuning_scheduler.core.schedule.requires_grad_capable`); or a phase refreezes a tensor that is
             not trainable when it starts, both thaws and refreezes a tensor, or leaves nothing trainable; or a
@@ -733,7 +733,7 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
 def view_default_schedule(view: Any, order: Literal["output_first", "input_first"] = "output_first") -> dict:
     """Generate a default schedule over a view's logical names.
 
-    Logical names standing for a tensor whose role is never thawed (``fitted`` or ``instrument``), or for a tensor whose
+    Logical names standing for a tensor whose role is never thawed (``fitted`` or ``artifact``), or for a tensor whose
     storage cannot require gradients (a quantized or packed base under trainable adapters, for example), are left out
     (with a warning when they also stand for trainable tensors), and groups left empty are dropped.
 
@@ -764,7 +764,7 @@ def view_default_schedule(view: Any, order: Literal["output_first", "input_first
         mixed = sorted(n for n in excluded if not all(_excluded(p) for p in mapped[n]))
         if mixed:
             rank_zero_warn(f"The generated schedule leaves out {mixed}: each stands for tensors whose role is never"
-                           " thawed (`fitted` or `instrument`), or whose storage cannot require gradients, as well as"
+                           " thawed (`fitted` or `artifact`), or whose storage cannot require gradients, as well as"
                            " trainable ones, so it cannot be scheduled.")
         if left_packed := sorted(n for n in excluded if n not in mixed and any(p in packed for p in mapped[n])):
             rank_zero_info(f"The generated schedule leaves out {len(left_packed)} names whose storage cannot require"
