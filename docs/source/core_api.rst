@@ -21,6 +21,7 @@ are not documented as public API.
     core.compile
     core.books
     core.grad_masks
+    core.grad_transforms
     strategies.base
     strategies.unsharded
     strategies.dtensor

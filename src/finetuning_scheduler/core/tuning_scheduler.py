@@ -410,7 +410,7 @@ class TuningScheduler:
         for i, sched in enumerate(schedulers):
             self._interface.set_lr_scheduler(i, sched, self._lr_step_cfg)
         self._step_hook = optimizer.register_step_post_hook(self._on_optimizer_step)
-        if any(cp.masks for cp in self._compiled.phases):
+        if any(cp.masks or cp.transforms for cp in self._compiled.phases):
             self._grad_masks = GradientMasks(self.model)
             self._grad_masks.attach(optimizer)
             self._sync_grad_masks(0)
@@ -461,7 +461,7 @@ class TuningScheduler:
         if self._gates:
             raise FTSConfigurationError("Gates are not supported on an externally driven tuning scheduler in this"
                                         " release.")
-        core_schedule.refuse_direct_api_keys(dict(schedule), keys=("refreeze", "restore"))
+        core_schedule.refuse_direct_api_keys(dict(schedule), keys=("grad_transforms", "refreeze", "restore"))
         self._executor, self._externally_driven = executor, True
         self._view = self._resolve_view()
         self._view_roles_at_setup = self._view.view_roles()
@@ -1087,14 +1087,19 @@ class TuningScheduler:
                 " one (it needs `keep_phase_best` and `best_path_for_depth`, as `BestCheckpoint` has).")
 
     def _refuse_unsupported_masks(self) -> None:
-        """Gradient masks need an unsharded model: a sharded parameter's gradient is a shard, set by the sharding
-        rather than accumulated, so a hook on it would not see it."""
+        """Gradient masks and transforms need an unsharded model: a sharded parameter's gradient is a shard, set by
+        the sharding rather than accumulated, so a hook on it would not see it."""
         assert self._compiled is not None
         masked = sorted(cp.depth for cp in self._compiled.phases if cp.masks)
         if masked and self._sharded:
             raise FTSConfigurationError(
                 f"Phases {masked} mask the gradients (`of: grad` with `units`) of a sharded model, which this release"
                 " does not support.")
+        transformed = sorted(cp.depth for cp in self._compiled.phases if cp.transforms)
+        if transformed and self._sharded:
+            raise FTSConfigurationError(
+                f"Phases {transformed} transform the gradients (`grad_transforms`) of a sharded model, which this"
+                " release does not support.")
 
     def _sync_grad_masks(self, depth: int) -> None:
         """Put the gradient masks in effect at ``depth`` in place (after its thaw and refreeze), reporting the masks
@@ -1102,9 +1107,12 @@ class TuningScheduler:
         if self._grad_masks is None:
             return
         assert self._compiled is not None
-        before = self._grad_masks.masks
-        masks = self._compiled.masks_at(depth)
-        self._grad_masks.sync(masks)
+        before, before_transforms = self._grad_masks.masks, self._grad_masks.transforms
+        masks, transforms = self._compiled.masks_at(depth), self._compiled.transforms_at(depth)
+        self._grad_masks.sync(masks, transforms)
+        if transforms != before_transforms:
+            rank_zero_info(f"Phase {depth} transforms the gradients of {len(transforms)} tensors"
+                           + (f": {', '.join(transforms)}." if transforms else "."))
         changed = {n: kept for n, kept in masks.items() if before.get(n) != kept}
         if changed:
             named = dict(self.model.named_parameters())
@@ -1623,8 +1631,8 @@ class TuningScheduler:
             archs = getattr(getattr(self.model, "config", None), "architectures", None)
             applies_to = {"architectures": list(archs)} if archs else None
         # a phase that only refreezes selects nothing
-        book = schedule_book({d: {"params": p} for d, p in self._source_params.items()
-                              if p or not self._schedule[d].get("refreeze")},
+        book = schedule_book({d: {"params": p, "grad_transforms": self._schedule[d].get("grad_transforms")}
+                              for d, p in self._source_params.items() if p or not self._schedule[d].get("refreeze")},
                              name=name or f"{type(self.model).__name__}-schedule", addresses=self._address_sets,
                              logical_names=[n for n, _ in self._view.logical_named_parameters()],
                              naming_scheme=self._view.support().naming_scheme, applies_to=applies_to,
@@ -2092,6 +2100,13 @@ class TuningScheduler:
         self._require_setup()
         assert self._compiled is not None
         return self._compiled
+
+    @property
+    def gradient_transforms(self) -> dict[str, tuple[Any, ...]]:
+        """The gradient transforms in effect: each transformed parameter's transforms, in the order they apply, with
+        the first-axis indices its entry keeps (see
+        :meth:`~finetuning_scheduler.core.compile.CompiledSchedule.transforms_at`)."""
+        return self._grad_masks.transforms if self._grad_masks is not None else {}
 
     @property
     def gradient_masks(self) -> dict[str, tuple[int, ...]]:

@@ -177,8 +177,50 @@ The rules:
 
 ``of: grad`` is refused by name in a ``refreeze`` or ``promote`` entry, on the Lightning callback (its strategy adapters
 shard and checkpoint parameters themselves), and on a sharded model (FSDP2 sets a parameter's gradient directly, so the
-mask's hook would not run). A mask is so far the only operation on the gradients a schedule addresses; scaling,
-projecting or a function of your own are `#219 <https://github.com/speediedan/finetuning-scheduler/issues/219>`_.
+mask's hook would not run). Other operations on the gradients a schedule addresses are
+:ref:`gradient transforms<tunable-views-gradient-transforms>`.
+
+.. _tunable-views-gradient-transforms:
+
+Transforming Gradients
+**********************
+A phase's ``grad_transforms`` (the PyTorch API only) maps entries, written as ``params`` entries are, to transforms of
+each step's accumulated gradient of the tensors they select: scale a component's gradient without splitting parameter
+groups, keep its update out of a protected direction, bound it, or apply a function of your own.
+
+.. code-block:: python
+
+    from finetuning_scheduler.core.grad_transforms import Clamp, Reject, Scale
+
+    concept = torch.randn(8)  # a direction in the middle layer's output space
+    first = {"module:2 & leaf:weight": Reject(concept), "module:2 & units:[0, 1] & of:grad": Scale(0.1)}
+    schedule = {
+        0: {"params": ["module:2"], "max_transition_epoch": 2, "grad_transforms": first},
+        1: {"params": ["4.weight"], "grad_transforms": {"module:2": [Scale(0.5), Clamp(-1.0, 1.0)]}},
+    }
+
+A transform is any callable ``transform(name, grad, units)`` returning the gradient's new value, where ``units`` are
+the indices along its first axis that the entry's gradient unit set keeps (``None`` without one). The built-ins in
+:mod:`~finetuning_scheduler.core.grad_transforms` (:class:`~finetuning_scheduler.core.grad_transforms.Scale`,
+:class:`~finetuning_scheduler.core.grad_transforms.Clamp`, :class:`~finetuning_scheduler.core.grad_transforms.Project`
+and :class:`~finetuning_scheduler.core.grad_transforms.Reject`) act on those rows when given. An entry selects tensors
+only to transform them: it neither thaws nor masks them, and a tensor it selects must be trainable in the phase.
+
+The rules:
+
+- **Transforms apply in the order written**, an entry's list in order and the entries in the mapping's order, and
+  before the tensor's mask, so no transform refills a masked row. Like a mask, they act before clipping and the
+  optimizer step.
+- **A phase's transforms carry on until a later phase states its own**, which replace them; ``grad_transforms: {}``
+  clears them, and a ``refreeze`` drops a tensor's transforms with it.
+- **They follow the schedule** through optimizer reinitialization, promotion and resume, and a state saved under other
+  transforms is refused. Each phase that changes them logs the tensors transformed, and
+  :attr:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.gradient_transforms` gives the transforms in
+  effect. A transform should keep no state of its own: a resumed run rebuilds the transforms from the schedule.
+
+Transforms are refused by name on the Lightning callback and on a sharded model, as masks are, and a schedule with
+them is not exported as an address book: a callable is not portable. venngram declares ops on parameter gradients in a
+recipe's ``gradients`` section, which a later release reads.
 
 Address Books Through venngram
 ******************************
