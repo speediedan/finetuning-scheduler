@@ -23,7 +23,7 @@ import yaml
 
 from finetuning_scheduler import CanonicalView, TuningScheduler
 from finetuning_scheduler.core.checkpoint import BestCheckpoint
-from finetuning_scheduler.core.compile import compile_schedule, gradient_entries, support_record
+from finetuning_scheduler.core.compile import _mask_support, compile_schedule, gradient_entries, support_record
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.schedule import load_address_sets
 from finetuning_scheduler.strategies.dtensor import DTensorAdapter
@@ -99,7 +99,11 @@ def test_an_of_grad_address_thaws_what_it_selects_and_compiles_to_masks():
     ([MID_ROWS, "1.bias"], {"1.weight": (0, 2)}),  # another entry selects the bias whole
     (["module:1 & units:0:4 & of:grad"], {}),  # a mask keeping every row is no mask
     (["module:1 & of:grad"], {}),  # nor is a gradient address without a unit set
-], ids=["union", "whole", "every_row", "no_units"])
+    # one set: a union's disjuncts each give their own mask, and a value part trains its tensors whole
+    (["module:1 & leaf:weight & units:[0] & of:grad | module:1 & leaf:bias & units:[1] & of:grad"],
+     {"1.weight": (0,), "1.bias": (1,)}),
+    (["module:1 & leaf:bias & of:value | module:1 & leaf:weight & units:[0, 2] & of:grad"], {"1.weight": (0, 2)}),
+], ids=["union", "whole", "every_row", "no_units", "union_masks_in_one_set", "mixed_set"])
 def test_a_phases_masks_are_the_union_of_its_entries(params, masks):
     (cp,) = _compiled({0: {"params": params}}).phases
     assert cp.physical == ("1.weight", "1.bias") and dict(cp.masks) == masks
@@ -130,10 +134,12 @@ def test_the_digest_sees_masks_only_when_present():
       2: {"params": [MID_ROWS], "refreeze": ["1.bias"]}}, "Phase 2 both thaws and refreezes these tensors"),
     ({0: {"params": [MID_ROWS], "max_transition_epoch": 1}, 1: {"params": [MID_ROWS], "refreeze": ["1.weight"]}},
      r"Phase 1 both thaws and refreezes these tensors: \['1.weight'\]"),
-    ({0: {"params": ["module:1 & units:[0] & of:grad | module:2"]}}, "sits under a union or a difference"),
+    ({0: {"params": ["module:1 & of:grad - module:1 & leaf:bias & units:[0] & of:grad"]}},
+     "sits under a union or a difference"),
+    ({0: {"params": ["(module:1 & units:[0, 1] & of:grad) & (module:1 & units:[1] & of:grad)"]}}, "it intersects"),
     ({0: {"params": ["module:1 & units:[0]"]}}, "masked as gradients with `of: grad`"),
-], ids=["refreeze_of_grad", "thaw_and_refreeze", "reselect_and_refreeze", "units_under_a_union",
-        "units_without_of_grad"])
+], ids=["refreeze_of_grad", "thaw_and_refreeze", "reselect_and_refreeze", "units_under_a_difference",
+        "units_intersected", "units_without_of_grad"])
 def test_refused_gradient_addresses(schedule, match):
     with pytest.raises(FTSConfigurationError, match=match):
         _compiled(schedule)
@@ -282,8 +288,22 @@ def test_a_gradient_phase_exports_as_a_set_of_gradients(tmp_path):
     replay = _compiled({0: {"params": ["@phase_0"], "max_transition_epoch": 1}, 1: {"params": ["@phase_1"]}},
                        addresses=load_address_sets(str(tmp_path / "masked.yaml")))
     assert replay.masks_at(1) == fts.compiled_schedule.masks_at(1) == {"1.weight": (0, 2), "1.bias": (0, 2)}
-    # MASKED's phase 1 mixes a name (values) with a gradient address, which one set cannot hold
-    with pytest.raises(FTSConfigurationError, match="Phase 1 mixes gradient"):
-        _fts().export_book()
-    with pytest.raises(FTSConfigurationError, match="Phase 0 has several gradient entries with a unit set"):
-        _fts({0: {"params": [MID_ROWS, "module:2 & of:grad"]}}).export_book()
+
+
+@pytest.mark.parametrize("schedule", [
+    MASKED,  # phase 1 mixes a name (values) with a gradient address
+    {0: {"params": [MID_ROWS, "module:2 & leaf:weight & units:[1] & of:grad"], "max_transition_epoch": 1},
+     1: {"params": ["module:2 & leaf:bias & of:grad"]}},  # several gradient entries with unit sets
+], ids=["mixed_set", "union_masks"])
+def test_every_phase_exports_as_one_set_that_compiles_back_to_its_masks(tmp_path, schedule):
+    fts = _fts(schedule)
+    book = fts.export_book(tmp_path / "book.yaml")
+    sets = load_address_sets(str(tmp_path / "book.yaml"))
+    # the record honours mixed sets and united masks, judged as compilation judges a set of gradients
+    assert not _mask_support(support_record().tuning).check_book(sets.books[0])
+    replay = _compiled({d: {**p, "params": [f"@phase_{d}"]} for d, p in schedule.items()}, addresses=sets)
+    for depth in schedule:
+        assert replay.masks_at(depth) == fts.compiled_schedule.masks_at(depth)
+        assert set(replay.phases[depth].physical) == set(fts.compiled_schedule.phases[depth].physical)
+    if schedule is MASKED:  # a value entry beside a gradient one states `of: value`
+        assert {"of": "value"} in book["sets"]["phase_1"]["any"][0]["all"]

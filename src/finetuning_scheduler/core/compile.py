@@ -46,7 +46,7 @@ from venngram import is_address, ParamSpace, select
 from venngram.address import parse as parse_address
 from venngram.address import references
 from venngram.errors import VenngramError
-from venngram.resolve import gradient_masks, gradient_of
+from venngram.resolve import gradient_masks, split_of
 from venngram.support import SupportRecord, TuningSupport
 
 from finetuning_scheduler.core.roles import is_frozen_role, role_kind
@@ -268,19 +268,26 @@ class _Addressing:
         except VenngramError as err:
             raise _unresolved(entry, depth, err) from err
 
-    def of_grad(self, entry: Any, depth: int) -> bool:
-        """Whether ``entry`` is an address of gradients (``of: grad``, written in it or in a set it references)."""
+    def split(self, entry: Any, depth: int) -> tuple[Any, Any]:
+        """``entry`` as its value part and its gradient part (``of: grad``), either ``None`` when it has none: a
+        set may unite the two (venngram's :func:`~venngram.resolve.split_of`), and a name or regex is all value."""
         if not is_address(entry):
-            return False
+            return entry, None
         try:
-            return gradient_of(entry, self.sets) == "grad"
+            return split_of(entry, self.sets)
         except VenngramError as err:
             raise _unresolved(entry, depth, err) from err
 
-    def masks(self, entry: Any, depth: int, roles: Mapping[str, str]) -> dict[str, tuple[int, ...]]:
-        """The kept first-axis indices of each tensor an ``of: grad`` address selects."""
+    def of_grad(self, entry: Any, depth: int) -> bool:
+        """Whether ``entry`` addresses gradients (``of: grad``, written in it or in a set it references), in whole
+        or in part."""
+        return self.split(entry, depth)[1] is not None
+
+    def masks(self, entry: Any, grad: Any, depth: int, roles: Mapping[str, str]) -> dict[str, tuple[int, ...]]:
+        """The kept first-axis indices of each tensor ``entry``'s gradient part ``grad`` selects (a union's
+        disjuncts each give their own mask, united per tensor)."""
         try:
-            return gradient_masks(entry, self.space(roles), self.sets, widths=self.widths)
+            return gradient_masks(grad, self.space(roles), self.sets, widths=self.widths)
         except VenngramError as err:
             raise _unresolved(entry, depth, err) from err
 
@@ -293,16 +300,20 @@ def _unresolved(entry: Any, depth: int, err: VenngramError) -> FTSConfigurationE
 def _phase_masks(entries: Sequence[Any], resolved: Sequence[tuple[bool, list[str]]],
                  mapped: Mapping[str, Sequence[str]], depth: int, roles: Mapping[str, str],
                  addressing: _Addressing) -> dict[str, tuple[int, ...]]:
-    """Phase ``depth``'s gradient masks: for each tensor its ``of: grad`` entries select, the union of their kept
-    indices, unless another of its entries selects the whole tensor or the union keeps every index (no mask)."""
+    """Phase ``depth``'s gradient masks: for each tensor the gradient parts (``of: grad``) of its entries select,
+    the union of their kept indices, unless a value part selects the whole tensor or the union keeps every index
+    (no mask)."""
     kept: dict[str, set[int]] = {}
     whole: set[str] = set()
     for entry, (is_sel, names) in zip(entries, resolved):
-        if addressing.of_grad(entry, depth):
-            for p, rows in addressing.masks(entry, depth, roles).items():
-                kept.setdefault(p, set()).update(rows)
-        else:
+        value, grad = addressing.split(entry, depth)
+        if grad is None:
             whole.update(names if is_sel else (q for n in names for q in mapped[n]))
+            continue
+        for p, rows in addressing.masks(entry, grad, depth, roles).items():
+            kept.setdefault(p, set()).update(rows)
+        if value is not None:  # a set uniting a value part and a gradient part
+            whole.update(addressing.select(value, depth, roles))
     return {p: tuple(sorted(rows)) for p, rows in kept.items()
             if p not in whole and len(rows) < addressing.widths[p]}
 
@@ -506,15 +517,15 @@ def referenced_sets(schedule: Mapping[int, Mapping[str, Any]]) -> set[str]:
 
 def _is_gradient(entry: Any, sets: Mapping[str, Any]) -> bool:
     try:
-        return gradient_of(entry, sets) == "grad"
-    except VenngramError:  # a missing set, or terms that disagree on `of`: compilation names it
+        return split_of(entry, sets)[1] is not None
+    except VenngramError:  # a missing set, or a disjunct mixing values and gradients: compilation names it
         return False
 
 
 def gradient_entries(schedule: Mapping[int, Mapping[str, Any]],
                      sets: Mapping[str, Any] | None = None) -> dict[int, list[str]]:
-    """Each phase's ``params`` entries that address gradients (``of: grad``, written in the entry or in a set of
-    ``sets`` it references), for the phases that have any."""
+    """Each phase's ``params`` entries that address gradients, in whole or in part (``of: grad``, written in the
+    entry or in a set of ``sets`` it references), for the phases that have any."""
     out: dict[int, list[str]] = {}
     for depth, phase in schedule.items():
         grads = [e for e in phase.get("params") or [] if isinstance(e, str) and is_address(e)
