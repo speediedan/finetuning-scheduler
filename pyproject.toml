@@ -192,7 +192,6 @@ exclude = [
     "*.egg",
     "build",
     "temp",
-    "scripts/vendored",  # vendored unmodified from interpretune; see scripts/check_vendored_notebook_tooling.py
 ]
 # lint.ignore-init-module-imports = true
 output-format = "pylint"
@@ -395,9 +394,8 @@ selection-env = { FTS_REVERSE_ORDER = "1" }
 command = "python -m pytest <pool modules> -v"
 release = false
 
-[tool.notebook-publishing]
-# The tutorial notebooks, read by the publisher and docs-artifact renderer vendored from interpretune
-# (scripts/vendored/notebook_tooling; shims scripts/publish_notebooks.py and scripts/render_notebook_docs.py).
+[tool.nbpress]
+# The tutorial notebooks, read by nbpress (https://github.com/speediedan/nbpress; nbpress-publish and nbpress-render).
 # dev_dir holds the authoring copies, publish_dir the stripped copies users open (Colab badge and install cell
 # added), docs_artifact_dir the executed copies the docs render.
 dev_dir = "src/fts_examples/notebooks/dev"
@@ -410,10 +408,10 @@ install_cell = [
     "# %pip install 'finetuning-scheduler[examples] @ git+https://github.com/speediedan/finetuning-scheduler.git@main'",
 ]
 docs_artifact_dir = "docs/notebook_artifacts"
-docs_render_command = "python scripts/render_notebook_docs.py"
+docs_render_command = "nbpress-render"
 
 # the PyTorch tutorial's docs render runs every phase, so its fts_implicit run reaches the transition its review shows
-[tool.notebook-publishing.docs_parameters."superglue/fts_superglue_pytorch"]
+[tool.nbpress.docs_parameters."superglue/fts_superglue_pytorch"]
 MAX_DEPTH = -1
 
 # Dependency groups for development (PEP 735)

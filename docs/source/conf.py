@@ -62,8 +62,7 @@ _transform_changelog(os.path.join(PATH_ROOT, "CHANGELOG.md"), os.path.join(PATH_
 
 # The tutorial notebooks, staged into `examples/notebooks/` (gitignored): the executed docs artifact where one exists, the
 # published (output-free) copy otherwise, with the publisher's install cell removed (noise on a static page). The
-# helpers are the docs-artifact renderer vendored from interpretune, loaded by file path; see pyproject's
-# [tool.notebook-publishing] and scripts/render_notebook_docs.py.
+# helpers are nbpress's docs-artifact renderer (pinned in requirements/docs.txt); see pyproject's [tool.nbpress].
 NOTEBOOK_STAGE_DIR = os.path.join(PATH_HERE, "examples", "notebooks")
 NOTEBOOK_SOURCES = [
     os.path.join(PATH_ROOT, "docs", "notebook_artifacts"),
@@ -73,11 +72,8 @@ NOTEBOOK_ASSET_SUFFIXES = {".ipynb", ".png", ".gif", ".jpg", ".jpeg", ".svg"}
 
 
 def _stage_notebooks() -> None:
-    engine = os.path.join(PATH_ROOT, "scripts", "vendored", "notebook_tooling", "notebook_docs.py")
-    nb_spec = spec_from_file_location("_notebook_docs", engine)
-    helpers = module_from_spec(nb_spec)
-    sys.modules[nb_spec.name] = helpers  # dataclasses resolve `from __future__` annotations through sys.modules
-    nb_spec.loader.exec_module(helpers)
+    from nbpress import render as helpers
+
     shutil.rmtree(NOTEBOOK_STAGE_DIR, ignore_errors=True)
     staged = set()
     for source_dir in NOTEBOOK_SOURCES:
@@ -151,7 +147,7 @@ suppress_warnings = [
 templates_path = ["_templates"]
 
 # Notebooks are never executed by the docs build: the executed copies are rendered offline, under the GPU lease, into
-# docs/notebook_artifacts (scripts/render_notebook_docs.py).
+# docs/notebook_artifacts (nbpress-render).
 nb_execution_mode = "off"
 nb_merge_streams = True
 
