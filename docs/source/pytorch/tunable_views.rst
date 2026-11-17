@@ -282,6 +282,11 @@ The schedule keeps its logical names (in logs and in the saved schedule), the ca
 and a generated schedule uses the view's logical names. A third-party strategy
 adapter that renames parameters takes precedence over an attached view (see :ref:`tunable-views-renaming-adapters`).
 
+The :doc:`LoRA placement notebook's Lightning companion</examples/notebooks/tunable_views/lora_placement_lightning>`
+does this end to end: it roots ``venngram.view(module)`` at the ``LightningModule``, checks that every condition
+selects the PyTorch notebook's tensors under the module's prefix, and restates a step transition as an epoch
+transition.
+
 Going Further
 *************
 :ref:`tunable-views-advanced` covers writing and testing a view of your own, promotion (an ``artifact`` becoming a
