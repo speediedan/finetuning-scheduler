@@ -17,7 +17,8 @@
 # records and reports (python -m gpu_epsilon.phase_evidence, configured by [tool.gpu-epsilon.phase-evidence] in
 # pyproject.toml) go to /evidence.
 #
-#   gpu_job_container.sh install | collect | verify | lease | phase <name> | coverage | report | release
+#   gpu_job_container.sh install | scheduled-coverage | collect | verify | lease | phase <name> | coverage | report |
+#     release
 set -eo pipefail
 
 out=/evidence/fts-phases
@@ -34,6 +35,13 @@ case "${1:?command}" in
     uv pip install -e . -r requirements/ci/requirements.txt -r requirements/ci/gpu-epsilon.txt \
       --excludes /tmp/venvs/fts_dev/torch-excludes.txt
     uv pip list
+    ;;
+  scheduled-coverage)
+    # A scheduled build whose tree a green full run already covered cancels itself, through the build API with the
+    # job's access token; anything it cannot establish lets the run go ahead (gpu_epsilon.scheduled_runs, configured
+    # by [tool.gpu-epsilon.scheduled-runs] in pyproject.toml). It always exits 0.
+    venv
+    python -m gpu_epsilon.scheduled_runs --in-job
     ;;
   collect)
     # Collection only, with no device visible, so it needs no lease (as in gpu-tests.yml).

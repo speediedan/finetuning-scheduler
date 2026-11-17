@@ -332,6 +332,14 @@ name = "exp_patch"
 optional = true
 special-tests = ["--mark_type=exp_patch", "--filter_pattern=test_f", "--experiment_patch_mask=1 0 0 1"]
 
+# Whether a scheduled GPU build's tree is already covered by a green full run (python -m gpu_epsilon.scheduled_runs): a
+# run is full when its standalone phase ran every standalone test, which .azure-pipelines/scripts/gpu_job_container.sh
+# prints. A pull request's merge-ref run can share main's tree with the smoke set, so the scope decides, not the tree.
+[tool.gpu-epsilon.scheduled-runs]
+repository = "speediedan/finetuning-scheduler"
+run-step = "Testing: standalone multi-gpu"
+run-pattern = 'standalone scope: (full|smoke)\b'
+
 [tool.gpu-epsilon.phase-evidence]
 # gpu-epsilon's phase-evidence writer (python -m gpu_epsilon.phase_evidence) reads this table: the GPU job collects each
 # phase's manifest with no device visible (.azure-pipelines/scripts/gpu_job_container.sh collect), records every pytest
