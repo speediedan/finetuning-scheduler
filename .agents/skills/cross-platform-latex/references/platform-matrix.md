@@ -81,6 +81,18 @@ than by probing constructs someone thought to test:
 - **An inline `$` pressed against the previous character is not math on GitHub.** `top-$q$` renders as
   text there and as math on MyST. A trailing hyphen is unaffected, so `$\gamma$-marked` is fine.
 
+## Engine-side losses the probe cannot see
+
+Every row above measures what the Markdown layer hands to the math engine. A macro the engine itself
+does not support passes that check as `verbatim` and still fails for the reader, so it needs a
+rendered page rather than the probe:
+
+- **`\operatorname{...}`, broken on GitHub.** The TeX reaches GitHub's engine intact and does not
+  render; MyST, MkDocs and notebook targets render it. Not measured by the probe: the evidence is the
+  rendered-page reports on `github/markup#1688` (through 2026, closed upstream as belonging to GitHub's
+  renderer, no fix). Use `\mathrm{...}`. Re-check by viewing a page that uses it on github.com, not
+  with `probe_renderers.py`.
+
 ## Non-portable forms, and why they are still worth knowing
 
 Two constructs render on exactly one target. Neither is a recommendation; both come up often enough
