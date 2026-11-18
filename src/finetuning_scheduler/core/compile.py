@@ -37,6 +37,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
+import torch
 from torch import Tensor
 
 from finetuning_scheduler.core.dist import rank_zero_debug, rank_zero_info, rank_zero_warn
@@ -46,11 +47,12 @@ from venngram import is_address, ParamSpace, select
 from venngram.address import parse as parse_address
 from venngram.address import references
 from venngram.errors import VenngramError
+from venngram.maps.schema import UNIT_SIDES
 from venngram.resolve import gradient_masks, split_of
 from venngram.support import SupportRecord, TuningSupport
 
 from finetuning_scheduler.core.grad_masks import Transform
-from finetuning_scheduler.core.grad_transforms import transform_id
+from finetuning_scheduler.core.grad_transforms import op_transforms, transform_id
 from finetuning_scheduler.core.roles import is_frozen_role, role_kind
 from finetuning_scheduler.core.schedule import (parse_promote, requires_grad_capable, resolve_param_entries,
                                                  shared_params_ref)
@@ -282,6 +284,12 @@ class _Addressing:
             self._structure = self.bound.structure()
         return ParamSpace(self.physical, roles=roles, aliases=self._aliases, structure=self._structure)
 
+    def structure(self) -> Any:
+        """The view's structure (a component map's structure records each tensor's unit axis and ``out`` side)."""
+        if self._aliases is None:
+            self.space({})
+        return self._structure
+
     def select(self, entry: Any, depth: int, roles: Mapping[str, str]) -> list[str]:
         try:
             return select(entry, self.space(roles), self.sets)
@@ -492,6 +500,24 @@ def _compile_refreeze(depth: int, entries: Sequence[str], bound: BoundView, logi
     return named + coupled, {k: tuple(v) for k, v in mapped.items()}
 
 
+def _transform_targets(entry: str, depth: int, bound: BoundView, logical_names: Sequence[str],
+                       roles: Mapping[str, str], shared: tuple, addressing: _Addressing, trainable: Collection[str],
+                       what: str) -> list[str]:
+    """The physical tensors a ``grad_transforms`` entry (or a treatment op's target, ``@<set>``) selects, as a
+    ``params`` entry resolves, checking each is ``trainable`` once the phase is in place."""
+    ((is_sel, names),) = _expand([entry], depth, bound, logical_names, roles, shared, addressing)
+    try:
+        mapped = dict(bound.to_physical(names)) if names and not is_sel else {}
+    except Unresolvable as err:
+        raise ScheduleUnresolvable(err.names, f"(phase {depth}'s `grad_transforms`)") from err
+    physical = list(dict.fromkeys(names if is_sel else (q for n in names for q in mapped[n])))
+    untrained = sorted(p for p in physical if p not in trainable)
+    if untrained:
+        raise FTSConfigurationError(f"Phase {depth}'s {what} selects tensors that are not trainable in the phase:"
+                                    f" {untrained}.")
+    return physical
+
+
 def _compile_transforms(depth: int, transforms: Mapping[str, Any], bound: BoundView, logical_names: Sequence[str],
                         roles: Mapping[str, str], shared: tuple, addressing: _Addressing,
                         trainable: Collection[str]) -> dict[str, tuple[Transform, ...]]:
@@ -500,17 +526,8 @@ def _compile_transforms(depth: int, transforms: Mapping[str, Any], bound: BoundV
     or when it keeps every index), checking each tensor is ``trainable`` once the phase is in place."""
     out: dict[str, list[Transform]] = {}
     for entry, fns in transforms.items():
-        ((is_sel, names),) = _expand([entry], depth, bound, logical_names, roles, shared, addressing)
-        try:
-            mapped = dict(bound.to_physical(names)) if names and not is_sel else {}
-        except Unresolvable as err:
-            raise ScheduleUnresolvable(err.names, f"(phase {depth}'s `grad_transforms`)") from err
-        physical = list(dict.fromkeys(names if is_sel else (q for n in names for q in mapped[n])))
-        untrained = sorted(p for p in physical if p not in trainable)
-        if untrained:
-            raise FTSConfigurationError(
-                f"Phase {depth}'s `grad_transforms` entry {entry!r} selects tensors that are not trainable in the"
-                f" phase: {untrained}.")
+        physical = _transform_targets(entry, depth, bound, logical_names, roles, shared, addressing, trainable,
+                                      f"`grad_transforms` entry {entry!r}")
         grad = addressing.split(entry, depth)[1] if is_address(entry) else None
         units = addressing.masks(entry, grad, depth, roles) if grad is not None else {}
         listed = list(fns) if isinstance(fns, (list, tuple)) else [fns]
@@ -518,6 +535,108 @@ def _compile_transforms(depth: int, transforms: Mapping[str, Any], bound: BoundV
             rows = units.get(p)
             kept = tuple(rows) if rows is not None and len(rows) < addressing.widths[p] else None
             out.setdefault(p, []).extend((fn, kept) for fn in listed)
+    return {p: tuple(ts) for p, ts in out.items()}
+
+
+def _treatment(name: str, sets: Mapping[str, Any], depth: int) -> Any:
+    """The treatment ``name`` of the schedule's address books (a :class:`venngram.recipe.Recipe`)."""
+    books = getattr(sets, "books", ())
+    found = [b.treatments[name] for b in books if name in b.treatments]
+    if len(found) != 1:
+        known = sorted(n for b in books for n in b.treatments)
+        why = "several of" if found else "none of"
+        raise FTSConfigurationError(f"Phase {depth}'s `grad_transforms` names the treatment `{name}`, which {why} the"
+                                    f" schedule's address books (`addresses`) has (treatments: {known}).")
+    return found[0]
+
+
+def _out_dim(structure: Any, name: str, ndim: int) -> int:
+    """The axis a span's directions run along on the tensor ``name``: a weight's ``out`` side, as the view's
+    component map records it, else the first axis."""
+    unit_dim = getattr(structure, "unit_dim", None)
+    if ndim < 2 or unit_dim is None:
+        return 0
+    dim = unit_dim(name, ndim)
+    if not isinstance(dim, int):
+        return 0
+    return dim if UNIT_SIDES.get(structure.locate(name).component or "") == "out" else 1 - dim
+
+
+def _unit_doses(structure: Any, name: str, tensor: Tensor, doses: Mapping[tuple[int, int], float],
+                where: str) -> tuple[int, dict[int, float]]:
+    """The axis the tensor ``name``'s units run along, and the doses a ``param_units`` op gives its units (those at
+    its layer)."""
+    dim = structure.unit_dim(name, tensor.dim())
+    if not isinstance(dim, int):
+        raise FTSConfigurationError(f"{where} acts on units of `{name}`, which has no unit axis: {dim}.")
+    loc = structure.locate(name)
+    depth = structure.depth(loc.stack)
+    at = {(layer + depth if layer < 0 and isinstance(depth, int) else layer, unit): dose
+          for (layer, unit), dose in doses.items()}
+    units = {unit: dose for (layer, unit), dose in at.items() if layer == loc.layer}
+    wide = sorted(u for u in units if not 0 <= u < tensor.shape[dim])
+    if wide:
+        raise FTSConfigurationError(f"{where} names units {wide} of `{name}`, which has {tensor.shape[dim]} along its"
+                                    f" unit axis (dimension {dim}).")
+    return dim, units
+
+
+def _directions(recipe: Any, operand: str) -> Tensor:
+    """A ``vector`` or ``subspace`` operand as directions, one per column (a subspace stacks them on its leading
+    axis)."""
+    values, shape = recipe.operands[operand].load(recipe.base_dir or ".")
+    directions = torch.tensor(values, dtype=torch.float64).reshape(shape)
+    return directions if directions.dim() == 1 else directions.T
+
+
+_SPAN_OPS = ("project", "reject")
+
+
+def _compile_treatment(depth: int, name: str, bound: BoundView, logical_names: Sequence[str],
+                       roles: Mapping[str, str], shared: tuple, addressing: _Addressing, trainable: Collection[str],
+                       tensors: Mapping[str, Tensor]) -> dict[str, tuple[Transform, ...]]:
+    """Resolve the treatment phase ``depth``'s ``grad_transforms`` names to each physical tensor's transforms: its
+    ``gradients`` ops in order, each on the trainable tensors its target set selects, as the built-ins
+    (:func:`~finetuning_scheduler.core.grad_transforms.op_transforms`)."""
+    recipe = _treatment(name, addressing.sets, depth)
+    where = f"Phase {depth}'s treatment `{name}`"
+    applied = [s for s in ("stages", "weights") if getattr(recipe, s)]
+    if applied or not recipe.gradients:
+        what = f"has {' and '.join(f'`{s}`' for s in applied)}" if applied else "has no `gradients` section"
+        raise FTSConfigurationError(f"{where} {what}: Fine-Tuning Scheduler applies a treatment's `gradients` ops"
+                                    " (ops on parameter gradients), and nothing else.")
+    problems = support_record().check_recipe(recipe)
+    problems += [f"gradients op {j} (`{op.op}`): an operand, which only `project` and `reject` take here"
+                 for j, op in enumerate(recipe.gradients) if op.operand is not None and op.op not in _SPAN_OPS]
+    if problems:
+        raise FTSConfigurationError(f"{where} asks for what Fine-Tuning Scheduler does not apply:"
+                                    f" {'; '.join(problems)}.")
+    structure = addressing.structure()
+    out: dict[str, list[Transform]] = {}
+    for j, op in enumerate(recipe.gradients):
+        at = f"{where} op {j} (`{op.op}`)"
+        physical = _transform_targets(f"@{op.target}", depth, bound, logical_names, roles, shared, addressing,
+                                      trainable, f"treatment `{name}` op {j} (`{op.op}`, on `@{op.target}`)")
+        doses = None
+        if op.target_kind(recipe.book) == "param_units":
+            if getattr(structure, "unit_dim", None) is None:
+                raise FTSConfigurationError(f"{at} acts on units of the tensors `@{op.target}` selects, whose unit axis"
+                                            " only a view with a component map records (`venngram.view(model)`).")
+            try:
+                doses = op.unit_doses(recipe.book, at)
+            except VenngramError as err:
+                raise FTSConfigurationError(str(err)) from err
+        directions = _directions(recipe, op.operand) if op.operand is not None else None
+        for p in physical:
+            if doses is not None:
+                dim, units = _unit_doses(structure, p, tensors[p], doses, at)
+                ts = op_transforms(op.op, dim=dim, doses=units) if units else []
+            elif directions is not None:
+                ts = op_transforms(op.op, dim=_out_dim(structure, p, tensors[p].dim()), directions=directions,
+                                   fraction=float(op.params.get("fraction", 1.0)))
+            else:
+                ts = op_transforms(op.op, dose=op.value.dose)
+            out.setdefault(p, []).extend(ts)
     return {p: tuple(ts) for p, ts in out.items()}
 
 
@@ -648,7 +767,9 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
 
     A phase's ``grad_transforms`` entries resolve the same way, to tensors trainable once the phase is in place, each
     with its transforms and the rows its entry's gradient unit set keeps (:attr:`CompiledPhase.transforms`); they apply
-    until a later phase states its own (:meth:`CompiledSchedule.transforms_at`).
+    until a later phase states its own (:meth:`CompiledSchedule.transforms_at`). A phase's ``grad_transforms`` naming a
+    treatment of the books in ``addresses`` compiles its ``gradients`` ops the same way, each to the built-in transforms
+    of the tensors its target set selects (:mod:`~finetuning_scheduler.core.grad_transforms`).
 
     Args:
         schedule: The schedule (phase depth mapped to its configuration; only ``params``, ``promote``, ``refreeze``
@@ -670,7 +791,8 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
             :func:`~finetuning_scheduler.core.schedule.requires_grad_capable`); or a phase refreezes a tensor that is
             not trainable when it starts, both thaws and refreezes a tensor, or leaves nothing trainable; or a
             ``refreeze`` or ``promote`` entry addresses gradients; or a ``grad_transforms`` entry selects a tensor that
-            is not trainable in its phase.
+            is not trainable in its phase, or names a treatment no book in ``addresses`` has or that asks for more than
+            Fine-Tuning Scheduler applies.
     """
     _warn_addresses_experimental(schedule, addresses)
     bound: BoundView = as_view(view)
@@ -790,10 +912,13 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
             lives[p] += 1
         if refreeze and not (live_primary or live_coupled):
             raise FTSConfigurationError(f"Phase {depth} leaves nothing trainable: it refreezes every trainable tensor.")
-        if schedule[depth].get("grad_transforms") is not None:
-            cp = replace(cp, transforms=_compile_transforms(depth, schedule[depth]["grad_transforms"], bound,
-                                                            logical_names, roles_now, shared, addressing,
-                                                            {**live_primary, **live_coupled}))
+        stated = schedule[depth].get("grad_transforms")
+        if isinstance(stated, str):  # a treatment of the schedule's address books
+            cp = replace(cp, transforms=_compile_treatment(depth, stated, bound, logical_names, roles_now, shared,
+                                                           addressing, {**live_primary, **live_coupled}, tensors))
+        elif stated is not None:
+            cp = replace(cp, transforms=_compile_transforms(depth, stated, bound, logical_names, roles_now, shared,
+                                                            addressing, {**live_primary, **live_coupled}))
         phases.append(cp)
     _check_disjoint_names(within, across, legacy)
     if overlaps:

@@ -202,9 +202,66 @@ groups, keep its update out of a protected direction, bound it, or apply a funct
 A transform is any callable ``transform(name, grad, units)`` returning the gradient's new value, where ``units`` are
 the indices along its first axis that the entry's gradient unit set keeps (``None`` without one). The built-ins in
 :mod:`~finetuning_scheduler.core.grad_transforms` (:class:`~finetuning_scheduler.core.grad_transforms.Scale`,
+:class:`~finetuning_scheduler.core.grad_transforms.Replace`, :class:`~finetuning_scheduler.core.grad_transforms.Add`,
 :class:`~finetuning_scheduler.core.grad_transforms.Clamp`, :class:`~finetuning_scheduler.core.grad_transforms.Project`
 and :class:`~finetuning_scheduler.core.grad_transforms.Reject`) act on those rows when given. An entry selects tensors
 only to transform them: it neither thaws nor masks them, and a tensor it selects must be trainable in the phase.
+
+.. _tunable-views-treatments:
+
+**Treatments.** ``grad_transforms`` may instead name a treatment of the schedule's address books. In venngram, a book's
+sets select what to address, and its ``treatments`` say what is done to them for one model. Each treatment is a
+*recipe* (``venngram.recipe.Recipe``; see `Large unit sets and treatments
+<https://github.com/speediedan/venngram#large-unit-sets-and-treatments>`_ in venngram's README), stored in the book
+under a name of its author's choosing. A recipe can hold several sections: ``stages`` act on activations,
+``weights`` edit parameters, and ``gradients`` act on each step's parameter gradients. Fine-Tuning Scheduler applies
+the ``gradients`` section, and a phase names the treatment by its key. Because the ops are data rather than callables, a
+schedule read from YAML can name one:
+
+.. code-block:: yaml
+
+    addresses:
+      sets:
+        mlp_13: {component: mlp.out, layers: [13]}
+        neuron_grads: {component: mlp.out, layers: [13], leaf: weight, units: [52, 101], of: grad}
+        down_grad: {component: mlp.out, layers: [13], leaf: weight, of: grad}
+      treatments:
+        keep_neurons_out:
+          model: {id: Qwen/Qwen3-4B, revision: main}
+          operands:
+            concept: {file: dirs.safetensors, key: concept, sha256: ..., shape: [2560], basis: unfolded}
+          gradients:
+            - {op: replace, target: {set: neuron_grads}, value: {dose: 0.0}}
+            - {op: reject, target: {set: down_grad}, operand: concept}
+    0:
+      params: ["@mlp_13"]
+      grad_transforms: keep_neurons_out
+
+Read top to bottom:
+
+- ``sets`` are ordinary named sets. ``mlp_13`` is layer 13's MLP output projection, which phase 0 trains.
+  ``neuron_grads`` and ``down_grad`` address the gradient of that projection's weight (``of: grad``):
+  ``neuron_grads`` covers only units 52 and 101, and ``down_grad`` covers all of it.
+- ``keep_neurons_out`` is the treatment's name: a key under ``treatments``, and what ``grad_transforms`` names.
+- ``model`` is the model the treatment was written for, since its units and directions are that model's.
+- ``operands`` are the data its ops take, by name. Here ``concept`` is one direction in the layer's output space,
+  read from a safetensors sidecar beside the book and checked against its hash and shape.
+- ``gradients`` lists the ops, each on the set its ``target`` names. The first replaces units 52 and 101's gradients
+  with zero (a dose of ``0.0``), so those two neurons' outgoing weights stay fixed while the rest of the projection
+  trains. The second rejects ``concept`` from the projection's gradient, so no update moves its output along that
+  direction.
+
+So phase 0 trains layer 13's MLP output projection while keeping two neurons and one direction out of the update. That
+is what the name ``keep_neurons_out`` records.
+
+Its ops apply in order, each to the gradients of the trainable tensors its target set selects, as the built-ins:
+``scale``, ``replace`` and ``add`` with a ``dose`` or per-unit ``doses``, and ``project`` and ``reject`` with a
+``vector`` or ``subspace`` operand and a ``fraction``. Where the built-ins act along a tensor's first axis, a treatment
+follows venngram's meaning: a target set with ``units`` acts along each tensor's unit axis (a down projection's input
+side, for one), and a span's directions run along a weight's ``out`` side, both as the view's component map records
+them (``venngram.view(model)``; a span uses the first axis without one). A treatment with ``stages`` or ``weights``,
+another op, or a value taken ``from`` evidence or through a value transform is refused, as Fine-Tuning Scheduler's
+support record declares (its ``steering`` section lists the ``gradient_ops`` it applies).
 
 The rules:
 
@@ -219,8 +276,8 @@ The rules:
   effect. A transform should keep no state of its own: a resumed run rebuilds the transforms from the schedule.
 
 Transforms are refused on the Lightning callback and on a sharded model, as masks are, and a schedule with
-them is not exported as an address book: a callable is not portable. venngram declares ops on parameter gradients in a
-recipe's ``gradients`` section, which a later release reads.
+them is not exported as an address book: a callable is not portable, and a treatment is already in the book that holds
+it.
 
 Address Books Through venngram
 ******************************
@@ -247,8 +304,9 @@ since is refused, naming the saved references so the schedule can cite them to r
 (``finetuning_scheduler/core/support_record.yaml``, read by :func:`~finetuning_scheduler.core.compile.support_record`;
 see `Support records <https://github.com/speediedan/venngram#support-records>`_). A set a schedule uses that asks for
 more (an activation site, or units of a tensor) is refused at compile time; a set of the same book the schedule does not
-use is not judged, so one book can serve a steering tool and a schedule. A book can be checked against the record
-without Fine-Tuning Scheduler installed:
+use is not judged, so one book can serve a steering tool and a schedule. The record's ``steering`` section declares
+the ops on parameter gradients it applies from a treatment a phase names (``gradient_ops``), and a treatment that asks
+for more is refused the same way. A book can be checked against the record without Fine-Tuning Scheduler installed:
 
 .. code-block:: bash
 

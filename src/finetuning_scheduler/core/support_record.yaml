@@ -14,7 +14,10 @@ description: >-
   model holding them is tuned through its own tensors), and no unit sets as values (`units: none`; a unit set under
   `of: grad` is a gradient mask, which venngram's support check does not yet tell apart, so Fine-Tuning Scheduler
   judges those sets itself). Naming schemes are whatever the view provides, checked against each book's
-  `requires.naming_scheme`.
+  `requires.naming_scheme`. Of a book's treatments it applies the `gradients` ops (ops on parameter gradients) of a
+  treatment a phase names in `grad_transforms` (the PyTorch API): `scale`, `replace` and `add` with a dose or per-unit
+  doses, a `param_units` target acting along each tensor's unit axis, and `project` and `reject` with a vector or
+  subspace operand along a weight's `out` side. It applies no stage or `weights` ops.
 sections:
   tuning:
     fields: [role, name, module, layers, stack, component, leaf, of]
@@ -23,3 +26,9 @@ sections:
     structure: [physical, vocabulary]
     portability: [family, checkpoint]
     gradients: [mixed-sets, union-masks]
+  steering:
+    ops: []
+    targets: [param, param_units]
+    of: [grad]
+    values: [dose, doses]
+    gradient_ops: [add, project, reject, replace, scale]

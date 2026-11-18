@@ -250,6 +250,12 @@ The grammar and address books are `venngram <https://github.com/speediedan/venng
 an agent skill for them, ``venngram-addressing``. Books can also be published and named by reference, and a schedule can be exported as a book: see
 :ref:`tunable-views-advanced`.
 
+A book's sets say *what* to address. A book may also carry **treatments**, under a ``treatments`` key beside its
+``sets``: named recipes that say what is *done* to those sets for one model, such as zeroing the gradients of a few
+neurons or keeping updates out of a direction. A set and what is done to it then travel together in one document, which
+a steering tool and a schedule can share. Fine-Tuning Scheduler applies a treatment's ops on parameter gradients when a
+phase names it in ``grad_transforms`` (see :ref:`tunable-views-gradient-transforms`).
+
 .. _tunable-views-export:
 
 Exporting by Role

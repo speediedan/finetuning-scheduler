@@ -99,8 +99,9 @@ def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addre
     transformed = sorted(d for d, p in schedule.items() if p.get("grad_transforms"))
     if transformed:
         raise FTSConfigurationError(
-            f"Phases {transformed} transform gradients (`grad_transforms`), which an address book cannot hold yet: a"
-            " callable is not portable. The schedule trains as written; export the phases without their transforms.")
+            f"Phases {transformed} transform gradients (`grad_transforms`), which an address book written from a"
+            " schedule cannot hold yet: a callable is not portable, and a treatment is already in the book that holds"
+            " it. The schedule trains as written; export the phases without their transforms.")
     sets = dict(addresses or {})
     out_sets: dict[str, Any] = {}
     uses_names = uses_of = False
