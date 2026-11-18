@@ -302,6 +302,19 @@ def test_tunable_views_lora_placement_nb(tmpdir):
 
 @pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
 @RunIf(min_cuda_gpus=1, skip_windows=True)
+def test_tunable_views_lora_placement_lightning_nb(tmpdir):
+    # the LoRA placement notebook's Lightning API companion, shortened through its parameters cell (#226): every
+    # condition, compiled over the view rooted at the LightningModule, selects the PyTorch notebook's tensors
+    out = _run_notebook("tunable_views/lora_placement_lightning.ipynb",
+                        {"MAX_STEPS": "4", "EVAL_EVERY": "2", "N_TRAIN": "64", "N_EVAL": "16"}, tmpdir.strpath)
+    assert "conformance: ok" in out
+    assert out.count("selects the PyTorch notebook's tensors") == 5, out
+    for condition in ("attention only", "MLP only", "all layers", "MLP + norms", "MLP, then attention"):
+        assert re.search(rf"^{re.escape(condition)} +final eval loss", out, flags=re.M), out
+
+
+@pytest.mark.skipif(not _HF_AVAILABLE, reason="Hugging Face transformers and datasets packages required")
+@RunIf(min_cuda_gpus=1, skip_windows=True)
 def test_tunable_views_cross_architecture_nb(tmpdir):
     # runs on CPU (meta-device models), but downloads four model configurations from the Hub, so it runs with the
     # other notebook tests rather than on every hosted matrix leg
