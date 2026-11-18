@@ -251,15 +251,16 @@ toctree in the sidebar, since every page is a child of `index`). The theme drops
 
 ### Tutorial notebooks
 
-Edit the authoring copies in `src/fts_examples/notebooks/dev/`. The `publish-notebooks` pre-commit hook copies them to
-`src/fts_examples/notebooks/publish/` (outputs stripped, Colab badge and install cell added); `nbstripout` keeps both
+Edit the authoring copies in `src/fts_examples/notebooks/dev/`. The `nbpress-publish` pre-commit hook copies them to
+`src/fts_examples/notebooks/publish/` (outputs stripped, Colab badge and install cell added); `nbpress-strip` keeps both
 lanes free of outputs. The docs render the executed copies in `docs/notebook_artifacts/`, which are produced offline and
 committed, never by the docs build:
 
 ```bash
-python scripts/render_notebook_docs.py --list
-python scripts/render_notebook_docs.py --notebook fts_superglue --timeout 7200   # GPU work: run under the lease
-python scripts/render_notebook_docs.py --check-stale                              # exit 3 when an artifact drifted
+uv pip install "$(grep -E '^nbpress @ git\+' requirements/docs.txt)" papermill   # once per environment
+nbpress-render --list
+nbpress-render --notebook fts_superglue --timeout 7200   # GPU work: run under the lease
+nbpress-render --check-stale                              # exit 3 when an artifact drifted
 ```
 
 Rendering needs `papermill`, `ipykernel` and the `examples` extra. Each notebook has a cell tagged `parameters`; the
@@ -270,10 +271,10 @@ The tunable-view examples and notebooks look venngram's maps up in its seed regi
 moving that pin means re-rendering both tunable-view artifacts. Their tests use a local registry instead of the Hub
 (`tests/helpers/venngram_registry.py`).
 
-The publisher, the renderer and the nbstripout hook are vendored unmodified from interpretune into
-`scripts/vendored/notebook_tooling/`, configured by `[tool.notebook-publishing]` in `pyproject.toml`. Never edit them
-here: make the change in interpretune, then `python scripts/check_vendored_notebook_tooling.py --sync <commit>`. The
-pre-commit check refuses a local edit; `--upstream` reports whether interpretune has moved on.
+The publisher, the renderer and the output stripper are [nbpress](https://github.com/speediedan/nbpress), shared with
+interpretune and configured by `[tool.nbpress]` in `pyproject.toml`. It is pinned by commit in `requirements/docs.txt`
+and as the `rev` of its pre-commit hooks (`tests/test_nbpress_pin.py` keeps the two equal); a change to the tools
+goes to nbpress, then both pins move.
 
 ## Agent skills
 
@@ -387,7 +388,11 @@ the `fts-development-branch-version-upgrade` skill.
     reverse-order pass too, so a green merge build covers what a nightly of the same tree would run. Path filters do not
     apply to a schedule, so any change to `main` counts. Like every build on the shared agent it waits for its gate to
     be approved, and only a successful scheduled run resets "changed": a nightly left unapproved is followed by another
-    the next night, so reject the stale one.
+    the next night, so reject the stale one. Once approved, its "Scheduled-run coverage" step cancels it when a green
+    full run (one whose standalone phase ran every standalone test) already ran its exact tree, and runs it otherwise
+    (gpu-epsilon's `gpu_epsilon.scheduled_runs --in-job`, configured by `[tool.gpu-epsilon.scheduled-runs]`). For the
+    gate itself, `python -m gpu_epsilon.scheduled_runs --build <id>` prints a verdict (release when uncovered and the
+    pool is quiet, reject when covered or stale, hold otherwise); `--help` names its Azure, pool and lease options.
 - `.azure-pipelines/templates/fts-gpu-job.yml`: the any-vendor GPU job, gpu-epsilon's `templates/gpu-job.yml` (shared
   with interpretune, pinned to a tag in each GPU pipeline's `resources`) with this repository's settings and steps: a
   host job that reads the agent's `GPU_VENDOR` and starts its own container from a digest-pinned image (CUDA or
