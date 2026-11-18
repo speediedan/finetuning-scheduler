@@ -663,9 +663,10 @@ def final_phase_max_epochs(schedule: dict, max_phase: int, max_epoch_wm: int, ma
 
 
 # phase keys the PyTorch API adds
-DIRECT_API_PHASE_KEYS = ("max_transition_step", "phase_config", "pg_overrides", "promote", "refreeze", "restore")
+DIRECT_API_PHASE_KEYS = ("grad_transforms", "max_transition_step", "phase_config", "pg_overrides", "promote",
+                         "refreeze", "restore")
 # those only the PyTorch API interprets in this release (the Lightning callback refuses them)
-LIGHTNING_UNSUPPORTED_PHASE_KEYS = ("max_transition_step", "promote", "refreeze", "restore")
+LIGHTNING_UNSUPPORTED_PHASE_KEYS = ("grad_transforms", "max_transition_step", "promote", "refreeze", "restore")
 # what a phase's `restore` key can name: the best checkpoint, one phase's best (`best:<depth>`), nothing, or a
 # named state
 RESTORE_BEST, RESTORE_NONE = "best", "none"
@@ -683,6 +684,9 @@ def restore_best_depth(restore: Any) -> int | None:
 def parse_phase_extensions(schedule: dict) -> None:
     """Validate and normalize, in place, the phase keys the PyTorch API adds.
 
+    - ``grad_transforms``: gradient transforms, as ``{entry: transform}`` or ``{entry: [transform, ...]}``, applied to
+      each step's accumulated gradient of the tensors each entry (a name, regex or address) selects, from this phase
+      until a later phase states its own (:mod:`~finetuning_scheduler.core.grad_transforms`).
     - ``max_transition_step``: a global optimizer step count at which the phase ends (default ``-1``, unset).
     - ``phase_config``: an opaque mapping handed to phase hooks and gates.
     - ``pg_overrides``: optimizer options (other than ``params`` and ``lr``, which have their own keys) applied to the
@@ -702,6 +706,7 @@ def parse_phase_extensions(schedule: dict) -> None:
         parse_promote(depth, phase.get("promote"))
         parse_refreeze(depth, phase.get("refreeze"))
         parse_restore(depth, phase.get("restore"))
+        parse_grad_transforms(depth, phase.get("grad_transforms"))
         mts = phase.setdefault("max_transition_step", -1)
         if isinstance(mts, bool) or not isinstance(mts, int) or mts < -1:
             raise FTSConfigurationError(
@@ -779,6 +784,33 @@ def parse_refreeze(depth: int, refreeze: Any) -> None:
                 f"Phase {depth}'s `refreeze` entry {entry!r} is not a string. Write a parameter name, a regex or an "
                 "address in its string form; an address in mapping form goes in the schedule's `addresses` sets and is "
                 "referenced as `@<set>`.")
+
+
+def parse_grad_transforms(depth: int, transforms: Any) -> None:
+    """Validate phase ``depth``'s ``grad_transforms`` mapping (``None`` when the phase has none; an empty mapping
+    clears the transforms an earlier phase set).
+
+    Raises:
+        FTSConfigurationError: If it is not a mapping of names, regexes or addresses to a callable or a non-empty list
+            of callables.
+    """
+    if transforms is None:
+        return
+    if not isinstance(transforms, Mapping):
+        raise FTSConfigurationError(
+            f"Phase {depth}'s `grad_transforms` must be a mapping of names, regexes or addresses to transforms, got"
+            f" {type(transforms).__name__}.")
+    for entry, fns in transforms.items():
+        if not isinstance(entry, str) or not entry:
+            raise FTSConfigurationError(
+                f"Phase {depth}'s `grad_transforms` entry {entry!r} is not a string: write a parameter name, a regex or"
+                " an address in its string form.")
+        listed = list(fns) if isinstance(fns, (list, tuple)) else [fns]
+        if not listed or not all(callable(fn) for fn in listed):
+            raise FTSConfigurationError(
+                f"Phase {depth}'s `grad_transforms` for {entry!r} must be a callable or a non-empty list of callables"
+                f" (`transform(name, grad, units)`), got {fns!r}. A schedule read from YAML cannot hold one: set"
+                " `grad_transforms` in Python.")
 
 
 def parse_restore(depth: int, restore: Any) -> None:

@@ -93,8 +93,14 @@ def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addre
         description: The book's description.
 
     Raises:
-        FTSConfigurationError: If a phase has no ``params``, or an address references a set ``addresses`` lacks.
+        FTSConfigurationError: If a phase has no ``params``, an address references a set ``addresses`` lacks, or a
+            phase transforms gradients (``grad_transforms``), which a book cannot hold yet.
     """
+    transformed = sorted(d for d, p in schedule.items() if p.get("grad_transforms"))
+    if transformed:
+        raise FTSConfigurationError(
+            f"Phases {transformed} transform gradients (`grad_transforms`), which an address book cannot hold yet: a"
+            " callable is not portable. The schedule trains as written; export the phases without their transforms.")
     sets = dict(addresses or {})
     out_sets: dict[str, Any] = {}
     uses_names = uses_of = False

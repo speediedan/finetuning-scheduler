@@ -155,5 +155,6 @@ jobs:
         tests/test_tuning_scheduler_fake_pg.py tests/test_shard_model.py tests/test_views.py tests/test_compile.py
         tests/test_conformance.py tests/test_tuning_scheduler_views.py tests/test_tuning_scheduler_promotion.py
         tests/test_tuning_scheduler_stages.py tests/test_tuning_scheduler_grad_masks.py
+        tests/test_tuning_scheduler_grad_transforms.py
         tests/test_tuning_scheduler_export.py tests/test_tuning_scheduler_externally_driven.py
         tests/test_tunable_view_protocol.py -v
