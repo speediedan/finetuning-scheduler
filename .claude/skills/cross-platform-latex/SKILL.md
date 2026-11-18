@@ -105,6 +105,22 @@ preserve all of them, so a formula can be right in the docs build and quietly wr
 Write the spacing out of the expression instead - juxtaposition is almost always enough - and where a
 literal percent or ampersand is genuinely needed, prefer a form that avoids the backslash.
 
+### Use `\mathrm` for multi-letter function names, not `\operatorname`
+
+Write `$W_U \mathrm{norm}(J_\ell h)$`, not `$W_U \operatorname{norm}(J_\ell h)$`. GitHub's math
+engine does not render `\operatorname`: the expression shows the raw macro or broken output there,
+while MyST, MkDocs and notebook targets render it correctly. This failure is in the math engine, not
+the Markdown parser, so the TeX reaches GitHub's engine verbatim and the probe below (which reads
+what the parser hands over) cannot see it. The evidence is reports of rendered pages instead: a
+GitHub issue tracking it (`github/markup#1688`) carries them through 2026 and was closed as belonging
+to GitHub's renderer rather than that repository, with no fix.
+
+`\mathrm{softmax}`, `\mathrm{rms}` and `\mathrm{norm}` set the name upright, which is what a reader
+needs. The one difference is spacing: `\operatorname` adds operator spacing around the name, and
+`\mathrm` does not. Before a parenthesized argument the two look the same, which is the usual case.
+Named operators that are their own commands, such as `\log` and `\max`, are separate macros and not
+part of this problem.
+
 ### Do not press an inline `$` against the preceding character
 
 Write `the top $q$ of the coordinates`, not `the top-$q$ of the coordinates`. GitHub refuses an inline

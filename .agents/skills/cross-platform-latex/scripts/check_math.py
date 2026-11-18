@@ -134,6 +134,13 @@ def lint(path: Path):
                 f"'{m2.group(1)}'. Drop the spacing command, or use a form that needs no backslash.")
             break
 
+        # A math-engine gap rather than a parser one: the TeX reaches GitHub's engine verbatim and
+        # is not rendered there, while MyST and MkDocs render it, so only a rule can catch it.
+        if re.search(r"\\operatorname\*?\s*\{", body):
+            add(start, "operatorname-in-math",
+                "\\operatorname does not render on GitHub (MyST and MkDocs render it). Use "
+                "\\mathrm{...} for multi-letter function names, e.g. \\mathrm{softmax}.")
+
         if kind == "display" and _emphasis_pair(body):
             add(start, "emphasis-pair-in-math",
                 "an underscore that can OPEN markdown emphasis is followed by one that can CLOSE it "
