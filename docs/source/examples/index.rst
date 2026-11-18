@@ -33,6 +33,12 @@ Notebooks
        roles, layers and architecture-neutral components), check it, and run attention-only,
        MLP-only, all-layer, MLP-plus-norms and phased LoRA as address schedules over the same model, probing a 2025
        result on where LoRA adapters belong.
+   * - :doc:`Where should LoRA go? The Lightning API companion<notebooks/tunable_views/lora_placement_lightning>`
+     - Lightning
+     - The LoRA placement experiment with the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback: a view
+       rooted at the ``LightningModule``, checked to select the PyTorch notebook's tensors for every condition, the
+       step transition restated as an epoch transition over the same batch sequence, and the callback configured to
+       match the plain loop.
    * - :doc:`Addressing across architectures<notebooks/tunable_views/cross_architecture_addresses>`
      - PyTorch (experimental)
      - Portable addresses and schedules: the LoRA placement conditions, unchanged, compiled on four model families

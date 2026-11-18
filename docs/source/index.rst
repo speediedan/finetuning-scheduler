@@ -426,6 +426,7 @@ Footnotes
    SuperGLUE notebook (PyTorch API) <examples/notebooks/superglue/fts_superglue_pytorch>
    SuperGLUE with the LightningCLI <examples/cli/superglue_cli>
    LoRA placement by address (PyTorch API) <examples/notebooks/tunable_views/lora_placement>
+   LoRA placement by address (Lightning) <examples/notebooks/tunable_views/lora_placement_lightning>
    Addressing across architectures (PyTorch API) <examples/notebooks/tunable_views/cross_architecture_addresses>
    Where does RL learn? (PyTorch API) <examples/notebooks/where_rl_learns/where_rl_learns>
    interpretune <examples/integrations/interpretune>
