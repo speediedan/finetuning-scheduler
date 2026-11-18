@@ -224,7 +224,11 @@ def gpt2():
     model = transformers.GPT2LMHeadModel(config)
     # the fixture map read directly, not through the registry, whose index the oldest pyarrow cannot read
     doc = yaml.safe_load((FIXTURE_MAPS / "gpt2.yaml").read_text(encoding="utf-8"))
-    cmap = from_document(with_layouts(doc, model))
+    doc = with_layouts(doc, model)
+    for row in doc["components"].values():  # an older transformers' Conv1D lacks the `nx` a layout is measured from
+        if row["kind"] == "linear":
+            row.setdefault("layout", "in_out")
+    cmap = from_document(doc)
     return venngram.view(model, cmap)
 
 
