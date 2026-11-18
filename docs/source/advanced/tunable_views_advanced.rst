@@ -275,9 +275,8 @@ The rules:
   :attr:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.gradient_transforms` gives the transforms in
   effect. A transform should keep no state of its own: a resumed run rebuilds the transforms from the schedule.
 
-Transforms are refused on the Lightning callback and on a sharded model, as masks are, and a schedule with
-them is not exported as an address book: a callable is not portable, and a treatment is already in the book that holds
-it.
+Transforms are refused on the Lightning callback and on a sharded model, as masks are. A schedule with them exports
+as an address book with a treatment per phase (see :ref:`a schedule as a book<tunable-views-export-book>`).
 
 Address Books Through venngram
 ******************************
@@ -329,6 +328,25 @@ gradient addresses (phase 1 of the :ref:`example above<tunable-views-gradient-ma
 each value entry stating ``of: value``, and a gradient part, and a phase of several gradient entries with unit sets a
 union whose disjuncts each give their own mask. Either compiles back to the phase's masks, and the support record
 declares both readings (venngram's ``mixed-sets`` and ``union-masks``).
+
+A phase's gradient transforms become a treatment named after its set, ``phase_<depth>``, in an address book of schema 4,
+so a schedule reading the book names it (``grad_transforms: phase_1``). The built-ins ``Scale``, ``Replace``, ``Add``,
+``Project`` and ``Reject`` become venngram's ``scale``, ``replace``, ``add``, ``project`` and ``reject`` ops, each on a
+set of the gradients its entry selects, with a span's directions inline. A treatment the phase names is copied, its
+target sets and any sidecar operand inlined, so the book stands alone. A treatment records the model it was written
+for, so an export with Python transforms takes ``model={"id": ..., "revision": ...}`` (by default the model's
+``config._name_or_path`` and ``config._commit_hash``, when it has both):
+
+.. code-block:: python
+
+    fts.export_book("books/my_schedule.yaml", model={"id": "Qwen/Qwen3-4B", "revision": "<commit>"})
+
+Before it is returned, the book is compiled back: the schedule with each phase naming its treatment must give every
+tensor the same transforms, in the same order. A built-in acts along a tensor's first axis unless told otherwise, while
+venngram's ops act on units along each tensor's unit axis and on spans along its ``out`` side, so a built-in acting
+along another axis is refused, as is ``Clamp`` or a callable of your own (venngram declares no op for them on
+gradients, and a callable is not portable). A phase that clears its transforms (``grad_transforms: {}``) has no
+treatment: a schedule reading the book clears them itself.
 
 .. _tunable-views-refusals:
 

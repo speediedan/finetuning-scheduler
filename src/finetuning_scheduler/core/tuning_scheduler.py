@@ -26,6 +26,7 @@ import itertools
 import os
 import pathlib
 import sys
+import warnings
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
@@ -38,6 +39,8 @@ import yaml
 from torch import nn, Tensor
 from torch.optim import Optimizer
 from torch.utils.hooks import RemovableHandle
+from venngram import AddressBook
+from venngram.errors import VenngramError
 
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import phase as core_phase
@@ -52,6 +55,7 @@ from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.executor import TuningSchedulerExecutor, PhaseExecutor
 from finetuning_scheduler.core.fingerprint import batch_fingerprint
 from finetuning_scheduler.core.grad_masks import GradientMasks
+from finetuning_scheduler.core.grad_transforms import Add, Replace, Scale, transform_id
 from finetuning_scheduler.core.interface import LRStepConfig, TorchInterface, TrainingInterface
 from finetuning_scheduler.core.rng import capture_rng_state, fork_rngs, restore_rng_state
 from finetuning_scheduler.core.roles import (is_frozen_role, is_role_selector, role_kind, SELECTOR_PREFIX,
@@ -141,6 +145,17 @@ def _checkpoint_keys(names: Iterable[str], saved: Iterable[str]) -> tuple[dict[s
     by_canonical = {canonical_fqn(k): k for k in saved}
     keys = {n: n if n in saved else by_canonical.get(canonical_fqn(n)) for n in names}
     return {n: k for n, k in keys.items() if k is not None}, [n for n, k in keys.items() if k is None]
+
+
+def _transform_keys(transforms: Mapping[str, Sequence[Any]] | None) -> dict[str, list[tuple[str, Any]]]:
+    """Each tensor's transforms as comparable keys, in order: a valued built-in by its kind, value (as a float) and
+    axis, anything else by :func:`~finetuning_scheduler.core.grad_transforms.transform_id`, each with its units."""
+    def key(fn: Any) -> str:
+        if isinstance(fn, (Scale, Replace, Add)):
+            value = fn.factor if isinstance(fn, Scale) else fn.value
+            return f"{type(fn).__name__}({float(value)!r}, dim={fn.dim})"
+        return transform_id(fn)
+    return {p: [(key(fn), units) for fn, units in ts] for p, ts in (transforms or {}).items()}
 
 
 def _configured_entry(entry: Any, key: str, options: tuple[str, ...], where: str) -> tuple[Callable, dict[str, Any]]:
@@ -308,7 +323,7 @@ class TuningScheduler:
         self._compiled: CompiledSchedule | None = None
         self._address_sets: core_schedule.AddressSets = core_schedule.AddressSets()
         self._address_references: tuple[str, ...] = ()
-        self._source_params: dict[int, list[Any]] = {}  # each phase's `params` as written, for `export_book`
+        self._source_schedule: dict[int, dict[str, Any]] = {}  # each phase as written, for `export_book`
         self._logical_params: dict[int, tuple[str, ...]] = {}
         # promotions applied so far, and each promoted tensor's value when it was promoted (on the CPU)
         self._promotions: list[dict[str, Any]] = []
@@ -601,7 +616,7 @@ class TuningScheduler:
         # logical names it resolved are kept for display
         assert self._view is not None
         core_schedule.check_param_entries(schedule)
-        self._source_params = {d: list(schedule[d].get("params") or []) for d in schedule}
+        self._source_schedule = {d: dict(schedule[d]) for d in schedule}
         self._compiled = compile_schedule(schedule, self._view, addresses=address_sets)
         for cp in self._compiled.phases:
             self._logical_params[cp.depth] = cp.logical
@@ -1611,35 +1626,89 @@ class TuningScheduler:
         return True
 
     def export_book(self, path: str | os.PathLike | None = None, *, name: str | None = None,
-                    applies_to: Mapping[str, Any] | None = None, description: str | None = None) -> dict[str, Any]:
-        """The schedule's phase selections as a venngram address book, one set per phase (see
-        :func:`~finetuning_scheduler.core.books.schedule_book`), written as YAML to ``path`` on global rank zero
-        when given.
+                    applies_to: Mapping[str, Any] | None = None, description: str | None = None,
+                    model: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """The schedule's phase selections as a venngram address book, one set per phase, with each phase's
+        gradient transforms as a treatment (see :func:`~finetuning_scheduler.core.books.schedule_book`), written as
+        YAML to ``path`` on global rank zero when given.
+
+        A book with treatments is compiled back before it is returned: the schedule with each phase naming its
+        treatment must give every tensor the transforms the schedule gives it, in order, or the export is refused (a
+        built-in acting along another axis than venngram's, for one).
 
         Args:
             path: Where to write the book.
             name: The book's name; by default ``<model class>-schedule``.
             applies_to: The book's ``applies_to``; by default the model's ``config.architectures``, when it has them.
             description: The book's description.
+            model: The model Python gradient transforms were written for (``{"id": ..., "revision": ...}``); by
+                default the model's ``config._name_or_path`` and ``config._commit_hash``, when it has both.
 
         Returns:
             The book document.
+
+        Raises:
+            FTSConfigurationError: If :func:`~finetuning_scheduler.core.books.schedule_book` refuses the schedule, or
+                the book's treatments do not compile back to the schedule's transforms.
         """
         self._require_setup()
         assert self._view is not None
+        config = getattr(self.model, "config", None)
         if applies_to is None:
-            archs = getattr(getattr(self.model, "config", None), "architectures", None)
+            archs = getattr(config, "architectures", None)
             applies_to = {"architectures": list(archs)} if archs else None
+        source, commit = getattr(config, "_name_or_path", None), getattr(config, "_commit_hash", None)
+        if model is None and source and commit:
+            model = {"id": source, "revision": commit}
         # a phase that only refreezes selects nothing
-        book = schedule_book({d: {"params": p, "grad_transforms": self._schedule[d].get("grad_transforms")}
-                              for d, p in self._source_params.items() if p or not self._schedule[d].get("refreeze")},
-                             name=name or f"{type(self.model).__name__}-schedule", addresses=self._address_sets,
+        exported = {d: p for d, p in self._source_schedule.items() if p.get("params") or not p.get("refreeze")}
+        book = schedule_book(exported, name=name or f"{type(self.model).__name__}-schedule",
+                             addresses=self._address_sets,
                              logical_names=[n for n, _ in self._view.logical_named_parameters()],
                              naming_scheme=self._view.support().naming_scheme, applies_to=applies_to,
-                             description=description)
+                             description=description, model=model)
+        if "treatments" in book:
+            self._check_exported_treatments(book)
         if path is not None and self._interface.is_global_zero:
             pathlib.Path(path).write_text(yaml.safe_dump(book, sort_keys=False), encoding="utf-8")
         return book
+
+    def _check_exported_treatments(self, book: Mapping[str, Any]) -> None:
+        """Compile the schedule with each phase naming its exported treatment (beside the schedule's own books) and
+        refuse the export when a tensor's transforms differ from the schedule's."""
+        assert self._compiled is not None
+        try:
+            exported = AddressBook.from_mapping(book, source="the exported book", inline=True)
+        except VenngramError as err:
+            raise FTSConfigurationError(f"The exported book does not load: {err}") from err
+        sets = self._address_sets
+        clash = sorted(set(sets) & set(exported.sets()))
+        if clash:
+            raise FTSConfigurationError(f"The schedule's address books already define {clash}, which the exported book"
+                                        " names; rename them to export the schedule's gradient transforms.")
+        treated = set(book["treatments"])
+        schedule = {d: {**p, "grad_transforms": f"phase_{d}"} if f"phase_{d}" in treated else p
+                    for d, p in self._source_schedule.items()}
+        merged = core_schedule.AddressSets({**sets, **exported.sets()}, (*sets.books, exported), sets.references)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                back = compile_schedule(schedule, self._view, addresses=merged)
+        except FTSConfigurationError as err:
+            raise FTSConfigurationError(f"The exported book's treatments do not compile back to the schedule: {err}"
+                                        ) from err
+        for written, read in zip(self._compiled.phases, back.phases):
+            if f"phase_{written.depth}" not in treated:
+                continue
+            want, got = _transform_keys(written.transforms), _transform_keys(read.transforms)
+            for p in sorted(set(want) | set(got)):
+                if want.get(p) != got.get(p):
+                    raise FTSConfigurationError(
+                        f"Phase {written.depth}'s gradient transforms of `{p}` would change in the exported book: the"
+                        f" schedule applies {want.get(p, [])}, the book's treatment {got.get(p, [])}. venngram's ops"
+                        " act on units along each tensor's unit axis and on spans along its `out` side, as the view's"
+                        " component map records them; a built-in acting along another axis (its `dim`) cannot be"
+                        " exported.")
 
     def export_best(self, fn: Callable[[dict[str, Tensor], dict[str, Any], str | None], Any] | None = None, *,
                     roles: Sequence[str] = ("adapter",), path: str | os.PathLike | None = None) -> Any:
