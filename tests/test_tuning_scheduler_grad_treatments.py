@@ -22,6 +22,7 @@ import torch
 import venngram
 import yaml
 from venngram.ops import op_cases
+from venngram.operands import write_operands
 
 from finetuning_scheduler.core.compile import compile_schedule, support_record
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
@@ -29,10 +30,11 @@ from finetuning_scheduler.core.grad_transforms import (Add, Clamp, GRADIENT_OPS,
                                                        Replace, Scale)
 from finetuning_scheduler.core.schedule import load_address_sets, parse_grad_transforms
 from finetuning_scheduler import CanonicalView, TuningScheduler
+from finetuning_scheduler.core.tuning_scheduler import _transform_keys
 from tests.helpers.venngram_registry import FIXTURE_MAPS
 from tests.test_tuning_scheduler_grad_masks import _backward
 from tests.test_tuning_scheduler_grad_transforms import _fts, SGD
-from tests.test_tuning_scheduler_stages import _model
+from tests.test_tuning_scheduler_stages import _model, _schedule
 
 MODEL = {"id": "toy", "revision": "0"}
 CONCEPT = [1.0, 0.0, 0.0, 0.0]
@@ -200,9 +202,30 @@ def test_a_treatment_name_must_be_a_non_empty_string():
         parse_grad_transforms(0, "")
 
 
-def test_a_schedule_naming_a_treatment_is_not_exported(tmp_path):
-    with pytest.raises(FTSConfigurationError, match="a treatment is already in the book that holds it"):
-        _fts(TREATED).export_book(tmp_path / "book.yaml")
+def _keys(compiled):
+    return [_transform_keys(cp.transforms) for cp in compiled.phases]
+
+
+def test_a_treatment_a_phase_names_is_copied_into_the_exported_book(tmp_path):
+    # the concept in a sidecar beside the schedule's book, read inline into the exported one
+    sha = write_operands(tmp_path / "dirs.safetensors", {"concept": (CONCEPT, [4])})
+    book = {"schema_version": 4, "name": "calm-book", **copy.deepcopy(BOOK)}
+    book["treatments"]["calm"]["operands"]["concept"] = {"file": "dirs.safetensors", "key": "concept", "sha256": sha,
+                                                         "shape": [4], "basis": "out"}
+    (tmp_path / "book.yaml").write_text(yaml.safe_dump(book), encoding="utf-8")
+    (tmp_path / "schedule.yaml").write_text(yaml.safe_dump({**TREATED, "addresses": "book.yaml"}), encoding="utf-8")
+    fts = TuningScheduler(_model(), str(tmp_path / "schedule.yaml"), optimizer=SGD)
+    fts.setup()
+    exported = fts.export_book()
+    calm = exported["treatments"]["phase_0"]
+    assert calm["model"]["id"] == "toy" and calm["operands"]["concept"] == {"values": CONCEPT, "shape": [4],
+                                                                            "basis": "out"}
+    assert [op["target"] for op in calm["gradients"]] == [{"set": "phase_0_mid_grads"},
+                                                          {"set": "phase_0_mid_weight_grad"}]
+    assert exported["sets"]["phase_0_mid_weight_grad"] == BOOK["sets"]["mid_weight_grad"]
+    read = {"addresses": exported, 0: {"params": ["@phase_0"], "max_transition_epoch": 1,
+                                       "grad_transforms": "phase_0"}, 1: {"params": ["@phase_1"]}}
+    assert _keys(_compiled(read)) == _keys(_compiled(TREATED))
 
 
 # the unit axis, through a component map
@@ -265,3 +288,35 @@ def test_units_beyond_the_unit_axis_are_named(gpt2):
                                                     r"which has 12 along its unit axis \(dimension 0\)"):
         compile_schedule({0: {"params": ["@mlp"], "grad_transforms": "quiet"}}, gpt2,
                          addresses=load_address_sets(book))
+
+
+# export through the unit axis
+
+FC = "transformer.h.1.mlp.c_fc.weight"  # [hidden, intermediate]: its units (neurons) run along dimension 1
+UNITS = {"sets": {"mlp": {"component": "mlp.*", "layers": [1]}}}
+
+
+def _gpt2_export(view, transforms):
+    schedule = {"addresses": UNITS, 0: {"params": ["@mlp"], "grad_transforms": transforms}}
+    fts = TuningScheduler(view.root, _schedule(schedule), optimizer=SGD, view=view)
+    fts.setup()
+    return fts.export_book(model=MODEL)
+
+
+def test_transforms_along_venngrams_axes_export(gpt2):
+    book = _gpt2_export(gpt2, {
+        "component:mlp.out & layers:[1] & leaf:weight & units:[2, 5] & of:grad": Scale(0.5),
+        "component:mlp.out & layers:[1] & leaf:weight": Reject(torch.tensor([1.0] + [0.0] * 7), dim=1)})
+    ops = book["treatments"]["phase_0"]["gradients"]
+    assert [op["op"] for op in ops] == ["scale", "reject"]
+
+
+@pytest.mark.parametrize("transforms, tensor", [
+    # a unit set along the first axis, where c_fc's units run along its second
+    ({"component:mlp.in & layers:[1] & leaf:weight & units:[2] & of:grad": Scale(0.5)}, FC),
+    # a span along c_proj's first axis, its input side, where venngram's run along its out side
+    ({"component:mlp.out & layers:[1] & leaf:weight": Reject(torch.ones(12))}, DOWN),
+], ids=["units", "span"])
+def test_transforms_along_another_axis_are_not_exported(gpt2, transforms, tensor):
+    with pytest.raises(FTSConfigurationError, match=f"gradient transforms of `{tensor}` would change in the exported"):
+        _gpt2_export(gpt2, transforms)

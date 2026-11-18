@@ -16,9 +16,11 @@ These need only PyTorch and the scheduling core (the ``core-no-lightning`` job r
 """
 import logging
 from functools import partial
+from types import SimpleNamespace
 
 import pytest
 import torch
+import yaml
 
 from finetuning_scheduler.core.compile import compile_schedule
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
@@ -259,9 +261,61 @@ def test_a_sharded_model_refuses_gradient_transforms():
         _fts(schedule, distributed=DTensorAdapter())
 
 
-def test_a_schedule_with_transforms_is_not_exported(tmp_path):
-    with pytest.raises(FTSConfigurationError, match=r"Phases \[0, 1\] transform gradients"):
-        _fts().export_book(tmp_path / "book.yaml")
+# export
+
+TOY = {"id": "toy", "revision": "0"}
+# the middle layer's gradients doubled and its weight's partly rejected from a direction on its output side, then
+# cleared
+WHOLE = {
+    0: {"params": ["module:1"], "max_transition_epoch": 1,
+        "grad_transforms": {"module:1": Scale(2), "module:1 & leaf:weight": [Reject(torch.tensor([1.0, 0, 0, 0]),
+                                                                                    fraction=0.5)]}},
+    1: {"params": ["2.weight", "2.bias"], "grad_transforms": {}},
+}
+
+
+def test_python_transforms_export_as_a_treatment_per_phase(tmp_path):
+    book = _fts(WHOLE).export_book(tmp_path / "book.yaml", model=TOY)
+    assert book["schema_version"] == 4 and sorted(book["treatments"]) == ["phase_0"]
+    assert book["sets"]["phase_0_grad_0"] == {"all": [{"module": "1"}, {"of": "grad"}]}
+    assert book["treatments"]["phase_0"] == {
+        "model": TOY,
+        "operands": {"phase_0_dir_0": {"values": [1.0, 0.0, 0.0, 0.0], "shape": [4], "basis": "out"}},
+        "gradients": [{"op": "scale", "target": {"set": "phase_0_grad_0"}, "value": {"dose": 2.0}},
+                      {"op": "reject", "target": {"set": "phase_0_grad_1"}, "operand": "phase_0_dir_0",
+                       "params": {"fraction": 0.5}}]}
+    # a schedule reading the book names the treatment, and clears the transforms itself
+    read = {"addresses": "book.yaml", 0: {"params": ["@phase_0"], "max_transition_epoch": 1,
+                                          "grad_transforms": "phase_0"},
+            1: {"params": ["@phase_1"], "grad_transforms": {}}}
+    (tmp_path / "read.yaml").write_text(yaml.safe_dump(read), encoding="utf-8")
+    fts = TuningScheduler(_model(), str(tmp_path / "read.yaml"), optimizer=SGD)
+    fts.setup()
+    _backward(fts, 0)
+    got = {n: p.grad for n, p in fts.model.named_parameters() if p.grad is not None}
+    want = _grads(WHOLE)
+    assert sorted(got) == sorted(want) and all(torch.equal(got[n], want[n]) for n in want)
+
+
+def test_an_export_takes_its_model_from_the_models_config():
+    model = _model()
+    model.config = SimpleNamespace(_name_or_path="org/toy", _commit_hash="abc123", architectures=None)
+    book = _fts(WHOLE, model=model).export_book()
+    assert book["treatments"]["phase_0"]["model"] == {"id": "org/toy", "revision": "abc123"}
+
+
+@pytest.mark.parametrize("transforms, kwargs, match", [
+    ({"module:1": Clamp(max=1.0)}, {"model": TOY}, r"applies Clamp\(.*\), which an address book cannot hold"),
+    ({"module:1": lambda name, grad, units: grad}, {"model": TOY}, "a callable is not portable"),
+    ({"module:1": Scale(2)}, {}, r"records the model it was written for: pass `model="),
+    ({"module:1 & leaf:weight": Reject(torch.ones(5000))}, {"model": TOY}, "more than the 4096 an exported book"),
+    ({"module:1 & units:[0] & of:grad": HALF}, {"model": TOY},
+     "do not compile back to the schedule: .* only a view with a component map records"),
+], ids=["clamp", "callable", "no_model", "too_long", "units_without_a_map"])
+def test_an_export_refuses_what_a_book_cannot_hold(transforms, kwargs, match):
+    schedule = {0: {"params": ["module:1"], "grad_transforms": transforms}}
+    with pytest.raises(FTSConfigurationError, match=match):
+        _fts(schedule).export_book(**kwargs)
 
 
 # resume

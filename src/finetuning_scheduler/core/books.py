@@ -32,6 +32,27 @@ uniting a value part and a gradient part, each value entry stating ``of: value``
 entries with unit sets one set whose disjuncts each give their own mask, united per tensor (venngram's ``mixed-sets``
 and ``union-masks``, which Fine-Tuning Scheduler's support record declares). Either compiles back to the phase's masks.
 
+A phase's gradient transforms (``grad_transforms``) become a treatment of the book named after the phase's set
+(``phase_<depth>``), so a schedule reading the book names it (``grad_transforms: phase_1``), in an address book of
+schema 4 (the first that can hold a treatment's ``gradients``):
+
+- the built-ins :class:`~finetuning_scheduler.core.grad_transforms.Scale`,
+  :class:`~finetuning_scheduler.core.grad_transforms.Replace`, :class:`~finetuning_scheduler.core.grad_transforms.Add`,
+  :class:`~finetuning_scheduler.core.grad_transforms.Project` and
+  :class:`~finetuning_scheduler.core.grad_transforms.Reject` become venngram's ``scale``, ``replace``, ``add``,
+  ``project`` and ``reject`` ops, in order, each on a set of the gradients its entry selects
+  (``phase_<depth>_grad_<n>``, the entry stating ``of: grad``), with a span's directions inline as an operand (in the
+  ``out`` basis). Every other transform (``Clamp``, or a callable of your own) is refused by name: venngram declares no
+  op for it on gradients, and a callable is not portable;
+- a treatment the phase names is copied, its target sets inlined as ``phase_<depth>_<set>`` and any sidecar operand
+  read inline, so the book stands alone.
+
+A treatment records the model it was written for (``model``, its ``id`` and ``revision``). A built-in acts along a
+tensor's first axis unless told otherwise, where a venngram op on units or a span follows the view's component map, so
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.export_book` compiles the book back and refuses an
+export whose transforms would differ. A phase that clears its transforms (``grad_transforms: {}``) has no treatment: a
+schedule reading the book clears them itself.
+
 A book derived from address books fetched by reference records their exact references under ``derived_from``.
 
 .. warning:: This is an experimental API and may change in a future release.
@@ -40,11 +61,14 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import torch
 from venngram import is_address
 from venngram.address import And, Expr, Guarded, Minus, Or, Ref, Term, terms, to_mapping
 from venngram.address import parse as parse_address
+from venngram.recipe import INLINE_LIMIT
 
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
+from finetuning_scheduler.core.grad_transforms import Add, Project, Reject, Replace, Scale
 
 
 def _inline(expr: Expr, sets: Mapping[str, Expr], path: tuple[str, ...] = ()) -> Expr:
@@ -73,9 +97,88 @@ def _entry_expr(entry: str, names: Sequence[str] | None, sets: Mapping[str, Expr
     return Term(name=f"(?:{entry}).*"), True
 
 
+_VALUED_OPS = {Scale: ("scale", "factor"), Replace: ("replace", "value"), Add: ("add", "value")}
+_SPAN_OPS = {Project: "project", Reject: "reject"}
+
+
+def _of_grad(expr: Expr) -> Expr:
+    """``expr`` addressing gradients: as written when a term states ``of``, else with ``of: grad``."""
+    return expr if any(t.of is not None for t in terms(expr)) else And((expr, Term(of="grad")))
+
+
+def _inline_values(values: Sequence[float], shape: Sequence[int], where: str) -> dict[str, Any]:
+    """An operand's values inline, refused past venngram's inline limit."""
+    if len(values) > INLINE_LIMIT:
+        raise FTSConfigurationError(f"{where} has {len(values)} values, more than the {INLINE_LIMIT} an exported"
+                                    " book holds inline; publish the treatment in a book of its own instead.")
+    return {"values": [float(v) for v in values], "shape": [int(n) for n in shape]}
+
+
+def _transforms_treatment(depth: int, transforms: Mapping[str, Any], names: Sequence[str] | None,
+                          sets: Mapping[str, Expr], model: Mapping[str, Any] | None) -> tuple[dict, dict, bool]:
+    """A phase's Python ``grad_transforms`` as a treatment body, the sets its ops target, and whether an entry was
+    written as a name or regex."""
+    if model is None:
+        raise FTSConfigurationError(f"Phase {depth}'s gradient transforms export as a treatment, which records the"
+                                    " model it was written for: pass `model={'id': ..., 'revision': ...}`.")
+    targets: dict[str, Any] = {}
+    operands: dict[str, Any] = {}
+    ops: list[dict[str, Any]] = []
+    uses_names = False
+    for n, (entry, fns) in enumerate(transforms.items()):
+        expr, named = _entry_expr(entry, names, sets)
+        uses_names |= named
+        target = f"phase_{depth}_grad_{n}"
+        targets[target] = to_mapping(_of_grad(expr))
+        for fn in list(fns) if isinstance(fns, (list, tuple)) else [fns]:
+            if type(fn) in _VALUED_OPS:
+                op, attr = _VALUED_OPS[type(fn)]
+                ops.append({"op": op, "target": {"set": target}, "value": {"dose": float(getattr(fn, attr))}})
+            elif type(fn) in _SPAN_OPS:
+                d = torch.as_tensor(fn.directions, dtype=torch.float64)
+                d = d if d.dim() == 1 else d.T  # a subspace stacks its directions on its leading axis
+                operand = f"phase_{depth}_dir_{len(operands)}"
+                operands[operand] = {**_inline_values(d.flatten().tolist(), d.shape,
+                                                      f"Phase {depth}'s `{type(fn).__name__}` on {entry!r}"),
+                                     "basis": "out"}
+                ops.append({"op": _SPAN_OPS[type(fn)], "target": {"set": target}, "operand": operand,
+                            "params": {"fraction": float(fn.fraction)}})
+            else:
+                raise FTSConfigurationError(
+                    f"Phase {depth}'s `grad_transforms` entry {entry!r} applies {fn!r}, which an address book cannot"
+                    " hold: venngram declares ops on gradients for `Scale`, `Replace`, `Add`, `Project` and `Reject`"
+                    " only, and a callable is not portable.")
+    body = {"model": dict(model), **({"operands": operands} if operands else {}), "gradients": ops}
+    return body, targets, uses_names
+
+
+def _named_treatment(depth: int, name: str, addresses: Any) -> tuple[dict, dict]:
+    """The treatment ``name`` of the schedule's books as a body standing alone: its target sets inlined (as
+    ``phase_<depth>_<set>``) and its sidecar operands read inline."""
+    found = [b.treatments[name] for b in getattr(addresses, "books", ()) if name in b.treatments]
+    if len(found) != 1:
+        raise FTSConfigurationError(f"Phase {depth}'s `grad_transforms` names the treatment `{name}`, which"
+                                    f" {'several' if found else 'none'} of the schedule's address books have.")
+    recipe = found[0]
+    body = recipe.to_treatment()
+    targets: dict[str, Any] = {}
+    for op in body.get("gradients", ()):  # each op targets one set of the book (venngram refuses anything else)
+        renamed = f"phase_{depth}_{op['target']['set']}"
+        targets[renamed] = to_mapping(_inline(Ref(op["target"]["set"]), addresses))
+        op["target"] = {"set": renamed}
+    for key, raw in list(body.get("operands", {}).items()):
+        if "values" not in raw:
+            values, shape = recipe.operands[key].load(recipe.base_dir or ".")
+            body["operands"][key] = {**_inline_values(values, shape, f"Phase {depth}'s treatment `{name}` operand"
+                                                                     f" `{key}`"),
+                                     **{k: raw[k] for k in ("basis", "space") if k in raw}}
+    return body, targets
+
+
 def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addresses: Mapping[str, Any] | None = None,
                   logical_names: Sequence[str] | None = None, naming_scheme: str = "physical",
-                  applies_to: Mapping[str, Any] | None = None, description: str | None = None) -> dict[str, Any]:
+                  applies_to: Mapping[str, Any] | None = None, description: str | None = None,
+                  model: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """A schedule's phase selections as an address book document (a mapping, ready to dump as YAML).
 
     Args:
@@ -91,18 +194,17 @@ def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addre
             entry is a name or regex.
         applies_to: The book's ``applies_to`` (for example ``{"architectures": ["Qwen3ForCausalLM"]}``).
         description: The book's description.
+        model: The model a phase's Python gradient transforms were written for (``{"id": ..., "revision": ...}``),
+            recorded by the treatment they become; a treatment the schedule names keeps its own.
 
     Raises:
         FTSConfigurationError: If a phase has no ``params``, an address references a set ``addresses`` lacks, or a
-            phase transforms gradients (``grad_transforms``), which a book cannot hold yet.
+            phase's gradient transforms cannot be exported: a transform venngram declares no op on gradients for, no
+            ``model`` for Python transforms, or a span with more values than a book holds inline.
     """
-    transformed = sorted(d for d, p in schedule.items() if p.get("grad_transforms"))
-    if transformed:
-        raise FTSConfigurationError(
-            f"Phases {transformed} transform gradients (`grad_transforms`), which an address book written from a"
-            " schedule cannot hold yet: a callable is not portable, and a treatment is already in the book that holds"
-            " it. The schedule trains as written; export the phases without their transforms.")
     sets = dict(addresses or {})
+    treatments: dict[str, Any] = {}
+    treatment_sets: dict[str, Any] = {}
     out_sets: dict[str, Any] = {}
     uses_names = uses_of = False
     for depth in sorted(schedule):
@@ -122,7 +224,18 @@ def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addre
             exprs = [e if any(t.of is not None for t in terms(e)) else And((e, Term(of="value"))) for e in exprs]
         uses_of |= any(t.of is not None for e in exprs for t in terms(e))
         out_sets[f"phase_{depth}"] = to_mapping(exprs[0] if len(exprs) == 1 else Or(tuple(exprs)))
-    book: dict[str, Any] = {"schema_version": 2 if uses_of else 1, "name": name}
+        stated = schedule[depth].get("grad_transforms")
+        if isinstance(stated, str):
+            treatments[f"phase_{depth}"], targets = _named_treatment(depth, stated, addresses)
+        elif stated:
+            treatments[f"phase_{depth}"], targets, named = _transforms_treatment(depth, stated, logical_names, sets,
+                                                                                 model)
+            uses_names |= named
+        else:
+            continue
+        treatment_sets.update(targets)
+    out_sets.update(treatment_sets)
+    book: dict[str, Any] = {"schema_version": 4 if treatments else 2 if uses_of else 1, "name": name}
     if description is not None:
         book["description"] = description
     book["portability"] = "family"
@@ -134,6 +247,8 @@ def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addre
     if references:
         book["derived_from"] = references
     book["sets"] = out_sets
+    if treatments:
+        book["treatments"] = treatments
     return book
 
 
