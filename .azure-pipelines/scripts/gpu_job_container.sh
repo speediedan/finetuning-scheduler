@@ -22,8 +22,19 @@
 set -eo pipefail
 
 out=/evidence/fts-phases
-pid=/tmp/azp_host_lease.pid
+pid=${FTS_LEASE_PIDFILE:-/tmp/azp_host_lease.pid}
+lease_dir=${FTS_LEASE_DIR:-/gpu_leases}
+lease_tool=${FTS_LEASE_TOOL:-/gpu_lease_tool}
 venv() { source /tmp/venvs/fts_dev/bin/activate; }
+
+# Who holds and who waits for the host leases, for the log of a wait that timed out.
+lease_status() {
+  if [[ -f "$lease_tool" && -x "$lease_tool" ]]; then
+    GPU_LEASE_DIR="$lease_dir" "$lease_tool" --status 2>&1 | sed 's/^/    /' || true
+  else
+    for h in "$lease_dir"/*.holder; do [[ -r "$h" ]] && { echo "    ${h##*/}:"; sed 's/^/      /' "$h"; }; done
+  fi
+}
 
 case "${1:?command}" in
   install)
@@ -58,8 +69,45 @@ case "${1:?command}" in
   lease)
     # The whole server and host memory, through the host's lease tool when it is mounted (scripts/gpu_lease_wrap.sh).
     # GPU_LEASE_DEVICES, when the host passes it, names the devices for a tool that cannot discover them itself.
+    #
+    # Wait policy: FTS_LEASE_WAIT seconds a wait (default 3600), within FTS_LEASE_BUDGET seconds in all. A build that
+    # is not a scheduled one has a budget of two waits (default 7200), so a wait that times out behind a long local
+    # hold logs who holds the leases and waits again (rejoining the queue at its back); only a spent budget fails it,
+    # naming the holders. A single 60-minute wait used to fail the job, and a second one did not fit its old 150-minute
+    # timeout (interpretune's gate 2101 failed this way on idle GPUs, behind a 108-minute local suite). A scheduled
+    # run keeps its one wait: the next night is a fresh attempt.
     source scripts/gpu_lease_wrap.sh
-    ci_host_lease_hold /gpu_leases /gpu_lease_tool "$pid" 3600 "azure-${BUILD_BUILDID:?}" --gpus all --cpu-heavy
+    wait=${FTS_LEASE_WAIT:-3600}
+    budget=${FTS_LEASE_BUDGET:-}
+    if [[ -z "$budget" ]]; then
+      [[ "${BUILD_REASON:-}" == Schedule ]] && budget=$wait || budget=$(( 2 * wait ))
+    fi
+    max=$(( (budget + wait - 1) / wait ))
+    deadline=$(( SECONDS + budget ))
+    floor=$(( wait < 60 ? wait : 60 ))  # a wait reached with the budget all but spent still gets a real attempt
+    attempt=1
+    while :; do
+      left=$(( deadline - SECONDS ))
+      this=$(( left < wait ? left : wait ))
+      (( this >= floor )) || this=$floor
+      rc=0
+      ci_host_lease_hold "$lease_dir" "$lease_tool" "$pid" "$this" "azure-${BUILD_BUILDID:?}" --gpus all --cpu-heavy \
+        || rc=$?
+      (( rc == 75 )) || break
+      left=$(( deadline - SECONDS ))
+      if (( attempt < max && left > 0 )); then
+        echo "##vso[task.logissue type=warning]Lease wait ${attempt} timed out after ${this}s; waiting again" \
+          "(${left}s of this build's lease budget left). Who holds the leases now:"
+        lease_status
+        attempt=$(( attempt + 1 ))
+        continue
+      fi
+      echo "##vso[task.logissue type=error]The host leases stayed busy through ${attempt} wait(s), this build's whole" \
+        "lease budget (${budget}s); who holds them:"
+      lease_status
+      break
+    done
+    exit "$rc"
     ;;
   verify)
     # Backend truth under the lease: the torch build must match the vendor the agent reported, with both devices.

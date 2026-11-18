@@ -52,8 +52,15 @@ jobs:
       images: ${{ parameters.images }}
       variablePrefix: FTS
       artifactPrefix: fts
-      # up to 60 minutes waiting for the host leases, then about 60 minutes of install and tests with the full suite
-      timeoutInMinutes: 150
+      # A scheduled run waits once, up to 60 minutes, for the host leases. Any other build may wait twice (a 120-minute
+      # lease budget, gpu_job_container.sh lease), so a wait that times out behind a long local hold is retried rather
+      # than failing the build. The rest of the job (container start, install, collect, the phases and reports) took at
+      # most 53 minutes over the 46 most recent jobs (main builds with pool-reverse: 50 to 53; pull requests: 9 to 51),
+      # so 195 minutes leaves room for the whole budget and the longest run.
+      ${{ if eq(variables['Build.Reason'], 'Schedule') }}:
+        timeoutInMinutes: 150
+      ${{ else }}:
+        timeoutInMinutes: 195
       workspaceClean: all
       hostPrep: |
         scope="${{ parameters.scope }}"
@@ -62,7 +69,7 @@ jobs:
         echo "##vso[task.setvariable variable=FTS_STANDALONE_SCOPE]$scope"
       containerOptions: |
         -e PL_RUN_CUDA_TESTS=1 -e "FTS_STANDALONE_SCOPE=${scope}" -e "FTS_POOL_REVERSE=${{ parameters.poolReverse }}"
-        -e "BUILD_BUILDID=$(Build.BuildId)" -e "BUILD_SOURCEVERSION=$(Build.SourceVersion)"
+        -e "BUILD_BUILDID=$(Build.BuildId)" -e "BUILD_SOURCEVERSION=$(Build.SourceVersion)" -e "BUILD_REASON=$(Build.Reason)"
       releaseCommand: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh release
       steps:
         - bash: docker exec "$(FTS_CTR)" bash .azure-pipelines/scripts/gpu_job_container.sh install
