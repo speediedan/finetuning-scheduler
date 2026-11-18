@@ -218,7 +218,7 @@ The rules:
   :attr:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.gradient_transforms` gives the transforms in
   effect. A transform should keep no state of its own: a resumed run rebuilds the transforms from the schedule.
 
-Transforms are refused by name on the Lightning callback and on a sharded model, as masks are, and a schedule with
+Transforms are refused on the Lightning callback and on a sharded model, as masks are, and a schedule with
 them is not exported as an address book: a callable is not portable. venngram declares ops on parameter gradients in a
 recipe's ``gradients`` section, which a later release reads.
 
