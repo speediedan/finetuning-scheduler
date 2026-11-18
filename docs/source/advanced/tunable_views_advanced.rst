@@ -276,7 +276,7 @@ The rules:
   effect. A transform should keep no state of its own: a resumed run rebuilds the transforms from the schedule.
 
 Transforms are refused on the Lightning callback and on a sharded model, as masks are. A schedule with them exports
-as an address book with a treatment per phase (see :ref:`tunable-views-export-book`).
+as an address book with a treatment per phase (see :ref:`a schedule as a book<tunable-views-export-book>`).
 
 Address Books Through venngram
 ******************************
