@@ -15,30 +15,49 @@ Fine-Tuning Scheduler Gradient Transforms
 
 Transform the gradients a schedule addresses, beyond masks: a phase's ``grad_transforms`` key (PyTorch API) maps
 ``params``-style entries (names, regexes or addresses) to transforms applied to each step's accumulated gradient of
-the tensors each entry selects.
+the tensors each entry selects, or names a treatment of the schedule's address books whose ``gradients`` ops it
+applies (see below).
 
 A transform is a callable ``transform(name, grad, units)`` taking a parameter's name, its accumulated gradient and the
 indices along its first axis that the entry's unit set keeps (``None`` for an entry without one), and returning the
 transformed gradient, of the gradient's shape. It runs inside the gradient hook, so it should not keep state: a resumed
-run rebuilds the transforms from the schedule. The built-ins below act on the ``units`` rows when given, else on the
-whole gradient:
+run rebuilds the transforms from the schedule. The built-ins below act on the ``units`` slices along their ``dim``
+(the first axis by default) when given, else on the whole gradient:
 
 - :class:`Scale`: multiply by a factor (a per-component learning-rate multiplier, without splitting parameter groups);
+- :class:`Replace` and :class:`Add`: set each element to a value, or add one to it;
 - :class:`Clamp`: bound each element;
-- :class:`Project` and :class:`Reject`: keep a gradient in, or move it out of, the span of directions along its first
-  axis (for a weight, its output side), a ``fraction`` of the way.
+- :class:`Project` and :class:`Reject`: keep a gradient in, or move it out of, the span of directions along one axis
+  (the first by default: for a ``torch.nn.Linear`` weight, its output side), a ``fraction`` of the way.
 
-:class:`Scale`, :class:`Project` and :class:`Reject` have the meaning venngram declares for the ``scale``, ``project``
-and ``reject`` ops on a parameter (``reject`` with fraction ``a`` and an orthonormal span ``U`` gives
-:math:`(I - aUU^\top)G`).
+:class:`Scale`, :class:`Replace`, :class:`Add`, :class:`Project` and :class:`Reject` have the meaning venngram declares
+for the ``scale``, ``replace``, ``add``, ``project`` and ``reject`` ops on a parameter (``reject`` with fraction ``a``
+and an orthonormal span ``U`` gives :math:`(I - aUU^\top)G`).
+
+**Treatments.** A phase's ``grad_transforms`` may instead name a treatment of the schedule's address books (a
+venngram recipe written in the book it treats, :mod:`venngram.recipe`), so a schedule read from YAML can transform
+gradients too. Its ``gradients`` section's ops apply in order, each to the gradients of the tensors its target set
+selects, as these built-ins (:data:`GRADIENT_OPS`): a ``dose`` or per-unit ``doses`` for ``scale``, ``replace`` and
+``add``, and a ``vector`` or ``subspace`` operand for ``project`` and ``reject``. A ``param_units`` target acts along
+each tensor's unit axis, which the view's component map records
+(:meth:`venngram.maps.structure.MapStructure.unit_dim`), and a span's directions run along a weight's ``out`` side,
+which it records too (the first axis without one). A treatment with ``stages`` or ``weights``, an op Fine-Tuning
+Scheduler does not apply, or a value taken ``from`` evidence or through a value transform is refused, as its support
+record declares.
 
 .. warning:: This is an experimental API and may change in a future release.
 """
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 import torch
 from torch import Tensor
+
+from finetuning_scheduler.core.grad_masks import Transform
+
+#: The venngram ops Fine-Tuning Scheduler applies to parameter gradients (a treatment's ``gradients`` section), as its
+#: support record's ``gradient_ops`` declares.
+GRADIENT_OPS = ("add", "project", "reject", "replace", "scale")
 
 
 def _rows(t: Tensor) -> Tensor:
@@ -46,47 +65,83 @@ def _rows(t: Tensor) -> Tensor:
     return t.view(1) if t.dim() == 0 else t
 
 
-def _on_units(grad: Tensor, units: Sequence[int] | None, fn) -> Tensor:
-    """``fn`` applied to ``grad``'s ``units`` rows (every row when ``units`` is ``None``), the rest unchanged."""
+def _along(t: Tensor, dim: int, name: str, who: str) -> Tensor:
+    """``t`` (a 0-d tensor as one entry) with its ``dim`` axis first, as a view."""
+    rows = _rows(t)
+    if not 0 <= dim < rows.dim():
+        raise ValueError(f"`{who}` on {name!r}: dimension {dim} is not an axis of a gradient of shape"
+                         f" {tuple(t.shape)}.")
+    return rows.movedim(dim, 0)
+
+
+def _on_units(grad: Tensor, units: Sequence[int] | None, fn, dim: int = 0, name: str = "", who: str = "") -> Tensor:
+    """``fn`` applied to ``grad``'s ``units`` slices along ``dim`` (all of ``grad`` when ``units`` is ``None``),
+    the rest unchanged."""
     if units is None:
         return fn(grad)
     out = grad.clone()
     index = torch.tensor(list(units), dtype=torch.long, device=grad.device)
-    rows = _rows(out)
+    rows = _along(out, dim, name, who)
     rows.index_copy_(0, index, fn(rows.index_select(0, index)))
     return out
 
 
 @dataclass(frozen=True)
 class Scale:
-    """Multiply the gradient (its ``units`` rows, when given) by ``factor``."""
+    """Multiply the gradient (its ``units`` slices along ``dim``, when given) by ``factor``."""
 
     factor: float
+    dim: int = 0
 
     def __call__(self, name: str, grad: Tensor, units: Sequence[int] | None) -> Tensor:
-        return _on_units(grad, units, lambda g: g * self.factor)
+        return _on_units(grad, units, lambda g: g * self.factor, self.dim, name, "Scale")
+
+
+@dataclass(frozen=True)
+class Replace:
+    """Set each element of the gradient (its ``units`` slices along ``dim``, when given) to ``value``: zero keeps
+    them out of a step (venngram's declared form of a gradient mask)."""
+
+    value: float
+    dim: int = 0
+
+    def __call__(self, name: str, grad: Tensor, units: Sequence[int] | None) -> Tensor:
+        return _on_units(grad, units, lambda g: torch.full_like(g, self.value), self.dim, name, "Replace")
+
+
+@dataclass(frozen=True)
+class Add:
+    """Add ``value`` to each element of the gradient (its ``units`` slices along ``dim``, when given)."""
+
+    value: float
+    dim: int = 0
+
+    def __call__(self, name: str, grad: Tensor, units: Sequence[int] | None) -> Tensor:
+        return _on_units(grad, units, lambda g: g + self.value, self.dim, name, "Add")
 
 
 @dataclass(frozen=True)
 class Clamp:
-    """Bound each element of the gradient (its ``units`` rows, when given) to ``[min, max]`` (either may be
-    ``None``)."""
+    """Bound each element of the gradient (its ``units`` slices along ``dim``, when given) to ``[min, max]``
+    (either may be ``None``)."""
 
     min: float | None = None
     max: float | None = None
+    dim: int = 0
 
     def __post_init__(self) -> None:
         if self.min is None and self.max is None:
             raise ValueError("`Clamp` needs a `min`, a `max` or both.")
 
     def __call__(self, name: str, grad: Tensor, units: Sequence[int] | None) -> Tensor:
-        return _on_units(grad, units, lambda g: g.clamp(min=self.min, max=self.max))
+        return _on_units(grad, units, lambda g: g.clamp(min=self.min, max=self.max), self.dim, name, "Clamp")
 
 
 @dataclass(frozen=True, eq=False)
 class _Span:
     directions: Tensor
     fraction: float = 1.0
+    dim: int = 0
     _basis: dict = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -108,24 +163,26 @@ class _Span:
         return self._basis[key]
 
     def in_span(self, name: str, grad: Tensor) -> Tensor:
-        """The component of ``grad`` in the span, along its first axis."""
-        g = _rows(grad).reshape(_rows(grad).shape[0], -1)
-        if g.shape[0] != torch.as_tensor(self.directions).shape[0]:
-            raise ValueError(f"`{type(self).__name__}` on {name!r}: its directions have"
-                             f" {torch.as_tensor(self.directions).shape[0]} entries, but the gradient has"
-                             f" {g.shape[0]} rows.")
+        """The component of ``grad`` in the span, along its ``dim`` axis."""
+        moved = _along(grad, self.dim, name, type(self).__name__)
+        g = moved.reshape(moved.shape[0], -1)
+        n = torch.as_tensor(self.directions).shape[0]
+        if g.shape[0] != n:
+            along = "rows" if self.dim == 0 else f"entries along dimension {self.dim}"
+            raise ValueError(f"`{type(self).__name__}` on {name!r}: its directions have {n} entries, but the gradient"
+                             f" has {g.shape[0]} {along}.")
         u = self.basis(g)
-        return (u @ (u.T @ g)).reshape(grad.shape)
+        return (u @ (u.T @ g)).reshape(moved.shape).movedim(0, self.dim).reshape(grad.shape)
 
 
 @dataclass(frozen=True, eq=False)
 class Project(_Span):
-    """Keep the gradient in the span of ``directions`` along its first axis, ``fraction`` of the way: with ``fraction``
-    :math:`a` and the projection :math:`P` onto the span, :math:`G - a(G - PG)` (:math:`a = 1` keeps only the component
-    in it).
+    """Keep the gradient in the span of ``directions`` along its ``dim`` axis, ``fraction`` of the way: with
+    ``fraction`` :math:`a` and the projection :math:`P` onto the span, :math:`G - a(G - PG)` (:math:`a = 1` keeps only
+    the component in it).
 
-    ``directions`` is a vector with one entry per row, or a matrix of such vectors, one per column. The gradient's
-    ``units`` are not used: a projection acts on the whole tensor.
+    ``directions`` is a vector with one entry per index along ``dim``, or a matrix of such vectors, one per column. The
+    gradient's ``units`` are not used: a projection acts on the whole tensor.
     """
 
     def __call__(self, name: str, grad: Tensor, units: Sequence[int] | None) -> Tensor:
@@ -134,31 +191,58 @@ class Project(_Span):
 
 @dataclass(frozen=True, eq=False)
 class Reject(_Span):
-    """Remove ``fraction`` of the gradient's component in the span of ``directions`` along its first axis: with
+    """Remove ``fraction`` of the gradient's component in the span of ``directions`` along its ``dim`` axis: with
     ``fraction`` :math:`a` and the projection :math:`P` onto the span, :math:`G - aPG` (:math:`a = 1` trains
     orthogonally to the span; above 1 over-rejects).
 
-    ``directions`` is a vector with one entry per row, or a matrix of such vectors, one per column. The gradient's
-    ``units`` are not used: a rejection acts on the whole tensor.
+    ``directions`` is a vector with one entry per index along ``dim``, or a matrix of such vectors, one per column. The
+    gradient's ``units`` are not used: a rejection acts on the whole tensor.
     """
 
     def __call__(self, name: str, grad: Tensor, units: Sequence[int] | None) -> Tensor:
         return grad - self.fraction * self.in_span(name, grad)
 
 
+_VALUED = {"scale": Scale, "replace": Replace, "add": Add}
+_SPANS = {"project": Project, "reject": Reject}
+
+
+def op_transforms(op: str, *, dim: int = 0, dose: float | None = None, doses: Mapping[int, float] | None = None,
+                  directions: Tensor | None = None, fraction: float = 1.0) -> list[Transform]:
+    """The built-ins applying venngram's op ``op`` (one of :data:`GRADIENT_OPS`) to one tensor's gradient, each
+    with the units it acts on (``None``: the whole tensor).
+
+    Args:
+        op: The op's name.
+        dim: The axis the op's units (``doses``) or ``directions`` run along.
+        dose: A ``scale``, ``replace`` or ``add`` op's value for the whole tensor.
+        doses: Its value per unit along ``dim`` instead: one built-in per distinct value, on the units that take it.
+        directions: A ``project`` or ``reject`` op's directions, one per column.
+        fraction: Its ``fraction``.
+    """
+    if op in _SPANS:
+        return [(_SPANS[op](directions, fraction=fraction, dim=dim), None)]
+    if doses is None:
+        return [(_VALUED[op](dose, dim=dim), None)]
+    by_value: dict[float, list[int]] = {}
+    for unit, value in sorted(doses.items()):
+        by_value.setdefault(value, []).append(unit)
+    return [(_VALUED[op](value, dim=dim), tuple(units)) for value, units in by_value.items()]
+
+
 def transform_id(transform: object) -> str:
     """A stable description of ``transform`` for the compiled schedule's digest: a built-in's parameters, or a
     callable's qualified name."""
-    if isinstance(transform, (Scale, Clamp)):
+    if isinstance(transform, (Scale, Replace, Add, Clamp)):
         return repr(transform)
     if isinstance(transform, _Span):
         d = torch.as_tensor(transform.directions)
         return (f"{type(transform).__name__}(directions={tuple(d.shape)}:{d.double().sum().item():.12g},"
-                f" fraction={transform.fraction})")
+                f" fraction={transform.fraction}, dim={transform.dim})")
     target = getattr(transform, "__func__", transform)
     qualname = getattr(target, "__qualname__", None) or type(transform).__qualname__
     module = getattr(target, "__module__", None) or type(transform).__module__
     return f"{module}.{qualname}"
 
 
-__all__ = ["Clamp", "Project", "Reject", "Scale", "transform_id"]
+__all__ = ["Add", "Clamp", "GRADIENT_OPS", "op_transforms", "Project", "Reject", "Replace", "Scale", "transform_id"]

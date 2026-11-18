@@ -685,8 +685,9 @@ def parse_phase_extensions(schedule: dict) -> None:
     """Validate and normalize, in place, the phase keys the PyTorch API adds.
 
     - ``grad_transforms``: gradient transforms, as ``{entry: transform}`` or ``{entry: [transform, ...]}``, applied to
-      each step's accumulated gradient of the tensors each entry (a name, regex or address) selects, from this phase
-      until a later phase states its own (:mod:`~finetuning_scheduler.core.grad_transforms`).
+      each step's accumulated gradient of the tensors each entry (a name, regex or address) selects, or the name of a
+      treatment of the schedule's address books whose ``gradients`` ops apply, from this phase until a later phase
+      states its own (:mod:`~finetuning_scheduler.core.grad_transforms`).
     - ``max_transition_step``: a global optimizer step count at which the phase ends (default ``-1``, unset).
     - ``phase_config``: an opaque mapping handed to phase hooks and gates.
     - ``pg_overrides``: optimizer options (other than ``params`` and ``lr``, which have their own keys) applied to the
@@ -787,19 +788,19 @@ def parse_refreeze(depth: int, refreeze: Any) -> None:
 
 
 def parse_grad_transforms(depth: int, transforms: Any) -> None:
-    """Validate phase ``depth``'s ``grad_transforms`` mapping (``None`` when the phase has none; an empty mapping
-    clears the transforms an earlier phase set).
+    """Validate phase ``depth``'s ``grad_transforms``: a mapping (an empty one clears the transforms an earlier
+    phase set) or a treatment's name (``None`` when the phase has none).
 
     Raises:
-        FTSConfigurationError: If it is not a mapping of names, regexes or addresses to a callable or a non-empty list
-            of callables.
+        FTSConfigurationError: If it is neither a treatment's name nor a mapping of names, regexes or addresses to a
+            callable or a non-empty list of callables.
     """
-    if transforms is None:
+    if transforms is None or (isinstance(transforms, str) and transforms):
         return
     if not isinstance(transforms, Mapping):
         raise FTSConfigurationError(
-            f"Phase {depth}'s `grad_transforms` must be a mapping of names, regexes or addresses to transforms, got"
-            f" {type(transforms).__name__}.")
+            f"Phase {depth}'s `grad_transforms` must be a mapping of names, regexes or addresses to transforms, or the"
+            f" name of a treatment of the schedule's address books, got {transforms!r}.")
     for entry, fns in transforms.items():
         if not isinstance(entry, str) or not entry:
             raise FTSConfigurationError(
@@ -810,7 +811,7 @@ def parse_grad_transforms(depth: int, transforms: Any) -> None:
             raise FTSConfigurationError(
                 f"Phase {depth}'s `grad_transforms` for {entry!r} must be a callable or a non-empty list of callables"
                 f" (`transform(name, grad, units)`), got {fns!r}. A schedule read from YAML cannot hold one: set"
-                " `grad_transforms` in Python.")
+                " `grad_transforms` in Python, or name a treatment of the schedule's address books.")
 
 
 def parse_restore(depth: int, restore: Any) -> None:
