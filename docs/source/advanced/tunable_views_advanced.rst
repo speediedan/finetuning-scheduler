@@ -207,9 +207,16 @@ the indices along its first axis that the entry's gradient unit set keeps (``Non
 and :class:`~finetuning_scheduler.core.grad_transforms.Reject`) act on those rows when given. An entry selects tensors
 only to transform them: it neither thaws nor masks them, and a tensor it selects must be trainable in the phase.
 
-``grad_transforms`` may instead name a treatment of the schedule's address books, a venngram recipe written in the book
-it treats, whose ``gradients`` section declares ops on parameter gradients. A schedule read from YAML can name one,
-since the ops are data rather than callables:
+.. _tunable-views-treatments:
+
+**Treatments.** ``grad_transforms`` may instead name a treatment of the schedule's address books. In venngram, a book's
+sets select what to address, and its ``treatments`` say what is done to them for one model. Each treatment is a
+*recipe* (``venngram.recipe.Recipe``; see `Large unit sets and treatments
+<https://github.com/speediedan/venngram#large-unit-sets-and-treatments>`_ in venngram's README), stored in the book
+under a name of its author's choosing. A recipe can hold several sections: ``stages`` act on activations,
+``weights`` edit parameters, and ``gradients`` act on each step's parameter gradients. Fine-Tuning Scheduler applies
+the ``gradients`` section, and a phase names the treatment by its key. Because the ops are data rather than callables, a
+schedule read from YAML can name one:
 
 .. code-block:: yaml
 
@@ -229,6 +236,23 @@ since the ops are data rather than callables:
     0:
       params: ["@mlp_13"]
       grad_transforms: keep_neurons_out
+
+Read top to bottom:
+
+- ``sets`` are ordinary named sets. ``mlp_13`` is layer 13's MLP output projection, which phase 0 trains.
+  ``neuron_grads`` and ``down_grad`` address the gradient of that projection's weight (``of: grad``):
+  ``neuron_grads`` covers only units 52 and 101, and ``down_grad`` covers all of it.
+- ``keep_neurons_out`` is the treatment's name: a key under ``treatments``, and what ``grad_transforms`` names.
+- ``model`` is the model the treatment was written for, since its units and directions are that model's.
+- ``operands`` are the data its ops take, by name. Here ``concept`` is one direction in the layer's output space,
+  read from a safetensors sidecar beside the book and checked against its hash and shape.
+- ``gradients`` lists the ops, each on the set its ``target`` names. The first replaces units 52 and 101's gradients
+  with zero (a dose of ``0.0``), so those two neurons' outgoing weights stay fixed while the rest of the projection
+  trains. The second rejects ``concept`` from the projection's gradient, so no update moves its output along that
+  direction.
+
+So phase 0 trains layer 13's MLP output projection while keeping two neurons and one direction out of the update. That
+is what the name ``keep_neurons_out`` records.
 
 Its ops apply in order, each to the gradients of the trainable tensors its target set selects, as the built-ins:
 ``scale``, ``replace`` and ``add`` with a ``dose`` or per-unit ``doses``, and ``project`` and ``reject`` with a
