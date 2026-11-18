@@ -12,7 +12,7 @@
 """Tests for treatments as gradient transforms: a phase's ``grad_transforms`` naming a treatment of the schedule's
 address books applies its ``gradients`` ops (venngram's ops on parameter gradients) as the built-in transforms (#219).
 
-These need only PyTorch and the scheduling core, except the unit-axis cases, which build a tiny Llama with
+These need only PyTorch and the scheduling core, except the unit-axis cases, which build a tiny GPT-2 with
 ``transformers`` for its component map.
 """
 import copy
@@ -208,22 +208,25 @@ def test_a_schedule_naming_a_treatment_is_not_exported(tmp_path):
 
 
 @pytest.fixture
-def llama():
-    """A tiny Llama's view, through its component map with the layouts measured on it (each tensor's unit axis)."""
+def gpt2():
+    """A tiny GPT-2's view, through its component map with the layouts measured on it (each tensor's unit axis).
+
+    GPT-2's ``Conv1D`` stores a weight as ``[in, out]``, the transpose of ``torch.nn.Linear``, so its unit axis and
+    ``out`` side are not where the first axis would put them.
+    """
     transformers = pytest.importorskip("transformers")
     from venngram.maps import component_map_for, from_document
     from venngram.maps.drafter import map_document
     from venngram.maps.verification import with_layouts
 
-    config = transformers.LlamaConfig(vocab_size=32, hidden_size=8, intermediate_size=12, num_hidden_layers=2,
-                                      num_attention_heads=2, num_key_value_heads=2)
+    config = transformers.GPT2Config(vocab_size=32, n_positions=16, n_embd=8, n_layer=2, n_head=2, n_inner=12)
     torch.manual_seed(0)
-    model = transformers.LlamaForCausalLM(config)
-    cmap = from_document(with_layouts(map_document(component_map_for("LlamaForCausalLM")), model))
+    model = transformers.GPT2LMHeadModel(config)
+    cmap = from_document(with_layouts(map_document(component_map_for("GPT2LMHeadModel")), model))
     return venngram.view(model, cmap)
 
 
-DOWN = "model.layers.1.mlp.down_proj.weight"  # [hidden, intermediate]: its units (neurons) run along dimension 1
+DOWN = "transformer.h.1.mlp.c_proj.weight"  # [intermediate, hidden]: its units (neurons) run along dimension 0
 NEURONS = {"sets": {"mlp": {"component": "mlp.out", "layers": [1]},
                     "neurons": {"component": "mlp.out", "layers": [1], "leaf": "weight", "units": [2, 5], "of": "grad"},
                     "down": {"component": "mlp.out", "layers": [1], "leaf": "weight", "of": "grad"}},
@@ -234,25 +237,25 @@ NEURONS = {"sets": {"mlp": {"component": "mlp.out", "layers": [1]},
                                                   {"op": "reject", "target": {"set": "down"}, "operand": "c"}]}}}
 
 
-def test_units_act_along_the_unit_axis_and_spans_along_the_out_side(llama):
-    compiled = compile_schedule({0: {"params": ["@mlp"], "grad_transforms": "quiet"}}, llama,
+def test_units_act_along_the_unit_axis_and_spans_along_the_out_side(gpt2):
+    compiled = compile_schedule({0: {"params": ["@mlp"], "grad_transforms": "quiet"}}, gpt2,
                                 addresses=load_address_sets(NEURONS))
     (cp,) = compiled.phases
     scale_2, scale_5, (reject, units) = cp.transforms[DOWN]
-    assert scale_2 == (Scale(0.5, dim=1), (2,)) and scale_5 == (Scale(0.0, dim=1), (5,))
-    assert isinstance(reject, Reject) and reject.dim == 0 and units is None
-    grad = torch.ones(8, 12)
+    assert scale_2 == (Scale(0.5, dim=0), (2,)) and scale_5 == (Scale(0.0, dim=0), (5,))
+    assert isinstance(reject, Reject) and reject.dim == 1 and units is None
+    grad = torch.ones(12, 8)
     for fn, units in cp.transforms[DOWN]:
         grad = fn(DOWN, grad, units)
-    assert torch.equal(grad[0], torch.zeros(12)) and torch.equal(grad[1:, 2], torch.full((7,), 0.5))
-    assert torch.equal(grad[1:, 5], torch.zeros(7)) and torch.equal(grad[1:, 0], torch.ones(7))
+    assert torch.equal(grad[:, 0], torch.zeros(12)) and torch.equal(grad[2, 1:], torch.full((7,), 0.5))
+    assert torch.equal(grad[5, 1:], torch.zeros(7)) and torch.equal(grad[0, 1:], torch.ones(7))
 
 
-def test_units_beyond_the_unit_axis_are_named(llama):
+def test_units_beyond_the_unit_axis_are_named(gpt2):
     book = copy.deepcopy(NEURONS)
     book["sets"]["neurons"]["units"] = [2, 12]
     book["treatments"]["quiet"]["gradients"][0]["value"] = {"dose": 0.0}
-    with pytest.raises(FTSConfigurationError, match=r"names units \[12\] of `model.layers.1.mlp.down_proj.weight`, "
-                                                    r"which has 12 along its unit axis \(dimension 1\)"):
-        compile_schedule({0: {"params": ["@mlp"], "grad_transforms": "quiet"}}, llama,
+    with pytest.raises(FTSConfigurationError, match=r"names units \[12\] of `transformer.h.1.mlp.c_proj.weight`, "
+                                                    r"which has 12 along its unit axis \(dimension 0\)"):
+        compile_schedule({0: {"params": ["@mlp"], "grad_transforms": "quiet"}}, gpt2,
                          addresses=load_address_sets(book))
