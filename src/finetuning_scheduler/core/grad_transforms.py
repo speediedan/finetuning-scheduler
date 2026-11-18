@@ -20,13 +20,19 @@ applies (see below).
 
 A transform is a callable ``transform(name, grad, units)`` taking a parameter's name, its accumulated gradient and the
 indices along its first axis that the entry's unit set keeps (``None`` for an entry without one), and returning the
-transformed gradient, of the gradient's shape. It runs inside the gradient hook, so it should not keep state: a resumed
-run rebuilds the transforms from the schedule. The built-ins below act on the ``units`` slices along their ``dim``
-(the first axis by default) when given, else on the whole gradient:
+transformed gradient, of the gradient's shape. It runs inside the gradient hook. A resumed run rebuilds the transforms
+from the schedule, so a transform that keeps state (a random generator, running statistics) is *stateful*: it defines
+``state_dict()`` and ``load_state_dict(state)``, and the tuning scheduler saves the state of each stateful transform in
+effect with its own (:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.state_dict`) and loads it into
+the rebuilt one on resume, so a resumed run matches an uninterrupted one. A transform with state it does not expose this
+way starts afresh on resume. The built-ins below act on the ``units`` slices along their ``dim`` (the first axis by
+default) when given, else on the whole gradient:
 
 - :class:`Scale`: multiply by a factor (a per-component learning-rate multiplier, without splitting parameter groups);
 - :class:`Replace` and :class:`Add`: set each element to a value, or add one to it;
 - :class:`Clamp`: bound each element;
+- :class:`Noise`: add Gaussian noise, drawn from a generator of its own (stateful: its generator follows the
+  checkpoints);
 - :class:`Project` and :class:`Reject`: keep a gradient in, or move it out of, the span of directions along one axis
   (the first by default: for a ``torch.nn.Linear`` weight, its output side), a ``fraction`` of the way.
 
@@ -138,6 +144,49 @@ class Clamp:
 
 
 @dataclass(frozen=True, eq=False)
+class Noise:
+    """Add Gaussian noise of standard deviation ``std`` to each element of the gradient (its ``units`` slices along
+    ``dim``, when given), drawn on the CPU from a generator of its own, seeded with ``seed``, so the draws do not
+    depend on the device or on the global random state.
+
+    It is stateful: its generator's state is saved with the tuning scheduler's and restored on resume, so a resumed run
+    draws what an uninterrupted one would. One instance used for several tensors draws for each in the order their
+    gradients accumulate.
+    """
+
+    std: float
+    seed: int = 0
+    dim: int = 0
+    _generator: torch.Generator = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.std < 0:
+            raise ValueError(f"`Noise`'s `std` must be >= 0, got {self.std}.")
+        generator = torch.Generator()
+        generator.manual_seed(self.seed)
+        object.__setattr__(self, "_generator", generator)
+
+    def _noisy(self, g: Tensor) -> Tensor:
+        return g + self.std * torch.randn(g.shape, generator=self._generator).to(device=g.device, dtype=g.dtype)
+
+    def __call__(self, name: str, grad: Tensor, units: Sequence[int] | None) -> Tensor:
+        return _on_units(grad, units, self._noisy, self.dim, name, "Noise")
+
+    def state_dict(self) -> dict[str, Tensor]:
+        """The generator's state."""
+        return {"generator": self._generator.get_state()}
+
+    def load_state_dict(self, state: Mapping[str, Tensor]) -> None:
+        """Restore the generator's state saved by :meth:`state_dict`."""
+        self._generator.set_state(state["generator"])
+
+
+def is_stateful(transform: object) -> bool:
+    """Whether ``transform`` keeps state it exposes for checkpoints (``state_dict`` and ``load_state_dict``)."""
+    return callable(getattr(transform, "state_dict", None)) and callable(getattr(transform, "load_state_dict", None))
+
+
+@dataclass(frozen=True, eq=False)
 class _Span:
     directions: Tensor
     fraction: float = 1.0
@@ -233,7 +282,7 @@ def op_transforms(op: str, *, dim: int = 0, dose: float | None = None, doses: Ma
 def transform_id(transform: object) -> str:
     """A stable description of ``transform`` for the compiled schedule's digest: a built-in's parameters, or a
     callable's qualified name."""
-    if isinstance(transform, (Scale, Replace, Add, Clamp)):
+    if isinstance(transform, (Scale, Replace, Add, Clamp, Noise)):
         return repr(transform)
     if isinstance(transform, _Span):
         d = torch.as_tensor(transform.directions)
@@ -245,4 +294,5 @@ def transform_id(transform: object) -> str:
     return f"{module}.{qualname}"
 
 
-__all__ = ["Add", "Clamp", "GRADIENT_OPS", "op_transforms", "Project", "Reject", "Replace", "Scale", "transform_id"]
+__all__ = ["Add", "Clamp", "GRADIENT_OPS", "is_stateful", "Noise", "op_transforms", "Project", "Reject", "Replace",
+           "Scale", "transform_id"]

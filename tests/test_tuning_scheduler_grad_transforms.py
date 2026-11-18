@@ -25,7 +25,7 @@ import yaml
 from finetuning_scheduler.core.compile import compile_schedule
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.executor import TuningSchedulerExecutor
-from finetuning_scheduler.core.grad_transforms import Clamp, Project, Reject, Scale
+from finetuning_scheduler.core.grad_transforms import Clamp, is_stateful, Noise, Project, Reject, Scale
 from finetuning_scheduler.core.schedule import refuse_direct_api_keys
 from finetuning_scheduler.strategies.dtensor import DTensorAdapter
 from finetuning_scheduler import CanonicalView, TorchInterface, TuningScheduler
@@ -259,6 +259,69 @@ def test_a_sharded_model_refuses_gradient_transforms():
     schedule = {0: {"params": ["module:1"], "grad_transforms": {"module:1": HALF}}}
     with pytest.raises(FTSConfigurationError, match=r"Phases \[0\] transform the gradients .* of a sharded model"):
         _fts(schedule, distributed=DTensorAdapter())
+
+
+# stateful transforms
+
+
+def test_noise_draws_from_its_own_seeded_generator():
+    grad = torch.zeros(3, 2)
+    first, again, other = Noise(0.1, seed=3), Noise(0.1, seed=3), Noise(0.1, seed=4)
+    drawn = first("w", grad, (0, 2))
+    assert torch.equal(drawn, again("w", grad, (0, 2))) and not torch.equal(drawn, other("w", grad, (0, 2)))
+    assert torch.equal(drawn[1], torch.zeros(2)) and drawn[[0, 2]].abs().sum() > 0
+    assert not torch.equal(first("w", grad, None)[0], first("w", grad, None)[0])  # the generator moves on
+    assert is_stateful(first) and not is_stateful(HALF)
+    with pytest.raises(ValueError, match="`std` must be >= 0"):
+        Noise(-1.0)
+
+
+def test_noise_state_round_trips():
+    noise = Noise(1.0, seed=0)
+    state = noise.state_dict()
+    drawn = noise("w", torch.zeros(4), None)
+    noise.load_state_dict(state)
+    assert torch.equal(noise("w", torch.zeros(4), None), drawn)
+
+
+def _noisy():
+    """A schedule with fresh noise: one instance on the middle layer, carried into phase 1, then cleared."""
+    noise = Noise(0.05, seed=11)
+    return {0: {"params": ["module:1"], "max_transition_epoch": 2, "grad_transforms": {"module:1": noise}},
+            1: {"params": ["2.weight", "2.bias"], "max_transition_epoch": 4},
+            2: {"params": ["0.weight", "0.bias"], "grad_transforms": {}}}
+
+
+def _make_noisy(model=None):
+    return _fts(_noisy(), model=model, optimizer=MOMENTUM)
+
+
+@pytest.mark.parametrize("split", [0, 1, 2, 4])
+def test_a_resumed_run_draws_what_an_uninterrupted_one_does(tmp_path, split):
+    """Saved while the noise draws (and carries on after the resume, which then depends on its generator's state)
+    or once it is cleared (no state saved), a resumed run ends where an uninterrupted one does."""
+    expected = _run(_make_noisy(), 7, _val)
+    first = _make_noisy()
+    for epoch in first.epochs(7):
+        _train_epoch(first, epoch, _val(epoch))
+        if epoch == split:
+            saved = first.save(tmp_path / "s.pt")
+            break
+    state = torch.load(saved, weights_only=False)["tuning_scheduler"]
+    assert sorted(state.get("transform_state", {})) == ([] if first.curr_depth == 2 else ["1.bias#0"])
+    resumed = _make_noisy(model=_model(seed=7))
+    resumed.load(saved)
+    _assert_same(expected, _run(resumed, 7, _val, start=split + 1))
+
+
+def test_a_state_without_its_transforms_state_is_refused(tmp_path):
+    saved = _make_noisy().save(tmp_path / "s.pt")
+    payload = torch.load(saved, weights_only=False)
+    del payload["tuning_scheduler"]["transform_state"]
+    torch.save(payload, saved)
+    with pytest.raises(FTSConfigurationError, match=r"stateful gradient transforms at \[\], but the schedule's at"
+                                                    r" depth 0 are at \['1.bias#0'\]"):
+        _make_noisy().load(saved)
 
 
 # export

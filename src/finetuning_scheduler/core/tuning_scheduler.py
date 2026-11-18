@@ -55,7 +55,7 @@ from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.executor import TuningSchedulerExecutor, PhaseExecutor
 from finetuning_scheduler.core.fingerprint import batch_fingerprint
 from finetuning_scheduler.core.grad_masks import GradientMasks
-from finetuning_scheduler.core.grad_transforms import Add, Replace, Scale, transform_id
+from finetuning_scheduler.core.grad_transforms import Add, is_stateful, Replace, Scale, transform_id
 from finetuning_scheduler.core.interface import LRStepConfig, TorchInterface, TrainingInterface
 from finetuning_scheduler.core.rng import capture_rng_state, fork_rngs, restore_rng_state
 from finetuning_scheduler.core.roles import (is_frozen_role, is_role_selector, role_kind, SELECTOR_PREFIX,
@@ -1987,12 +1987,28 @@ class TuningScheduler:
     # ------------------------------------------------------------------------------------------------------------------
     # state and configuration
     # ------------------------------------------------------------------------------------------------------------------
+    def _stateful_transforms(self) -> dict[str, Any]:
+        """The stateful gradient transforms in effect (see :mod:`~finetuning_scheduler.core.grad_transforms`), each
+        once, keyed ``<tensor>#<index>`` by its first place in the tensors' transforms (in name order)."""
+        if self._compiled is None:
+            return {}
+        out: dict[str, Any] = {}
+        seen: set[int] = set()
+        for name, ts in sorted(self._compiled.transforms_at(self._depth).items()):
+            for i, (fn, _) in enumerate(ts):
+                if is_stateful(fn) and id(fn) not in seen:
+                    seen.add(id(fn))
+                    out[f"{name}#{i}"] = fn
+        return out
+
     def state_dict(self) -> dict[str, Any]:
         """The tuning scheduler's resumable state: depth, counters, pending decision, stop state, policy state,
-        fingerprints and the schedule and configuration hashes.
+        fingerprints, the state of the stateful gradient transforms in effect and the schedule and configuration
+        hashes.
 
         Optimizer and lr scheduler state are saved separately.
         """
+        stateful = self._stateful_transforms()
         return {
             "version": STATE_VERSION,
             "depth": self._depth,
@@ -2019,6 +2035,8 @@ class TuningScheduler:
             "checkpoint": self._checkpoint.state_dict() if self._checkpoint is not None else None,
             "last_metrics": dict(self._last_metrics),
             "finished": self._finished,
+            # only when present, so a schedule without stateful transforms saves what it always has
+            **({"transform_state": {k: fn.state_dict() for k, fn in stateful.items()}} if stateful else {}),
         }
 
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
@@ -2027,7 +2045,8 @@ class TuningScheduler:
         optimizer's and lr schedulers' state (:meth:`load` does all of this).
 
         Raises:
-            FTSConfigurationError: If the saved state belongs to a different fine-tuning schedule.
+            FTSConfigurationError: If the saved state belongs to a different fine-tuning schedule, or holds the state
+                of stateful gradient transforms other than those in effect at its depth.
             FileNotFoundError: If the checkpoint policy's best checkpoint or rollback point no longer exists.
         """
         self._require_setup()
@@ -2066,6 +2085,17 @@ class TuningScheduler:
             # saved after `train_end`: resuming reopens the run, so the phase's end hooks run again at its real end
             self._ended_depths.discard(self._depth)
         self._last_metrics = dict(state_dict.get("last_metrics", {}))
+        self._load_transform_state(state_dict.get("transform_state", {}))
+
+    def _load_transform_state(self, saved: Mapping[str, Any]) -> None:
+        """Load each saved state into the stateful gradient transform in effect at the same place."""
+        stateful = self._stateful_transforms()
+        if sorted(saved) != sorted(stateful):
+            raise FTSConfigurationError(
+                f"The saved state holds the state of the stateful gradient transforms at {sorted(saved)}, but the"
+                f" schedule's at depth {self._depth} are at {sorted(stateful)}.")
+        for key, fn in stateful.items():
+            fn.load_state_dict(saved[key])
 
     def config_dict(self) -> dict[str, Any]:
         """The configuration the hash covers (paths and package versions excluded)."""
