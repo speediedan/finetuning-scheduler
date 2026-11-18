@@ -27,12 +27,10 @@ Each phase's set is the union of its ``params`` entries, as written:
   the view's vocabulary, so a book with any declares ``requires.naming_scheme``.
 
 A phase of gradient addresses (``of: grad``) becomes a set of gradients, in an address book of schema 2 (the first that
-can hold ``of``); a book without one keeps schema 1. Two kinds of phase train as written but cannot yet be exported,
-because a venngram set is either values or gradients and takes a gradient mask from one conjunction: a phase mixing
-whole tensors and gradient addresses (training some tensors whole beside part of others is allowed, each entry resolving
-on its own), and a phase of several gradient entries with a unit set among them (their union would not resolve to the
-phase's masks). Both are refused by name until venngram lets one set hold either
-(`venngram#91 <https://github.com/speediedan/venngram/issues/91>`_).
+can hold ``of``); a book without one keeps schema 1. A phase mixing whole tensors and gradient addresses becomes one set
+uniting a value part and a gradient part, each value entry stating ``of: value``, and a phase of several gradient
+entries with unit sets one set whose disjuncts each give their own mask, united per tensor (venngram's ``mixed-sets``
+and ``union-masks``, which Fine-Tuning Scheduler's support record declares). Either compiles back to the phase's masks.
 
 A book derived from address books fetched by reference records their exact references under ``derived_from``.
 
@@ -95,8 +93,7 @@ def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addre
         description: The book's description.
 
     Raises:
-        FTSConfigurationError: If a phase has no ``params``, an address references a set ``addresses`` lacks, or a phase
-            mixes gradient (``of: grad``) and value entries or has several gradient entries with a unit set among them.
+        FTSConfigurationError: If a phase has no ``params``, or an address references a set ``addresses`` lacks.
     """
     sets = dict(addresses or {})
     out_sets: dict[str, Any] = {}
@@ -112,18 +109,10 @@ def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addre
             expr, named = _entry_expr(entry, logical_names, sets)
             exprs.append(expr)
             uses_names |= named
-        # entries are inlined, so each term says whether it addresses gradients
-        grads = [any(t.of == "grad" for t in terms(e)) for e in exprs]
-        if any(grads) and not all(grads):
-            raise FTSConfigurationError(
-                f"Phase {depth} mixes gradient (`of: grad`) and value entries, which one set cannot hold (a set is"
-                " either values or gradients), so it cannot be exported as a book. It trains as written; export waits"
-                " on speediedan/venngram#91.")
-        if len(exprs) > 1 and any(grads) and any(t.units is not None for e in exprs for t in terms(e)):
-            raise FTSConfigurationError(
-                f"Phase {depth} has several gradient entries with a unit set among them, whose union cannot be one set:"
-                " venngram takes a gradient mask from one conjunction, so it cannot be exported as a book. It trains as"
-                " written; export waits on speediedan/venngram#91.")
+        # entries are inlined, so each term says whether it addresses gradients; beside a gradient entry, a value entry
+        # states `of: value`, since terms that do not state `of` follow those that do
+        if any(t.of == "grad" for e in exprs for t in terms(e)):
+            exprs = [e if any(t.of is not None for t in terms(e)) else And((e, Term(of="value"))) for e in exprs]
         uses_of |= any(t.of is not None for e in exprs for t in terms(e))
         out_sets[f"phase_{depth}"] = to_mapping(exprs[0] if len(exprs) == 1 else Or(tuple(exprs)))
     book: dict[str, Any] = {"schema_version": 2 if uses_of else 1, "name": name}

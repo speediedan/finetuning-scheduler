@@ -15,7 +15,7 @@ typing-extensions  # already in `base.txt` but the docs CI job does not install 
 pydata-sphinx-theme==0.23.0
 # venngram is not on PyPI yet: Read the Docs installs without UV_OVERRIDE, so it takes the same commit pin as
 # requirements/ci/overrides.txt (keep the two in step). Remove once venngram 0.1.0 is published.
-venngram @ git+https://github.com/speediedan/venngram.git@7773cf4e6c800120df5f6a3dc63cd8d8fc7d3a53
+venngram @ git+https://github.com/speediedan/venngram.git@aed99ccd78545ecd3d69e2366c26461c1b617892
 # nbpress publishes and renders the tutorial notebooks; conf.py stages them with its renderer. The same commit as the
 # `rev` of its hooks in .pre-commit-config.yaml (tests/test_nbpress_pin.py).
 nbpress @ git+https://github.com/speediedan/nbpress@b4a62204ac84578baaa1d7373d39f2d8a9090de5

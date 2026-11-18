@@ -156,7 +156,9 @@ The rules:
 - **A phase's mask for a tensor is the union of its entries.** An entry that selects the tensor whole, or a mask that
   keeps every index, trains it unmasked. A later phase that selects a masked tensor again widens its mask (unit 5 above)
   or trains it whole.
-- **A phase may mix whole tensors and gradient addresses**, as phase 1 does: each entry resolves on its own.
+- **A phase may mix whole tensors and gradient addresses**, as phase 1 does, and so may one set: in
+  ``(@whole & of:value) | (@rows & of:grad)`` the value part trains its tensors whole and the gradient part is masked.
+  A union of gradient disjuncts takes each disjunct's mask, united per tensor.
 - **The masked indices stay put.** The mask is applied to each step's accumulated gradient, before clipping and the
   optimizer step, and the masked indices are also held through the step, so weight decay and momentum do not move
   them, for any optimizer. Masks follow the schedule through refreezing, promotion, optimizer reinitialization and
@@ -222,11 +224,11 @@ per phase (``phase_0``, ``phase_1``, ...), so a tuning setup can be published, i
 
 Names and regexes become ``name`` terms (a regex keeps Fine-Tuning Scheduler's prefix match), the book declares the
 view's naming scheme, and books fetched by reference are recorded under ``derived_from``. A phase of gradient addresses
-becomes a set of gradients, in an address book of schema 2. A venngram set is either values or gradients, and takes a
-gradient mask from one conjunction, so two kinds of phase that train as written cannot yet be exported: one mixing
-whole tensors and gradient addresses (phase 1 of the :ref:`example above<tunable-views-gradient-masks>`), and one of
-several gradient entries with a unit set among them. Each is refused by name;
-`venngram#91 <https://github.com/speediedan/venngram/issues/91>`_ would let one set hold either.
+becomes a set of gradients, in an address book of schema 2. Every phase is one set: a phase mixing whole tensors and
+gradient addresses (phase 1 of the :ref:`example above<tunable-views-gradient-masks>`) becomes a union of a value part,
+each value entry stating ``of: value``, and a gradient part, and a phase of several gradient entries with unit sets a
+union whose disjuncts each give their own mask. Either compiles back to the phase's masks, and the support record
+declares both readings (venngram's ``mixed-sets`` and ``union-masks``).
 
 .. _tunable-views-refusals:
 
