@@ -29,6 +29,7 @@ from finetuning_scheduler.core.grad_transforms import (Add, Clamp, GRADIENT_OPS,
                                                        Replace, Scale)
 from finetuning_scheduler.core.schedule import load_address_sets, parse_grad_transforms
 from finetuning_scheduler import CanonicalView, TuningScheduler
+from tests.helpers.venngram_registry import FIXTURE_MAPS
 from tests.test_tuning_scheduler_grad_masks import _backward
 from tests.test_tuning_scheduler_grad_transforms import _fts, SGD
 from tests.test_tuning_scheduler_stages import _model
@@ -215,14 +216,15 @@ def gpt2():
     ``out`` side are not where the first axis would put them.
     """
     transformers = pytest.importorskip("transformers")
-    from venngram.maps import component_map_for, from_document
-    from venngram.maps.drafter import map_document
+    from venngram.maps import from_document
     from venngram.maps.verification import with_layouts
 
     config = transformers.GPT2Config(vocab_size=32, n_positions=16, n_embd=8, n_layer=2, n_head=2, n_inner=12)
     torch.manual_seed(0)
     model = transformers.GPT2LMHeadModel(config)
-    cmap = from_document(with_layouts(map_document(component_map_for("GPT2LMHeadModel")), model))
+    # the fixture map read directly, not through the registry, whose index the oldest pyarrow cannot read
+    doc = yaml.safe_load((FIXTURE_MAPS / "gpt2.yaml").read_text(encoding="utf-8"))
+    cmap = from_document(with_layouts(doc, model))
     return venngram.view(model, cmap)
 
 
