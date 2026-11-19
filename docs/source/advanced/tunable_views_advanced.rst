@@ -203,8 +203,9 @@ A transform is any callable ``transform(name, grad, units)`` returning the gradi
 the indices along its first axis that the entry's gradient unit set keeps (``None`` without one). The built-ins in
 :mod:`~finetuning_scheduler.core.grad_transforms` (:class:`~finetuning_scheduler.core.grad_transforms.Scale`,
 :class:`~finetuning_scheduler.core.grad_transforms.Replace`, :class:`~finetuning_scheduler.core.grad_transforms.Add`,
-:class:`~finetuning_scheduler.core.grad_transforms.Clamp`, :class:`~finetuning_scheduler.core.grad_transforms.Project`
-and :class:`~finetuning_scheduler.core.grad_transforms.Reject`) act on those rows when given. An entry selects tensors
+:class:`~finetuning_scheduler.core.grad_transforms.Clamp`, :class:`~finetuning_scheduler.core.grad_transforms.Noise`,
+:class:`~finetuning_scheduler.core.grad_transforms.Project` and :class:`~finetuning_scheduler.core.grad_transforms.Reject`)
+act on those rows when given. An entry selects tensors
 only to transform them: it neither thaws nor masks them, and a tensor it selects must be trainable in the phase.
 
 .. _tunable-views-treatments:
@@ -273,7 +274,14 @@ The rules:
 - **They follow the schedule** through optimizer reinitialization, promotion and resume, and a state saved under other
   transforms is refused. Each phase that changes them logs the tensors transformed, and
   :attr:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.gradient_transforms` gives the transforms in
-  effect. A transform should keep no state of its own: a resumed run rebuilds the transforms from the schedule.
+  effect.
+- **A transform with state saves it.** A resumed run rebuilds the transforms from the schedule, so a transform that
+  keeps state (a random generator, running statistics) defines ``state_dict()`` and ``load_state_dict(state)``. The
+  scheduler saves the state of each one in effect with its own and loads it into the rebuilt transform on resume, so a
+  resumed run matches an uninterrupted one. ``Noise(std, seed=0)`` is one: its generator follows the checkpoints. A
+  state saved without the state of the transforms in effect at its depth is refused, and a transform with state it
+  does not expose this way starts afresh on resume. Restoring a best checkpoint (``restore``) does not rewind a
+  transform's state.
 
 Transforms are refused on the Lightning callback and on a sharded model, as masks are. A schedule with them exports
 as an address book with a treatment per phase (see :ref:`a schedule as a book<tunable-views-export-book>`).
@@ -344,7 +352,7 @@ for, so an export with Python transforms takes ``model={"id": ..., "revision": .
 Before it is returned, the book is compiled back: the schedule with each phase naming its treatment must give every
 tensor the same transforms, in the same order. A built-in acts along a tensor's first axis unless told otherwise, while
 venngram's ops act on units along each tensor's unit axis and on spans along its ``out`` side, so a built-in acting
-along another axis is refused, as is ``Clamp`` or a callable of your own (venngram declares no op for them on
+along another axis is refused, as are ``Clamp``, ``Noise`` and a callable of your own (venngram declares no op for them on
 gradients, and a callable is not portable). A phase that clears its transforms (``grad_transforms: {}``) has no
 treatment: a schedule reading the book clears them itself.
 
