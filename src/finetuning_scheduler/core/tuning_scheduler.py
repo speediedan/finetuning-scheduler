@@ -66,7 +66,7 @@ from finetuning_scheduler.core.views import (artifact_state_keys, BoundView, can
                                              resolve_view)
 from venngram.tuning.errors import TunableViewError
 from finetuning_scheduler.core.transitions import (AnyOf, as_decision, Decision, epoch_transition_due, GateEvent,
-                                                   GateResult, TransitionContext, TransitionPolicy)
+                                                   GateResult, RestoreEvent, TransitionContext, TransitionPolicy)
 
 STATE_VERSION = 1
 # the non-tensor state of a sharded (DCP) checkpoint directory
@@ -247,6 +247,8 @@ class TuningScheduler:
         phase_hooks: Phase hooks to register, in order, as :meth:`add_phase_hook` would: a mapping from ``"start"``
             and ``"end"`` to sequences of hooks, each a callable or a mapping ``{"hook": fn, "isolate_rng": ...}``.
             Given here, phase 0's start hooks are registered before :meth:`setup` runs them.
+        restore_choosers: Restore choosers to register, as :meth:`add_restore_chooser` would: a mapping from the name
+            a phase's chosen ``restore`` gives to the callable.
     """
 
     def __init__(
@@ -283,6 +285,7 @@ class TuningScheduler:
         artifacts: Mapping[str, Mapping[str, str]] | None = None,
         gates: Sequence[Callable[[GateEvent], GateResult | bool] | Mapping[str, Any]] | None = None,
         phase_hooks: Mapping[str, Sequence[Callable[[PhaseEvent], None] | Mapping[str, Any]]] | None = None,
+        restore_choosers: Mapping[str, Callable[[RestoreEvent], str]] | None = None,
     ) -> None:
         self.model = model
         self._artifacts = _validate_artifacts(artifacts)
@@ -348,6 +351,9 @@ class TuningScheduler:
         self._gates: OrderedDict[int, tuple[Callable, bool, bool | None]] = OrderedDict()
         self._statefuls: dict[str, tuple[Any, bool]] = {}
         self._gate_records: list[dict[str, Any]] = []
+        self._restore_choosers: dict[str, Callable[[RestoreEvent], str]] = {}
+        self._imported_choosers: dict[str, Callable[..., Any]] = {}  # named by import path, resolved at setup
+        self._restore_choices: list[dict[str, Any]] = []
         self._ended_depths: set[int] = set()
         self._last_metrics: dict[str, Any] = {}
         self._restored_count = 0
@@ -362,6 +368,11 @@ class TuningScheduler:
         self._executor: PhaseExecutor = TuningSchedulerExecutor(self)
         self._externally_driven = False
         self._register_configured(gates, phase_hooks)
+        if restore_choosers is not None and not isinstance(restore_choosers, Mapping):
+            raise FTSConfigurationError("`restore_choosers` maps names to restore choosers, got"
+                                        f" {type(restore_choosers).__name__}.")
+        for name, fn in (restore_choosers or {}).items():
+            self.add_restore_chooser(name, fn)
 
     def _register_configured(self, gates: Any, phase_hooks: Any) -> None:
         """Register the constructor's ``gates`` and ``phase_hooks`` through :meth:`add_gate` and
@@ -406,12 +417,14 @@ class TuningScheduler:
         if self._compiled.promotions:
             self._refuse_unsupported_promotion()
         self._refuse_unsupported_restore()
+        self._resolve_restore_choosers()
         self._refuse_unsupported_masks()
         if self._checkpoint is not None:
             for phase in self._schedule.values():
-                target = core_schedule.restore_best_depth(phase.get("restore"))
-                if target is not None:
-                    getattr(self._checkpoint, "keep_phase_best")(target)
+                for restore in core_schedule.restore_targets(phase.get("restore")):
+                    target = core_schedule.restore_best_depth(restore)
+                    if target is not None:
+                        getattr(self._checkpoint, "keep_phase_best")(target)
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
         self._refuse_unschedulable_params()
         core_phase.reshard_fsdp_modules(self.model)
@@ -433,7 +446,8 @@ class TuningScheduler:
         self._fingerprints.setdefault(0, [])
         self._is_setup = True
         save_initial = self._checkpoint is not None and getattr(self._checkpoint, "save_initial", False)
-        keep_initial = any(p.get("restore") == "initial" for p in self._schedule.values())
+        keep_initial = any("initial" in core_schedule.restore_targets(p.get("restore"))
+                           for p in self._schedule.values())
         if save_initial or keep_initial:
             assert self._checkpoint is not None
             initial = self._write_checkpoint(self._interface.broadcast_object(self._checkpoint.path_for("initial")))
@@ -989,22 +1003,20 @@ class TuningScheduler:
     # ------------------------------------------------------------------------------------------------------------------
     def _advance(self, reason: str | None) -> None:
         """Close phase ``k`` and open ``k + 1``: restore the best (if configured), run phase ``k``'s end hooks and
-        its gates (a veto stops here), advance and pin the boundary best, restore a named state (if ``k + 1``
-        starts from one), run the new phase's start hooks, then thaw, refreeze and configure the optimizer."""
+        its gates (a veto stops here), advance and pin the boundary best, choose the restore (if ``k + 1``'s is
+        chosen) and restore what it names, or a named state (if ``k + 1`` starts from one), run the new phase's
+        start hooks, then thaw, refreeze and configure the optimizer."""
         prev = self._depth
-        restore = self._schedule[prev + 1].get("restore") or (
+        spec = self._schedule[prev + 1].get("restore")
+        chosen = isinstance(spec, Mapping)
+        # a chosen restore is decided after the end hooks and gates, which see the ended phase's last state
+        restore = core_schedule.RESTORE_NONE if chosen else spec or (
             core_schedule.RESTORE_BEST if self._restore_best else core_schedule.RESTORE_NONE)
         core_phase.reshard_fsdp_modules(self.model)
         schedulers = [s for s, _ in self._interface.get_lr_schedulers()]
         pre_state = core_optim.capture_lr_state(schedulers[0] if schedulers else None, self.optimizer)
         # restore before the end hooks, so they see the best state under either interface
-        best_depth = core_schedule.restore_best_depth(restore)
-        if restore == core_schedule.RESTORE_BEST:
-            restored_depth = self._restore_best_state()
-        elif best_depth is not None:
-            restored_depth = self._restore_best_state(best_depth)
-        else:
-            restored_depth = None
+        restored_depth = self._restore_saved_best(restore)
         self._end_phase(prev)
         if not self._run_gates(prev, final=False):
             return
@@ -1013,6 +1025,9 @@ class TuningScheduler:
         self._fingerprints.setdefault(self._depth, [])
         if self._checkpoint is not None and not self._externally_driven:
             self._pin_boundary(self._depth)
+        if chosen:
+            restore = self._choose_restore(self._depth, spec)
+            restored_depth = self._restore_saved_best(restore)
         if restore in core_schedule.NAMED_STATES:
             # after the end hooks and gates, which judge the phase that ended, and with its lr state, not the latest
             restored_depth, pre_state = self._restore_named_state(restore), None
@@ -1028,6 +1043,59 @@ class TuningScheduler:
         self._policy.reset(self._depth)
         rank_zero_info(f"Fine-tuning advanced from phase {prev} to phase {self._depth}"
                        f"{f' ({reason})' if reason else ''}.")
+
+    def _restore_saved_best(self, restore: str) -> int | None:
+        """Restore the best checkpoint ``restore`` names (``best``, or one phase's ``best:<depth>``), returning the
+        depth it came from; ``None`` (restoring nothing) for ``none`` or a named state."""
+        if restore == core_schedule.RESTORE_BEST:
+            return self._restore_best_state()
+        best_depth = core_schedule.restore_best_depth(restore)
+        return self._restore_best_state(best_depth) if best_depth is not None else None
+
+    def _choose_restore(self, depth: int, spec: Mapping[str, Any]) -> str:
+        """Call phase ``depth``'s restore chooser (on global rank zero, its choice broadcast) and record its
+        choice.
+
+        Raises:
+            FTSConfigurationError: If the chooser returns a state that is not one of the phase's candidates.
+        """
+        name = spec[core_schedule.RESTORE_CHOOSE]
+        fn = self._restore_choosers.get(name) or self._imported_choosers[name]
+        candidates = core_schedule.restore_targets(spec)
+        cp = self._checkpoint
+        event = RestoreEvent(depth=depth, candidates=candidates, scores=self._candidate_scores(candidates),
+                             best_depth=cp.best_depth if cp else None, metrics=dict(self._last_metrics),
+                             gate_records=tuple(deepcopy(self._gate_records)),
+                             phase_configs={d: c for d, c in self._phase_configs.items() if d < depth},
+                             metadata=self._metadata, tuning_scheduler=self)
+        choice = None
+        if self._interface.is_global_zero:
+            rngs = fork_rngs(self._interface.rng_devices()) if self.isolate_rng else nullcontext()
+            with self._suspend_step_counting(), rngs:
+                choice = fn(event)
+        choice = self._interface.broadcast_object(choice)
+        if choice not in candidates:
+            raise FTSConfigurationError(
+                f"Restore chooser {name!r} ({describe_callable(fn)}) chose {choice!r} for phase {depth}, which is not"
+                f" one of its candidates {list(candidates)}.")
+        self._restore_choices.append({"depth": depth, "chooser": name, "fn": describe_callable(fn),
+                                      "candidates": list(candidates), "choice": choice})
+        rank_zero_info(f"Restore chooser {name!r} chose {choice!r} for phase {depth}.")
+        return choice
+
+    def _candidate_scores(self, candidates: Sequence[str]) -> dict[str, Tensor | None]:
+        """Each candidate's monitored value, where the checkpoint policy records one."""
+        cp = self._checkpoint
+        scores: dict[str, Tensor | None] = {}
+        for candidate in candidates:
+            best_depth = core_schedule.restore_best_depth(candidate)
+            if cp is not None and candidate == core_schedule.RESTORE_BEST:
+                scores[candidate] = cp.best_score
+            elif cp is not None and best_depth is not None:
+                scores[candidate] = getattr(cp, "best_score_for_depth")(best_depth)
+            else:
+                scores[candidate] = None
+        return scores
 
     def _apply_promotions(self, depth: int) -> None:
         """Promote the tensors phase ``depth`` names in its ``promote`` key (when the phase starts, after its start
@@ -1084,22 +1152,54 @@ class TuningScheduler:
 
     def _refuse_unsupported_restore(self) -> None:
         """A phase restoring ``best`` or a named state needs a checkpoint policy to restore from, a named state one
-        that can keep it, and one phase's best (``best:<depth>``) one that can keep each phase's best."""
-        restores = {d: p["restore"] for d, p in self._schedule.items() if p.get("restore")}
-        saved = sorted(d for d, r in restores.items() if r != core_schedule.RESTORE_NONE)
+        that can keep it, and one phase's best (``best:<depth>``) one that can keep each phase's best.
+
+        A chosen restore needs what each of its candidates needs.
+        """
+        restores = {d: core_schedule.restore_targets(p.get("restore")) for d, p in self._schedule.items()}
+        saved = sorted(d for d, rs in restores.items() if any(r != core_schedule.RESTORE_NONE for r in rs))
         if saved and self._checkpoint is None:
             raise FTSConfigurationError(f"Phases {saved} `restore` a saved state, which needs a `checkpoint` policy.")
-        named = sorted(d for d, r in restores.items() if r in core_schedule.NAMED_STATES)
+        named = sorted(d for d, rs in restores.items() if any(r in core_schedule.NAMED_STATES for r in rs))
         if named and not (hasattr(self._checkpoint, "pin_state") and hasattr(self._checkpoint, "state_path")):
             raise FTSConfigurationError(
                 f"Phases {named} `restore` a named state, but {type(self._checkpoint).__name__} cannot keep one (it"
                 " needs `pin_state` and `state_path`, as `BestCheckpoint` has).")
-        per_phase = sorted(d for d, r in restores.items() if core_schedule.restore_best_depth(r) is not None)
+        per_phase = sorted(d for d, rs in restores.items()
+                           if any(core_schedule.restore_best_depth(r) is not None for r in rs))
         if per_phase and not (hasattr(self._checkpoint, "keep_phase_best")
                               and hasattr(self._checkpoint, "best_path_for_depth")):
             raise FTSConfigurationError(
                 f"Phases {per_phase} `restore` one phase's best, but {type(self._checkpoint).__name__} cannot keep"
                 " one (it needs `keep_phase_best` and `best_path_for_depth`, as `BestCheckpoint` has).")
+
+    def _resolve_restore_choosers(self) -> None:
+        """Resolve each chosen restore's chooser: a registered name, else a fully qualified import path.
+
+        Raises:
+            FTSConfigurationError: Naming the phases whose chooser is neither registered nor importable.
+        """
+        unresolved: dict[str, list[int]] = {}
+        for depth, phase in self._schedule.items():
+            spec = phase.get("restore")
+            if not isinstance(spec, Mapping):
+                continue
+            name = spec[core_schedule.RESTORE_CHOOSE]
+            if name not in self._restore_choosers:
+                fn: Any
+                try:
+                    fn = core_optim.resolve_class_path(name) if "." in name else None
+                except (ImportError, AttributeError, ValueError):
+                    fn = None
+                if callable(fn):
+                    self._imported_choosers[name] = fn
+                else:
+                    unresolved.setdefault(name, []).append(depth)
+        if unresolved:
+            listed = "; ".join(f"{name!r} (phases {depths})" for name, depths in unresolved.items())
+            raise FTSConfigurationError(
+                f"These restore choosers are neither registered (`restore_choosers`, `add_restore_chooser`) nor a"
+                f" fully qualified import path of a callable: {listed}.")
 
     def _refuse_unsupported_masks(self) -> None:
         """Gradient masks and transforms need an unsharded model: a sharded parameter's gradient is a shard, set by
@@ -1364,6 +1464,34 @@ class TuningScheduler:
         self._gates[handle.id] = (fn, rank_zero_only, isolate_rng)
         return handle
 
+    def add_restore_chooser(self, name: str, fn: Callable[[RestoreEvent], str]) -> None:
+        """Register a restore chooser under ``name``, for the phases whose ``restore`` is chosen: ``{"choose":
+        name, "candidates": [<state>, ...]}``, the candidates being ``restore`` values (``best``, ``best:<depth>``,
+        ``none``, ``initial``; ``["best", "none"]`` by default).
+
+        At such a phase's boundary, after the ended phase's end hooks and gates (which see its last state, as with
+        ``restore: none``), ``fn(event)`` gets a :class:`~finetuning_scheduler.core.transitions.RestoreEvent` and
+        returns one of the candidates, which the phase then restores. It runs on global rank zero, its choice broadcast,
+        without disturbing the training random streams when ``isolate_rng`` is set. Each choice is recorded
+        (:attr:`restore_choices`) and saved with the tuning scheduler's state, so a resumed run keeps the choices it
+        made and calls the chooser only at boundaries it has not crossed. The chooser's import path is part of the
+        configuration hash.
+
+        A chosen restore may also name a chooser by its fully qualified import path, without registering it.
+
+        Raises:
+            FTSConfigurationError: If ``name`` is already registered or ``fn`` is not callable, or on an externally
+                driven tuning scheduler (see :meth:`attach`), whose framework decides restores.
+        """
+        if self._externally_driven:
+            raise FTSConfigurationError("Restore choosers are not supported on an externally driven tuning scheduler"
+                                        " in this release.")
+        if not isinstance(name, str) or not name or not callable(fn):
+            raise FTSConfigurationError(f"A restore chooser needs a name and a callable, got {name!r} and {fn!r}.")
+        if name in self._restore_choosers:
+            raise FTSConfigurationError(f"A restore chooser named {name!r} is already registered.")
+        self._restore_choosers[name] = fn
+
     def _run_gates(self, depth: int, final: bool) -> bool:
         if not self._gates:
             return True
@@ -1463,7 +1591,8 @@ class TuningScheduler:
                          "artifacts": deepcopy(self._artifacts),
                          "phase_config": self._schedule[self._depth].get("phase_config"),
                          "gate_records": list(self._gate_records), "fingerprints": deepcopy(self._fingerprints),
-                         "promotions": deepcopy(self._promotions)},
+                         "promotions": deepcopy(self._promotions),
+                         **({"restore_choices": deepcopy(self._restore_choices)} if self._restore_choices else {})},
         }
         if with_tensors:
             assert self._view is not None
@@ -2028,6 +2157,8 @@ class TuningScheduler:
             "address_references": list(self._address_references),
             "config_hash": self.config_hash,
             "gate_records": list(self._gate_records),
+            # only when a restore was chosen, so a schedule without chosen restores saves what it always has
+            **({"restore_choices": deepcopy(self._restore_choices)} if self._restore_choices else {}),
             "promotions": deepcopy(self._promotions),
             # the promoted tensors' values at promotion, which a resume cannot recompute (start hooks are not replayed)
             "promoted_values": dict(self._promoted_values),
@@ -2080,6 +2211,7 @@ class TuningScheduler:
         self._policy.load_state_dict(state_dict["policy"])
         self._fingerprints = deepcopy(state_dict["fingerprints"])
         self._gate_records = list(state_dict.get("gate_records", []))
+        self._restore_choices = deepcopy(list(state_dict.get("restore_choices", [])))
         self._ended_depths = set(state_dict.get("ended_depths", []))
         if state_dict.get("finished") and not self._should_stop:
             # saved after `train_end`: resuming reopens the run, so the phase's end hooks run again at its real end
@@ -2124,6 +2256,11 @@ class TuningScheduler:
             "fingerprint_batches": self.fingerprint_batches,
             "metadata": self._metadata,
             **self._view_config(),
+            # only when registered, so the hash of a configuration without restore choosers is unchanged (a chooser
+            # named by import path is described by the schedule itself)
+            **({"restore_choosers": {name: describe_callable(fn)
+                                     for name, fn in sorted(self._restore_choosers.items())}}
+               if self._restore_choosers else {}),
         }
 
     def _view_config(self) -> dict[str, Any]:
@@ -2270,6 +2407,12 @@ class TuningScheduler:
     @property
     def gate_records(self) -> list[dict[str, Any]]:
         return self._gate_records
+
+    @property
+    def restore_choices(self) -> list[dict[str, Any]]:
+        """Each chosen restore so far: the phase (``depth``), the chooser's name and import path (``chooser``,
+        ``fn``), its ``candidates`` and its ``choice``."""
+        return self._restore_choices
 
     @property
     def restored_count(self) -> int:

@@ -453,3 +453,33 @@ class GateResult:
     accept: bool
     record: Mapping[str, Any] = field(default_factory=dict)
     reason: str | None = None
+
+
+@dataclass(frozen=True)
+class RestoreEvent:
+    """What a restore chooser sees at a phase boundary: after the ended phase's end hooks and gates, before the phase
+    starting there restores anything.
+
+    Attributes:
+        depth: The phase starting, whose ``restore`` the chooser decides.
+        candidates: The states it may return, in the order the schedule lists them.
+        scores: Each candidate's monitored value, where the checkpoint policy records one: ``best`` the run's best,
+            ``best:<depth>`` that phase's best; ``None`` for ``none``, a named state, or a phase with no checkpoint.
+        best_depth: The phase the run's best checkpoint came from, if any.
+        metrics: The metrics of the last unit.
+        gate_records: Every gate's record so far, the ended phase's included.
+        phase_configs: The validated payload of each earlier phase that has one, by depth.
+        metadata: The run's user metadata.
+        tuning_scheduler: The tuning scheduler, for access to the module (still in the ended phase's last state), the
+            optimizer, the checkpoint policy and the schedule.
+    """
+
+    depth: int
+    candidates: tuple[str, ...]
+    scores: Mapping[str, Tensor | None] = field(default_factory=dict)
+    best_depth: int | None = None
+    metrics: Mapping[str, Tensor] = field(default_factory=dict)
+    gate_records: tuple[Mapping[str, Any], ...] = ()
+    phase_configs: Mapping[int, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    tuning_scheduler: "TuningScheduler | None" = field(default=None, repr=False)

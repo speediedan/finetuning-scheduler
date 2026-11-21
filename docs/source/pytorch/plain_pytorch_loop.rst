@@ -188,6 +188,9 @@ order, so a run resumed at any point matches an uninterrupted run.
        and kept for the whole run: the model, the optimizer (momentum starts over) and the lr schedulers (decay starts
        over). It is restored after the ended phase's end hooks and gates, which judge that phase's outcome, and before the
        new phase's start hooks.
+   * - ``{"choose": <name>, "candidates": [...]}``
+     - Whichever of the candidates (the forms above; ``["best", "none"]`` by default) a restore chooser picks at the
+       boundary: see :ref:`chosen-restore`.
 
 Without the key, a boundary follows ``restore_best``, which keeps its defaults: the Lightning callback restores the best
 checkpoint at every boundary, and ``TuningScheduler`` does when given a checkpoint policy. ``"best"``,
@@ -219,6 +222,54 @@ process per condition:
 
 An end hook sees each condition's outcome before the next one restores. Both keys work under FSDP2 and tensor
 parallelism, through the same checkpoints as the best-checkpoint restore.
+
+.. _chosen-restore:
+
+Choosing the Restore at the Boundary
+====================================
+When what a stage should start from depends on how the run went (the best of several earlier stages by a recorded
+measure, or the state a gate's record points to), a phase's ``restore`` names a restore chooser and the states it may
+choose among. The chooser is a function registered under a name, through the ``restore_choosers`` argument or
+:meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.add_restore_chooser`, or named by its fully
+qualified import path:
+
+.. code-block:: python
+
+    def lowest_loss(event):
+        scored = {state: score for state, score in event.scores.items() if score is not None}
+        return min(scored, key=lambda state: float(scored[state]))
+
+
+    schedule = {
+        0: {"params": ["head.*"], "max_transition_epoch": 2},
+        1: {"params": ["layers.1.*"], "refreeze": ["head.*"], "max_transition_epoch": 5},
+        2: {
+            "params": ["head.*"],
+            "refreeze": ["layers.1.*"],
+            "restore": {"choose": "lowest_loss", "candidates": ["best:0", "best:1"]},
+        },
+    }
+    fts = TuningScheduler(
+        model,
+        schedule,
+        optimizer=factory,
+        checkpoint=BestCheckpoint("ckpts", monitor="val_loss"),
+        restore_choosers={"lowest_loss": lowest_loss},
+    )
+
+At the boundary, after the ended phase's end hooks and gates (which see its last state, as with ``"none"``), the chooser
+gets a :class:`~finetuning_scheduler.core.transitions.RestoreEvent`: the candidates, each one's recorded score (the
+run's best for ``"best"``, that phase's best for ``"best:<depth>"``), the last metrics, every gate record so far, the
+earlier phases' ``phase_config`` payloads and the run's metadata. It returns one of the candidates, which the phase then
+restores as that form would; any other value is refused. The chooser runs on global rank zero, its choice broadcast,
+with the training random streams isolated under ``isolate_rng``.
+
+Each choice is recorded (:attr:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.restore_choices`, and in
+every checkpoint's metadata) and saved with the tuning scheduler's state, so a resumed run keeps the choices it made and
+calls the chooser only at boundaries it has not crossed. The schedule hash covers the chosen restore, and the
+configuration hash each registered chooser's import path. Candidates need what their fixed forms need: a checkpoint
+policy for any but ``"none"``, one that keeps each phase's best for ``"best:<depth>"``. The Lightning callback refuses
+the ``restore`` key in any form.
 
 Phase Hooks and Gates
 *********************
