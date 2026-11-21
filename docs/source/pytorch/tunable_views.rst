@@ -256,6 +256,41 @@ neurons or keeping updates out of a direction. A set and what is done to it then
 a steering tool and a schedule can share. Fine-Tuning Scheduler applies a treatment's ops on parameter gradients when a
 phase names it in ``grad_transforms`` (see :ref:`tunable-views-gradient-transforms`).
 
+.. _tunable-views-default-book:
+
+The Default Schedule of a Structured View
+*****************************************
+Without a schedule, Fine-Tuning Scheduler generates one. For a view that supplies structure (architecture-neutral
+components and a block count, as ``venngram.view(model)`` does through a component map), the generated schedule is an
+address book: it states no naming scheme, so it selects the same tensors on every composition of the model, such as
+its Hugging Face, nnsight and TransformerLens ones. One set per stage, thawed in this order:
+
+.. code-block:: yaml
+
+    addresses:
+      sets:
+        head: "component:unembed | component:ln_final"
+        block_1: "layers:-1"
+        block_2: "layers:-2"
+        # ... one set per block, from the top
+        embeddings: "component:embed | component:pos_embed"
+    0:
+      params: ["@head"]
+    1:
+      params: ["@block_1"]
+    # ...
+
+- A tied ``unembed`` (GPT-2's is the ``embed`` tensor) is thawed with the head, written ``component:embed``, and the
+  ``embeddings`` stage then thaws only the position embeddings.
+- ``view_default_schedule(view, stride=2)`` puts two blocks in each block set (``layers:-2:``, ``layers:-4:-2``, ...),
+  ``order="input_first"`` reverses the stages, and ``addresses=False`` lists names instead.
+- The book is used only when it thaws exactly the tensors a schedule of the view's names would. A tensor outside
+  every block and every head or embedding component (a classifier the map does not name, say), a second block stack,
+  or a tensor the book cannot leave out (a frozen role, packed storage) keeps the name-based schedule, one of the
+  view's depth groups per phase, and an info message says why.
+
+A view without structure, such as the canonical view, generates the name-based schedule.
+
 .. _tunable-views-export:
 
 Exporting by Role
@@ -285,7 +320,8 @@ Attach the view to the ``LightningModule`` as ``tunable_view``, rooted at the mo
     trainer.fit(module)
 
 The schedule keeps its logical names (in logs and in the saved schedule), the callback tunes the physical parameters,
-and a generated schedule uses the view's logical names. A third-party strategy
+and a generated schedule uses the view's logical names, or is an address book when the view supplies structure (see
+:ref:`tunable-views-default-book`). A third-party strategy
 adapter that renames parameters takes precedence over an attached view (see :ref:`tunable-views-renaming-adapters`).
 
 The :doc:`LoRA placement notebook's Lightning companion</examples/notebooks/tunable_views/lora_placement_lightning>`

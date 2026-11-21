@@ -31,6 +31,7 @@ import functools
 import hashlib
 import itertools
 import json
+import math
 import pathlib
 from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
@@ -54,8 +55,8 @@ from venngram.support import SupportRecord, TuningSupport
 from finetuning_scheduler.core.grad_masks import Transform
 from finetuning_scheduler.core.grad_transforms import op_transforms, transform_id
 from finetuning_scheduler.core.roles import is_frozen_role, role_kind
-from finetuning_scheduler.core.schedule import (parse_promote, requires_grad_capable, resolve_param_entries,
-                                                 shared_params_ref)
+from finetuning_scheduler.core.schedule import (ADDRESSES_KEY, load_address_sets, parse_promote, requires_grad_capable,
+                                                 resolve_param_entries, shared_params_ref)
 from finetuning_scheduler.core.views import as_view, BoundView, ScheduleUnresolvable, Unresolvable
 
 
@@ -928,23 +929,120 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
                             logical_to_physical=logical_to_physical, promotions=promotions)
 
 
-def view_default_schedule(view: Any, order: Literal["output_first", "input_first"] = "output_first") -> dict:
-    """Generate a default schedule over a view's logical names.
+#: The components outside every block a structured default schedule thaws with the head (first), and with the
+#: embeddings (last). A tied ``unembed`` is the ``embed`` tensor, which then joins the head.
+_HEAD_COMPONENTS = ("unembed", "ln_final")
+_EMBEDDING_COMPONENTS = ("embed", "pos_embed")
 
-    Logical names standing for a tensor whose role is never thawed (``fitted`` or ``artifact``), or for a tensor whose
-    storage cannot require gradients (a quantized or packed base under trainable adapters, for example), are left out
-    (with a warning when they also stand for trainable tensors), and groups left empty are dropped.
+
+def _block_address(k: int, stride: int) -> str:
+    """The ``k``-th block set's address (``k`` from 1, counted from the top), ``stride`` blocks each."""
+    if stride == 1:
+        return f"layers:-{k}"
+    return f"layers:-{stride}:" if k == 1 else f"layers:-{k * stride}:-{(k - 1) * stride}"
+
+
+def _tied_unembed(bound: BoundView, structure: Any) -> bool:
+    """Whether the root's ``unembed`` is its ``embed`` tensor (GPT-2's tied weights): a parameter aliased under
+    both components."""
+    components: dict[int, set[str | None]] = {}
+    for name, t in bound.root.named_parameters(remove_duplicate=False):
+        components.setdefault(id(t), set()).add(structure.locate(name).component)
+    return any({"unembed", "embed"} <= c for c in components.values())
+
+
+def _structured_default(bound: BoundView, names: dict, order: str, stride: int) -> dict | None:
+    """``names`` (the name-based default schedule) as an address book of the view's structure, or ``None`` (with
+    the reason, at info level) when the view supplies no structure, or its structure does not place every tensor
+    ``names`` thaws, or the book would not thaw exactly those tensors."""
+    structure = bound.structure()
+    depth = structure.depth()
+    if not getattr(structure, "vocabulary", False) or not isinstance(depth, int) or depth < 1 or not names:
+        return None
+    entries = [n for phase in names.values() for n in phase["params"]]
+    mapped = bound.to_physical(entries)
+    located = {p: structure.locate(p) for n in entries for p in mapped[n]}
+
+    def _keep_names(why: str) -> None:
+        rank_zero_info(f"The generated schedule lists tensor names rather than addresses: {why}.")
+
+    tied = _tied_unembed(bound, structure)
+    head = _HEAD_COMPONENTS + (("embed",) if tied else ())
+    embeddings = tuple(c for c in _EMBEDDING_COMPONENTS if not (tied and c == "embed"))
+    unplaced = sorted(p for p, loc in located.items()
+                      if loc.stack is not None or (loc.layer is None and loc.component not in (*head, *embeddings)))
+    if unplaced:
+        _keep_names(f"the view's structure places {unplaced[0]!r} in no block of its primary stack and in no head or"
+                    f" embedding component ({len(unplaced)} such tensors)")
+        return None
+    outside = {loc.component for loc in located.values() if loc.layer is None}
+    sets: dict[str, str] = {}
+    if present := [c for c in head if c in outside]:
+        sets["head"] = " | ".join(f"component:{c}" for c in present)
+    layers = {loc.layer for loc in located.values() if loc.layer is not None}
+    for k in range(1, math.ceil(depth / stride) + 1):
+        if any(depth - k * stride <= layer < depth - (k - 1) * stride for layer in layers):
+            sets[f"block_{k}"] = _block_address(k, stride)
+    if present := [c for c in embeddings if c in outside]:
+        sets["embeddings"] = " | ".join(f"component:{c}" for c in present)
+    stages = list(sets) if order == "output_first" else list(reversed(sets))
+    phases = {d: {"params": [f"@{name}"]} for d, name in enumerate(stages)}
+    book = {"sets": sets}
+    try:
+        selected = {p for cp in compile_schedule(phases, bound, addresses=load_address_sets(book)).phases
+                    for p in cp.thawed}
+        expected = {p for cp in compile_schedule(names, bound).phases for p in cp.thawed}
+    except FTSConfigurationError as err:
+        _keep_names(f"the address book of its structure does not compile ({err})")
+        return None
+    if selected != expected:
+        diff = sorted(selected ^ expected)
+        _keep_names(f"the address book of its structure would thaw other tensors than the view's default, such as"
+                    f" {diff[0]!r} ({len(diff)} tensors differ)")
+        return None
+    return {ADDRESSES_KEY: book, **phases}
+
+
+def view_default_schedule(view: Any, order: Literal["output_first", "input_first"] = "output_first", *,
+                          stride: int = 1, addresses: bool = True) -> dict:
+    """Generate a default schedule for a view.
+
+    When the view supplies structure (its ``structure()`` reports architecture-neutral components and a block count,
+    as a view through a venngram component map does), the schedule is an address book, so it states no naming scheme
+    and selects the same tensors on every composition of the model (the core/Hugging Face, nnsight and TransformerLens
+    ones, for example). Its sets are named once, under the schedule's ``addresses``, and each phase thaws one:
+
+    - ``head``: ``component:unembed | component:ln_final``. A tied ``unembed`` (GPT-2's, which is the ``embed``
+      tensor) is thawed here too, written ``component:embed``;
+    - ``block_1`` to ``block_N``: the blocks from the top, ``stride`` per set (``layers:-1``, ``layers:-2``, ... or,
+      with a stride of 2, ``layers:-2:``, ``layers:-4:-2``, ...);
+    - ``embeddings``: ``component:embed | component:pos_embed``, the position embeddings alone when ``embed`` is tied.
+
+    Components a model lacks are left out of their set, and a set left empty is dropped. The book is used only when
+    it thaws exactly the tensors the name-based schedule below does; otherwise (a tensor outside every block and every
+    head or embedding component, a second block stack, a role or storage the book cannot leave out) the schedule
+    lists names, with the reason at info level.
+
+    Without structure, the schedule lists the view's logical names, one ``depth_groups()`` group per phase. Logical
+    names standing for a tensor whose role is never thawed (``fitted`` or ``artifact``), or for a tensor whose storage
+    cannot require gradients (a quantized or packed base under trainable adapters, for example), are left out (with a
+    warning when they also stand for trainable tensors), and groups left empty are dropped.
 
     Args:
         view: A tunable view (bound or not).
-        order: ``"output_first"`` (the default, as Fine-Tuning Scheduler has always generated schedules) uses the
-            view's ``depth_groups()``; ``"input_first"`` thaws the same groups in the reverse order.
+        order: ``"output_first"`` (the default, as Fine-Tuning Scheduler has always generated schedules) thaws from the
+            output (the head, or the view's ``depth_groups()`` order); ``"input_first"`` thaws the same sets or groups
+            in the reverse order.
+        stride: The blocks each block set of an address book holds.
+        addresses: Write the schedule as an address book when the view supplies structure. ``False`` lists names.
 
     Returns:
-        The schedule, mapping each phase to its ``params``.
+        The schedule, mapping each phase to its ``params``, and ``addresses`` to its address book when it has one.
     """
     if order not in ("output_first", "input_first"):
         raise FTSConfigurationError(f"`order` must be 'output_first' or 'input_first', got {order!r}.")
+    if not isinstance(stride, int) or isinstance(stride, bool) or stride < 1:
+        raise FTSConfigurationError(f"`stride` must be a positive integer, got {stride!r}.")
     bound = as_view(view)
     groups = bound.depth_groups()
     roles = bound.roles()
@@ -968,6 +1066,9 @@ def view_default_schedule(view: Any, order: Literal["output_first", "input_first
             rank_zero_info(f"The generated schedule leaves out {len(left_packed)} names whose storage cannot require"
                            f" gradients (quantized or packed), such as {left_packed[0]!r}.")
         groups = [kept for g in groups if (kept := [n for n in g if n not in excluded])]
+    names = {depth: {"params": list(g)} for depth, g in enumerate(groups)}
+    if addresses and (book := _structured_default(bound, names, order, stride)) is not None:
+        return book
     if order == "input_first":
         groups = [list(reversed(g)) for g in reversed(groups)]
     return {depth: {"params": list(g)} for depth, g in enumerate(groups)}

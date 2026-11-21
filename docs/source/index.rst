@@ -176,7 +176,9 @@ The Default Fine-Tuning Schedule
 The default schedule thaws parameters in pairs, starting from the last registered parameter (a naive, two-parameters
 per level heuristic). Using the default/implicitly generated schedule will often be less computationally efficient than
 a user-defined schedule but can often serve as a good baseline for subsequent explicit schedule refinement
-and will marginally outperform many explicit schedules.
+and will marginally outperform many explicit schedules. Through a tunable view that supplies structure, the default
+schedule is instead an address book that thaws the head, then one block at a time from the top, then the embeddings
+(see :ref:`tunable-views-default-book`).
 
 .. tab-set::
     :sync-group: interface
