@@ -42,10 +42,11 @@ from typing import Any
 import torch
 from torch.nn.utils import parametrize
 
-from finetuning_scheduler.core.compile import compile_schedule, view_default_schedule
+from finetuning_scheduler.core.compile import CompiledSchedule, compile_schedule, view_default_schedule
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.phase import thaw_params
 from finetuning_scheduler.core.roles import is_frozen_role
+from finetuning_scheduler.core.schedule import load_address_sets, split_addresses
 from finetuning_scheduler.core.views import as_view, BoundView
 from venngram.tuning.conformance import ConformanceCase, ConformanceError, ConformanceReport, ViewConformance
 
@@ -64,6 +65,13 @@ def _freeze(root: torch.nn.Module) -> None:
 
 def _trainable(root: torch.nn.Module) -> set[str]:
     return {n for n, p in root.named_parameters() if p.requires_grad}
+
+
+def _compile_default(view: BoundView) -> CompiledSchedule:
+    """Compile the view's default schedule, with the address book it is written in when the view supplies
+    structure."""
+    phases, addresses = split_addresses(view_default_schedule(view))
+    return compile_schedule(phases, view, addresses=load_address_sets(addresses))
 
 
 def _has_frozen_parameter(view: BoundView) -> bool:
@@ -111,6 +119,8 @@ class TunableViewConformance(ViewConformance):
             ConformanceCase("frozen_roles_refuse", "roles", lambda s, v: s.trainable and _has_frozen_parameter(v),
                             self._frozen_roles_refuse),
             protocol["promotion"],
+            protocol["cooperative_roles_merge"],
+            protocol["cooperative_roles_conflict"],
             ConformanceCase("parametrization_mapping", "parametrization",
                             lambda s, v: s.trainable and any(parametrize.is_parametrized(m) for m in v.root.modules()),
                             self._parametrization_mapping),
@@ -122,7 +132,7 @@ class TunableViewConformance(ViewConformance):
     def _default_schedule_compiles(self) -> None:
         """The view's own default schedule compiles: no two phases share storage."""
         view = self._fresh()
-        compile_schedule(view_default_schedule(view), view)
+        _compile_default(view)
 
     def _thaw_exact(self) -> None:
         """Compiling a logical name is deterministic, and thawing the result flips exactly those tensors.
@@ -145,9 +155,9 @@ class TunableViewConformance(ViewConformance):
 
     def _step_changes_only_thawed(self) -> None:
         """An optimizer step over phase 0 of the default schedule changes only phase 0's tensors (and never a
-        ``fitted`` or ``instrument`` tensor)."""
+        ``fitted`` or ``artifact`` tensor)."""
         view = self._fresh()
-        compiled = compile_schedule(view_default_schedule(view), view)
+        compiled = _compile_default(view)
         _freeze(view.root)
         thaw = list(compiled.physical_for(0))
         thaw_params(view.root, thaw)
@@ -168,7 +178,7 @@ class TunableViewConformance(ViewConformance):
         _check(not unexpected, f"An optimizer step over phase 0 changed tensors phase 0 does not thaw: {unexpected}.")
         roles = view.roles()
         frozen_changed = sorted(n for n in changed if is_frozen_role(roles.get(n, "base")))
-        _check(not frozen_changed, f"An optimizer step changed `fitted` or `instrument` tensors: {frozen_changed}.")
+        _check(not frozen_changed, f"An optimizer step changed `fitted` or `artifact` tensors: {frozen_changed}.")
 
     def _unmatched_rule_refuses(self) -> None:
         """A schedule entry that matches nothing is refused."""
@@ -191,7 +201,7 @@ class TunableViewConformance(ViewConformance):
         raise ConformanceError("A view declaring `trainable=False` was not refused.")
 
     def _frozen_roles_refuse(self) -> None:
-        """Scheduling a ``fitted`` or ``instrument`` parameter, through its logical name, is refused."""
+        """Scheduling a ``fitted`` or ``artifact`` parameter, through its logical name, is refused."""
         view = self._fresh()
         params = {n for n, _ in view.root.named_parameters()}
         frozen = [n for n, r in view.roles().items() if n in params and is_frozen_role(r)]

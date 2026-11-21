@@ -115,13 +115,30 @@ Report readiness with: branch head SHA, CI results, coverage, build metadata, an
 
 ## Phase 4: Verify publication
 
-1. **`release-pypi.yml`** fires on `release: published`. All four jobs must succeed: `build-package`,
-   `upload-package`, `publish-package-testpypi`, `publish-package-pypi` (trusted publishing; no local credential).
-   The TestPyPI job uploads to TestPyPI (environment `testpypi`) and the PyPI job needs it, so a missing TestPyPI
-   trusted publisher stops the release before PyPI: register it, then re-run the failed jobs. Check that the version
-   reached `https://test.pypi.org/project/finetuning-scheduler/` before the PyPI job's delay ends.
+1. **`release-pypi.yml`** fires on `release: published`. All five jobs must succeed: `build-package`,
+   `upload-package`, `check-pypi-environment`, `publish-package-testpypi`, `publish-package-pypi` (trusted
+   publishing; no local credential). `check-pypi-environment` stops the release before anything is published unless
+   the `pypi` environment has a required reviewer and a deployment policy admitting only release tags (the one-time
+   setup below). The TestPyPI job uploads to TestPyPI (environment `testpypi`) and the PyPI job needs it, so a missing
+   TestPyPI trusted publisher stops the release before PyPI: register it, then re-run the failed jobs.
    ```bash
    gh run list --workflow release-pypi.yml --limit 1 && gh run watch <id> --exit-status
+   ```
+1. **Verify the TestPyPI upload, then the maintainer approves PyPI.** The PyPI job waits for an approval of its
+   `pypi` deployment (GitHub cancels a run still waiting after 30 days). Install the TestPyPI build in a clean
+   environment and import it before asking:
+   ```bash
+   pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ \
+     finetuning-scheduler==X.Y.Z
+   python -c "import finetuning_scheduler as fts; print(fts.__version__)"
+   ```
+   Report the result and ask the maintainer to approve the deployment (the run's "Review deployments" button). The
+   approval is the maintainer's own decision for each release, like the tag: never approve it on their behalf, even
+   with their credentials. Their command-line equivalent, after reading the run's pending deployment:
+   ```bash
+   gh api repos/speediedan/finetuning-scheduler/actions/runs/<id>/pending_deployments
+   gh api -X POST repos/speediedan/finetuning-scheduler/actions/runs/<id>/pending_deployments \
+     -F 'environment_ids[]=<pypi environment id>' -f state=approved -f comment='TestPyPI X.Y.Z verified'
    ```
 1. **PyPI metadata:** latest version, `requires_python`, `torch`/`lightning` requirements, zero `git+`, wheel and
    sdist both present. The JSON API can update before the simple index pip reads; if `pip install` cannot find the
@@ -140,6 +157,24 @@ Report readiness with: branch head SHA, CI results, coverage, build metadata, an
    fired). Release its gate when the agent is quiet and confirm it green. Its tree equals the validated branch head,
    so a missing tag build is not a validation gap.
 1. The Docker release workflow (`release-docker.yml`) is disabled by design; CI images are built and pushed manually.
+
+### One-time setup: the `pypi` environment
+
+The PyPI job deploys to the `pypi` environment, and `check-pypi-environment` refuses a release until that
+environment requires a maintainer's approval and admits only release tags. A repository administrator creates it
+once (the maintainer, never an agent: it is the release's approval gate):
+
+```bash
+gh api -X PUT repos/speediedan/finetuning-scheduler/environments/pypi --input - <<'JSON'
+{"reviewers": [{"type": "User", "id": <maintainer's user id>}], "prevent_self_review": false,
+ "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+JSON
+gh api -X POST repos/speediedan/finetuning-scheduler/environments/pypi/deployment-branch-policies \
+  -f name='v*' -f type=tag
+```
+
+`prevent_self_review` stays off, since the maintainer approves their own release. Optionally scope the PyPI trusted
+publisher for finetuning-scheduler to the `pypi` environment, so that only an approved job can publish.
 
 ## Phase 5: Close out
 

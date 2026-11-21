@@ -52,7 +52,7 @@ def test_refuse_direct_api_keys():
 
     refuse_direct_api_keys({0: {"params": ["a"], "max_transition_epoch": 2}})
     mixed = {0: {"params": ["a"]}, 1: {"max_transition_step": 3, "phase_config": {}}, 2: {"pg_overrides": {}},
-             3: {"promote": {"role:instrument": "latent:x"}}}
+             3: {"promote": {"role:artifact": "latent:x"}}}
     with pytest.raises(FTSConfigurationError, match=r"\(phase 1: max_transition_step; phase 3: promote\)"):
         refuse_direct_api_keys(mixed)
     with pytest.raises(FTSConfigurationError, match=r"phase 1: max_transition_step, phase_config; phase 2: pg_over"):

@@ -80,7 +80,7 @@ def test_export_best_selectors_and_a_custom_writer(tmp_path):
 
 
 @pytest.mark.parametrize("roles, match", [
-    (("instrument",), "never checkpointed"),
+    (("artifact",), "never checkpointed"),
     (("intervention:none",), "No tensor's role matches"),
 ])
 def test_export_best_refusals(tmp_path, roles, match):
@@ -193,7 +193,7 @@ def test_export_best_takes_a_tensor_promoted_after_the_best_at_its_promotion_val
     """A latent tensor promoted after the best checkpoint is exported with its value at promotion, as restoring the
     best does."""
     promote = {0: {"params": ["role:latent"], "max_transition_epoch": 1},
-               1: {"params": ["role:latent:lens"], "promote": {"role:instrument": "latent:lens"}}}
+               1: {"params": ["role:latent:lens"], "promote": {"role:artifact": "latent:lens"}}}
     torch.manual_seed(0)
     model = InterventionModel()
     lens = model.lens.weight.detach().clone()

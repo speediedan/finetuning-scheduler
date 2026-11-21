@@ -84,7 +84,7 @@ class DTensorAdapter:
                 state = {"model": model_sd, "optim": optim_sd}
             else:
                 state = {"model": get_model_state_dict(model)}
-            # excluded (instrument) tensors are never saved, so they are the only model keys a load may miss
+            # excluded (artifact) tensors are never saved, so they are the only model keys a load may miss
             excluded = exclude(state["model"].keys())
             state["model"] = {k: v for k, v in state["model"].items() if k not in excluded}
             dcp.load(state, checkpoint_id=path)

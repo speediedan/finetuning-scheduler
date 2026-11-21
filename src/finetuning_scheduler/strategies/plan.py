@@ -10,8 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 r"""
-Fine-Tuning Scheduler FSDP2 Plans
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Fine-Tuning Scheduler Parallelism Plans
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 An FSDP2 plan names the modules to apply ``fully_shard`` to and the keyword arguments for each, so a model can be
 sharded from configuration (a YAML file, for instance) rather than by code. The same plan grammar serves the PyTorch
@@ -30,6 +30,25 @@ communication. :class:`~finetuning_scheduler.TuningScheduler` and the Lightning
 :class:`~finetuning_scheduler.strategy_adapters.ModelParallelStrategyAdapter` report them when they validate a schedule
 against an FSDP2 model (:class:`~finetuning_scheduler.strategies.fsdp2.FSDP2Adapter`).
 
+A tensor-parallel plan (:func:`parallelize_model`, PyTorch API only) uses the same keys, each mapped to one parallel
+style and its options, so a plan can live in YAML:
+
+.. code-block:: yaml
+
+    tok_embeddings: {style: rowwise, input_layouts: replicate, output_layouts: {shard: 1}}
+    'layers\.\d+\.attention$': {style: prepare_input, input_layouts: {shard: 1}, desired_input_layouts: replicate}
+    'layers\.\d+\.attention\.w[qkv]$': {style: colwise, use_local_output: false}
+    output:
+      style: colwise
+      input_layouts: {shard: 1}
+      output_layouts: replicate
+      loss_parallel: {output_layouts: {shard: -1}, use_local_output: false}
+
+``style`` is ``colwise``, ``rowwise``, ``sequence``, ``prepare_input``, ``prepare_output`` or ``prepare_input_output``,
+and the other options are that style's keyword arguments. A layout is ``replicate``, ``{shard: <dim>}`` or null, or a
+list of those with one per argument. An entry's ``loss_parallel`` options override the others when the plan is applied
+with ``loss_parallel=True``, for use with ``torch.distributed.tensor.parallel.loss_parallel``.
+
 .. warning:: This is an experimental API and may change in a future release.
 """
 import re
@@ -39,7 +58,11 @@ from typing import Any
 import torch
 from torch import nn
 from torch.distributed.fsdp import CPUOffloadPolicy, FSDPModule, MixedPrecisionPolicy, fully_shard
-from torch.distributed.tensor import DTensor
+from torch.distributed.tensor import DTensor, Placement, Replicate, Shard
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel, parallelize_module, ParallelStyle, PrepareModuleInput, PrepareModuleInputOutput,
+    PrepareModuleOutput, RowwiseParallel, SequenceParallel,
+)
 
 from finetuning_scheduler.core.dist import rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
@@ -48,8 +71,13 @@ from finetuning_scheduler.strategies.base import Feedback
 # a plan key with this prefix selects modules by class rather than by name
 CLASS_SELECTOR = "class:"
 
-__all__ = ["CLASS_SELECTOR", "phase_feedback", "plan_key_modules", "resolve_fsdp_plan", "resolve_ignored_params",
-           "shard_model"]
+# the parallel styles a tensor-parallel plan may name
+_TP_STYLES = {"colwise": ColwiseParallel, "rowwise": RowwiseParallel, "sequence": SequenceParallel,
+              "prepare_input": PrepareModuleInput, "prepare_output": PrepareModuleOutput,
+              "prepare_input_output": PrepareModuleInputOutput}
+
+__all__ = ["CLASS_SELECTOR", "parallelize_model", "phase_feedback", "plan_key_modules", "resolve_fsdp_plan",
+           "resolve_ignored_params", "resolve_tp_plan", "shard_model"]
 
 
 def plan_key_modules(key: str, named_modules: Mapping[str, nn.Module]) -> list[str]:
@@ -359,3 +387,117 @@ def shard_model(model: nn.Module, mesh: Any, plan: Mapping[str, Mapping[str, Any
     if shard_root and not isinstance(model, FSDPModule):
         _apply(model, "", mesh, {k: v for k, v in (default_kwargs or {}).items() if k != "act_ckpt"})
     return model
+
+
+def _tp_layout(n: str, value: Any) -> Any:
+    """A placement from its plan form, recursing into the per-argument list a ``prepare_*`` style takes."""
+    if value is None or isinstance(value, Placement):
+        return value
+    if isinstance(value, (list, tuple)):
+        return tuple(_tp_layout(n, v) for v in value)
+    if value == "replicate":
+        return Replicate()
+    if isinstance(value, Mapping) and set(value) == {"shard"} and isinstance(value["shard"], int):
+        return Shard(value["shard"])
+    raise FTSConfigurationError(
+        f"The layout {value!r} in the `tp_plan` entry for '{n or '<root>'}' is not 'replicate', {{shard: <dim>}} or "
+        "null, or a list of those."
+    )
+
+
+def _tp_style(n: str, entry: Any, loss_parallel: bool) -> ParallelStyle:
+    """A new parallel style for the module ``n`` from its plan entry: a style may hold per-module state, so modules
+    a key selects together never share one."""
+    if not isinstance(entry, Mapping) or entry.get("style") not in _TP_STYLES:
+        raise FTSConfigurationError(
+            f"The `tp_plan` entry for '{n or '<root>'}' must be a mapping whose `style` is one of "
+            f"{', '.join(repr(s) for s in _TP_STYLES)}; got {entry!r}."
+        )
+    options = {k: v for k, v in entry.items() if k not in ("style", "loss_parallel")}
+    if loss_parallel:
+        options.update(entry.get("loss_parallel") or {})
+    for option, value in options.items():
+        if option.endswith("_kwarg_layouts"):
+            options[option] = {k: _tp_layout(n, v) for k, v in value.items()}
+        elif option.endswith("_layouts"):
+            options[option] = _tp_layout(n, value)
+    try:
+        return _TP_STYLES[entry["style"]](**options)
+    except TypeError as err:
+        raise FTSConfigurationError(
+            f"The `tp_plan` entry for '{n or '<root>'}' has an option its style '{entry['style']}' does not take: {err}"
+        ) from err
+
+
+def resolve_tp_plan(model: nn.Module, plan: Mapping[str, Mapping[str, Any]], *, loss_parallel: bool = False,
+                    warn: Callable[[str], None] = rank_zero_warn) -> dict[str, ParallelStyle]:
+    """Expand a tensor-parallel plan's keys into the modules they select, each with a new parallel style.
+
+    Modules keep the order in which a key first selects them; a later key selecting the same module replaces its style.
+    A ``ModuleList`` or ``ModuleDict`` is skipped with a warning, as :func:`resolve_fsdp_plan` skips one. See the module
+    docstring for the plan grammar.
+
+    Args:
+        model: The model the plan is for.
+        plan: Plan keys mapped to parallel styles and their options.
+        loss_parallel: Apply each entry's ``loss_parallel`` options.
+        warn: Called with the warning for a skipped module.
+
+    Returns:
+        Each selected module's name mapped to its parallel style.
+
+    Raises:
+        FTSConfigurationError: If a key selects no module, an entry or layout is malformed or names an option its style
+            does not take, or ``loss_parallel`` is set and no entry has ``loss_parallel`` options.
+    """
+    if loss_parallel and not any(isinstance(e, Mapping) and e.get("loss_parallel") for e in plan.values()):
+        raise FTSConfigurationError(
+            "`loss_parallel=True` needs a `tp_plan` entry with `loss_parallel` options: the module computing the "
+            "logits must keep them sharded for `torch.distributed.tensor.parallel.loss_parallel`."
+        )
+    named_modules = dict(model.named_modules())
+    resolved: dict[str, ParallelStyle] = {}
+    for key, entry in plan.items():
+        matched = plan_key_modules(key, named_modules)
+        if not matched:
+            what = "class" if key.startswith(CLASS_SELECTOR) else "module or regex"
+            raise FTSConfigurationError(
+                f"The {what} '{key}' specified in `tp_plan` did not match any named modules in the provided model."
+            )
+        for n in matched:
+            if isinstance(named_modules[n], (nn.ModuleList, nn.ModuleDict)):
+                warn(f"Provided TP module plan includes a directive to apply a parallel style to ('{n}') which has the "
+                     f"unsupported type '{type(named_modules[n])}'. This directive will be pruned and ignored.")
+                continue
+            resolved[n] = _tp_style(n, entry, loss_parallel)
+    return resolved
+
+
+def parallelize_model(model: nn.Module, tp_mesh: Any, plan: Mapping[str, Mapping[str, Any]], *,
+                      loss_parallel: bool = False) -> nn.Module:
+    """Apply the parallel styles a tensor-parallel plan selects, with ``parallelize_module``.
+
+    The model may be on the meta device or materialized, and parameter names do not change, so a fine-tuning schedule
+    names the same parameters it would without the plan. For both tensor and data parallelism, apply this first over
+    ``mesh["tensor_parallel"]`` and then :func:`shard_model` over ``mesh["data_parallel"]``; only a one-dimensional
+    tensor-parallel mesh over all ranks is tested so far.
+
+    Args:
+        model: The model to parallelize.
+        tp_mesh: A one-dimensional ``DeviceMesh``.
+        plan: Plan keys mapped to parallel styles and their options; see the module docstring for the grammar.
+        loss_parallel: Apply each entry's ``loss_parallel`` options, to keep the logits sharded for
+            ``torch.distributed.tensor.parallel.loss_parallel``.
+
+    Returns:
+        ``model``, parallelized.
+
+    Raises:
+        FTSConfigurationError: If ``tp_mesh`` is not one-dimensional, or :func:`resolve_tp_plan` refuses the plan.
+    """
+    if tp_mesh.ndim != 1:
+        raise FTSConfigurationError(
+            f"`parallelize_model` needs a one-dimensional mesh, not one with {tp_mesh.ndim} dimensions: pass the "
+            "tensor-parallel dimension (`mesh['tensor_parallel']`)."
+        )
+    return parallelize_module(model, tp_mesh, resolve_tp_plan(model, plan, loss_parallel=loss_parallel))

@@ -1,6 +1,28 @@
-# Tensor parallelism on two ranks: the plain PyTorch counterpart of `fts_tp_plan.yaml`. The TP plan is
-# `parallel_plans.apply_tp_plan`, with loss parallelism.
+# Tensor parallelism on two ranks: the plain PyTorch counterpart of `fts_tp_plan.yaml`. `parallelize_model` applies
+# this plan to the `Transformer`, with loss parallelism. It is `parallel_plans.apply_tp_plan`, which the Lightning
+# example applies from code, as configuration.
 run_name: torch_tp_plan
 mesh:
   data_parallel_size: 1
   tensor_parallel_size: 2
+tp_plan:
+  tok_embeddings: {style: rowwise, input_layouts: replicate, output_layouts: {shard: 1}}
+  norm: {style: sequence}
+  'layers\.\d+\.attention$':
+    style: prepare_input
+    input_layouts: [{shard: 1}, null]
+    desired_input_layouts: [replicate, null]
+  'layers\.\d+\.(attention_norm|ffn_norm)$': {style: sequence}
+  'layers\.\d+\.attention\.w[qkv]$': {style: colwise}
+  'layers\.\d+\.attention\.wo$': {style: rowwise, output_layouts: {shard: 1}}
+  'layers\.\d+\.feed_forward$':
+    style: prepare_input
+    input_layouts: [{shard: 1}]
+    desired_input_layouts: [replicate]
+  'layers\.\d+\.feed_forward\.w[13]$': {style: colwise}
+  'layers\.\d+\.feed_forward\.w2$': {style: rowwise, output_layouts: {shard: 1}}
+  output:
+    style: colwise
+    input_layouts: {shard: 1}
+    output_layouts: replicate
+    loss_parallel: {output_layouts: {shard: -1}, use_local_output: false}

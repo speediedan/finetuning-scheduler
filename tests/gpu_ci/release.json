@@ -1,5 +1,5 @@
 {
-  "description": "Release eligibility configuration for gpu_epsilon.release_eligibility, run by .azure-pipelines/gpu-release.yml. tests/test_release_eligibility.py checks it against phase_manifest.py and the pipeline's artifact names.",
+  "description": "Release eligibility configuration for gpu_epsilon.release_eligibility, run by .azure-pipelines/gpu-release.yml. tests/test_release_eligibility.py checks it against [tool.gpu-epsilon.phase-evidence] and the pipeline's artifact names.",
   "repository": "speediedan/finetuning-scheduler",
   "artifact_prefix": "fts-release",
   "phases_dir": "fts-phases",

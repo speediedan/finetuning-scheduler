@@ -26,7 +26,7 @@ from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.strategies import FSDP2Adapter
 from tests.dist_cases.fts_tuning_scheduler import _data, _model, _params, _train
 
-ROLES = {"4.weight": "adapter:head", "4.bias": "adapter:head", "0.weight": "instrument", "0.bias": "instrument",
+ROLES = {"4.weight": "adapter:head", "4.bias": "adapter:head", "0.weight": "artifact", "0.bias": "artifact",
          "2.bias": "fitted"}
 SCHEDULE = {0: {"params": ["role:adapter"], "max_transition_epoch": 2},
             1: {"params": ["2.weight"], "lr": 0.05, "max_transition_epoch": 4}}
@@ -83,7 +83,7 @@ def reference(ckpt_dir: str, epochs: int = 5, steps: int = 2, batch: int = 8, se
 def promotion_refused(ctx, ckpt_dir: str, seed: int = 7) -> dict:
     """Promotion on a sharded model is refused at setup, naming the phase."""
     model = _sharded(ctx, seed)
-    schedule = {**SCHEDULE, 1: {**SCHEDULE[1], "promote": {"role:instrument": "latent:probe"}}}
+    schedule = {**SCHEDULE, 1: {**SCHEDULE[1], "promote": {"role:artifact": "latent:probe"}}}
     try:
         _tuning_scheduler(model, os.path.join(ckpt_dir, str(ctx.rank)), schedule=schedule)
     except FTSConfigurationError as err:

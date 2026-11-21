@@ -138,6 +138,26 @@ def test_plateau_transition_missing_metric_and_state():
     assert policy.config()["init_args"]["min_delta"] == 0.1
 
 
+@pytest.mark.parametrize("reset_best", [False, True], ids=["keeps_best", "resets_best"])
+def test_plateau_transition_reset_best_on_phase(reset_best):
+    """By default a phase transition keeps the best score, so a phase that starts worse than an earlier phase's
+    best spends its patience at once; with ``reset_best_on_phase`` it is judged against its own best (#201)."""
+    policy = PlateauTransition("val_loss", patience=2, reset_best_on_phase=reset_best)
+    for v in (1.0, 0.5):  # phase 0 reaches 0.5
+        policy.evaluate(_ctx(metrics={"val_loss": torch.tensor(v)}))
+    policy.reset(1)
+    assert policy.wait_count == 0
+    assert float(policy.best_score) == (float("inf") if reset_best else 0.5)
+    # phase 1 starts worse than phase 0's best but improves against its own start (0.9, then 0.8)
+    decisions = [as_decision(policy.evaluate(_ctx(metrics={"val_loss": torch.tensor(v)})))[0] for v in (0.9, 0.8)]
+    if reset_best:
+        assert decisions == [Decision.CONTINUE, Decision.CONTINUE]
+        assert float(policy.best_score) == pytest.approx(0.8)
+    else:
+        assert decisions == [Decision.CONTINUE, Decision.ADVANCE]  # patience spent against phase 0's best
+    assert policy.config()["init_args"]["reset_best_on_phase"] is reset_best
+
+
 def test_any_of_and_callable():
     seen = []
 

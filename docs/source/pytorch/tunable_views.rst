@@ -50,7 +50,7 @@ and the Lightning callback (attach the view to the ``LightningModule``). A model
    Views and addresses exist for what names do badly:
 
    - **interpretability experiments**, which tune, freeze and promote adapters, interventions, latent models and
-     instruments by role, often through several wrappers of one model;
+     artifacts by role, often through several wrappers of one model;
    - **composable, shareable model components**: named sets of parameters or units, defined once for a model family
      and reused, sliced and recombined;
    - **experiments defined once and run across models**: conditions written as addresses depend far less on any one
@@ -188,16 +188,18 @@ A role says what a tensor *is*, and so what Fine-Tuning Scheduler may do with it
      - never
      - yes
      - the only role checkpointed but never trained: a resumed run needs its values, and no optimizer may touch them
-   * - ``instrument``
-     - a published artifact loaded for analysis (a pretrained SAE, for example)
+   * - ``artifact``
+     - a published, re-loadable object applied in the forward pass (a pretrained SAE, a frozen steering vector or a
+       loaded weight patch, for example)
      - never (until promoted)
      - no
      - reloaded from its source rather than checkpointed; the only role that can be promoted
 
 The trained roles behave alike in Fine-Tuning Scheduler; they are separate kinds rather than names of one kind so that
 the common selector (``role:adapter``) means what it says when a model carries several kinds of added tensors, and so
-that tools reading a view can tell them apart. ``fitted`` and ``instrument`` exist for interpretability work, where
-interpretune's views use them.
+that tools reading a view can tell them apart. ``fitted`` and ``artifact`` exist for interpretability work, where
+interpretune's views use them. ``instrument``, the earlier name of ``artifact``, is still read as ``artifact`` (in a
+view's roles and in a ``role:`` selector) with a deprecation warning through venngram 0.1, and refused from venngram 0.2.
 
 Selectors and Addresses
 ***********************
@@ -248,6 +250,47 @@ The grammar and address books are `venngram <https://github.com/speediedan/venng
 an agent skill for them, ``venngram-addressing``. Books can also be published and named by reference, and a schedule can be exported as a book: see
 :ref:`tunable-views-advanced`.
 
+A book's sets say *what* to address. A book may also carry **treatments**, under a ``treatments`` key beside its
+``sets``: named recipes that say what is *done* to those sets for one model, such as zeroing the gradients of a few
+neurons or keeping updates out of a direction. A set and what is done to it then travel together in one document, which
+a steering tool and a schedule can share. Fine-Tuning Scheduler applies a treatment's ops on parameter gradients when a
+phase names it in ``grad_transforms`` (see :ref:`tunable-views-gradient-transforms`).
+
+.. _tunable-views-default-book:
+
+The Default Schedule of a Structured View
+*****************************************
+Without a schedule, Fine-Tuning Scheduler generates one. For a view that supplies structure (architecture-neutral
+components and a block count, as ``venngram.view(model)`` does through a component map), the generated schedule is an
+address book: it states no naming scheme, so it selects the same tensors on every composition of the model, such as
+its Hugging Face, nnsight and TransformerLens ones. One set per stage, thawed in this order:
+
+.. code-block:: yaml
+
+    addresses:
+      sets:
+        head: "component:unembed | component:ln_final"
+        block_1: "layers:-1"
+        block_2: "layers:-2"
+        # ... one set per block, from the top
+        embeddings: "component:embed | component:pos_embed"
+    0:
+      params: ["@head"]
+    1:
+      params: ["@block_1"]
+    # ...
+
+- A tied ``unembed`` (GPT-2's is the ``embed`` tensor) is thawed with the head, written ``component:embed``, and the
+  ``embeddings`` stage then thaws only the position embeddings.
+- ``view_default_schedule(view, stride=2)`` puts two blocks in each block set (``layers:-2:``, ``layers:-4:-2``, ...),
+  ``order="input_first"`` reverses the stages, and ``addresses=False`` lists names instead.
+- The book is used only when it thaws exactly the tensors a schedule of the view's names would. A tensor outside
+  every block and every head or embedding component (a classifier the map does not name, say), a second block stack,
+  or a tensor the book cannot leave out (a frozen role, packed storage) keeps the name-based schedule, one of the
+  view's depth groups per phase, and an info message says why.
+
+A view without structure, such as the canonical view, generates the name-based schedule.
+
 .. _tunable-views-export:
 
 Exporting by Role
@@ -277,11 +320,17 @@ Attach the view to the ``LightningModule`` as ``tunable_view``, rooted at the mo
     trainer.fit(module)
 
 The schedule keeps its logical names (in logs and in the saved schedule), the callback tunes the physical parameters,
-and a generated schedule uses the view's logical names. A third-party strategy
+and a generated schedule uses the view's logical names, or is an address book when the view supplies structure (see
+:ref:`tunable-views-default-book`). A third-party strategy
 adapter that renames parameters takes precedence over an attached view (see :ref:`tunable-views-renaming-adapters`).
+
+The :doc:`LoRA placement notebook's Lightning companion</examples/notebooks/tunable_views/lora_placement_lightning>`
+does this end to end: it roots ``venngram.view(module)`` at the ``LightningModule``, checks that every condition
+selects the PyTorch notebook's tensors under the module's prefix, and restates a step transition as an epoch
+transition.
 
 Going Further
 *************
-:ref:`tunable-views-advanced` covers writing and testing a view of your own, promotion (an ``instrument`` becoming a
+:ref:`tunable-views-advanced` covers writing and testing a view of your own, promotion (an ``artifact`` becoming a
 trainable ``latent``), address books by reference, what a book may ask of Fine-Tuning Scheduler, and exporting a
 schedule as a book.

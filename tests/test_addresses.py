@@ -106,6 +106,17 @@ def test_tuning_scheduler_reads_address_books_relative_to_the_schedule_file(tmp_
     assert fts.compiled_schedule.phases[0].physical == ("blocks.3.adapter.weight",)
 
 
+def test_address_books_listed_together_must_not_share_a_set_name(tmp_path):
+    books = {"upper": {"upper": {"role": "adapter", "layers": -1}, "adapters": {"role": "adapter"}},
+             "lower": {"lower": {"role": "adapter", "layers": 0}, "adapters": {"role": "adapter"}},
+             "mid": {"mid": {"role": "adapter", "layers": 1}}}
+    for name, sets in books.items():
+        (tmp_path / f"{name}.yaml").write_text(yaml.safe_dump({"schema_version": 1, "sets": sets}))
+    with pytest.raises(FTSConfigurationError, match=r"both define \['adapters'\]; import one of them"):
+        load_address_sets(["upper.yaml", "lower.yaml"], tmp_path)
+    assert set(load_address_sets(["upper.yaml", "mid.yaml"], tmp_path)) == {"upper", "adapters", "mid"}
+
+
 @pytest.mark.parametrize("schedule, match", [
     ({0: {"params": ["role:adapter & units:[0, 1]"]}}, "unit adapter"),
     ({0: {"params": ["point:resid_post & layers:1"]}}, "site resolver"),
@@ -142,8 +153,8 @@ def test_address_books_written_in_another_naming_scheme_are_refused_through_the_
 
 def test_promotion_sources_take_addresses():
     model = Blocks()
-    roles = {"blocks.3.adapter.weight": "instrument", "blocks.2.adapter.weight": "instrument"}
-    promote = {"role:instrument & layers:-1:": "latent:t"}
+    roles = {"blocks.3.adapter.weight": "artifact", "blocks.2.adapter.weight": "artifact"}
+    promote = {"role:artifact & layers:-1:": "latent:t"}
     compiled = compile_schedule({0: {"params": ["module:head"]}, 1: {"params": ["role:latent:t"], "promote": promote}},
                                 CanonicalView(model, roles=roles))
     assert compiled.promotions[1] == {"blocks.3.adapter.weight": "latent:t"}
@@ -208,6 +219,18 @@ def test_the_lightning_callback_refuses_an_unresolvable_address(tmp_path):
     fts = FinetuningScheduler(ft_schedule={0: {"params": ["role:adapter & layers:[9]"], "max_transition_epoch": 1}},
                               epoch_transitions_only=True)
     with pytest.raises((FTSConfigurationError, MisconfigurationException), match="outside a stack of 4"):
+        _trainer(tmp_path, [fts], max_epochs=1).fit(_lightning_module())
+
+
+def test_the_lightning_callback_refuses_gradient_addresses_by_name(tmp_path):
+    """Gradient masks are the PyTorch API's in this release (#198); a set of gradients is refused by name, whether
+    written in the entry or in a set it references."""
+    schedule = {"addresses": {"sets": {"rows": {"role": "adapter", "layers": -1, "units": [0, 1], "of": "grad"}}},
+                0: {"params": ["@rows"], "max_transition_epoch": 1},
+                1: {"params": ["role:base & of:grad"]}}
+    fts = FinetuningScheduler(ft_schedule=schedule, epoch_transitions_only=True)
+    with pytest.raises(MisconfigurationException,
+                       match=r"addresses gradients .*only the PyTorch API .*phase 0: \['@rows'\]; phase 1:"):
         _trainer(tmp_path, [fts], max_epochs=1).fit(_lightning_module())
 
 

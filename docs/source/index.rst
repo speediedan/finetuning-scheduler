@@ -76,6 +76,14 @@ latent models or chosen units rather than successive layers, often in interpreta
 therefore also address a model through a :ref:`tunable view<tunable-views>`, by role and structure (experimental in
 2.15). :ref:`fts-evolution` says why, and when names and regexes are still the better tool.
 
+Phases as Stages
+****************
+Phases accumulate by default: each thaws more of the model. Under the PyTorch API (experimental in 2.15), a phase can
+also be a stage of an experiment. Its ``refreeze`` key takes what earlier phases trained out of training and out of the
+optimizer, and its ``restore`` key says what the phase starts from: the best checkpoint, the state the previous phase
+ended with, or the initial state. One schedule can then run several conditions from one starting point, with a phase
+hook recording each one's outcome. :ref:`phase-stages` has the details.
+
 .. _basic-usage:
 
 Basic Usage
@@ -168,7 +176,9 @@ The Default Fine-Tuning Schedule
 The default schedule thaws parameters in pairs, starting from the last registered parameter (a naive, two-parameters
 per level heuristic). Using the default/implicitly generated schedule will often be less computationally efficient than
 a user-defined schedule but can often serve as a good baseline for subsequent explicit schedule refinement
-and will marginally outperform many explicit schedules.
+and will marginally outperform many explicit schedules. Through a tunable view that supplies structure, the default
+schedule is instead an address book that thaws the head, then one block at a time from the top, then the embeddings
+(see :ref:`tunable-views-default-book`).
 
 .. tab-set::
     :sync-group: interface
@@ -418,7 +428,10 @@ Footnotes
    SuperGLUE notebook (PyTorch API) <examples/notebooks/superglue/fts_superglue_pytorch>
    SuperGLUE with the LightningCLI <examples/cli/superglue_cli>
    LoRA placement by address (PyTorch API) <examples/notebooks/tunable_views/lora_placement>
+   LoRA placement by address (Lightning) <examples/notebooks/tunable_views/lora_placement_lightning>
    Addressing across architectures (PyTorch API) <examples/notebooks/tunable_views/cross_architecture_addresses>
+   Where does RL learn? (PyTorch API) <examples/notebooks/where_rl_learns/where_rl_learns>
+   interpretune <examples/integrations/interpretune>
 
 .. toctree::
    :maxdepth: 1

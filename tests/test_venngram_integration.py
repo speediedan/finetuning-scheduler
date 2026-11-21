@@ -17,6 +17,7 @@ import yaml
 from lightning.pytorch import seed_everything
 from lightning.pytorch.callbacks import Callback
 from venngram import AddressBook
+from venngram.address import parse as parse_address
 from venngram.conformance import check
 from venngram.store import publish, Reference
 from venngram.support import SupportRecord
@@ -157,6 +158,40 @@ def test_a_schedule_exports_as_a_book_that_selects_what_it_scheduled(tmp_path):
     assert [cp.physical for cp in replay.phases] == [cp.physical for cp in fts.compiled_schedule.phases]
     with pytest.raises(FTSConfigurationError, match="Phase 0 has no `params`"):
         schedule_book({0: {}}, name="empty")
+
+
+def test_a_book_exported_from_fetched_sets_stands_alone_and_cites_them(tmp_path):
+    """Sets fetched by reference, one guarded by `expect` and one a union referencing it, are inlined with their
+    modifiers, so the exported book selects what the schedule did, and it cites the books it derives from."""
+    guarded = {"schema_version": 1, "name": "lora",
+               "sets": {"top": {"role": "adapter", "layers": -1, "expect": 1},
+                        "upper": "@top | (role:adapter & layers:2)"}}
+    location = publish_books(tmp_path / "pub", {"books/lora.yaml": guarded})
+    sets = load_address_sets(f"{location}:books/lora.yaml")
+    schedule = {0: {"params": ["@upper"]}, 1: {"params": ["role:adapter - @upper"]}}
+    book = schedule_book(schedule, name="blocks", addresses=sets, applies_to={"architectures": ["Blocks"]})
+    assert book["applies_to"] == {"architectures": ["Blocks"]}
+    assert book["derived_from"] == list(sets.references) and len(book["derived_from"]) == 1
+    assert "@" not in yaml.safe_dump(book["sets"])
+    assert {"role": "adapter", "layers": -1, "expect": 1} in book["sets"]["phase_0"]["any"]
+    model = Blocks()
+    view = CanonicalView(model, roles=adapter_roles(model))
+    replay = compile_schedule({0: {"params": ["@phase_0"]}, 1: {"params": ["@phase_1"]}}, view,
+                              addresses=load_address_sets(book))
+    original = compile_schedule(schedule, view, addresses=sets)
+    assert [cp.physical for cp in replay.phases] == [cp.physical for cp in original.phases]
+    assert replay.phases[0].physical == ("blocks.2.adapter.weight", "blocks.3.adapter.weight")
+
+
+@pytest.mark.parametrize("schedule, addresses, match", [
+    ({0: {"params": ["@missing"]}}, None, "`@missing` names no set of the schedule's `addresses`"),
+    # the book refuses cycles when it loads; an assembled mapping is checked as it is inlined
+    ({0: {"params": ["@a"]}}, {"a": parse_address("@b"), "b": parse_address("@a")}, "form a cycle through `@a`"),
+    ({0: {"params": [{"role": "adapter"}]}}, None, r"Phase 0's `params` entry \{'role': 'adapter'\} is not a string"),
+], ids=["unknown_set", "cycle", "not_a_string"])
+def test_a_schedule_that_cannot_export_as_a_book_is_refused(schedule, addresses, match):
+    with pytest.raises(FTSConfigurationError, match=match):
+        schedule_book(schedule, name="refused", addresses=addresses)
 
 
 def test_exported_books_pass_venngram_conformance_against_the_support_record(tmp_path):

@@ -12,8 +12,11 @@
 """``TuningScheduler`` on a model-parallel toy transformer, mirroring the Lightning callback's model-parallel tests
 (#87): the same phase path and parameter states, ranks in agreement, and parameters equal to a single-process
 run."""
+import re
+
 import pytest
 
+from tests.dist_cases import fts_tp_plan as tp_plan
 from tests.dist_cases import fts_tuning_scheduler_mp as mp
 from tests.helpers.dist_pool import assert_ranks_agree, dist_pool_fixture
 from tests.helpers.runif import RunIf
@@ -114,6 +117,70 @@ def test_root_only_plan_saves_sharded_after_a_forward(gloo_pool, tmp_path):
     assert _close(results[0]["params"], ref["params"])
 
 
+def _names(results: dict, patterns: list) -> list:
+    return [n for n in results["initial"] if any(re.match(p, n) for p in patterns)]
+
+
+def _assert_stages(result: dict) -> None:
+    """A refrozen stage holds its values while the next trains, and the last stage starts over from the initial
+    state."""
+    first, second, third = (_names(result, mp.STAGES[d]["params"]) for d in range(3))
+    assert result["trainable"] == result["expected"]
+    assert result["depth"] == 2 and result["groups"] == [1, 1, 1]
+    after = result["after"]
+    assert all(after[0][n] == after[1][n] for n in first) and all(after[0][n] != result["initial"][n] for n in first)
+    assert all(after[1][n] != result["initial"][n] for n in second)
+    # the initial state: the first two stages' tensors are back to it, and only the last stage's have moved
+    assert all(after[2][n] == result["initial"][n] for n in first + second)
+    assert all(after[2][n] != result["initial"][n] for n in third)
+
+
+@GLOO
+@pytest.mark.parametrize("layout", ["fsdp", "tp"])
+def test_stages_refreeze_restore_and_resume(gloo_pool, tmp_path, layout):
+    """``refreeze`` and ``restore: initial`` match a single-process run under FSDP2 and tensor parallelism, through
+    DCP checkpoints, with momentum and weight decay; a save after any epoch resumes to the same end in a fresh
+    model."""
+    results = gloo_pool.run(mp.staged, layout=layout, ckpt_dir=str(tmp_path / "run"))
+    assert_ranks_agree([{k: r[k] for k in ("trainable", "groups", "depth")} for r in results])
+    _assert_stages(results[0])
+    ref = mp.staged(None, "plain", str(tmp_path / "ref"), momentum=0.9 if layout == "fsdp" else 0.0)
+    assert _close(results[0]["params"], ref["params"])
+    for split in range(2):
+        resumed = gloo_pool.run(mp.staged, layout=layout, ckpt_dir=str(tmp_path / f"split{split}"), split=split)
+        assert all(r["saved"] for r in resumed)
+        assert _close(resumed[0]["params"], results[0]["params"], tol=1e-6)
+
+
+@GLOO
+def test_a_refrozen_stage_thawed_again_resumes_when_sharded(gloo_pool, tmp_path):
+    """A stage refrozen and then thawed again trains with fresh optimizer state under FSDP2, matches a run in one
+    process, and a save on either side of the thaw resumes to the same end."""
+    results = gloo_pool.run(mp.staged, layout="fsdp", ckpt_dir=str(tmp_path / "run"), schedule="rethaw")
+    result = results[0]
+    assert result["trainable"] == result["expected"] and result["groups"] == [1, 1, 1]
+    first = _names(result, mp.RETHAW[0]["params"])
+    assert all(result["after"][0][n] == result["after"][1][n] for n in first)
+    assert all(result["after"][2][n] != result["after"][1][n] for n in first)
+    ref = mp.staged(None, "plain", str(tmp_path / "ref"), schedule="rethaw")
+    assert _close(result["params"], ref["params"])
+    for split in range(2):
+        resumed = gloo_pool.run(mp.staged, layout="fsdp", ckpt_dir=str(tmp_path / f"split{split}"), split=split,
+                                schedule="rethaw")
+        assert _close(resumed[0]["params"], result["params"], tol=1e-6)
+
+
+@GLOO
+def test_a_best_from_before_a_refreeze_replays_it_when_sharded(gloo_pool, tmp_path):
+    """A best saved before the refreeze brings back groups holding the refrozen tensors; the phases after it are
+    replayed."""
+    val = [1.0, 1.1, 1.2]  # the first epoch stays the best
+    results = gloo_pool.run(mp.staged, layout="fsdp", ckpt_dir=str(tmp_path / "run"), restore_best=True, val=val)
+    assert results[0]["trainable"] == results[0]["expected"]
+    ref = mp.staged(None, "plain", str(tmp_path / "ref"), restore_best=True, val=val)
+    assert _close(results[0]["params"], ref["params"])
+
+
 @GLOO
 def test_warning_covers_tensor_parallel_params_outside_fsdp(gloo_pool):
     """On a (data-parallel, tensor-parallel) mesh, a tensor-parallel DTensor no FSDP module manages is not averaged
@@ -160,6 +227,54 @@ def test_wrappers_that_miss_late_thaws_are_refused(gloo_pool):
     assert refused == {"ddp_root": "the model is wrapped in `DistributedDataParallel`",
                        "ddp_submodule": "`layers.1` is wrapped in `DistributedDataParallel`",
                        "replicate": "the model is under the composable `replicate()`"}
+
+
+@GLOO
+@pytest.mark.parametrize("tp_loss_parallel", [True, False], ids=["loss_parallel", "replicated_loss"])
+def test_tp_plan_from_configuration_matches_a_single_process_run(gloo_pool, tmp_path, tp_loss_parallel):
+    """A plan from configuration (#150) follows the Lightning test's TP path, restores the best through DCP, and
+    matches a single-process run's losses and final parameters."""
+    results = gloo_pool.run(tp_plan.planned_tp, tp_loss_parallel=tp_loss_parallel, ckpt_dir=str(tmp_path / "tp"),
+                            val=VAL)
+    agreed = _agreed(results)
+    assert _states(agreed["path"]) == _expected(path_tp)
+    assert agreed["unmoved"] == [] and agreed["plain"] == []
+    ref = mp.reference(ckpt_dir=str(tmp_path / "ref"), val=VAL)
+    assert agreed["restored"] == ref["restored"] == 2
+    assert agreed["losses"] == pytest.approx(ref["losses"], rel=1e-4)
+    assert _close(results[0]["params"], ref["params"], tol=1e-4)
+
+
+@GLOO
+def test_tp_plan_from_configuration_resumes_through_dcp(gloo_pool, tmp_path):
+    """Saved through DCP and loaded into a fresh planned model, a run ends where an uninterrupted one does."""
+    results = gloo_pool.run(tp_plan.planned_tp_resume, ckpt_dir=str(tmp_path / "resumed"), val=VAL)
+    assert results[0]["saved_is_dir"]
+    whole = gloo_pool.run(tp_plan.planned_tp, ckpt_dir=str(tmp_path / "whole"), val=VAL)
+    assert _phases(_agreed(results)["path"]) == _phases(_agreed(whole)["path"])
+    assert _close(results[0]["params"], whole[0]["params"], tol=1e-5)
+
+
+@GLOO
+def test_example_tp_plan_matches_the_code_it_replaces(gloo_pool):
+    """The PyTorch example's configured plan and the Lightning example's ``apply_tp_plan`` lay the model out
+    alike."""
+    for by_mode in gloo_pool.run(tp_plan.example_plan_matches_code):
+        for layouts in by_mode.values():
+            assert layouts["configured"] == layouts["code"]
+            assert layouts["configured"]["params"] and not layouts["configured"]["plain"]
+
+
+@RunIf(min_cuda_gpus=2)
+def test_tp_plan_from_configuration_nccl(nccl_pool, tmp_path):
+    """The configured plan on two GPUs, matching a single-process run's losses."""
+    results = nccl_pool.run(tp_plan.planned_tp, ckpt_dir=str(tmp_path / "tp"), val=VAL)
+    agreed = _agreed(results)
+    assert _states(agreed["path"]) == _expected(path_tp)
+    assert agreed["unmoved"] == [] and agreed["plain"] == []
+    ref = mp.reference(ckpt_dir=str(tmp_path / "ref"), val=VAL)
+    assert agreed["losses"] == pytest.approx(ref["losses"], rel=1e-3)
+    assert _close(results[0]["params"], ref["params"], tol=1e-3)
 
 
 @RunIf(min_cuda_gpus=2)

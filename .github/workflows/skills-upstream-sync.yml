@@ -1,0 +1,30 @@
+name: Skills Upstream Sync
+
+# The vendored skills match the shared master (speediedan/skills). The `vendored-skills-unmodified` pre-commit hook
+# catches a local edit offline; this catches the master moving ahead of the copies, which needs the network, so it is a
+# workflow rather than a hook. A failure names each drifted file; refresh the copies and their manifests from the master
+# to clear it. No path filter: the master moves without any change here, so the weekly run is what notices it between
+# pull requests.
+on:
+  push:
+    branches: [main, "release/*"]
+  pull_request:
+    branches: [main, "release/*"]
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  skills-upstream-sync:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: vendored skills match the shared master
+        run: python scripts/check_skills_upstream.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

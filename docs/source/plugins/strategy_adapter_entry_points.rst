@@ -98,7 +98,7 @@ TransformerLens-style parameter naming in FTS schedules. Here's how it's registe
         strategy_adapter_cfg={"use_tl_names": True},  # Adapter-specific config
     )
 
-This allows fine-tuning schedules to use architecture-agnostic parameter names like ``blocks.9.attn.W_Q`` instead
+This allows schedules to use architecture-agnostic parameter names like ``blocks.9.attn.W_Q`` instead
 of verbose and architecture-dependent canonical names, while FTS handles the necessary translations automatically.
 
 **Key Points:**

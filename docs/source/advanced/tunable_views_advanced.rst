@@ -112,14 +112,14 @@ Lightning:
 
 Promotion
 *********
-A phase can promote ``instrument`` tensors to a ``latent`` role when it starts, so that phase, or a later one, trains
+A phase can promote ``artifact`` tensors to a ``latent`` role when it starts, so that phase, or a later one, trains
 them (the PyTorch API only):
 
 .. code-block:: python
 
     schedule = {
         0: {"params": ["role:adapter"], "max_transition_epoch": 2},
-        1: {"params": ["role:latent:transcoder"], "promote": {"role:instrument": "latent:transcoder"}},
+        1: {"params": ["role:latent:transcoder"], "promote": {"role:artifact": "latent:transcoder"}},
     }
 
 A ``promote`` source is a selector or an address. The promotion happens after the phase's start hooks and before it
@@ -130,6 +130,161 @@ and promotions are replayed before a saved state loads. Restoring a checkpoint s
 checkpoint, or the rollback point of a vetoed phase) puts the promoted tensors back to their values at promotion; those
 values are kept on the CPU and saved with :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save`.
 Promotion is not yet supported on a sharded model, and a view that overrides its checkpoint state must define ``promote``.
+
+.. _tunable-views-gradient-masks:
+
+Training Part of a Tensor
+*************************
+An address of gradients (``of: grad``) trains part of each tensor it selects (the PyTorch API only): the tensor is
+thawed, and its gradient is masked to the indices along its first axis (a weight's output rows, a bias's entries) that
+the address's ``units`` keep. Here a model's middle ``Linear`` trains only output units 0 and 2, then unit 5 as well,
+beside its head's weight trained whole:
+
+.. code-block:: python
+
+    model = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 8), nn.ReLU(), nn.Linear(8, 2))
+    schedule = {
+        0: {"params": ["module:2 & units:[0, 2] & of:grad"], "max_transition_epoch": 2},
+        1: {"params": ["4.weight", "module:2 & units:[5] & of:grad"]},
+    }
+    fts = TuningScheduler(model, schedule, optimizer=partial(torch.optim.AdamW, lr=1e-3))
+    fts.setup()
+    fts.gradient_masks  # {'2.weight': (0, 2), '2.bias': (0, 2)}; from phase 1, (0, 2, 5) for each
+
+The rules:
+
+- **A phase's mask for a tensor is the union of its entries.** An entry that selects the tensor whole, or a mask that
+  keeps every index, trains it unmasked. A later phase that selects a masked tensor again widens its mask (unit 5 above)
+  or trains it whole.
+- **A phase may mix whole tensors and gradient addresses**, as phase 1 does, and so may one set: in
+  ``(@whole & of:value) | (@rows & of:grad)`` the value part trains its tensors whole and the gradient part is masked.
+  A union of gradient disjuncts takes each disjunct's mask, united per tensor.
+- **The masked indices stay put.** The mask is applied to each step's accumulated gradient, before clipping and the
+  optimizer step, and the masked indices are also held through the step, so weight decay and momentum do not move
+  them, for any optimizer. Masks follow the schedule through refreezing, promotion, optimizer reinitialization and
+  resume; each phase logs its masked tensors, and
+  :attr:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.gradient_masks` gives the masks in effect.
+- **Unit sets are written like any other field**, in an entry or in a named set, where an architecture-neutral
+  component makes the same schedule apply to every model its view maps:
+
+  .. code-block:: yaml
+
+      addresses:
+        sets:
+          q_rows: {component: attn.q, layers: "-4:", units: [0, 17, 42], of: grad}
+      0:
+        params: ["@q_rows"]
+
+``of: grad`` is refused by name in a ``refreeze`` or ``promote`` entry, on the Lightning callback (its strategy adapters
+shard and checkpoint parameters themselves), and on a sharded model (FSDP2 sets a parameter's gradient directly, so the
+mask's hook would not run). Other operations on the gradients a schedule addresses are
+:ref:`gradient transforms<tunable-views-gradient-transforms>`.
+
+.. _tunable-views-gradient-transforms:
+
+Transforming Gradients
+**********************
+A phase's ``grad_transforms`` (the PyTorch API only) maps entries, written as ``params`` entries are, to transforms of
+each step's accumulated gradient of the tensors they select: scale a component's gradient without splitting parameter
+groups, keep its update out of a protected direction, bound it, or apply a function of your own.
+
+.. code-block:: python
+
+    from finetuning_scheduler.core.grad_transforms import Clamp, Reject, Scale
+
+    concept = torch.randn(8)  # a direction in the middle layer's output space
+    first = {"module:2 & leaf:weight": Reject(concept), "module:2 & units:[0, 1] & of:grad": Scale(0.1)}
+    schedule = {
+        0: {"params": ["module:2"], "max_transition_epoch": 2, "grad_transforms": first},
+        1: {"params": ["4.weight"], "grad_transforms": {"module:2": [Scale(0.5), Clamp(-1.0, 1.0)]}},
+    }
+
+A transform is any callable ``transform(name, grad, units)`` returning the gradient's new value, where ``units`` are
+the indices along its first axis that the entry's gradient unit set keeps (``None`` without one). The built-ins in
+:mod:`~finetuning_scheduler.core.grad_transforms` (:class:`~finetuning_scheduler.core.grad_transforms.Scale`,
+:class:`~finetuning_scheduler.core.grad_transforms.Replace`, :class:`~finetuning_scheduler.core.grad_transforms.Add`,
+:class:`~finetuning_scheduler.core.grad_transforms.Clamp`, :class:`~finetuning_scheduler.core.grad_transforms.Noise`,
+:class:`~finetuning_scheduler.core.grad_transforms.Project` and :class:`~finetuning_scheduler.core.grad_transforms.Reject`)
+act on those rows when given. An entry selects tensors
+only to transform them: it neither thaws nor masks them, and a tensor it selects must be trainable in the phase.
+
+.. _tunable-views-treatments:
+
+**Treatments.** ``grad_transforms`` may instead name a treatment of the schedule's address books. In venngram, a book's
+sets select what to address, and its ``treatments`` say what is done to them for one model. Each treatment is a
+*recipe* (``venngram.recipe.Recipe``; see `Large unit sets and treatments
+<https://github.com/speediedan/venngram#large-unit-sets-and-treatments>`_ in venngram's README), stored in the book
+under a name of its author's choosing. A recipe can hold several sections: ``stages`` act on activations,
+``weights`` edit parameters, and ``gradients`` act on each step's parameter gradients. Fine-Tuning Scheduler applies
+the ``gradients`` section, and a phase names the treatment by its key. Because the ops are data rather than callables, a
+schedule read from YAML can name one:
+
+.. code-block:: yaml
+
+    addresses:
+      sets:
+        mlp_13: {component: mlp.out, layers: [13]}
+        neuron_grads: {component: mlp.out, layers: [13], leaf: weight, units: [52, 101], of: grad}
+        down_grad: {component: mlp.out, layers: [13], leaf: weight, of: grad}
+      treatments:
+        keep_neurons_out:
+          model: {id: Qwen/Qwen3-4B, revision: main}
+          operands:
+            concept: {file: dirs.safetensors, key: concept, sha256: ..., shape: [2560], basis: unfolded}
+          gradients:
+            - {op: replace, target: {set: neuron_grads}, value: {dose: 0.0}}
+            - {op: reject, target: {set: down_grad}, operand: concept}
+    0:
+      params: ["@mlp_13"]
+      grad_transforms: keep_neurons_out
+
+Read top to bottom:
+
+- ``sets`` are ordinary named sets. ``mlp_13`` is layer 13's MLP output projection, which phase 0 trains.
+  ``neuron_grads`` and ``down_grad`` address the gradient of that projection's weight (``of: grad``):
+  ``neuron_grads`` covers only units 52 and 101, and ``down_grad`` covers all of it.
+- ``keep_neurons_out`` is the treatment's name: a key under ``treatments``, and what ``grad_transforms`` names.
+- ``model`` is the model the treatment was written for, since its units and directions are that model's.
+- ``operands`` are the data its ops take, by name. Here ``concept`` is one direction in the layer's output space,
+  read from a safetensors sidecar beside the book and checked against its hash and shape.
+- ``gradients`` lists the ops, each on the set its ``target`` names. The first replaces units 52 and 101's gradients
+  with zero (a dose of ``0.0``), so those two neurons' outgoing weights stay fixed while the rest of the projection
+  trains. The second rejects ``concept`` from the projection's gradient, so no update moves its output along that
+  direction.
+
+So phase 0 trains layer 13's MLP output projection while keeping two neurons and one direction out of the update. That
+is what the name ``keep_neurons_out`` records.
+
+Its ops apply in order, each to the gradients of the trainable tensors its target set selects, as the built-ins:
+``scale``, ``replace`` and ``add`` with a ``dose`` or per-unit ``doses``, and ``project`` and ``reject`` with a
+``vector`` or ``subspace`` operand and a ``fraction``. Where the built-ins act along a tensor's first axis, a treatment
+follows venngram's meaning: a target set with ``units`` acts along each tensor's unit axis (a down projection's input
+side, for one), and a span's directions run along a weight's ``out`` side, both as the view's component map records
+them (``venngram.view(model)``; a span uses the first axis without one). A treatment with ``stages`` or ``weights``,
+another op, or a value taken ``from`` evidence or through a value transform is refused, as Fine-Tuning Scheduler's
+support record declares (its ``steering`` section lists the ``gradient_ops`` it applies).
+
+The rules:
+
+- **Transforms apply in the order written**, an entry's list in order and the entries in the mapping's order, and
+  before the tensor's mask, so no transform refills a masked row. Like a mask, they act before clipping and the
+  optimizer step.
+- **A phase's transforms carry on until a later phase states its own**, which replace them; ``grad_transforms: {}``
+  clears them, and a ``refreeze`` drops a tensor's transforms with it.
+- **They follow the schedule** through optimizer reinitialization, promotion and resume, and a state saved under other
+  transforms is refused. Each phase that changes them logs the tensors transformed, and
+  :attr:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.gradient_transforms` gives the transforms in
+  effect.
+- **A transform with state saves it.** A resumed run rebuilds the transforms from the schedule, so a transform that
+  keeps state (a random generator, running statistics) defines ``state_dict()`` and ``load_state_dict(state)``. The
+  scheduler saves the state of each one in effect with its own and loads it into the rebuilt transform on resume, so a
+  resumed run matches an uninterrupted one. ``Noise(std, seed=0)`` is one: its generator follows the checkpoints. A
+  state saved without the state of the transforms in effect at its depth is refused, and a transform with state it
+  does not expose this way starts afresh on resume. Restoring a best checkpoint (``restore``) does not rewind a
+  transform's state.
+
+Transforms are refused on the Lightning callback and on a sharded model, as masks are. A schedule with them exports
+as an address book with a treatment per phase (see :ref:`a schedule as a book<tunable-views-export-book>`).
 
 Address Books Through venngram
 ******************************
@@ -156,8 +311,9 @@ since is refused, naming the saved references so the schedule can cite them to r
 (``finetuning_scheduler/core/support_record.yaml``, read by :func:`~finetuning_scheduler.core.compile.support_record`;
 see `Support records <https://github.com/speediedan/venngram#support-records>`_). A set a schedule uses that asks for
 more (an activation site, or units of a tensor) is refused at compile time; a set of the same book the schedule does not
-use is not judged, so one book can serve a steering tool and a schedule. A book can be checked against the record
-without Fine-Tuning Scheduler installed:
+use is not judged, so one book can serve a steering tool and a schedule. The record's ``steering`` section declares
+the ops on parameter gradients it applies from a treatment a phase names (``gradient_ops``), and a treatment that asks
+for more is refused the same way. A book can be checked against the record without Fine-Tuning Scheduler installed:
 
 .. code-block:: bash
 
@@ -174,7 +330,31 @@ per phase (``phase_0``, ``phase_1``, ...), so a tuning setup can be published, i
     fts.export_book("books/my_schedule.yaml")
 
 Names and regexes become ``name`` terms (a regex keeps Fine-Tuning Scheduler's prefix match), the book declares the
-view's naming scheme, and books fetched by reference are recorded under ``derived_from``.
+view's naming scheme, and books fetched by reference are recorded under ``derived_from``. A phase of gradient addresses
+becomes a set of gradients, in an address book of schema 2. Every phase is one set: a phase mixing whole tensors and
+gradient addresses (phase 1 of the :ref:`example above<tunable-views-gradient-masks>`) becomes a union of a value part,
+each value entry stating ``of: value``, and a gradient part, and a phase of several gradient entries with unit sets a
+union whose disjuncts each give their own mask. Either compiles back to the phase's masks, and the support record
+declares both readings (venngram's ``mixed-sets`` and ``union-masks``).
+
+A phase's gradient transforms become a treatment named after its set, ``phase_<depth>``, in an address book of schema 4,
+so a schedule reading the book names it (``grad_transforms: phase_1``). The built-ins ``Scale``, ``Replace``, ``Add``,
+``Project`` and ``Reject`` become venngram's ``scale``, ``replace``, ``add``, ``project`` and ``reject`` ops, each on a
+set of the gradients its entry selects, with a span's directions inline. A treatment the phase names is copied, its
+target sets and any sidecar operand inlined, so the book stands alone. A treatment records the model it was written
+for, so an export with Python transforms takes ``model={"id": ..., "revision": ...}`` (by default the model's
+``config._name_or_path`` and ``config._commit_hash``, when it has both):
+
+.. code-block:: python
+
+    fts.export_book("books/my_schedule.yaml", model={"id": "Qwen/Qwen3-4B", "revision": "<commit>"})
+
+Before it is returned, the book is compiled back: the schedule with each phase naming its treatment must give every
+tensor the same transforms, in the same order. A built-in acts along a tensor's first axis unless told otherwise, while
+venngram's ops act on units along each tensor's unit axis and on spans along its ``out`` side, so a built-in acting
+along another axis is refused, as are ``Clamp``, ``Noise`` and a callable of your own (venngram declares no op for them on
+gradients, and a callable is not portable). A phase that clears its transforms (``grad_transforms: {}``) has no
+treatment: a schedule reading the book clears them itself.
 
 .. _tunable-views-refusals:
 
@@ -183,7 +363,8 @@ Refusals
 An address that does not resolve is refused: it matches nothing, references a set no book
 defines, names a layer outside the model, needs architecture knowledge the view does not supply (``component:`` needs a
 vocabulary-backed structure provider, such as :class:`~venngram.maps.view.MappedView`'s), addresses an activation site
-(``point:``), or addresses units of a tensor (``units:``, which are tuned through a unit adapter of their own).
+(``point:``), or addresses units of a tensor's value (``units:`` outside an ``of: grad`` address; units are trained in
+place through a :ref:`gradient mask<tunable-views-gradient-masks>`, or tuned through a unit adapter of their own).
 venngram's ``venngram-addressing`` agent skill (`Agent skill <https://github.com/speediedan/venngram#agent-skill>`_)
 explains how to read each one.
 

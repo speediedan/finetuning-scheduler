@@ -36,7 +36,7 @@ What Changed
 - **Training loops vary.** Many training loops are written directly in PyTorch, often distributed with FSDP2 or tensor
   parallelism, rather than in a framework.
 - **A schedule is no longer only a fine-tuning schedule.** It may train adapters, fit or freeze a latent model, or
-  promote an instrument, as steps of an experiment. These docs therefore say *schedule*, or *experiment schedule* where
+  promote an artifact, as steps of an experiment. These docs therefore say *schedule*, or *experiment schedule* where
   a qualifier helps, rather than *fine-tuning schedule*, which remains only in the names of existing APIs
   (``ft_schedule``, :class:`~finetuning_scheduler.fts.FinetuningScheduler`).
 
@@ -66,6 +66,11 @@ step, and each leaves existing schedules alone.
   Fine-Tuning Scheduler is one consumer. `interpretune <https://github.com/speediedan/interpretune>`_ is another: it
   supplies the views and site resolvers that make one address mean the same thing across interpretability backends, so
   Fine-Tuning Scheduler can tune and interpretune can steer and analyse the same named slices of a model.
+- **Phases as stages.** A phase no longer has to thaw more than the one before it. It can
+  :ref:`refreeze<phase-stages>` what earlier phases trained and restore the state it starts from, so a schedule can
+  describe the stages of an experiment (train an adapter, hold it fixed and train a latent model over it, or run
+  several conditions from one starting point) rather than only a growing trainable set. The PyTorch API interprets both
+  keys; the Lightning callback refuses them.
 
 Interpretability-driven examples are becoming the reference workloads, beside the phased fine-tuning examples, because
 they exercise what is new: tuning adapters, latent models and units, scheduled by role and address, through several
@@ -92,7 +97,7 @@ a schedule by hand:
      - names and regexes
    * - train a subset of a role (some adapters, not all) across several wrappers of one model
      - a view and addresses
-   * - tune or freeze latent models, interventions and instruments, and promote them between phases
+   * - tune or freeze latent models, interventions and artifacts, and promote them between phases
      - a view, with roles
    * - share or reuse a named set of parameters or units across models of a family
      - addresses and address books

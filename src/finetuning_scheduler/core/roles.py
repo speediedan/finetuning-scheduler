@@ -61,7 +61,7 @@ def role_kind(role: str) -> str:
 
 
 def is_frozen_role(role: str) -> bool:
-    """Whether tensors with ``role`` are never thawed or placed in an optimizer (``fitted`` and ``instrument``).
+    """Whether tensors with ``role`` are never thawed or placed in an optimizer (``fitted`` and ``artifact``).
 
     Raises:
         FTSConfigurationError: If the role is invalid.

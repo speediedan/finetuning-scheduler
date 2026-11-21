@@ -4,8 +4,9 @@ Overview
 ########
 
 End-to-end examples of scheduled fine-tuning, grouped by how they run: ``notebooks/`` holds the tutorial notebooks
-(each rendered here from an executed run, and runnable in Colab or locally) and ``cli/`` the examples driven from the
-command line. Each example names the interface it uses; the two interfaces share one schedule format.
+(each rendered here from an executed run, and runnable in Colab or locally), ``cli/`` the examples driven from the
+command line, and ``integrations/`` libraries that use Fine-Tuning Scheduler. Each example names the interface it uses;
+the two interfaces share one schedule format.
 
 Notebooks
 *********
@@ -32,12 +33,25 @@ Notebooks
        roles, layers and architecture-neutral components), check it, and run attention-only,
        MLP-only, all-layer, MLP-plus-norms and phased LoRA as address schedules over the same model, probing a 2025
        result on where LoRA adapters belong.
+   * - :doc:`Where should LoRA go? The Lightning API companion<notebooks/tunable_views/lora_placement_lightning>`
+     - Lightning
+     - The LoRA placement experiment with the :class:`~finetuning_scheduler.fts.FinetuningScheduler` callback: a view
+       rooted at the ``LightningModule``, checked to select the PyTorch notebook's tensors for every condition, the
+       step transition restated as an epoch transition over the same batch sequence, and the callback configured to
+       match the plain loop.
    * - :doc:`Addressing across architectures<notebooks/tunable_views/cross_architecture_addresses>`
      - PyTorch (experimental)
      - Portable addresses and schedules: the LoRA placement conditions, unchanged, compiled on four model families
        (Qwen3, Llama, OPT, GPT-2) built on the meta device from their configurations alone, showing what each address
        resolves to per family, the refusal of an address a family cannot provide, and each condition's parameter counts
        side by side: an experiment defined once and orchestrated across models. No training; runs on a CPU.
+   * - :doc:`Where does RL learn? One block, or one percent, of Qwen3-1.7B<notebooks/where_rl_learns/where_rl_learns>`
+     - PyTorch (experimental)
+     - Which parameters reinforcement learning needs: five Dr. GRPO arms on Qwen3-1.7B-Base (the whole model, one middle
+       block, one late block, a Fisher 1% mask and a random 1% mask), each a one-phase address schedule, reproducing a
+       2026 result on Fisher-selected sparse updates and carrying a single-block contrast over to its recipe. Rebuilds
+       the schedules on a meta-device model and analyzes the runs' packaged results problem by problem; the training
+       commands are included. Runs on a CPU.
 
 Command Line
 ************
@@ -53,3 +67,20 @@ Command Line
    * - :ref:`Scheduled fine-tuning on SuperGLUE<scheduled-fine-tuning-superglue>`
      - Lightning (``LightningCLI``)
      - Explicit, implicit and baseline scenarios for RTE and BoolQ, configured entirely in YAML.
+
+Integrations
+************
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 18 52
+   :class: fts-examples-table
+
+   * - Example
+     - Interface
+     - What it shows
+   * - :ref:`Scheduled fine-tuning in interpretune<example-interpretune>`
+     - Lightning and PyTorch (experimental)
+     - An AI interpretability research framework that declares a tunable view for each model composition, so
+       schedules use the backend's own parameter names and select adapters and latents by role. A runnable placeholder
+       example, until a research-based one replaces it, tunes a small model on a CPU in seconds.

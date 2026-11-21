@@ -1,0 +1,7 @@
+# interpretune for the interpretune example's test (tests/test_interpretune_example.py), installed by the
+# install-ci-dependencies action on the `latest` legs only (interpretune needs transformers>=4.57.1, newer than the
+# oldest lock's). It is a CI pin, not a package dependency: interpretune's tuning support needs Fine-Tuning Scheduler's
+# PyTorch API, so no interpretune release can carry it before 2.15.0 is published, and a git URL in Fine-Tuning
+# Scheduler's own metadata would block its upload. Move it along interpretune's main as its tuning work lands, and to a
+# released version once interpretune publishes one requiring finetuning-scheduler>=2.15.0.
+interpretune @ git+https://github.com/speediedan/interpretune@c39dd1a94ec9c5b58aaa64658654a03f4df5b124

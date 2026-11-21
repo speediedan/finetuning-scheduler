@@ -271,7 +271,8 @@ class PlateauTransition:
     """Advance when the monitored metric stops improving; in the final phase, stop.
 
     Mirrors Lightning's ``EarlyStopping`` arguments and semantics (including the ``min_delta`` sign convention). As in
-    the Lightning integration, a phase transition resets the patience count but keeps the best score.
+    the Lightning integration, a phase transition resets the patience count but keeps the best score, unless
+    ``reset_best_on_phase`` is set.
 
     Args:
         monitor: The metric to monitor.
@@ -283,6 +284,9 @@ class PlateauTransition:
         divergence_threshold: Stop once the metric is worse than this value.
         strict: Raise if the metric is missing; otherwise continue with a warning.
         granularity: Evaluate at the end of each ``"epoch"`` or each ``"step"``.
+        reset_best_on_phase: Also reset the best score when a phase begins, so each phase is judged against its own
+            best. For schedules whose phases are stages of an experiment, where a later stage can start worse than
+            an earlier stage's best through no fault of its own.
     """
 
     order_dict = {"min": "<", "max": ">"}
@@ -290,7 +294,7 @@ class PlateauTransition:
     def __init__(self, monitor: str, mode: Literal["min", "max"] = "min", patience: int = 3, min_delta: float = 0.0,
                  check_finite: bool = True, stopping_threshold: float | None = None,
                  divergence_threshold: float | None = None, strict: bool = True,
-                 granularity: Literal["epoch", "step"] = "epoch") -> None:
+                 granularity: Literal["epoch", "step"] = "epoch", reset_best_on_phase: bool = False) -> None:
         if mode not in self.order_dict:
             raise FTSConfigurationError(f"`mode` can be {', '.join(self.order_dict)}, got {mode}")
         self.monitor, self.mode, self.patience = monitor, mode, patience
@@ -299,6 +303,7 @@ class PlateauTransition:
         self.check_finite, self.strict = check_finite, strict
         self.stopping_threshold, self.divergence_threshold = stopping_threshold, divergence_threshold
         self.granularity = frozenset({granularity})
+        self.reset_best_on_phase = reset_best_on_phase
         self.wait_count = 0
         self.best_score = torch.tensor(torch.inf if mode == "min" else -torch.inf)
         self._warned_missing = False
@@ -335,6 +340,8 @@ class PlateauTransition:
 
     def reset(self, depth: int) -> None:
         self.wait_count = 0
+        if self.reset_best_on_phase:
+            self.best_score = torch.tensor(torch.inf if self.mode == "min" else -torch.inf)
 
     def state_dict(self) -> dict[str, Any]:
         return {"wait_count": self.wait_count, "best_score": self.best_score.clone()}
@@ -349,7 +356,8 @@ class PlateauTransition:
                               "min_delta": abs(self.min_delta), "check_finite": self.check_finite,
                               "stopping_threshold": self.stopping_threshold,
                               "divergence_threshold": self.divergence_threshold, "strict": self.strict,
-                              "granularity": next(iter(self.granularity))}}
+                              "granularity": next(iter(self.granularity)),
+                              "reset_best_on_phase": self.reset_best_on_phase}}
 
 
 class AnyOf:

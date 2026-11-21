@@ -42,6 +42,18 @@ SCHEDULE = {
     2: {"params": [r"layers.0.(feed_forward|ffn_norm|attention.w.*|attention_norm).*",
                    r"(pos_embeddings|tok_embeddings).weight"], "lr": 0.1},
 }
+# the same stages, each refrozen when the next starts, the last starting over from the initial state
+STAGES = {
+    0: {"params": SCHEDULE[0]["params"], "max_transition_epoch": 1},
+    1: {"params": SCHEDULE[1]["params"], "refreeze": SCHEDULE[0]["params"], "max_transition_epoch": 2, "lr": 0.05},
+    2: {"params": SCHEDULE[2]["params"], "refreeze": SCHEDULE[1]["params"], "restore": "initial", "lr": 0.05},
+}
+# the first stage thawed again in place of the second, once the second has trained over it
+RETHAW = {
+    0: STAGES[0],
+    1: STAGES[1],
+    2: {"params": SCHEDULE[0]["params"], "refreeze": SCHEDULE[1]["params"], "lr": 0.05},
+}
 # the parameters whose state ``tests/model_parallel_expected_paths.py`` records each epoch
 SAMPLED = ["layers.0.feed_forward.w2.weight", "layers.0.feed_forward.w2.bias", "layers.1.feed_forward.w2.weight",
            "layers.1.feed_forward.w2.bias", "norm.weight", "norm.bias", "output.weight"]
@@ -149,12 +161,14 @@ def _unmoved(model: nn.Module, initial: dict, tol: float = 1e-4) -> list[str]:
 
 
 def _train(fts, model, data, shard, device, epochs, val=None, tp_loss_parallel=False, start_path=None,
-           evaluate=False):
+           evaluate=False, losses=None):
     path = list(start_path or [])
     for epoch in fts.epochs(epochs):
         path.append((epoch, fts.curr_depth, _state(model)))
         for step in range(data.shape[1]):
-            _loss(model, data[epoch, step, shard].to(device), tp_loss_parallel)
+            loss = _loss(model, data[epoch, step, shard].to(device), tp_loss_parallel)
+            if losses is not None:  # a loss computed under ``loss_parallel`` is a replicated ``DTensor``
+                losses.append(float(loss.to_local() if isinstance(loss, DTensor) else loss))
             fts.optimizer.step()
             fts.optimizer.zero_grad()
         if evaluate:  # a forward-only pass before ``epoch_end``, as a loop computing its validation metric runs
@@ -223,8 +237,11 @@ def reference(epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, ck
     model = _model(seed, torch.device("cpu"))
     initial = _params(model)
     fts = _tuning_scheduler(model, ckpt_dir, restore_best=ckpt_dir is not None)
-    path = _train(fts, model, _data(epochs, steps, batch, seed), slice(None), torch.device("cpu"), epochs, val=val)
-    return {"path": path, "params": _params(model), "restored": fts.restored_count, "unmoved": _unmoved(model, initial)}
+    losses = []
+    path = _train(fts, model, _data(epochs, steps, batch, seed), slice(None), torch.device("cpu"), epochs, val=val,
+                  losses=losses)
+    return {"path": path, "params": _params(model), "restored": fts.restored_count, "unmoved": _unmoved(model, initial),
+            "losses": losses}
 
 
 def fsdp_resume(ctx, ckpt_dir: str, epochs: int = 3, split: int = 2, steps: int = 2, batch: int = 4, seed: int = 7,
@@ -248,6 +265,71 @@ def fsdp_resume(ctx, ckpt_dir: str, epochs: int = 3, split: int = 2, steps: int 
     fts.load(saved)
     path = _train(fts, model, data, shard, ctx.device, epochs, val=val, start_path=path)
     return {"path": path, "params": _params(model), "saved_is_dir": os.path.isdir(saved)}
+
+
+def _staged_model(ctx, seed: int, layout: str) -> nn.Module:
+    if layout == "tp":
+        mesh = ctx.mesh((ctx.world_size,), ("tensor_parallel",))
+        return gen_apply_transformer_tp_plan(_model(seed, ctx.device, math_sdpa=True), mesh, True)
+    model = _model(seed, ctx.device if ctx else torch.device("cpu"))
+    if layout == "fsdp":
+        _fsdp_plan(model, ctx.mesh())
+    return model
+
+
+def staged(ctx, layout: str, ckpt_dir: str, restore_best: bool = False, split: int | None = None, epochs: int = 3,
+           steps: int = 2, batch: int = 4, seed: int = 7, val: list | None = None, momentum: float = 0.9,
+           schedule: str = "stages") -> dict:
+    """Train ``STAGES`` (or, with ``schedule="rethaw"``, ``RETHAW``) with momentum and weight decay under
+    ``layout`` (``fsdp``, ``tp`` or ``plain``, which runs one process on the full batch), with the parameters and
+    optimizer groups recorded after each epoch; with ``split``, save after that epoch and finish in a fresh model
+    and tuning scheduler."""
+    device = ctx.device if ctx else torch.device("cpu")
+    data = _data(epochs, steps, batch, seed)
+    shard = _shard(ctx, batch) if layout == "fsdp" else slice(None)
+    val = val or [1.0 - e / 10 for e in range(epochs)]
+    # DCP refuses the partial-placement momentum buffers tensor parallelism leaves, with or without a refreeze
+    momentum = 0.0 if layout == "tp" else momentum
+
+    def build(model, name):
+        stages = RETHAW if schedule == "rethaw" else STAGES
+        fts = TuningScheduler(model, {k: dict(v) for k, v in stages.items()},
+                              optimizer=partial(torch.optim.SGD, lr=0.05, momentum=momentum, weight_decay=0.01),
+                              interface=TorchInterface(model), checkpoint=BestCheckpoint(os.path.join(ckpt_dir, name),
+                                                                                         "val_loss"),
+                              restore_best=restore_best)
+        fts.setup()
+        return fts
+
+    after, trainable, groups = [], [], []
+
+    def train(fts, model, stop_after=None):
+        for epoch in fts.epochs(epochs):
+            trainable.append(sorted(n for n, p in model.named_parameters() if p.requires_grad))
+            groups.append(len(fts.optimizer.param_groups))
+            for step in range(data.shape[1]):
+                _loss(model, data[epoch, step, shard].to(device), layout == "tp")
+                fts.optimizer.step()
+                fts.optimizer.zero_grad()
+            fts.epoch_end({"val_loss": val[epoch]})
+            after.append(_params(model))
+            if epoch == stop_after:
+                return
+
+    model = _staged_model(ctx, seed, layout)
+    initial = _params(model)
+    fts = build(model, "run")
+    train(fts, model, stop_after=split)
+    saved = None
+    if split is not None:
+        saved = fts.save(os.path.join(ckpt_dir, "resume"))
+        model = _staged_model(ctx, seed + 100, layout)  # different initial weights: the load must overwrite them
+        fts = build(model, "run")
+        fts.load(saved)
+        train(fts, model)
+    expected = [sorted(fts.compiled_schedule.trainable_at(d)) for d in range(3)]
+    return {"after": after, "params": _params(model), "initial": initial, "trainable": trainable, "expected": expected,
+            "groups": groups, "depth": fts.curr_depth, "saved": saved is not None and os.path.isdir(saved)}
 
 
 def tp(ctx, epochs: int = 3, steps: int = 2, batch: int = 4, seed: int = 7, tp_loss_parallel: bool = True,

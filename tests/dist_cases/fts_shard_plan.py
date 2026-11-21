@@ -112,3 +112,56 @@ def example_plan(ctx, config: str) -> dict:
     sched_phases = {d: resolve_param_entries(schedule[d]["params"], d, names, shared) for d in schedule}
     feedback = FSDP2Adapter().validate(model, sched_phases)
     return {**_layout(model), "feedback": [(f.level, f.message) for f in feedback]}
+
+
+def parallelized(ctx, tp_loss_parallel: bool = True) -> dict:
+    """Apply a configured tensor-parallel plan, then set a tuning scheduler up over the unchanged schedule."""
+    from functools import partial
+
+    from finetuning_scheduler import TorchInterface, TuningScheduler
+    from finetuning_scheduler.strategies.plan import parallelize_model
+    from tests.dist_cases.fts_tp_plan import TOY_TP_PLAN
+
+    mesh = ctx.mesh((ctx.world_size,), ("tensor_parallel",))
+    model = parallelize_model(_model(7, ctx.device, math_sdpa=True), mesh["tensor_parallel"], TOY_TP_PLAN,
+                              loss_parallel=tp_loss_parallel)
+    fts = TuningScheduler(model, SCHEDULE, optimizer=partial(torch.optim.SGD, lr=0.1), transition=None,
+                          interface=TorchInterface(model))
+    fts.setup()
+    return {"names_unchanged": {n for n, _ in model.named_parameters()}
+            == {n for n, _ in _model(7, torch.device("meta"), math_sdpa=True).named_parameters()},
+            "plain": sorted(n for n, p in model.named_parameters() if not isinstance(p, DTensor)),
+            "adapter": type(fts._distributed).__name__,
+            "thawed": sorted(n for n, p in model.named_parameters() if p.requires_grad)}
+
+
+def parallelized_bad_schedule(ctx) -> str:
+    """A schedule naming a parameter the planned model lacks is refused, as it is without a plan."""
+    from functools import partial
+
+    from finetuning_scheduler import TorchInterface, TuningScheduler
+    from finetuning_scheduler.strategies.plan import parallelize_model
+    from tests.dist_cases.fts_tp_plan import TOY_TP_PLAN
+
+    mesh = ctx.mesh((ctx.world_size,), ("tensor_parallel",))
+    model = parallelize_model(_model(7, ctx.device, math_sdpa=True), mesh["tensor_parallel"], TOY_TP_PLAN)
+    schedule = {0: {"params": ["output.weight"]}, 1: {"params": ["no_such_parameter.weight"]}}
+    fts = TuningScheduler(model, schedule, optimizer=partial(torch.optim.SGD, lr=0.1), transition=None,
+                          interface=TorchInterface(model))
+    try:
+        fts.setup()
+    except Exception as err:
+        return f"{type(err).__name__}: {err}"
+    return ""
+
+
+def parallelize_refuses_a_2d_mesh(ctx) -> str:
+    """A two-dimensional mesh is refused, naming the dimension to pass."""
+    from finetuning_scheduler.strategies.plan import parallelize_model
+
+    mesh = ctx.mesh((1, ctx.world_size), ("data_parallel", "tensor_parallel"))
+    try:
+        parallelize_model(_model(7, ctx.device), mesh, {"norm": {"style": "sequence"}})
+    except FTSConfigurationError as err:
+        return str(err)
+    return ""

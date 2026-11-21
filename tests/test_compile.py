@@ -14,6 +14,7 @@
 These need only PyTorch and the scheduling core (the ``core-no-lightning`` job runs them with ``--noconftest``).
 """
 import copy
+import warnings
 
 import pytest
 import torch
@@ -22,7 +23,7 @@ from torch import nn
 from finetuning_scheduler import CanonicalView, TunableSupport
 from finetuning_scheduler.core.compile import compile_schedule, view_default_schedule
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
-from finetuning_scheduler.core.schedule import resolve_phase_params, shared_params_ref
+from finetuning_scheduler.core.schedule import build_default_schedule, resolve_phase_params, shared_params_ref
 from finetuning_scheduler.core.views import Unresolvable
 
 
@@ -119,8 +120,23 @@ def test_unresolvable_and_unmatched_entries_refuse():
 
     with pytest.raises(Unresolvable, match=r"\['block7'\]. \(phase 1\)"):
         compile_schedule({0: {"params": ["head"]}, 1: {"params": ["block7"]}}, ListsMoreThanItMaps(net))
+    # a `refreeze` entry resolves as a `params` entry does, and is refused naming the key
+    with pytest.raises(Unresolvable, match=r"\['block7'\]. \(phase 1's `refreeze`\)"):
+        compile_schedule({0: {"params": ["head"], "max_transition_epoch": 1},
+                          1: {"params": ["block2"], "refreeze": ["block7"]}}, ListsMoreThanItMaps(net))
     with pytest.raises(FTSConfigurationError, match="'nothing.*' specified in phase 0"):
         compile_schedule({0: {"params": ["nothing.*"]}}, CanonicalView(net))
+
+
+def test_name_terms_select_by_a_logical_views_names():
+    """Through a view with its own naming scheme, a `name` term matches the logical names as well as the physical
+    ones: `block2` names no physical tensor, so only its logical name selects it."""
+    net = _net()
+    compiled = compile_schedule({0: {"params": ['name:"block2"'], "max_transition_epoch": 1},
+                                 1: {"params": ['name:"block0|head"']}}, BlockView(net))
+    assert compiled.phases[0].physical == ("2.weight", "2.bias")
+    assert compiled.phases[0].coupled == ("3.weight", "3.bias")
+    assert compiled.phases[1].physical == ("0.weight", "0.bias", "4.weight", "4.bias")
 
 
 def test_role_selectors():
@@ -137,10 +153,10 @@ def test_role_selectors():
 
 def test_frozen_roles_refuse():
     net = _net()
-    view = CanonicalView(net, roles={"0.weight": "fitted", "1.weight": "instrument"})
+    view = CanonicalView(net, roles={"0.weight": "fitted", "1.weight": "artifact"})
     with pytest.raises(FTSConfigurationError, match=r"Phase 1 schedules tensors whose role is never thawed.*0.weight"):
         compile_schedule({0: {"params": ["4.weight"]}, 1: {"params": [r"0\..*"]}}, view)
-    leaky = BlockView(net, roles={"1.weight": "instrument"})
+    leaky = BlockView(net, roles={"1.weight": "artifact"})
     sched = {0: {"params": ["head"]}, 1: {"params": ["block0"]}}
     with pytest.raises(FTSConfigurationError, match="coupled tensors include tensors whose role is never thawed"):
         compile_schedule(sched, leaky)
@@ -183,6 +199,53 @@ def test_support_refusals():
     view.support = lambda: TunableSupport(trainable=True, logical_names_are_views=True)  # type: ignore[method-assign]
     with pytest.raises(FTSConfigurationError, match=r"quantized or packed tensors.*\['q'\]"):
         compile_schedule({0: {"params": ["q"]}}, view)
+
+
+def _packed_net():
+    """``_net`` with a frozen packed (``uint8``, bitsandbytes' 4-bit storage) base weight and a trainable adapter
+    beside it, as a QLoRA layout has."""
+    net = _net()
+    net.packed = nn.Parameter(torch.zeros(4, dtype=torch.uint8), requires_grad=False)
+    net.adapter = nn.Parameter(torch.zeros(4))
+    return net
+
+
+def test_thawing_packed_storage_refuses_at_compile():
+    """A physical-name view: a phase naming a tensor whose storage cannot require gradients is refused at compile,
+    naming the tensor, its dtype and the phase, rather than failing when the phase thaws it. The positive control
+    for the check."""
+    with pytest.raises(FTSConfigurationError, match=r"Phase 1 schedules tensors whose storage cannot require gradients"
+                       r".*packed \(uint8\)"):
+        compile_schedule({0: {"params": ["adapter"]}, 1: {"params": ["packed"]}}, CanonicalView(_packed_net()))
+    with pytest.raises(FTSConfigurationError, match=r"packed \(uint8\)"):  # a regex reaching it is refused too
+        compile_schedule({0: {"params": ["pack.*"]}}, CanonicalView(_packed_net()))
+
+
+def test_packed_storage_left_frozen_compiles():
+    """A frozen packed base under trainable tensors (QLoRA's layout) compiles: the check refuses a selection, never
+    the presence of packed storage."""
+    compiled = compile_schedule({0: {"params": ["adapter"]}, 1: {"params": [r"4\..*"]}}, CanonicalView(_packed_net()))
+    assert compiled.physical_for(0) == ("adapter",)
+
+
+def test_floating_point_quantized_storage_thaws():
+    """Quantized formats that keep a floating-point dtype (float8 here) can require gradients, so they are not
+    refused."""
+    net = _net()
+    net.f8 = nn.Parameter(torch.zeros(4, dtype=torch.float8_e4m3fn), requires_grad=False)
+    assert compile_schedule({0: {"params": ["f8"]}}, CanonicalView(net)).physical_for(0) == ("f8",)
+
+
+def test_default_schedules_leave_packed_storage_out():
+    """Generated schedules never name storage that cannot require gradients, so they compile over a QLoRA
+    layout."""
+    view = CanonicalView(_packed_net())
+    generated = view_default_schedule(view)
+    names = [n for phase in generated.values() for n in phase["params"]]
+    assert "packed" not in names and "adapter" in names
+    compile_schedule(generated, view)
+    legacy = [n for phase in build_default_schedule(_packed_net()).values() for n in phase["params"]]
+    assert "packed" not in legacy and "adapter" in legacy
 
 
 def test_view_default_schedule():
@@ -266,10 +329,26 @@ def test_physical_for_takes_a_phase_depth():
 @pytest.mark.parametrize("target", ["adapter", "bogus-role", "latent"])
 def test_compiling_refuses_an_invalid_promotion_target(target):
     net = _net()
-    view = CanonicalView(net, roles={"0.weight": "instrument"})
+    view = CanonicalView(net, roles={"0.weight": "artifact"})
     with pytest.raises(FTSConfigurationError):
         compile_schedule({0: {"params": ["4.weight"]}, 1: {"params": ["2.weight"], "promote": {"0.weight": target}}},
                          view)
+
+
+def test_the_retired_instrument_role_reads_as_artifact():
+    """``instrument``, the earlier name of ``artifact``, still reads as ``artifact`` through venngram 0.1.
+
+    It does so (warning once per process that it is deprecated) in a view's roles and in a ``role:`` selector, so
+    promotion accepts it.
+    """
+    net = _net()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        view = CanonicalView(net, roles={"0.weight": "instrument"})
+        compiled = compile_schedule(
+            {0: {"params": ["4.weight"]}, 1: {"params": ["role:latent:a"], "promote": {"role:instrument": "latent:a"}}},
+            view)
+    assert compiled.roles_at(0)["0.weight"] == "artifact" and compiled.roles_at(1)["0.weight"] == "latent:a"
 
 
 def test_a_regex_through_a_view_that_indexes_a_mapping_refuses_by_name():
@@ -299,14 +378,14 @@ def test_view_default_schedule_leaves_out_a_name_standing_for_frozen_and_trainab
 @pytest.mark.parametrize(
     "promote, match",
     [
-        ({"0.weight": "latent:a", "role:instrument": "latent:b"}, "names these tensors more than once"),
+        ({"0.weight": "latent:a", "role:artifact": "latent:b"}, "names these tensors more than once"),
         ({"": "latent:a"}, "keys must be selectors or names"),
     ],
     ids=["twice", "empty_key"],
 )
 def test_compiling_refuses_an_invalid_promotion_source(promote, match):
     net = _net()
-    view = CanonicalView(net, roles={"0.weight": "instrument"})
+    view = CanonicalView(net, roles={"0.weight": "artifact"})
     with pytest.raises(FTSConfigurationError, match=match):
         compile_schedule({0: {"params": ["4.weight"]}, 1: {"params": ["2.weight"], "promote": promote}}, view)
 

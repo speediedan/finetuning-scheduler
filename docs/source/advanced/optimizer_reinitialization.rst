@@ -7,13 +7,13 @@ Optimizer Reinitialization
 Overview
 ********
 :class:`~finetuning_scheduler.fts.FinetuningScheduler` (FTS) supports the initialization of new optimizers according to
-a user-specified fine-tuning schedule. Similarly motivated to Fine-Tuning Scheduler's
+a user-specified schedule. Similarly motivated to Fine-Tuning Scheduler's
 :ref:`lr scheduler reinitialization feature<lrs-reinit-overview>`, one can initialize new optimizers (or reinitialize
 an existing one) at the beginning of one or more scheduled training phases.
 
 Optimizer reinitialization is supported:
 
-- In both explicit and implicit fine-tuning schedule modes (see the :ref:`Fine-Tuning Scheduler intro<motivation>` for
+- In both explicit and implicit schedule modes (see the :ref:`Fine-Tuning Scheduler intro<motivation>` for
   more on basic usage modes)
 - With or without concurrent lr scheduler reinitialization
 - In the context of all supported training strategies (including FSDP)
@@ -28,7 +28,7 @@ reinitialization of optimizers and lr schedulers at different phases.
 Specifying Optimizer Configurations For Specific Fine-Tuning Phases
 *******************************************************************
 
-When defining a fine-tuning schedule (see :ref:`the intro<specifying schedule>` for basic schedule specification), a new
+When defining a schedule (see :ref:`the intro<specifying schedule>` for basic schedule specification), a new
 optimizer configuration can be applied to the existing training session at the beginning of a given phase by specifying
 the desired configuration in the ``new_optimizer`` key. The ``new_optimizer`` dictionary format is described in the
 annotated yaml schedule below and can be explored using the :ref:`advanced usage example<advanced-fine-tuning-optimizer-example>`.
@@ -95,7 +95,7 @@ reinitialization):
         init_pg_lrs: [2.0e-06, 2.0e-06]
 
 
-All optimizer reinitialization configurations specified in the fine-tuning schedule will have their configurations
+All optimizer reinitialization configurations specified in the schedule will have their configurations
 sanity-checked prior to training initiation.
 
 .. _optimizer-compat-note:
@@ -167,10 +167,10 @@ another optimizer configuration defined in a subsequent schedule phase.
 
 .. _implicit optimizer lr scheduler reinitialization schedule:
 
-Optimizer Reinitialization With Generated (Implicit Mode) Fine-Tuning Schedules
-*******************************************************************************
-One can also specify optimizer reinitialization in the context of implicit mode fine-tuning schedules. Since the
-fine-tuning schedule is automatically generated, the same optimizer configuration will be applied at each of the
+Optimizer Reinitialization With Generated (Implicit Mode) Schedules
+*******************************************************************
+One can also specify optimizer reinitialization in the context of implicit mode schedules. Since the
+schedule is automatically generated, the same optimizer configuration will be applied at each of the
 phase transitions. In implicit mode, the optimizer reconfiguration should be supplied to the
 :paramref:`~finetuning_scheduler.fts.FinetuningScheduler.reinit_optim_cfg` parameter of
 :class:`~finetuning_scheduler.fts.FinetuningScheduler`.

@@ -1,18 +1,34 @@
 # Fine-Tuning Scheduler's venngram support record: what a schedule's address books may ask of it. Read by
 # `finetuning_scheduler.core.compile.support_record()`; published beside exported books so they can be checked with
 # `python -m venngram.conformance <location> --support <this record>` without Fine-Tuning Scheduler installed.
-schema_version: 2
+schema_version: 5
 kind: support_record
 name: finetuning-scheduler
 description: >-
   A schedule thaws tensors: its sets select parameters by role, name, module, layer, block stack, component (through a
-  view with a component vocabulary) and leaf. It tunes no sites, features or subspaces directly (an adapter or latent
-  model holding them is tuned through its own tensors), and no unit sets yet. Naming schemes are whatever the view
-  provides, checked against each book's `requires.naming_scheme`.
+  view with a component vocabulary) and leaf. A set of gradients (`of: grad`) thaws what it selects and, with `units`,
+  masks each tensor's gradient to those indices along its first axis (the PyTorch API, `TuningScheduler`, applies the
+  masks; the Lightning callback refuses them). A set may unite a value part and a gradient part (`mixed-sets`), whose
+  value part thaws whole tensors, and a gradient part's disjuncts may each carry `units` (`union-masks`), whose masks
+  are united per tensor. It tunes no sites, features or subspaces directly (an adapter or latent
+  model holding them is tuned through its own tensors), and no unit sets as values (`units: none`; a unit set under
+  `of: grad` is a gradient mask, which venngram's support check does not yet tell apart, so Fine-Tuning Scheduler
+  judges those sets itself). Naming schemes are whatever the view provides, checked against each book's
+  `requires.naming_scheme`. Of a book's treatments it applies the `gradients` ops (ops on parameter gradients) of a
+  treatment a phase names in `grad_transforms` (the PyTorch API): `scale`, `replace` and `add` with a dose or per-unit
+  doses, a `param_units` target acting along each tensor's unit axis, and `project` and `reject` with a vector or
+  subspace operand along a weight's `out` side. It applies no stage or `weights` ops.
 sections:
   tuning:
-    fields: [role, name, module, layers, stack, component, leaf]
+    fields: [role, name, module, layers, stack, component, leaf, of]
     targets: [param]
     units: none
     structure: [physical, vocabulary]
     portability: [family, checkpoint]
+    gradients: [mixed-sets, union-masks]
+  steering:
+    ops: []
+    targets: [param, param_units]
+    of: [grad]
+    values: [dose, doses]
+    gradient_ops: [add, project, reject, replace, scale]

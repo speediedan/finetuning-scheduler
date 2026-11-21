@@ -172,6 +172,7 @@ namespaces = true
 "fts_examples.model_parallel.config.defaults" = ["*.yaml"]
 "fts_examples.model_parallel.config.profiling" = ["*.yaml"]
 "fts_examples.tunable_views.config" = ["*.yaml"]
+"fts_examples.where_rl_learns.results" = ["*.json"]
 
 [tool.ruff]
 line-length = 120
@@ -191,7 +192,6 @@ exclude = [
     "*.egg",
     "build",
     "temp",
-    "scripts/vendored",  # vendored unmodified from interpretune; see scripts/check_vendored_notebook_tooling.py
 ]
 # lint.ignore-init-module-imports = true
 output-format = "pylint"
@@ -257,7 +257,10 @@ norecursedirs = [
     "docs",
 ]
 
+# the interpretune example imports interpretune when loaded, which a plain install lacks, so doctest collection must not
+# load it; tests/test_interpretune_example.py imports it where interpretune is installed
 addopts = """--strict-markers --doctest-modules --color=yes \
+--ignore=src/fts_examples/interpretune_phased_tuning.py \
 --disable-pytest-warnings"""
 
 junit_duration_report = "call"
@@ -329,9 +332,78 @@ name = "exp_patch"
 optional = true
 special-tests = ["--mark_type=exp_patch", "--filter_pattern=test_f", "--experiment_patch_mask=1 0 0 1"]
 
-[tool.notebook-publishing]
-# The tutorial notebooks, read by the publisher and docs-artifact renderer vendored from interpretune
-# (scripts/vendored/notebook_tooling; shims scripts/publish_notebooks.py and scripts/render_notebook_docs.py).
+# Whether a scheduled GPU build's tree is already covered by a green full run (python -m gpu_epsilon.scheduled_runs): a
+# run is full when its standalone phase ran every standalone test, which .azure-pipelines/scripts/gpu_job_container.sh
+# prints. A pull request's merge-ref run can share main's tree with the smoke set, so the scope decides, not the tree.
+[tool.gpu-epsilon.scheduled-runs]
+repository = "speediedan/finetuning-scheduler"
+run-step = "Testing: standalone multi-gpu"
+run-pattern = 'standalone scope: (full|smoke)\b'
+
+[tool.gpu-epsilon.phase-evidence]
+# gpu-epsilon's phase-evidence writer (python -m gpu_epsilon.phase_evidence) reads this table: the GPU job collects each
+# phase's manifest with no device visible (.azure-pipelines/scripts/gpu_job_container.sh collect), records every pytest
+# process the phase starts (its `phase` step, through run-env) and reports each phase against its manifest. Only a clean
+# phase passes: a skip or xfail needs a reason in tests/gpu_ci/reviewed_exclusions.json.
+repository = "speediedan/finetuning-scheduler"
+# the variables tests/conftest.py and tests/helpers/runif.py select or order on, stripped before every collection
+selection-vars = ["PL_RUN_STANDALONE_TESTS", "FTS_EXPERIMENTAL_PATCH_TESTS", "FTS_CUDA_TESTS_ONLY", "FTS_REVERSE_ORDER"]
+# set for every GPU phase (the pipeline's job variable): it gates skips, never selection
+collect-env = { PL_RUN_CUDA_TESTS = "1" }
+device-vars = ["CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES"]
+# the phase commands below set no selection variables themselves, so run-env exports them
+run-env-exports-selection = true
+gate = { empty = "never", unreviewed-exclusions = "never" }
+
+[tool.gpu-epsilon.phase-evidence.versions]
+lightning = "module:lightning"
+finetuning_scheduler = "module:finetuning_scheduler"
+lightning_commit = "vcs:lightning"
+torch_record_sha256 = "record:torch"
+
+# a pull request into main runs the standalone smoke set (.azure-pipelines/scripts/standalone_scope.sh)
+[tool.gpu-epsilon.phase-evidence.scopes.smoke]
+select-file = "tests/.standalone_smoke"
+phases = ["standalone"]
+
+[[tool.gpu-epsilon.phase-evidence.phase]]
+name = "gpu-nonstandalone"
+paths = ["src/finetuning_scheduler", "tests"]
+selection-env = { FTS_CUDA_TESTS_ONLY = "1" }
+command = "python -m coverage run --source src/finetuning_scheduler -m pytest src/finetuning_scheduler tests -v"
+measured = true
+
+[[tool.gpu-epsilon.phase-evidence.phase]]
+name = "standalone"
+paths = ["tests"]
+selection-env = { PL_RUN_STANDALONE_TESTS = "1" }
+command = "python -m gpu_epsilon.special_tests --mark_type=standalone"
+measured = true
+
+[[tool.gpu-epsilon.phase-evidence.phase]]
+name = "examples"
+paths = ["src/fts_examples"]
+command = "python -m pytest src/fts_examples -v"
+
+[[tool.gpu-epsilon.phase-evidence.phase]]
+name = "examples-multigpu"
+paths = ["src/fts_examples"]
+selection-env = { PL_RUN_STANDALONE_TESTS = "1" }
+args = ["-k", "model_parallel_examples"]
+command = """python -m gpu_epsilon.special_tests --mark_type=standalone --collect_dir=src/fts_examples \
+--filter_pattern=model_parallel_examples"""
+measured = true
+
+# the scheduled reverse-order leg: in cross-host parity, never in release eligibility
+[[tool.gpu-epsilon.phase-evidence.phase]]
+name = "pool-reverse"
+paths-from = { glob = "tests/test_*.py", contains = "dist_pool_fixture" }
+selection-env = { FTS_REVERSE_ORDER = "1" }
+command = "python -m pytest <pool modules> -v"
+release = false
+
+[tool.nbpress]
+# The tutorial notebooks, read by nbpress (https://github.com/speediedan/nbpress; nbpress-publish and nbpress-render).
 # dev_dir holds the authoring copies, publish_dir the stripped copies users open (Colab badge and install cell
 # added), docs_artifact_dir the executed copies the docs render.
 dev_dir = "src/fts_examples/notebooks/dev"
@@ -344,10 +416,10 @@ install_cell = [
     "# %pip install 'finetuning-scheduler[examples] @ git+https://github.com/speediedan/finetuning-scheduler.git@main'",
 ]
 docs_artifact_dir = "docs/notebook_artifacts"
-docs_render_command = "python scripts/render_notebook_docs.py"
+docs_render_command = "nbpress-render"
 
 # the PyTorch tutorial's docs render runs every phase, so its fts_implicit run reaches the transition its review shows
-[tool.notebook-publishing.docs_parameters."superglue/fts_superglue_pytorch"]
+[tool.nbpress.docs_parameters."superglue/fts_superglue_pytorch"]
 MAX_DEPTH = -1
 
 # Dependency groups for development (PEP 735)

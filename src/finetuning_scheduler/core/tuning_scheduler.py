@@ -26,6 +26,7 @@ import itertools
 import os
 import pathlib
 import sys
+import warnings
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
@@ -38,6 +39,8 @@ import yaml
 from torch import nn, Tensor
 from torch.optim import Optimizer
 from torch.utils.hooks import RemovableHandle
+from venngram import AddressBook
+from venngram.errors import VenngramError
 
 from finetuning_scheduler.core import optim as core_optim
 from finetuning_scheduler.core import phase as core_phase
@@ -51,13 +54,15 @@ from finetuning_scheduler.core.dist import rank_zero_info, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.executor import TuningSchedulerExecutor, PhaseExecutor
 from finetuning_scheduler.core.fingerprint import batch_fingerprint
+from finetuning_scheduler.core.grad_masks import GradientMasks
+from finetuning_scheduler.core.grad_transforms import Add, is_stateful, Replace, Scale, transform_id
 from finetuning_scheduler.core.interface import LRStepConfig, TorchInterface, TrainingInterface
 from finetuning_scheduler.core.rng import capture_rng_state, fork_rngs, restore_rng_state
 from finetuning_scheduler.core.roles import (is_frozen_role, is_role_selector, role_kind, SELECTOR_PREFIX,
                                              selector_matches)
 from finetuning_scheduler.strategies.base import DistributedAdapter, select_distributed_adapter
 from finetuning_scheduler.strategies.dtensor import DTensorAdapter
-from finetuning_scheduler.core.views import (BoundView, canonical_fqn, CanonicalView, instrument_state_keys,
+from finetuning_scheduler.core.views import (artifact_state_keys, BoundView, canonical_fqn, CanonicalView,
                                              resolve_view)
 from venngram.tuning.errors import TunableViewError
 from finetuning_scheduler.core.transitions import (AnyOf, as_decision, Decision, epoch_transition_due, GateEvent,
@@ -108,6 +113,8 @@ class PhaseEvent:
         tuning_scheduler: The tuning scheduler, for access to the module, optimizer and schedule.
         physical_params: The physical parameters the phase thaws (its own, then its coupled ones).
         logical_params: The logical names the phase's schedule entries resolved to (role selectors excluded).
+        refrozen_params: The physical parameters the phase's ``refreeze`` key refreezes. Start hooks run before the
+            phase's thaw and refreeze.
     """
 
     depth: int
@@ -118,6 +125,7 @@ class PhaseEvent:
     tuning_scheduler: "TuningScheduler" = field(repr=False)
     physical_params: tuple[str, ...] = ()
     logical_params: tuple[str, ...] = ()
+    refrozen_params: tuple[str, ...] = ()
 
 
 def _is_compiled(module: nn.Module) -> bool:
@@ -137,6 +145,17 @@ def _checkpoint_keys(names: Iterable[str], saved: Iterable[str]) -> tuple[dict[s
     by_canonical = {canonical_fqn(k): k for k in saved}
     keys = {n: n if n in saved else by_canonical.get(canonical_fqn(n)) for n in names}
     return {n: k for n, k in keys.items() if k is not None}, [n for n, k in keys.items() if k is None]
+
+
+def _transform_keys(transforms: Mapping[str, Sequence[Any]] | None) -> dict[str, list[tuple[str, Any]]]:
+    """Each tensor's transforms as comparable keys, in order: a valued built-in by its kind, value (as a float) and
+    axis, anything else by :func:`~finetuning_scheduler.core.grad_transforms.transform_id`, each with its units."""
+    def key(fn: Any) -> str:
+        if isinstance(fn, (Scale, Replace, Add)):
+            value = fn.factor if isinstance(fn, Scale) else fn.value
+            return f"{type(fn).__name__}({float(value)!r}, dim={fn.dim})"
+        return transform_id(fn)
+    return {p: [(key(fn), units) for fn, units in ts] for p, ts in (transforms or {}).items()}
 
 
 def _configured_entry(entry: Any, key: str, options: tuple[str, ...], where: str) -> tuple[Callable, dict[str, Any]]:
@@ -191,7 +210,8 @@ class TuningScheduler:
             :class:`~finetuning_scheduler.core.checkpoint.BestCheckpoint`), offered each epoch's metrics; the training
             state is saved whenever it reports a new best.
         restore_best: Restore the best checkpoint's model, optimizer and lr scheduler state at each phase boundary, as
-            the Lightning callback does. Defaults to ``True`` when a ``checkpoint`` policy is given.
+            the Lightning callback does. Defaults to ``True`` when a ``checkpoint`` policy is given. A phase's
+            ``restore`` key overrides it for that boundary.
         capture_rng: Include every random generator's state in :meth:`save` (and, by default, in
             :meth:`resume_state`), so :meth:`load` resumes the random streams exactly.
         max_depth: The deepest phase to run; ``-1`` runs every phase.
@@ -303,11 +323,13 @@ class TuningScheduler:
         self._compiled: CompiledSchedule | None = None
         self._address_sets: core_schedule.AddressSets = core_schedule.AddressSets()
         self._address_references: tuple[str, ...] = ()
-        self._source_params: dict[int, list[Any]] = {}  # each phase's `params` as written, for `export_book`
+        self._source_schedule: dict[int, dict[str, Any]] = {}  # each phase as written, for `export_book`
         self._logical_params: dict[int, tuple[str, ...]] = {}
         # promotions applied so far, and each promoted tensor's value when it was promoted (on the CPU)
         self._promotions: list[dict[str, Any]] = []
         self._promoted_values: dict[str, Tensor] = {}
+        # the gradient masks in effect, when the schedule has any (`of: grad` addresses)
+        self._grad_masks: GradientMasks | None = None
 
         self._schedule: dict = {}
         self._phase_configs: dict[int, Any] = {}
@@ -383,6 +405,13 @@ class TuningScheduler:
         assert self._compiled is not None
         if self._compiled.promotions:
             self._refuse_unsupported_promotion()
+        self._refuse_unsupported_restore()
+        self._refuse_unsupported_masks()
+        if self._checkpoint is not None:
+            for phase in self._schedule.values():
+                target = core_schedule.restore_best_depth(phase.get("restore"))
+                if target is not None:
+                    getattr(self._checkpoint, "keep_phase_best")(target)
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
         self._refuse_unschedulable_params()
         core_phase.reshard_fsdp_modules(self.model)
@@ -396,12 +425,22 @@ class TuningScheduler:
         for i, sched in enumerate(schedulers):
             self._interface.set_lr_scheduler(i, sched, self._lr_step_cfg)
         self._step_hook = optimizer.register_step_post_hook(self._on_optimizer_step)
+        if any(cp.masks or cp.transforms for cp in self._compiled.phases):
+            self._grad_masks = GradientMasks(self.model)
+            self._grad_masks.attach(optimizer)
+            self._sync_grad_masks(0)
         self._check_schedule_agreement()
         self._fingerprints.setdefault(0, [])
         self._is_setup = True
-        if self._checkpoint is not None and getattr(self._checkpoint, "save_initial", False):
+        save_initial = self._checkpoint is not None and getattr(self._checkpoint, "save_initial", False)
+        keep_initial = any(p.get("restore") == "initial" for p in self._schedule.values())
+        if save_initial or keep_initial:
+            assert self._checkpoint is not None
             initial = self._write_checkpoint(self._interface.broadcast_object(self._checkpoint.path_for("initial")))
-            self._pin_boundary(0, initial_path=initial)
+            if keep_initial:
+                getattr(self._checkpoint, "pin_state")("initial", initial)
+            if save_initial:
+                self._pin_boundary(0, initial_path=initial)
         self._run_hooks("start", 0)
         rank_zero_info(f"Fine-tuning schedule set up with {len(self._schedule)} phases (max_depth {self._max_depth}).")
 
@@ -437,6 +476,7 @@ class TuningScheduler:
         if self._gates:
             raise FTSConfigurationError("Gates are not supported on an externally driven tuning scheduler in this"
                                         " release.")
+        core_schedule.refuse_direct_api_keys(dict(schedule), keys=("grad_transforms", "refreeze", "restore"))
         self._executor, self._externally_driven = executor, True
         self._view = self._resolve_view()
         self._view_roles_at_setup = self._view.view_roles()
@@ -576,11 +616,13 @@ class TuningScheduler:
         # logical names it resolved are kept for display
         assert self._view is not None
         core_schedule.check_param_entries(schedule)
-        self._source_params = {d: list(schedule[d].get("params") or []) for d in schedule}
+        self._source_schedule = {d: dict(schedule[d]) for d in schedule}
         self._compiled = compile_schedule(schedule, self._view, addresses=address_sets)
         for cp in self._compiled.phases:
             self._logical_params[cp.depth] = cp.logical
             schedule[cp.depth]["params"] = list(cp.thawed)
+            if cp.refrozen:
+                schedule[cp.depth]["refreeze"] = list(cp.refrozen)
         self._epoch_watermark = max_epoch_wm
         if not self._user_policies:
             final = core_schedule.resolve_max_depth(self._max_depth_arg, len(schedule))
@@ -867,7 +909,13 @@ class TuningScheduler:
 
     def train_end(self) -> None:
         """End training (once): with gates registered, restore the best (if configured) and run the gates on the
-        last phase, after its end hooks; a veto rolls back to the best as of the phase's start."""
+        last phase, after its end hooks; a veto rolls back to the best as of the phase's start.
+
+        The terminal gate history is written to that rollback checkpoint on a veto, otherwise to the policy's best
+        (or initial rollback checkpoint when no best exists). Only audit metadata changes, leaving the saved training
+        state and its configuration hash intact. A sharded checkpoint updates only ``fts_meta.pt``, on rank zero.
+        Without a checkpoint policy, records remain available through :attr:`gate_records`.
+        """
         if not self._is_setup or self._finished:
             return
         self._finished = True
@@ -941,14 +989,22 @@ class TuningScheduler:
     # ------------------------------------------------------------------------------------------------------------------
     def _advance(self, reason: str | None) -> None:
         """Close phase ``k`` and open ``k + 1``: restore the best (if configured), run phase ``k``'s end hooks and
-        its gates (a veto stops here), advance and pin the boundary best, run the new phase's start hooks, then
-        thaw and configure the optimizer for it."""
+        its gates (a veto stops here), advance and pin the boundary best, restore a named state (if ``k + 1``
+        starts from one), run the new phase's start hooks, then thaw, refreeze and configure the optimizer."""
         prev = self._depth
+        restore = self._schedule[prev + 1].get("restore") or (
+            core_schedule.RESTORE_BEST if self._restore_best else core_schedule.RESTORE_NONE)
         core_phase.reshard_fsdp_modules(self.model)
         schedulers = [s for s, _ in self._interface.get_lr_schedulers()]
         pre_state = core_optim.capture_lr_state(schedulers[0] if schedulers else None, self.optimizer)
         # restore before the end hooks, so they see the best state under either interface
-        restored_depth = self._restore_best_state() if self._restore_best else None
+        best_depth = core_schedule.restore_best_depth(restore)
+        if restore == core_schedule.RESTORE_BEST:
+            restored_depth = self._restore_best_state()
+        elif best_depth is not None:
+            restored_depth = self._restore_best_state(best_depth)
+        else:
+            restored_depth = None
         self._end_phase(prev)
         if not self._run_gates(prev, final=False):
             return
@@ -957,6 +1013,9 @@ class TuningScheduler:
         self._fingerprints.setdefault(self._depth, [])
         if self._checkpoint is not None and not self._externally_driven:
             self._pin_boundary(self._depth)
+        if restore in core_schedule.NAMED_STATES:
+            # after the end hooks and gates, which judge the phase that ended, and with its lr state, not the latest
+            restored_depth, pre_state = self._restore_named_state(restore), None
         self._run_hooks("start", self._depth)
         self._apply_promotions(self._depth)
         if restored_depth is not None:
@@ -998,13 +1057,13 @@ class TuningScheduler:
                     " them out, so they would never be checkpointed.")
             for k in added:
                 self._promoted_values[k] = state[k].detach().to("cpu", copy=True)
-            self._promotions.append({"depth": depth, "names": sorted(names), "from": "instrument", "to": role,
+            self._promotions.append({"depth": depth, "names": sorted(names), "from": "artifact", "to": role,
                                      "materialized": sorted(n for n in names if after[n] is not before[n])})
-            rank_zero_info(f"Phase {depth} promoted {sorted(names)} from `instrument` to `{role}`.")
+            rank_zero_info(f"Phase {depth} promoted {sorted(names)} from `artifact` to `{role}`.")
 
     def _with_promoted_values(self, model_state: Mapping[str, Any]) -> Mapping[str, Any]:
         """``model_state`` (a checkpoint's), completed with the value at promotion of each tensor promoted since
-        the checkpoint was saved: an ``instrument`` tensor then, it was not checkpointed."""
+        the checkpoint was saved: an ``artifact`` tensor then, it was not checkpointed."""
         missing = [k for k in self._promoted_values if k not in model_state]
         return {**model_state, **{k: self._promoted_values[k] for k in missing}} if missing else model_state
 
@@ -1023,11 +1082,76 @@ class TuningScheduler:
                 " not `promote`: a view that translates checkpoint keys must define `promote`, so its checkpoint state"
                 " includes the tensors it promotes.")
 
+    def _refuse_unsupported_restore(self) -> None:
+        """A phase restoring ``best`` or a named state needs a checkpoint policy to restore from, a named state one
+        that can keep it, and one phase's best (``best:<depth>``) one that can keep each phase's best."""
+        restores = {d: p["restore"] for d, p in self._schedule.items() if p.get("restore")}
+        saved = sorted(d for d, r in restores.items() if r != core_schedule.RESTORE_NONE)
+        if saved and self._checkpoint is None:
+            raise FTSConfigurationError(f"Phases {saved} `restore` a saved state, which needs a `checkpoint` policy.")
+        named = sorted(d for d, r in restores.items() if r in core_schedule.NAMED_STATES)
+        if named and not (hasattr(self._checkpoint, "pin_state") and hasattr(self._checkpoint, "state_path")):
+            raise FTSConfigurationError(
+                f"Phases {named} `restore` a named state, but {type(self._checkpoint).__name__} cannot keep one (it"
+                " needs `pin_state` and `state_path`, as `BestCheckpoint` has).")
+        per_phase = sorted(d for d, r in restores.items() if core_schedule.restore_best_depth(r) is not None)
+        if per_phase and not (hasattr(self._checkpoint, "keep_phase_best")
+                              and hasattr(self._checkpoint, "best_path_for_depth")):
+            raise FTSConfigurationError(
+                f"Phases {per_phase} `restore` one phase's best, but {type(self._checkpoint).__name__} cannot keep"
+                " one (it needs `keep_phase_best` and `best_path_for_depth`, as `BestCheckpoint` has).")
+
+    def _refuse_unsupported_masks(self) -> None:
+        """Gradient masks and transforms need an unsharded model: a sharded parameter's gradient is a shard, set by
+        the sharding rather than accumulated, so a hook on it would not see it."""
+        assert self._compiled is not None
+        masked = sorted(cp.depth for cp in self._compiled.phases if cp.masks)
+        if masked and self._sharded:
+            raise FTSConfigurationError(
+                f"Phases {masked} mask the gradients (`of: grad` with `units`) of a sharded model, which this release"
+                " does not support.")
+        transformed = sorted(cp.depth for cp in self._compiled.phases if cp.transforms)
+        if transformed and self._sharded:
+            raise FTSConfigurationError(
+                f"Phases {transformed} transform the gradients (`grad_transforms`) of a sharded model, which this"
+                " release does not support.")
+
+    def _sync_grad_masks(self, depth: int) -> None:
+        """Put the gradient masks in effect at ``depth`` in place (after its thaw and refreeze), reporting the masks
+        that change: each masked tensor and how many of its rows train."""
+        if self._grad_masks is None:
+            return
+        assert self._compiled is not None
+        before, before_transforms = self._grad_masks.masks, self._grad_masks.transforms
+        masks, transforms = self._compiled.masks_at(depth), self._compiled.transforms_at(depth)
+        self._grad_masks.sync(masks, transforms)
+        if transforms != before_transforms:
+            rank_zero_info(f"Phase {depth} transforms the gradients of {len(transforms)} tensors"
+                           + (f": {', '.join(transforms)}." if transforms else "."))
+        changed = {n: kept for n, kept in masks.items() if before.get(n) != kept}
+        if changed:
+            named = dict(self.model.named_parameters())
+            rows = {n: named[n].shape[0] if named[n].dim() else 1 for n in changed}
+            rank_zero_info(f"Phase {depth} trains part of {len(changed)} tensors through gradient masks (rows kept of"
+                           f" rows): {', '.join(f'{n} ({len(k)} of {rows[n]})' for n, k in changed.items())}.")
+
+    def _restore_named_state(self, name: str) -> int:
+        """Restore the named state's model, optimizer and lr scheduler state; return the depth it was saved at."""
+        self._interface.barrier("fts_restore_named")
+        path = getattr(self._checkpoint, "state_path")(name)
+        return self._restore_checkpoint(path, restore_optimizer=True)["depth"]
+
     def _configure_phase(self, depth: int, restored_depth: int, depth_sync: bool,
                          pre_state: tuple[dict, list] | None) -> None:
         """Thaw ``depth``'s parameters (and, after a restore or an optimizer reinitialization, every phase the
-        optimizer lacks) and configure the optimizer and lr schedulers for them, as the callback's ``step_pg``
-        does."""
+        optimizer lacks), configure the optimizer and lr schedulers for them, as the callback's ``step_pg`` does,
+        and apply each such phase's ``refreeze``.
+
+        Revisiting the phases in order leaves the same trainable set and parameter groups however the optimizer got
+        here. A phase's new groups come before its ``refreeze``, which can empty every group it finds, and its
+        ``refreeze`` before an lr scheduler reinitialization, whose ``init_pg_lrs`` describes the groups the phase
+        trains. A tensor a phase thaws again after a refreeze joins that phase's groups with fresh optimizer state.
+        """
         # after any phase hooks and gates, which may have run a forward-only pass, and on `load_state_dict`'s replay
         core_phase.reshard_fsdp_modules(self.model)
         optimizer = self.optimizer
@@ -1045,17 +1169,20 @@ class TuningScheduler:
                 continue
             if i == depth and depth > 0 and pre_state is not None:
                 core_optim.restore_latest_lr_state(optimizer, schedulers, *pre_state)
-            core_optim.add_optimizer_groups(
-                self.model, optimizer, phase["params"], no_decay=self.no_decay,
-                lr=phase.get("lr", optimizer.defaults["lr"]), apply_lambdas=self.apply_lambdas_new_pgs,
-                schedulers=schedulers, pg_overrides=phase.get("pg_overrides"),
-            )
+            if phase["params"] or not phase.get("refreeze"):  # a phase may only refreeze
+                core_optim.add_optimizer_groups(
+                    self.model, optimizer, phase["params"], no_decay=self.no_decay,
+                    lr=phase.get("lr", optimizer.defaults["lr"]), apply_lambdas=self.apply_lambdas_new_pgs,
+                    schedulers=schedulers, pg_overrides=phase.get("pg_overrides"),
+                )
+            self._refreeze_phase(i, optimizer, schedulers)
             new_scheduler_cfg = core_phase.lr_reinit_cfg_for(phase, depth, self.reinit_lr_cfg)
             if new_scheduler_cfg:
                 self._reinit_lr_scheduler(new_scheduler_cfg, optimizer)
                 schedulers = [s for s, _ in self._interface.get_lr_schedulers()]
             else:
                 core_optim.warn_unapplied_lr_lambdas(schedulers, self.apply_lambdas_new_pgs)
+        self._sync_grad_masks(depth)
 
     def _pin_boundary(self, depth: int, initial_path: str | None = None) -> None:
         assert self._checkpoint is not None
@@ -1104,6 +1231,8 @@ class TuningScheduler:
         self._retire_optimizer(self.optimizer)
         self._interface.set_optimizer(0, optimizer)
         self._step_hook = optimizer.register_step_post_hook(self._on_optimizer_step)  # type: ignore[attr-defined]
+        if self._grad_masks is not None:
+            self._grad_masks.attach(optimizer)  # type: ignore[arg-type]
         for sched, _ in self._interface.get_lr_schedulers():
             sched.optimizer = optimizer
         rank_zero_info(f"Optimizer reinitialized at phase {self._depth}: {optimizer_class.__name__}.")
@@ -1157,8 +1286,21 @@ class TuningScheduler:
                 if name in owners and isinstance(mod, nn.modules.batchnorm._BatchNorm):
                     mod.track_running_stats = True
 
+    def _refreeze_phase(self, depth: int, optimizer: Optimizer, schedulers: Sequence[Any]) -> None:
+        names = self._schedule[depth].get("refreeze")
+        if not names:
+            return
+        refrozen = core_phase.refreeze_params(self.model, names)
+        core_optim.drop_optimizer_params(optimizer, refrozen, schedulers)
+        if not self.frozen_bn_track_running_stats:
+            owners = {owner_module(n) for n in names}
+            for name, mod in self.model.named_modules():
+                if name in owners and isinstance(mod, nn.modules.batchnorm._BatchNorm) and not any(
+                        p.requires_grad for p in mod.parameters(recurse=False)):
+                    mod.track_running_stats = False
+
     def _refuse_frozen_roles_in(self, optimizer: Optimizer) -> None:
-        """An optimizer instance may not hold a `fitted` or `instrument` parameter, even with
+        """An optimizer instance may not hold a `fitted` or `artifact` parameter, even with
         ``enforce_phase0_params=False``."""
         roles = self.roles
         names = {id(p): n for n, p in self.model.named_parameters()}
@@ -1166,16 +1308,16 @@ class TuningScheduler:
                       if id(p) in names and is_frozen_role(roles.get(names[id(p)], "base")))
         if held:
             raise FTSConfigurationError(
-                f"The optimizer holds parameters whose role is never optimized (`fitted` or `instrument`): {held}.")
+                f"The optimizer holds parameters whose role is never optimized (`fitted` or `artifact`): {held}.")
 
     def _refuse_trainable_frozen_roles(self) -> None:
-        """Guard: no `fitted` or `instrument` tensor may require grad (a view's coupled tensors could leak one)."""
+        """Guard: no `fitted` or `artifact` tensor may require grad (a view's coupled tensors could leak one)."""
         roles = self.roles
         leaked = sorted(n for n, p in self.model.named_parameters()
                         if p.requires_grad and is_frozen_role(roles.get(n, "base")))
         if leaked:
             raise FTSConfigurationError(
-                f"Tensors whose role is never thawed (`fitted` or `instrument`) require grad: {leaked}.")
+                f"Tensors whose role is never thawed (`fitted` or `artifact`) require grad: {leaked}.")
 
     # ------------------------------------------------------------------------------------------------------------------
     # checkpoints, gates and registered state
@@ -1242,13 +1384,23 @@ class TuningScheduler:
             if rank_zero_only:
                 result = self._interface.broadcast_object(result)
             assert result is not None
-            self._gate_records.append({"depth": depth, "final": final, "gate": describe_callable(fn),
-                                       "accept": result.accept, "reason": result.reason,
-                                       "record": dict(result.record)})
-            if not result.accept:
+            record = {"depth": depth, "final": final, "gate": describe_callable(fn),
+                      "best_depth": event.best_depth, "accept": result.accept, "reason": result.reason,
+                      "record": dict(result.record)}
+            if not rank_zero_only and self._interface.world_size > 1:
+                # A veto on any rank is the verdict on every rank, including the one writing audit metadata.
+                rank_results = self._interface.all_gather_object(record)
+                record = dict(rank_results[0])
+                record["accept"] = all(r["accept"] for r in rank_results)
+                record["reason"] = "; ".join(dict.fromkeys(r["reason"] for r in rank_results if r["reason"])) or None
+                record["rank_results"] = rank_results
+            self._gate_records.append(record)
+            if not record["accept"]:
                 accepted = False
-                reasons.append(result.reason or describe_callable(fn))
+                reasons.append(record["reason"] or describe_callable(fn))
         if not self._interface.reduce_any(not accepted):
+            if final and cp is not None:
+                self._stamp_gate_records(cp.best_path or cp.boundary_path(depth))
             return True
         # every rank reports the same reasons, whichever rank vetoed
         gathered = [r for rank_reasons in self._interface.all_gather_object(reasons) for r in rank_reasons]
@@ -1259,7 +1411,20 @@ class TuningScheduler:
         self._ended_depths.add(depth)
         self._stop(f"veto: phase {depth} was rejected ({'; '.join(reasons)})"
                    + ("" if boundary else "; no earlier checkpoint to restore"))
+        # A boundary veto is terminal too: train_end will not run gates for this ended phase again.
+        self._stamp_gate_records(boundary or (cp.best_path if cp else None))
         return False
+
+    def _stamp_gate_records(self, path: str | None) -> None:
+        """Atomically update only a terminal checkpoint's audit history, never its tensors or resume state."""
+        if path is None:
+            return
+        if self._interface.is_global_zero:
+            target = os.path.join(path, META_FILE) if os.path.isdir(path) else path
+            payload = load_payload(target)
+            payload["metadata"] = {**payload["metadata"], "gate_records": deepcopy(self._gate_records)}
+            save_payload(payload, target)
+        self._interface.barrier("fts_gate_records_written")
 
     @property
     def _sharded(self) -> bool:
@@ -1275,8 +1440,8 @@ class TuningScheduler:
                 raise FTSConfigurationError(feedback.message)
             (rank_zero_warn if feedback.level == "warning" else rank_zero_info)(feedback.message)
 
-    def _instrument_keys(self, keys: Any) -> set[str]:
-        return instrument_state_keys(self.model, self.roles, keys)
+    def _artifact_keys(self, keys: Any) -> set[str]:
+        return artifact_state_keys(self.model, self.roles, keys)
 
     def _training_payload(self, with_tensors: bool) -> dict[str, Any]:
         named = dict(self.model.named_parameters())
@@ -1331,7 +1496,7 @@ class TuningScheduler:
             if self._interface.is_global_zero:
                 remove_checkpoint(tmp)
             self._interface.barrier("fts_checkpoint_tmp")
-            model_sd, optim_sd = self._distributed.state_dict(self.model, self.optimizer, exclude=self._instrument_keys,
+            model_sd, optim_sd = self._distributed.state_dict(self.model, self.optimizer, exclude=self._artifact_keys,
                                                               quiesce=self._suspend_step_counting)
             optim_saved = optim_sd is not None
             self._distributed.save({"model": model_sd, "optim": optim_sd}, tmp)
@@ -1387,11 +1552,11 @@ class TuningScheduler:
             if with_optimizer:
                 optimizer.state.clear()  # a checkpoint saved before any step restores an optimizer with no state
             # a sharded checkpoint loads through DCP whatever this model's layout (an unsharded model included), and
-            # instrument tensors are never saved, so they are the only model keys a load may miss
+            # artifact tensors are never saved, so they are the only model keys a load may miss
             reader = self._distributed if self._distributed.sharded else DTensorAdapter()
             reader.load_state(path, self.model, optimizer,
                               load_optimizer=with_optimizer and meta.get("optim_saved", True),
-                              exclude=self._instrument_keys, quiesce=self._suspend_step_counting)
+                              exclude=self._artifact_keys, quiesce=self._suspend_step_counting)
         else:
             if with_optimizer:
                 optimizer.load_state_dict(meta["optimizer"])
@@ -1425,19 +1590,23 @@ class TuningScheduler:
             self._checkpoint.load_state_dict(state)
         return bool(improved)
 
-    def _restore_best_state(self) -> int | None:
+    def _restore_best_state(self, depth: int | None = None) -> int | None:
         """Restore the best checkpoint's model, optimizer and lr scheduler state (as the callback does at a phase
-        boundary); return the depth it was saved at, or ``None`` when there is none yet."""
+        boundary), or phase ``depth``'s own best when given; return the depth it was saved at, or ``None`` when
+        there is none yet."""
         cp = self._checkpoint
-        restore = getattr(cp, "restore", None) if self._externally_driven else None
+        restore = getattr(cp, "restore", None) if self._externally_driven and depth is None else None
         if restore is not None:  # a policy whose interface reads its own checkpoints restores the best itself
-            depth = restore()
-            self._restored_count += depth is not None
-            return depth
-        if cp is None or cp.best_path is None:
+            restored = restore()
+            self._restored_count += restored is not None
+            return restored
+        # setup refuses `restore_best`, a `restore: best` key and `best:<depth>` without a checkpoint policy
+        assert cp is not None
+        path = cp.best_path if depth is None else getattr(cp, "best_path_for_depth")(depth)
+        if path is None:
             return None
         self._interface.barrier("fts_restore_best")
-        meta = self._restore_checkpoint(cp.best_path, restore_optimizer=True)
+        meta = self._restore_checkpoint(path, restore_optimizer=True)
         self._restored_count += 1
         return meta["depth"]
 
@@ -1457,33 +1626,89 @@ class TuningScheduler:
         return True
 
     def export_book(self, path: str | os.PathLike | None = None, *, name: str | None = None,
-                    applies_to: Mapping[str, Any] | None = None, description: str | None = None) -> dict[str, Any]:
-        """The schedule's phase selections as a venngram address book, one set per phase (see
-        :func:`~finetuning_scheduler.core.books.schedule_book`), written as YAML to ``path`` on global rank zero
-        when given.
+                    applies_to: Mapping[str, Any] | None = None, description: str | None = None,
+                    model: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """The schedule's phase selections as a venngram address book, one set per phase, with each phase's
+        gradient transforms as a treatment (see :func:`~finetuning_scheduler.core.books.schedule_book`), written as
+        YAML to ``path`` on global rank zero when given.
+
+        A book with treatments is compiled back before it is returned: the schedule with each phase naming its
+        treatment must give every tensor the transforms the schedule gives it, in order, or the export is refused (a
+        built-in acting along another axis than venngram's, for one).
 
         Args:
             path: Where to write the book.
             name: The book's name; by default ``<model class>-schedule``.
             applies_to: The book's ``applies_to``; by default the model's ``config.architectures``, when it has them.
             description: The book's description.
+            model: The model Python gradient transforms were written for (``{"id": ..., "revision": ...}``); by
+                default the model's ``config._name_or_path`` and ``config._commit_hash``, when it has both.
 
         Returns:
             The book document.
+
+        Raises:
+            FTSConfigurationError: If :func:`~finetuning_scheduler.core.books.schedule_book` refuses the schedule, or
+                the book's treatments do not compile back to the schedule's transforms.
         """
         self._require_setup()
         assert self._view is not None
+        config = getattr(self.model, "config", None)
         if applies_to is None:
-            archs = getattr(getattr(self.model, "config", None), "architectures", None)
+            archs = getattr(config, "architectures", None)
             applies_to = {"architectures": list(archs)} if archs else None
-        book = schedule_book({d: {"params": p} for d, p in self._source_params.items()},
-                             name=name or f"{type(self.model).__name__}-schedule", addresses=self._address_sets,
+        source, commit = getattr(config, "_name_or_path", None), getattr(config, "_commit_hash", None)
+        if model is None and source and commit:
+            model = {"id": source, "revision": commit}
+        # a phase that only refreezes selects nothing
+        exported = {d: p for d, p in self._source_schedule.items() if p.get("params") or not p.get("refreeze")}
+        book = schedule_book(exported, name=name or f"{type(self.model).__name__}-schedule",
+                             addresses=self._address_sets,
                              logical_names=[n for n, _ in self._view.logical_named_parameters()],
                              naming_scheme=self._view.support().naming_scheme, applies_to=applies_to,
-                             description=description)
+                             description=description, model=model)
+        if "treatments" in book:
+            self._check_exported_treatments(book)
         if path is not None and self._interface.is_global_zero:
             pathlib.Path(path).write_text(yaml.safe_dump(book, sort_keys=False), encoding="utf-8")
         return book
+
+    def _check_exported_treatments(self, book: Mapping[str, Any]) -> None:
+        """Compile the schedule with each phase naming its exported treatment (beside the schedule's own books) and
+        refuse the export when a tensor's transforms differ from the schedule's."""
+        assert self._compiled is not None
+        try:
+            exported = AddressBook.from_mapping(book, source="the exported book", inline=True)
+        except VenngramError as err:
+            raise FTSConfigurationError(f"The exported book does not load: {err}") from err
+        sets = self._address_sets
+        clash = sorted(set(sets) & set(exported.sets()))
+        if clash:
+            raise FTSConfigurationError(f"The schedule's address books already define {clash}, which the exported book"
+                                        " names; rename them to export the schedule's gradient transforms.")
+        treated = set(book["treatments"])
+        schedule = {d: {**p, "grad_transforms": f"phase_{d}"} if f"phase_{d}" in treated else p
+                    for d, p in self._source_schedule.items()}
+        merged = core_schedule.AddressSets({**sets, **exported.sets()}, (*sets.books, exported), sets.references)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                back = compile_schedule(schedule, self._view, addresses=merged)
+        except FTSConfigurationError as err:
+            raise FTSConfigurationError(f"The exported book's treatments do not compile back to the schedule: {err}"
+                                        ) from err
+        for written, read in zip(self._compiled.phases, back.phases):
+            if f"phase_{written.depth}" not in treated:
+                continue
+            want, got = _transform_keys(written.transforms), _transform_keys(read.transforms)
+            for p in sorted(set(want) | set(got)):
+                if want.get(p) != got.get(p):
+                    raise FTSConfigurationError(
+                        f"Phase {written.depth}'s gradient transforms of `{p}` would change in the exported book: the"
+                        f" schedule applies {want.get(p, [])}, the book's treatment {got.get(p, [])}. venngram's ops"
+                        " act on units along each tensor's unit axis and on spans along its `out` side, as the view's"
+                        " component map records them; a built-in acting along another axis (its `dim`) cannot be"
+                        " exported.")
 
     def export_best(self, fn: Callable[[dict[str, Tensor], dict[str, Any], str | None], Any] | None = None, *,
                     roles: Sequence[str] = ("adapter",), path: str | os.PathLike | None = None) -> Any:
@@ -1509,7 +1734,7 @@ class TuningScheduler:
 
         Raises:
             FTSConfigurationError: If there is no best checkpoint yet, no tensor matches ``roles``, a matched tensor is
-                never checkpointed (``instrument``) or absent from the best checkpoint, or the view translates
+                never checkpointed (``artifact``) or absent from the best checkpoint, or the view translates
                 checkpoint keys. Every rank raises whatever fails on global rank zero.
         """
         self._require_setup()
@@ -1528,9 +1753,9 @@ class TuningScheduler:
                  if any(selector_matches(sel, effective.get(n, "base")) for sel in selectors)]
         if not names:
             raise FTSConfigurationError(f"No tensor's role matches {list(roles)}.")
-        never_saved = sorted(n for n in names if role_kind(effective.get(n, "base")) == "instrument")
+        never_saved = sorted(n for n in names if role_kind(effective.get(n, "base")) == "artifact")
         if never_saved:
-            raise FTSConfigurationError(f"`instrument` tensors are never checkpointed, so they cannot be exported: "
+            raise FTSConfigurationError(f"`artifact` tensors are never checkpointed, so they cannot be exported: "
                                         f"{never_saved}.")
         # exported under wrapper-free names (without torch.compile's or activation checkpointing's segments)
         export_roles = {canonical_fqn(n): effective.get(n, "base") for n in names}
@@ -1712,7 +1937,8 @@ class TuningScheduler:
         event = PhaseEvent(depth=depth, epoch=self._interface.current_epoch, global_step=self._interface.global_step,
                            phase_config=self._phase_configs.get(depth), metadata=self._metadata, tuning_scheduler=self,
                            physical_params=tuple(self._schedule[depth]["params"]),
-                           logical_params=self._logical_params.get(depth, ()))
+                           logical_params=self._logical_params.get(depth, ()),
+                           refrozen_params=tuple(self._schedule[depth].get("refreeze", ())))
         for fn, isolate in list(self._hooks[when].values()):
             isolate = self.isolate_rng if isolate is None else isolate
             rngs = fork_rngs(self._interface.rng_devices()) if isolate else nullcontext()
@@ -1761,12 +1987,28 @@ class TuningScheduler:
     # ------------------------------------------------------------------------------------------------------------------
     # state and configuration
     # ------------------------------------------------------------------------------------------------------------------
+    def _stateful_transforms(self) -> dict[str, Any]:
+        """The stateful gradient transforms in effect (see :mod:`~finetuning_scheduler.core.grad_transforms`), each
+        once, keyed ``<tensor>#<index>`` by its first place in the tensors' transforms (in name order)."""
+        if self._compiled is None:
+            return {}
+        out: dict[str, Any] = {}
+        seen: set[int] = set()
+        for name, ts in sorted(self._compiled.transforms_at(self._depth).items()):
+            for i, (fn, _) in enumerate(ts):
+                if is_stateful(fn) and id(fn) not in seen:
+                    seen.add(id(fn))
+                    out[f"{name}#{i}"] = fn
+        return out
+
     def state_dict(self) -> dict[str, Any]:
         """The tuning scheduler's resumable state: depth, counters, pending decision, stop state, policy state,
-        fingerprints and the schedule and configuration hashes.
+        fingerprints, the state of the stateful gradient transforms in effect and the schedule and configuration
+        hashes.
 
         Optimizer and lr scheduler state are saved separately.
         """
+        stateful = self._stateful_transforms()
         return {
             "version": STATE_VERSION,
             "depth": self._depth,
@@ -1793,6 +2035,8 @@ class TuningScheduler:
             "checkpoint": self._checkpoint.state_dict() if self._checkpoint is not None else None,
             "last_metrics": dict(self._last_metrics),
             "finished": self._finished,
+            # only when present, so a schedule without stateful transforms saves what it always has
+            **({"transform_state": {k: fn.state_dict() for k, fn in stateful.items()}} if stateful else {}),
         }
 
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
@@ -1801,7 +2045,8 @@ class TuningScheduler:
         optimizer's and lr schedulers' state (:meth:`load` does all of this).
 
         Raises:
-            FTSConfigurationError: If the saved state belongs to a different fine-tuning schedule.
+            FTSConfigurationError: If the saved state belongs to a different fine-tuning schedule, or holds the state
+                of stateful gradient transforms other than those in effect at its depth.
             FileNotFoundError: If the checkpoint policy's best checkpoint or rollback point no longer exists.
         """
         self._require_setup()
@@ -1840,6 +2085,17 @@ class TuningScheduler:
             # saved after `train_end`: resuming reopens the run, so the phase's end hooks run again at its real end
             self._ended_depths.discard(self._depth)
         self._last_metrics = dict(state_dict.get("last_metrics", {}))
+        self._load_transform_state(state_dict.get("transform_state", {}))
+
+    def _load_transform_state(self, saved: Mapping[str, Any]) -> None:
+        """Load each saved state into the stateful gradient transform in effect at the same place."""
+        stateful = self._stateful_transforms()
+        if sorted(saved) != sorted(stateful):
+            raise FTSConfigurationError(
+                f"The saved state holds the state of the stateful gradient transforms at {sorted(saved)}, but the"
+                f" schedule's at depth {self._depth} are at {sorted(stateful)}.")
+        for key, fn in stateful.items():
+            fn.load_state_dict(saved[key])
 
     def config_dict(self) -> dict[str, Any]:
         """The configuration the hash covers (paths and package versions excluded)."""
@@ -1943,6 +2199,19 @@ class TuningScheduler:
         self._require_setup()
         assert self._compiled is not None
         return self._compiled
+
+    @property
+    def gradient_transforms(self) -> dict[str, tuple[Any, ...]]:
+        """The gradient transforms in effect: each transformed parameter's transforms, in the order they apply, with
+        the first-axis indices its entry keeps (see
+        :meth:`~finetuning_scheduler.core.compile.CompiledSchedule.transforms_at`)."""
+        return self._grad_masks.transforms if self._grad_masks is not None else {}
+
+    @property
+    def gradient_masks(self) -> dict[str, tuple[int, ...]]:
+        """The gradient masks in effect: each masked parameter's kept first-axis indices (see
+        :meth:`~finetuning_scheduler.core.compile.CompiledSchedule.masks_at`)."""
+        return self._grad_masks.masks if self._grad_masks is not None else {}
 
     @property
     def roles(self) -> dict[str, str]:

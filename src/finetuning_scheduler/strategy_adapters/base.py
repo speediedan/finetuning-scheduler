@@ -657,11 +657,17 @@ class StrategyAdapter:
             f"[base StrategyAdapter.gen_ft_schedule] Generating schedule for {self.pl_module.__class__.__name__}"
         )
         view = self.tunable_view if self.attached_view else None
-        if view is not None and (view.support().naming_scheme != "physical"
-                                 or any(is_frozen_role(r) for r in view.roles().values())):
-            # a view with logical names generates its schedule over them, and one with frozen roles leaves them out
+        if view is not None:
             from finetuning_scheduler.core.compile import view_default_schedule
+            from finetuning_scheduler.core.schedule import ADDRESSES_KEY
 
-            return ScheduleImplMixin.save_schedule(f"{self.pl_module.__class__.__name__}_ft_schedule.yaml",
-                                                   view_default_schedule(view), dump_loc)
+            # a view with logical names generates its schedule over them, and one with frozen roles leaves them out
+            over_view = view.support().naming_scheme != "physical" or any(is_frozen_role(r)
+                                                                          for r in view.roles().values())
+            # a view supplying structure writes its schedule as an address book, when the book thaws what names would
+            if over_view or getattr(view.structure(), "vocabulary", False):
+                schedule = view_default_schedule(view)
+                if over_view or ADDRESSES_KEY in schedule:
+                    return ScheduleImplMixin.save_schedule(f"{self.pl_module.__class__.__name__}_ft_schedule.yaml",
+                                                           schedule, dump_loc)
         return ScheduleImplMixin._gen_ft_schedule_impl(self.pl_module, dump_loc)

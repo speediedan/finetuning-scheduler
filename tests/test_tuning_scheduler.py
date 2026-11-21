@@ -338,14 +338,23 @@ def test_phase_config_validation():
         TuningScheduler(Net(), bad, optimizer=partial(torch.optim.SGD, lr=0.1), phase_config_type=Cfg).setup()
 
 
+class _WrappedParameter(nn.Parameter):
+    """A floating-point ``Parameter`` subclass, as a quantization library's weight wrapper is."""
+
+
 @pytest.mark.parametrize(
     "mutate, match",
     [
+        # refused when the schedule compiles, before the scheduler's own check of what it was given
         (lambda m: setattr(m.l2, "weight", nn.Parameter(torch.zeros(1, 4, dtype=torch.int8), requires_grad=False)),
-         "must be floating point"),
+         r"storage cannot require gradients .*l2\.weight \(int8\)"),
         (lambda m: setattr(m.l0, "weight", nn.Parameter(torch.empty(4, 4, device="meta"))), "meta device"),
+        # floating-point storage compiles, but the scheduler trains only plain parameters (or `DTensor`s)
+        (lambda m: setattr(m.l1, "bias", _WrappedParameter(torch.zeros(4))),
+         r"must be floating point \(or complex\) tensors or `DTensor`s.*"
+         r"l1\.bias \(torch\.float32, _WrappedParameter\)"),
     ],
-    ids=["int8", "meta"],
+    ids=["int8", "meta", "parameter_subclass"],
 )
 def test_unschedulable_params_refused(mutate, match):
     model = Net()

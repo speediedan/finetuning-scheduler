@@ -192,7 +192,7 @@ def test_fsdp1_accepts_only_views_with_physical_names():
 
 
 def test_the_promote_key_is_refused_under_lightning(tmp_path):
-    schedule = {**LOGICAL_SCHEDULE, 1: {**LOGICAL_SCHEDULE[1], "promote": {"role:instrument": "latent:x"}}}
+    schedule = {**LOGICAL_SCHEDULE, 1: {**LOGICAL_SCHEDULE[1], "promote": {"role:artifact": "latent:x"}}}
     fts = FinetuningScheduler(ft_schedule=schedule, epoch_transitions_only=True)
     with pytest.raises(FTSConfigurationError, match="phase 1: promote"):
         _trainer(tmp_path, [fts]).fit(_viewed_model())

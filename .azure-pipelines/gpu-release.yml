@@ -1,8 +1,8 @@
 # Release validation on both GPU vendors (#57): a release needs one demanded, full, clean run per vendor at the release
-# candidate's revision. One leg per vendor runs through .azure-pipelines/templates/gpu-job.yml under the `ci-release`
-# class, and a CPU job then checks both legs' phase evidence (`gpu_epsilon.release_eligibility`, configured by
-# tests/gpu_ci/release.json). Its verdict, published as `fts-release-eligibility`, is the release's GPU gate; the legs'
-# own results are necessary, not sufficient.
+# candidate's revision. One leg per vendor runs through .azure-pipelines/templates/fts-gpu-job.yml under the
+# `ci-release` class, and a CPU job then checks both legs' phase evidence (`gpu_epsilon.release_eligibility`, configured
+# by tests/gpu_ci/release.json). Its verdict, published as `fts-release-eligibility`, is the release's GPU gate; the
+# legs' own results are necessary, not sufficient.
 #
 # Queued by hand on the candidate's branch or tag, never triggered: a vendor-demanded job queued while no agent in the
 # pool matches its demands fails at once instead of waiting, and the AMD agent takes release work only in its release
@@ -20,8 +20,18 @@ parameters:
       nvidia: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-azpl-init@sha256:b736deaecaa51b3a9de03186c8d81db050bc649a2d474d29cd9a216e61e2e3cb"
       amd: "speediedan/finetuning-scheduler:py3.13-pt2.15.0-pl2.6-rocm10.0-azpl-init@sha256:07bc4bb6f937e801b3289dfd5f83ae36dda3bdc5a56006f7e092e19143188b17"
 
+# The any-vendor GPU job template shared with interpretune, pinned to a gpu-epsilon tag (move it with
+# requirements/ci/gpu-epsilon.txt). templates/fts-gpu-job.yml passes finetuning-scheduler's settings to it.
+resources:
+  repositories:
+    - repository: ci
+      type: github
+      name: speediedan/gpu-epsilon
+      endpoint: speediedan
+      ref: refs/tags/gpu-job-v1
+
 jobs:
-  - template: templates/gpu-job.yml
+  - template: templates/fts-gpu-job.yml
     parameters:
       jobName: release_nvidia
       vendor: nvidia
@@ -29,7 +39,7 @@ jobs:
       scope: full
       images: ${{ parameters.images }}
 
-  - template: templates/gpu-job.yml
+  - template: templates/fts-gpu-job.yml
     parameters:
       jobName: release_amd
       vendor: amd
