@@ -134,15 +134,25 @@ def test_the_digest_sees_masks_only_when_present():
       2: {"params": [MID_ROWS], "refreeze": ["1.bias"]}}, "Phase 2 both thaws and refreezes these tensors"),
     ({0: {"params": [MID_ROWS], "max_transition_epoch": 1}, 1: {"params": [MID_ROWS], "refreeze": ["1.weight"]}},
      r"Phase 1 both thaws and refreezes these tensors: \['1.weight'\]"),
-    ({0: {"params": ["module:1 & of:grad - module:1 & leaf:bias & units:[0] & of:grad"]}},
-     "sits under a union or a difference"),
-    ({0: {"params": ["(module:1 & units:[0, 1] & of:grad) & (module:1 & units:[1] & of:grad)"]}}, "it intersects"),
     ({0: {"params": ["module:1 & units:[0]"]}}, "masked as gradients with `of: grad`"),
-], ids=["refreeze_of_grad", "thaw_and_refreeze", "reselect_and_refreeze", "units_under_a_difference",
-        "units_intersected", "units_without_of_grad"])
+], ids=["refreeze_of_grad", "thaw_and_refreeze", "reselect_and_refreeze", "units_without_of_grad"])
 def test_refused_gradient_addresses(schedule, match):
     with pytest.raises(FTSConfigurationError, match=match):
         _compiled(schedule)
+
+
+@pytest.mark.parametrize("entry, physical, masks", [
+    # a unit set under a difference keeps the rest of the tensor: the bias without its row 0, the weight whole
+    ("module:1 & of:grad - module:1 & leaf:bias & units:[0] & of:grad", ("1.weight", "1.bias"), {"1.bias": (1, 2, 3)}),
+    # intersected unit sets keep the rows both keep
+    ("(module:1 & units:[0, 1] & of:grad) & (module:1 & units:[1] & of:grad)", ("1.weight", "1.bias"),
+     {"1.weight": (1,), "1.bias": (1,)}),
+], ids=["units_under_a_difference", "units_intersected"])
+def test_unit_sets_under_a_difference_or_intersection_resolve_exactly(entry, physical, masks):
+    """Venngram resolves gradient masks under a difference or an intersection exactly (it refused them before)."""
+    compiled = _compiled({0: {"params": [entry]}})
+    assert compiled.physical_for(0) == physical
+    assert compiled.masks_at(0) == masks
 
 
 def test_the_support_record_honours_gradient_masks_and_refuses_unit_sets_to_tune():
