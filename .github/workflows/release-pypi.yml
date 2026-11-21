@@ -63,9 +63,47 @@ jobs:
         files: 'dist/*'
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
+  check-pypi-environment:
+    runs-on: ubuntu-22.04
+    # a release reaches PyPI only once a maintainer approves the pypi environment's deployment, so a release whose
+    # pypi environment requires no approval, or admits refs other than tags, stops here, before anything is published
+    if: startsWith(github.event.ref, 'refs/tags') || github.event_name == 'release'
+    permissions:
+      actions: read
+      contents: read
+    steps:
+    - name: Check that the pypi environment requires approval and admits only tags
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+      run: |
+        if ! env_json=$(gh api "repos/${REPO}/environments/pypi"); then
+          echo "::error::the pypi environment does not exist: create it with a required reviewer before releasing"
+          exit 1
+        fi
+        reviewers=$(jq '[.protection_rules[] | select(.type == "required_reviewers") | .reviewers[]] | length' \
+          <<< "${env_json}")
+        if [ "${reviewers}" -lt 1 ]; then
+          echo "::error::the pypi environment has no required reviewer, so nothing would stop a release reaching PyPI"
+          exit 1
+        fi
+        if [ "$(jq -r '.deployment_branch_policy.custom_branch_policies // false' <<< "${env_json}")" != "true" ]; then
+          echo "::error::the pypi environment admits every ref: give it a deployment policy admitting only release tags"
+          exit 1
+        fi
+        policies=$(gh api "repos/${REPO}/environments/pypi/deployment-branch-policies")
+        if [ "$(jq '.branch_policies | length' <<< "${policies}")" -lt 1 ] || \
+           [ "$(jq '[.branch_policies[] | select(.type != "tag")] | length' <<< "${policies}")" -ne 0 ]; then
+          echo "::error::the pypi environment's deployment policy must admit release tags only (for example v*)"
+          jq -c '.branch_policies' <<< "${policies}"
+          exit 1
+        fi
+        echo "pypi environment: ${reviewers} required reviewer(s), tag-only deployment policy"
+
   publish-package-testpypi:
     runs-on: ubuntu-22.04
-    needs: build-package
+    # the PyPI job waits for approval after this one, so TestPyPI runs unattended once the environment check passes
+    needs: [build-package, check-pypi-environment]
     # each index's trusted publisher can be scoped to its own environment
     environment: testpypi
     permissions:
@@ -95,7 +133,11 @@ jobs:
   publish-package-pypi:
     runs-on: ubuntu-22.04
     needs: publish-package-testpypi
-    environment: pypi
+    # the pypi environment requires a maintainer's approval (checked by check-pypi-environment), so this job waits for
+    # it: verify the TestPyPI upload, then approve the deployment
+    environment:
+      name: pypi
+      url: https://pypi.org/p/finetuning-scheduler
     permissions:
       id-token: write
     # only publish packages with new tags or release
@@ -107,12 +149,6 @@ jobs:
         name: pypi-packages-${{ github.sha }}
         path: dist
     - run: ls -lh dist/
-
-    - name: Delay releasing
-      # give time to verify that the release looks good on github before proceeding with pypi
-      uses: juliangruber/sleep-action@v1
-      with:
-        time: 2m
 
     - name: Publish distribution 📦 to PyPI
       uses: pypa/gh-action-pypi-publish@v1.13.0
