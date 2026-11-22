@@ -18,8 +18,8 @@ from finetuning_scheduler.core.state import FTSState
 from finetuning_scheduler.core.tuning_scheduler import TuningScheduler, PhaseEvent
 from finetuning_scheduler.core.interface import LRStepConfig, TorchInterface, TrainingInterface
 from finetuning_scheduler.core.transitions import (AnyOf, CallableTransition, Decision, EpochTransition, GateEvent,
-                                                   GateResult, PlateauTransition, StepTransition, TransitionContext,
-                                                   TransitionPolicy)
+                                                   GateResult, PlateauTransition, RestoreEvent, StepTransition,
+                                                   TransitionContext, TransitionPolicy)
 from finetuning_scheduler.core.views import (CanonicalView, TunableSupport, TunableView, TunableViewExtras,
                                              ViewDefaults)
 from finetuning_scheduler.strategies.plan import (
@@ -85,6 +85,7 @@ __all__ = [
     "LRStepConfig",
     "PhaseEvent",
     "PlateauTransition",
+    "RestoreEvent",
     "StepTransition",
     "TorchInterface",
     "TrainingInterface",

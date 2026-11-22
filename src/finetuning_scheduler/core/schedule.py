@@ -671,6 +671,19 @@ LIGHTNING_UNSUPPORTED_PHASE_KEYS = ("grad_transforms", "max_transition_step", "p
 # named state
 RESTORE_BEST, RESTORE_NONE = "best", "none"
 NAMED_STATES = ("initial",)
+# a restore whose state a registered function chooses at the boundary: `{"choose": <name>, "candidates": [...]}`
+RESTORE_CHOOSE, RESTORE_CANDIDATES = "choose", "candidates"
+DEFAULT_RESTORE_CANDIDATES = (RESTORE_BEST, RESTORE_NONE)
+
+
+def restore_targets(restore: Any) -> tuple[str, ...]:
+    """Every state a ``restore`` value can name: the value itself, or a chosen restore's candidates (``()`` for
+    none)."""
+    if restore is None:
+        return ()
+    if isinstance(restore, Mapping):
+        return tuple(restore.get(RESTORE_CANDIDATES, DEFAULT_RESTORE_CANDIDATES))
+    return (restore,)
 
 
 def restore_best_depth(restore: Any) -> int | None:
@@ -698,7 +711,9 @@ def parse_phase_extensions(schedule: dict) -> None:
       dropped from the optimizer (not in phase 0).
     - ``restore``: what the phase starts from: ``"best"``, one earlier phase's best (``"best:<depth>"``), ``"none"``
       or a named state (``"initial"``), overriding the tuning scheduler's ``restore_best`` for this boundary (not in
-      phase 0).
+      phase 0); or a chosen restore, ``{"choose": <name>, "candidates": [<state>, ...]}``, whose restore chooser
+      picks one of the candidates at the boundary (see
+      :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.add_restore_chooser`).
 
     Raises:
         FTSConfigurationError: If a key has the wrong type.
@@ -815,7 +830,8 @@ def parse_grad_transforms(depth: int, transforms: Any) -> None:
 
 
 def parse_restore(depth: int, restore: Any) -> None:
-    """Validate phase ``depth``'s ``restore`` key (``None`` when the phase has none).
+    """Validate phase ``depth``'s ``restore`` key (``None`` when the phase has none): a state, or a chosen restore
+    ``{"choose": <name>, "candidates": [<state>, ...]}``, whose candidates default to ``["best", "none"]``.
 
     Raises:
         FTSConfigurationError: If it names nothing a phase can start from, or phase 0 has one.
@@ -824,6 +840,34 @@ def parse_restore(depth: int, restore: Any) -> None:
         return
     if depth == 0:
         raise FTSConfigurationError("Phase 0 may not set `restore`: no earlier state exists when it starts.")
+    if isinstance(restore, Mapping):
+        _parse_chosen_restore(depth, restore)
+    else:
+        _parse_restore_state(depth, restore)
+
+
+def _parse_chosen_restore(depth: int, restore: Mapping) -> None:
+    """Validate a chosen restore: a restore chooser's name, and the distinct states it may choose among."""
+    where = f"Phase {depth}'s chosen `restore`"
+    if unknown := sorted(set(restore) - {RESTORE_CHOOSE, RESTORE_CANDIDATES}):
+        raise FTSConfigurationError(f"{where} has unknown keys {unknown}; it takes {RESTORE_CHOOSE!r} and"
+                                    f" {RESTORE_CANDIDATES!r}.")
+    name = restore.get(RESTORE_CHOOSE)
+    if not isinstance(name, str) or not name:
+        raise FTSConfigurationError(f"{where} needs the name of a restore chooser under {RESTORE_CHOOSE!r}.")
+    candidates = restore.get(RESTORE_CANDIDATES, DEFAULT_RESTORE_CANDIDATES)
+    if isinstance(candidates, (str, Mapping)) or not isinstance(candidates, Sequence) or not candidates:
+        raise FTSConfigurationError(f"{where} needs {RESTORE_CANDIDATES!r} as a non-empty list of states.")
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            raise FTSConfigurationError(f"{where}'s candidates are states (strings), got {candidate!r}.")
+        _parse_restore_state(depth, candidate)
+    if len(set(candidates)) != len(candidates):
+        raise FTSConfigurationError(f"{where} lists a candidate more than once: {list(candidates)}.")
+
+
+def _parse_restore_state(depth: int, restore: Any) -> None:
+    """Validate one state a phase can start from."""
     known = (RESTORE_BEST, RESTORE_NONE, *NAMED_STATES)
     if restore in known:
         return
