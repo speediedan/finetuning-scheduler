@@ -1,9 +1,14 @@
 # .github/workflows/documentation-links.yml
-# Adds Read the Docs preview links to Pull Request descriptions
+# Adds Read the Docs preview links to Pull Request descriptions.
+#
+# It runs on `pull_request`, not `pull_request_target`: GitHub blocks `pull_request_target` by default in public
+# repositories from 2026-12-02. A pull request from a fork gets a read-only token under `pull_request`, so the job runs
+# only for branches of this repository; a fork's pull request still has the Read the Docs check, which links its
+# preview build.
 
 name: readthedocs/actions
 on:
-  pull_request_target:
+  pull_request:
     types:
       - opened
     # Execute this action only on PRs that touch documentation files
@@ -17,6 +22,7 @@ permissions:
 
 jobs:
   documentation-links:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: readthedocs/actions/preview@v1
