@@ -84,12 +84,6 @@ def test_roles_view_on_fsdp2_matches_single_process(gloo_pool, tmp_path, explici
     assert _close(results[0]["params"], ref["params"])
 
 
-@GLOO
-def test_sharded_promotion_is_refused(gloo_pool, tmp_path):
-    results = gloo_pool.run(fts_views.promotion_refused, ckpt_dir=str(tmp_path / "promote"))
-    assert all(r["refused"] for r in results)
-
-
 @RunIf(min_cuda_gpus=2)
 def test_roles_view_on_fsdp2_matches_single_process_nccl(nccl_pool, tmp_path):
     results = nccl_pool.run(fts_views.roles, ckpt_dir=str(tmp_path / "sharded"))

@@ -77,7 +77,8 @@ class DistributedAdapter(Protocol):
         ...
 
     def save(self, state: Mapping[str, Any], path: str) -> None:
-        """Write ``state`` (``{"model": ..., "optim": ...}``) to ``path``."""
+        """Write ``state`` (``{"model": ..., "optim": ..., "promoted": ...}``, leaving out what is ``None``) to
+        ``path``."""
         ...
 
     def load_state(self, path: str, model: nn.Module, optimizer: Optimizer | None, *, load_optimizer: bool,
