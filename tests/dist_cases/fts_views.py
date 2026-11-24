@@ -80,17 +80,6 @@ def reference(ckpt_dir: str, epochs: int = 5, steps: int = 2, batch: int = 8, se
     return {"path": path, "params": _params(model), "adapter": fts._distributed.name}
 
 
-def promotion_refused(ctx, ckpt_dir: str, seed: int = 7) -> dict:
-    """Promotion on a sharded model is refused at setup, naming the phase."""
-    model = _sharded(ctx, seed)
-    schedule = {**SCHEDULE, 1: {**SCHEDULE[1], "promote": {"role:artifact": "latent:probe"}}}
-    try:
-        _tuning_scheduler(model, os.path.join(ckpt_dir, str(ctx.rank)), schedule=schedule)
-    except FTSConfigurationError as err:
-        return {"refused": "sharded model" in str(err)}
-    return {"refused": False}
-
-
 def explicit_unsharded_refused(ctx, ckpt_dir: str, seed: int = 7) -> dict:
     """An explicit unsharded adapter on an FSDP2 model is refused: one file would keep one rank's shards only."""
     from finetuning_scheduler.strategies import UnshardedAdapter

@@ -129,7 +129,20 @@ with its own ``promote``, which must keep each tensor's name. Promoted tensors a
 and promotions are replayed before a saved state loads. Restoring a checkpoint saved before a promotion (a best
 checkpoint, or the rollback point of a vetoed phase) puts the promoted tensors back to their values at promotion; those
 values are kept on the CPU and saved with :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save`.
-Promotion is not yet supported on a sharded model, and a view that overrides its checkpoint state must define ``promote``.
+A view that overrides its checkpoint state must define ``promote``.
+
+Promotion works the same way on a sharded model (FSDP2 units, FSDP2's root unit alone, or tensor parallelism), with three
+differences:
+
+- **Promoted parameters are kept.** The placement holds the parameters it registered, so a promotion changes their role
+  and replaces none. A promoted parameter tied to another within one FSDP2 unit is refused at setup (untie it before
+  sharding the model), and so is a view whose ``promote`` replaces a parameter, when its phase starts.
+- **Each rank keeps its own shard** of the values at promotion, so no process holds a tensor it has only part of.
+  :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.save` writes them through
+  ``torch.distributed.checkpoint``, so a save loads under another layout, a single process included.
+- **A training loop that checkpoints itself** resumes promoted tensors under the layout it saved: each rank's
+  :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.resume_state` holds that rank's shards, and a state
+  saved under another layout is refused.
 
 .. _tunable-views-gradient-masks:
 

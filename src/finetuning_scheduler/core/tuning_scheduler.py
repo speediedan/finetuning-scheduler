@@ -57,6 +57,8 @@ from finetuning_scheduler.core.fingerprint import batch_fingerprint
 from finetuning_scheduler.core.grad_masks import GradientMasks
 from finetuning_scheduler.core.grad_transforms import Add, is_stateful, Replace, Scale, transform_id
 from finetuning_scheduler.core.interface import LRStepConfig, TorchInterface, TrainingInterface
+from finetuning_scheduler.core.promotion import (full_value, in_layout_of, live_tensors, local_value, put_back,
+                                                 tied_names)
 from finetuning_scheduler.core.rng import capture_rng_state, fork_rngs, restore_rng_state
 from finetuning_scheduler.core.roles import (is_frozen_role, is_role_selector, role_kind, SELECTOR_PREFIX,
                                              selector_matches)
@@ -328,9 +330,12 @@ class TuningScheduler:
         self._address_references: tuple[str, ...] = ()
         self._source_schedule: dict[int, dict[str, Any]] = {}  # each phase as written, for `export_book`
         self._logical_params: dict[int, tuple[str, ...]] = {}
-        # promotions applied so far, and each promoted tensor's value when it was promoted (on the CPU)
+        # promotions applied so far, and each promoted tensor's value when it was promoted (on the CPU; of a sharded
+        # tensor, the part this process holds)
         self._promotions: list[dict[str, Any]] = []
         self._promoted_values: dict[str, Tensor] = {}
+        # the roles of a sharded model's tensors promoted without the view's own `promote`
+        self._promoted_in_place: dict[str, str] = {}
         # the gradient masks in effect, when the schedule has any (`of: grad` addresses)
         self._grad_masks: GradientMasks | None = None
 
@@ -428,6 +433,8 @@ class TuningScheduler:
         self._max_depth = core_schedule.resolve_max_depth(self._max_depth_arg, len(self._schedule))
         self._refuse_unschedulable_params()
         core_phase.reshard_fsdp_modules(self.model)
+        if self._sharded:
+            self._refuse_tied_promotion()
         self._validate_layout()
         self._warn_unsynchronized_params()
         core_phase.freeze_module_tree(self.model, train_bn=False,
@@ -1111,23 +1118,104 @@ class TuningScheduler:
         for name, role in promoted.items():
             by_role.setdefault(role, []).append(name)
         for role, names in by_role.items():
-            before = dict(self.model.named_parameters(remove_duplicate=False))
-            unsaved = set(self._view.checkpoint_state_dict())
-            self._view.promote(names, role)
-            after = dict(self.model.named_parameters(remove_duplicate=False))
-            # every checkpoint key the promotion adds (the promoted tensors, and aliases a materialization untied),
-            # by its value now: a checkpoint saved before the promotion lacks it
-            state = self._view.checkpoint_state_dict()
-            added = [k for k in state if k not in unsaved]
-            if not added:
-                raise FTSConfigurationError(
-                    f"After promoting {sorted(names)}, {type(self._view.view).__name__}'s checkpoint state still leaves"
-                    " them out, so they would never be checkpointed.")
-            for k in added:
-                self._promoted_values[k] = state[k].detach().to("cpu", copy=True)
+            materialized = (self._promote_sharded if self._sharded else self._promote_unsharded)(names, role)
             self._promotions.append({"depth": depth, "names": sorted(names), "from": "artifact", "to": role,
-                                     "materialized": sorted(n for n in names if after[n] is not before[n])})
+                                     "materialized": materialized})
             rank_zero_info(f"Phase {depth} promoted {sorted(names)} from `artifact` to `{role}`.")
+
+    def _promote_unsharded(self, names: Sequence[str], role: str) -> list[str]:
+        """Promote ``names`` to ``role`` through the view, record each value the promotion adds to a checkpoint,
+        and return the names it gave storage of their own."""
+        assert self._view is not None
+        before = dict(self.model.named_parameters(remove_duplicate=False))
+        unsaved = set(self._view.checkpoint_state_dict())
+        self._view.promote(names, role)
+        after = dict(self.model.named_parameters(remove_duplicate=False))
+        # every checkpoint key the promotion adds (the promoted tensors, and aliases a materialization untied), by its
+        # value now: a checkpoint saved before the promotion lacks it
+        state = self._view.checkpoint_state_dict()
+        added = [k for k in state if k not in unsaved]
+        if not added:
+            raise FTSConfigurationError(
+                f"After promoting {sorted(names)}, {type(self._view.view).__name__}'s checkpoint state still leaves"
+                " them out, so they would never be checkpointed.")
+        for k in added:
+            self._promoted_values[k] = state[k].detach().to("cpu", copy=True)
+        return sorted(n for n in names if after[n] is not before[n])
+
+    def _promote_sharded(self, names: Sequence[str], role: str) -> list[str]:
+        """Promote ``names``, parameters of a sharded model, to ``role`` in place, and record the part of each
+        value this process holds.
+
+        The placement (FSDP2 or tensor parallelism) holds on to the parameters it registered, so none is
+        replaced: only their role changes.
+        """
+        assert self._view is not None
+        core_phase.reshard_fsdp_modules(self.model)  # a start hook may have left unsharded parameters registered
+        before = live_tensors(self.model)
+        if self._view.overrides("promote"):
+            self._view.promote(names, role)
+            after = live_tensors(self.model)
+            replaced = sorted(n for n in names if after.get(n) is not before[n])
+            if replaced:
+                raise FTSConfigurationError(
+                    f"{type(self._view.view).__name__}.promote replaced the parameters {replaced} of a sharded model:"
+                    " the placement holds the ones it registered, so a promotion must keep them.")
+        else:
+            self._promoted_in_place.update(dict.fromkeys(names, role))
+        self._promoted_values.update({n: local_value(before[n]) for n in names})
+        return []
+
+    def _refuse_tied_promotion(self) -> None:
+        """A promoted parameter that shares its tensor would need one of its own, which replaces a parameter the
+        sharded model's placement registered."""
+        assert self._compiled is not None
+        promoted = {n for ps in self._compiled.promotions.values() for n in ps}
+        tied = tied_names(self.model, sorted(promoted))
+        if tied:
+            raise FTSConfigurationError(
+                "A sharded model's tied parameters cannot be promoted, since each would need storage of its own:"
+                f" {tied} (each with the names it shares its tensor with). Untie them before sharding the model.")
+
+    def _promoted_since(self, path: str) -> set[str]:
+        """The wrapper-free names of the tensors promoted since the sharded checkpoint at ``path`` was saved: each
+        an ``artifact`` tensor then, so it was not saved."""
+        if not self._promoted_values:
+            return set()
+        import torch.distributed.checkpoint as dcp
+
+        saved = dcp.FileSystemReader(path).read_metadata().state_dict_metadata
+        return {canonical_fqn(k) for k in self._promoted_values} - {
+            canonical_fqn(k[len("model."):]) for k in saved if k.startswith("model.")}
+
+    def _promoted_tensors(self, names: Iterable[str] | None = None) -> dict[str, tuple[Tensor, Tensor]]:
+        """Each promoted tensor (of the wrapper-free ``names``, when given) and its value at promotion, by its
+        wrapper-free name, in the same order on every rank."""
+        live = {canonical_fqn(n): t for n, t in live_tensors(self.model).items()}
+        values = {canonical_fqn(k): v for k, v in self._promoted_values.items()}
+        return {k: (live[k], values[k]) for k in sorted(values if names is None else set(names) & set(values))}
+
+    def _load_promoted_values(self, path: str) -> None:
+        """Read the values at promotion :meth:`save` wrote to the sharded checkpoint at ``path``, each process the
+        part it holds, whatever layout the checkpoint was saved under."""
+        if not self._promoted_values:
+            return
+        import torch.distributed.checkpoint as dcp
+
+        state = {k: in_layout_of(t, v) for k, (t, v) in self._promoted_tensors().items()}
+        dcp.load({"promoted": state}, checkpoint_id=path)
+        self._promoted_values = {k: local_value(state[canonical_fqn(k)]) for k in self._promoted_values}
+
+    def _load_process_values(self, saved: Mapping[str, Tensor]) -> None:
+        """Take the values at promotion a state dict holds, which are this process's own (a shard of each sharded
+        tensor)."""
+        for k, v in saved.items():
+            if k in self._promoted_values and v.shape != self._promoted_values[k].shape:
+                raise FTSConfigurationError(
+                    f"The saved state holds a value of shape {tuple(v.shape)} for the promoted tensor {k!r}, of which"
+                    f" this process holds {tuple(self._promoted_values[k].shape)}: the state was saved under another"
+                    " layout. Resume with `save` and `load`, which read each promoted value under any layout.")
+        self._promoted_values.update(saved)
 
     def _with_promoted_values(self, model_state: Mapping[str, Any]) -> Mapping[str, Any]:
         """``model_state`` (a checkpoint's), completed with the value at promotion of each tensor promoted since
@@ -1136,13 +1224,10 @@ class TuningScheduler:
         return {**model_state, **{k: self._promoted_values[k] for k in missing}} if missing else model_state
 
     def _refuse_unsupported_promotion(self) -> None:
-        """Promotion needs an unsharded model, and a view that translates checkpoint keys must own promotion, since
-        only it can report the promoted tensors in its checkpoint state."""
+        """A view that translates checkpoint keys must own promotion, since only it can report the promoted tensors
+        in its checkpoint state."""
         assert self._compiled is not None and self._view is not None
         phases = sorted(self._compiled.promotions)
-        if self._sharded:
-            raise FTSConfigurationError(
-                f"Phases {phases} `promote` tensors of a sharded model, which this release does not support.")
         translating = [m for m in ("checkpoint_state_dict", "load_checkpoint_state_dict") if self._view.overrides(m)]
         if translating and not self._view.overrides("promote"):
             raise FTSConfigurationError(
@@ -1607,10 +1692,14 @@ class TuningScheduler:
         return payload
 
     def _write_checkpoint(self, path: str, extra: Mapping[str, Any] | None = None,
-                          rng_state: dict | None = None) -> str:
+                          rng_state: dict | None = None, resumable: bool = False) -> str:
         """Write the training state to ``path``: one file (rank zero) for an unsharded model; for a sharded model,
         a directory written by every rank through DCP, with the non-tensor state in ``fts_meta.pt`` and each rank's
-        random generator state (if given) beside it."""
+        random generator state (if given) beside it.
+
+        A ``resumable`` sharded checkpoint also holds the promoted
+        tensors' values at promotion (an unsharded one has them in the tuning scheduler's state, in ``extra``).
+        """
         path = os.path.normpath(os.fspath(path))  # `ckpt/` and `ckpt` are one checkpoint
         core_phase.reshard_fsdp_modules(self.model)
         # registered state (a data-loader position, for example) and random streams are per rank
@@ -1628,7 +1717,8 @@ class TuningScheduler:
             model_sd, optim_sd = self._distributed.state_dict(self.model, self.optimizer, exclude=self._artifact_keys,
                                                               quiesce=self._suspend_step_counting)
             optim_saved = optim_sd is not None
-            self._distributed.save({"model": model_sd, "optim": optim_sd}, tmp)
+            promoted = {k: in_layout_of(t, v) for k, (t, v) in self._promoted_tensors().items()} if resumable else {}
+            self._distributed.save({"model": model_sd, "optim": optim_sd, "promoted": promoted or None}, tmp)
             if self._interface.is_global_zero:
                 save_payload({**self._training_payload(with_tensors=False), "optim_saved": optim_saved,
                               "per_rank": per_rank, **(extra or {})}, os.path.join(tmp, META_FILE))
@@ -1681,11 +1771,17 @@ class TuningScheduler:
             if with_optimizer:
                 optimizer.state.clear()  # a checkpoint saved before any step restores an optimizer with no state
             # a sharded checkpoint loads through DCP whatever this model's layout (an unsharded model included), and
-            # artifact tensors are never saved, so they are the only model keys a load may miss
+            # artifact tensors are never saved, so they (those promoted since included) are the only model keys a load
+            # may miss
             reader = self._distributed if self._distributed.sharded else DTensorAdapter()
+            since = self._promoted_since(path)
             reader.load_state(path, self.model, optimizer,
                               load_optimizer=with_optimizer and meta.get("optim_saved", True),
-                              exclude=self._artifact_keys, quiesce=self._suspend_step_counting)
+                              exclude=lambda keys: self._artifact_keys(keys) | {k for k in keys
+                                                                                if canonical_fqn(k) in since},
+                              quiesce=self._suspend_step_counting)
+            for tensor, value in self._promoted_tensors(since).values():
+                put_back(tensor, value)
         else:
             if with_optimizer:
                 optimizer.load_state_dict(meta["optimizer"])
@@ -1895,10 +1991,15 @@ class TuningScheduler:
         failure: tuple[str, str] | None = None
         raised: BaseException | None = None
         self._interface.barrier("fts_export_best")
+        # gathered on every rank, before rank zero reads the checkpoint alone
+        since = self._promoted_since(best) if os.path.isdir(best) else set()
+        if since:
+            core_phase.reshard_fsdp_modules(self.model)  # a forward-only pass may have left full parameters registered
+        promoted = {k: full_value(t, v) for k, (t, v) in self._promoted_tensors(since & set(export_roles)).items()}
         if self._interface.is_global_zero:
             try:
                 meta = self._read_meta(best)
-                tensors = self._read_checkpoint_tensors(best, meta, names)
+                tensors = self._read_checkpoint_tensors(best, meta, names, promoted)
                 metadata = {**meta.get("metadata", {}), "source": best, "best_depth": cp.best_depth,
                             "best_score": float(cp.best_score) if cp.best_score is not None else None,
                             "config_hash": meta.get("config_hash"), "versions": meta.get("versions")}
@@ -1919,12 +2020,14 @@ class TuningScheduler:
             raise RuntimeError(f"`export_best` failed on global rank zero: {kind}: {message}")
         return result
 
-    def _read_checkpoint_tensors(self, path: str, meta: Mapping[str, Any], names: Sequence[str]) -> dict[str, Tensor]:
+    def _read_checkpoint_tensors(self, path: str, meta: Mapping[str, Any], names: Sequence[str],
+                                 promoted: Mapping[str, Tensor]) -> dict[str, Tensor]:
         """The full values of the model state ``names`` in the checkpoint at ``path`` (whose metadata is ``meta``),
         keyed by their wrapper-free names and read on this process alone (call it on one rank), without touching
         the live model.
 
-        A tensor promoted after the checkpoint was saved takes its value at promotion.
+        A tensor promoted after the checkpoint was saved takes its value at promotion (for a sharded checkpoint, its
+        full value in ``promoted``).
         """
         if not meta.get("sharded"):
             state = self._with_promoted_values(meta["model"])
@@ -1938,12 +2041,14 @@ class TuningScheduler:
 
         saved = dcp.FileSystemReader(path).read_metadata().state_dict_metadata
         keys, missing = _checkpoint_keys(names, [k[len("model."):] for k in saved if k.startswith("model.")])
+        missing = [n for n in missing if canonical_fqn(n) not in promoted]
         if missing:
             raise FTSConfigurationError(f"The best checkpoint does not hold {missing}.")
         model_state = {k: torch.empty(saved[f"model.{k}"].size, dtype=saved[f"model.{k}"].properties.dtype)
                        for k in keys.values()}
-        dcp.load({"model": model_state}, checkpoint_id=path, no_dist=True)
-        return {canonical_fqn(n): model_state[k] for n, k in keys.items()}
+        if model_state:
+            dcp.load({"model": model_state}, checkpoint_id=path, no_dist=True)
+        return {**{canonical_fqn(n): model_state[k] for n, k in keys.items()}, **promoted}
 
     def save(self, path: str | os.PathLike) -> str:
         """Save everything needed to resume exactly: the tuning scheduler's state, the model, optimizer, lr schedulers,
@@ -1960,8 +2065,11 @@ class TuningScheduler:
         self._require_setup()
         self._refuse_externally_driven("save", resume=True)
         rng_state = capture_rng_state(self._interface.rng_devices()) if self.capture_rng else None
-        path = self._write_checkpoint(os.fspath(path), extra={"tuning_scheduler": self.state_dict()},
-                                      rng_state=rng_state)
+        state = self.state_dict()
+        if self._sharded:
+            state["promoted_values"] = {}  # this rank's shards: every rank writes its own through DCP instead
+        path = self._write_checkpoint(os.fspath(path), extra={"tuning_scheduler": state}, rng_state=rng_state,
+                                      resumable=True)
         self._checkpoint_hook("mark_resume_point")  # keep the checkpoints this save refers to until the next one
         return path
 
@@ -1979,6 +2087,7 @@ class TuningScheduler:
         self.load_state_dict(meta["tuning_scheduler"])
         self._restore_checkpoint(path, restore_optimizer=True, statefuls="all", meta=meta)
         if meta.get("sharded"):
+            self._load_promoted_values(path)
             rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
             rng_file = os.path.join(path, f"rng_rank{rank}.pt")
             if os.path.exists(rng_file):
@@ -2160,7 +2269,8 @@ class TuningScheduler:
             # only when a restore was chosen, so a schedule without chosen restores saves what it always has
             **({"restore_choices": deepcopy(self._restore_choices)} if self._restore_choices else {}),
             "promotions": deepcopy(self._promotions),
-            # the promoted tensors' values at promotion, which a resume cannot recompute (start hooks are not replayed)
+            # the promoted tensors' values at promotion, which a resume cannot recompute (start hooks are not
+            # replayed); of a sharded tensor, the part this process holds
             "promoted_values": dict(self._promoted_values),
             "ended_depths": sorted(self._ended_depths),
             "checkpoint": self._checkpoint.state_dict() if self._checkpoint is not None else None,
@@ -2201,7 +2311,7 @@ class TuningScheduler:
             self._depth = depth
             self._apply_promotions(depth)  # before the state loads: promoted tensors are checkpointed only from then
             self._executor.configure_phase(depth, depth - 1, depth_sync=False, pre_state=None)
-        self._promoted_values.update(state_dict.get("promoted_values", {}))
+        self._load_process_values(state_dict.get("promoted_values", {}))
         self._depth = state_dict["depth"]
         self._interface.load_counters(state_dict["epoch"], state_dict["global_step"])  # type: ignore[attr-defined]
         self._phase_start_epoch, self._phase_start_step = state_dict["phase_start_epoch"], state_dict[
@@ -2355,7 +2465,7 @@ class TuningScheduler:
         """Physical parameter and buffer names mapped to roles (anything unlisted is ``base``)."""
         if self._compiled is not None:
             assert self._view is not None
-            return {**self._compiled.roles, **self._view.promoted}
+            return {**self._compiled.roles, **self._view.promoted, **self._promoted_in_place}
         return dict(self._view.roles()) if self._view is not None else {}
 
     @property
