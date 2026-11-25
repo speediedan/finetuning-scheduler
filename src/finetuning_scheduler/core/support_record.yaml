@@ -14,8 +14,10 @@ description: >-
   model holding them is tuned through its own tensors), and no unit sets as values (`units: none`; a unit set under
   `of: grad` is a gradient mask, which venngram's support check does not yet tell apart, so Fine-Tuning Scheduler
   judges those sets itself). Naming schemes are whatever the view provides, checked against each book's
-  `requires.naming_scheme`. Of a book's treatments it applies the `gradients` ops (ops on parameter gradients) of a
-  treatment a phase names in `grad_transforms` (the PyTorch API): `scale`, `replace` and `add` with a dose or per-unit
+  `requires.naming_scheme`. A book that pins the models it was written against (`requires.base_model`,
+  `requires.latent_models`) applies through a view that checks them (one defining `check_book`), and is refused through
+  any other, so the record declares no `pins`. Of a book's treatments it applies the `gradients` ops (ops on parameter
+  gradients) of a treatment a phase names in `grad_transforms` (the PyTorch API): `scale`, `replace` and `add` with a dose or per-unit
   doses, a `param_units` target acting along each tensor's unit axis, and `project` and `reject` with a vector or
   subspace operand along a weight's `out` side. It applies no stage or `weights` ops.
 sections:

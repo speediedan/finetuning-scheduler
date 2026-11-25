@@ -42,7 +42,9 @@ The optional members (:class:`~finetuning_scheduler.core.views.TunableViewExtras
 ``promote`` and ``structure`` (where the root's tensors sit in its block structure, for addresses; the default finds the
 root's block list). :class:`~finetuning_scheduler.core.views.ViewDefaults` implements every default, for implementers who
 prefer to inherit. A view need not inherit from any class. Members are methods: a view whose ``roles`` (for example) is
-a dictionary rather than a method returning one is refused.
+a dictionary rather than a method returning one is refused. Beside the protocol's members, Fine-Tuning Scheduler calls
+``check_book(book)`` where a view defines it, to check the models an address book pins (see :ref:`pinned
+books<tunable-views-pinned-books>`).
 
 A view that does not satisfy the protocol (one lacking a required member, or whose ``support()`` returns something
 other than a :class:`~finetuning_scheduler.core.views.TunableSupport`) raises
@@ -332,6 +334,29 @@ for more is refused the same way. A book can be checked against the record witho
 
     python -m venngram.conformance hub-model:my-org/qwen3-sets@v1 --support support_record.yaml
 
+.. _tunable-views-pinned-books:
+
+**Pinned books.** A book that names latent models records the base model and the dictionaries it was written against in
+its ``requires`` (``base_model`` and ``latent_models``, see `Address books
+<https://github.com/speediedan/venngram#address-books>`_). The same names select the same tensors on other models, but
+they no longer mean the same thing there, so such a book applies only where its pins are checked. Fine-Tuning Scheduler
+does not know where a model's dictionaries came from; the view's owner does, so a view that defines ``check_book(book)``
+is asked to check each pinned book of the schedule (those whose imports pin included) when the schedule compiles, under
+both interfaces:
+
+.. code-block:: python
+
+    class PinnedView(MappedView):
+        def check_book(self, book):
+            # raises `venngram.PinMismatchError`, naming each entry that differs
+            # `loaded_base` is {"id": ..., "revision": ...}, and `loaded_latents` each dictionary's name mapped to
+            # {"release": {...}, "frames": {...}}, as they were recorded when the models were loaded
+            book.check_pins(base_model=self.loaded_base, latent_models=self.loaded_latents)
+
+A ``check_book`` states everything the model has loaded: ``check_pins`` skips a ``base_model`` or ``latent_models`` it
+is not given. Through a view that defines none, a pinned book is refused. The support record therefore declares no
+``pins``, so the command above reports a pinned book as refused: whether its pins are checked depends on the view.
+
 .. _tunable-views-export-book:
 
 **A schedule as a book.** :meth:`~finetuning_scheduler.core.tuning_scheduler.TuningScheduler.export_book` (or
@@ -343,19 +368,21 @@ per phase (``phase_0``, ``phase_1``, ...), so a tuning setup can be published, i
     fts.export_book("books/my_schedule.yaml")
 
 Names and regexes become ``name`` terms (a regex keeps Fine-Tuning Scheduler's prefix match), the book declares the
-view's naming scheme, and books fetched by reference are recorded under ``derived_from``. A phase of gradient addresses
-becomes a set of gradients, in an address book of schema 2. Every phase is one set: a phase mixing whole tensors and
-gradient addresses (phase 1 of the :ref:`example above<tunable-views-gradient-masks>`) becomes a union of a value part,
-each value entry stating ``of: value``, and a gradient part, and a phase of several gradient entries with unit sets a
-union whose disjuncts each give their own mask. Either compiles back to the phase's masks, and the support record
-declares both readings (venngram's ``mixed-sets`` and ``union-masks``).
+view's naming scheme, books fetched by reference are recorded under ``derived_from``, and the models the schedule's
+books pin are pinned by the export too. The export declares the address book schema its contents need (2 for a set of
+gradients, 7 for layers relative to the depth, 8 for pins). A phase of gradient addresses becomes a set of gradients.
+Every phase is one set: a phase mixing whole tensors and gradient addresses (phase 1 of the :ref:`example
+above<tunable-views-gradient-masks>`) becomes a union of a value part, each value entry stating ``of: value``, and a
+gradient part, and a phase of several gradient entries with unit sets a union whose disjuncts each give their own mask.
+Either compiles back to the phase's masks, and the support record declares both readings (venngram's ``mixed-sets`` and
+``union-masks``).
 
-A phase's gradient transforms become a treatment named after its set, ``phase_<depth>``, in an address book of schema 4,
-so a schedule reading the book names it (``grad_transforms: phase_1``). The built-ins ``Scale``, ``Replace``, ``Add``,
+A phase's gradient transforms become a treatment named after its set, ``phase_<depth>`` (schema 4 or later), so a
+schedule reading the book names it (``grad_transforms: phase_1``). The built-ins ``Scale``, ``Replace``, ``Add``,
 ``Project`` and ``Reject`` become venngram's ``scale``, ``replace``, ``add``, ``project`` and ``reject`` ops, each on a
 set of the gradients its entry selects, with a span's directions inline. A treatment the phase names is copied, its
-target sets and any sidecar operand inlined, so the book stands alone. A treatment records the model it was written
-for, so an export with Python transforms takes ``model={"id": ..., "revision": ...}`` (by default the model's
+target sets and any sidecar operand inlined, so the book stands alone. A treatment records the model it was written for,
+so an export with Python transforms takes ``model={"id": ..., "revision": ...}`` (by default the model's
 ``config._name_or_path`` and ``config._commit_hash``, when it has both):
 
 .. code-block:: python

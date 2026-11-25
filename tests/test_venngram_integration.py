@@ -18,7 +18,9 @@ from lightning.pytorch import seed_everything
 from lightning.pytorch.callbacks import Callback
 from venngram import AddressBook
 from venngram.address import parse as parse_address
+from venngram.address import to_mapping
 from venngram.conformance import check
+from venngram.errors import PinMismatchError
 from venngram.store import publish, Reference
 from venngram.support import SupportRecord
 
@@ -26,6 +28,7 @@ from finetuning_scheduler import CanonicalView, FinetuningScheduler, TuningSched
 from finetuning_scheduler.core.books import schedule_book
 from finetuning_scheduler.core.compile import compile_schedule, referenced_sets, support_record, SUPPORT_RECORD_PATH
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
+from finetuning_scheduler.core.grad_transforms import Scale
 from finetuning_scheduler.core.schedule import load_address_sets, same_documents
 from tests.test_addresses import _lightning_module, ADDRESSED, adapter_roles, Blocks, SGD
 from tests.test_legacy_adapter_contract import _trainer
@@ -229,3 +232,160 @@ def test_a_book_reference_that_does_not_fetch_is_refused_before_anything_changes
     with pytest.raises(FTSConfigurationError, match="cannot be loaded"):
         fts.setup()
     assert all(torch.equal(before[n][0], p) and before[n][1] == p.requires_grad for n, p in model.named_parameters())
+
+
+BASE = {"id": "org/base", "revision": "c5ebcd4"}
+SAE = {"release": {"sae_lens": "res-jb", "id": "layer_3"}}
+PINNED = {"schema_version": 8, "name": "pinned", "requires": {"base_model": BASE, "latent_models": {"sae": SAE}},
+          "sets": {"top": {"role": "adapter", "layers": -1}, "probe": {"point": "resid_post"},
+                   "rows": {"role": "adapter", "layers": -1, "units": [0, 2]}}}
+LOADED = {"base_model": BASE, "latent_models": {"sae": SAE}}
+
+
+class PinCheckingView(CanonicalView):
+    """A view that knows what its model loaded, and records the books it is asked to check."""
+
+    def __init__(self, model, loaded=LOADED):
+        super().__init__(model, roles=adapter_roles(model))
+        self.loaded, self.checked = loaded, []
+
+    def check_book(self, book):
+        self.checked.append(book.name)
+        book.check_pins(**self.loaded)
+
+
+@pytest.fixture
+def imports_pinned(tmp_path):
+    """A book that pins nothing itself and imports ``PINNED``."""
+    (tmp_path / "pinned.yaml").write_text(yaml.safe_dump(PINNED))
+    return {"schema_version": 1, "name": "importer", "imports": {"p": str(tmp_path / "pinned.yaml")},
+            "sets": {"top": "@p.top"}}
+
+
+def test_a_pinned_book_drives_a_schedule_through_a_view_that_checks_its_pins(imports_pinned):
+    for book in (PINNED, imports_pinned):
+        view = PinCheckingView(Blocks())
+        compiled = compile_schedule({0: {"params": ["@top"]}}, view, addresses=load_address_sets(book))
+        assert compiled.phases[0].physical == ("blocks.3.adapter.weight",)
+        assert view.checked == [book["name"]]
+    # the sets an `of: grad` entry uses are judged with the pins checked too
+    compiled = compile_schedule({0: {"params": ["@rows & of:grad"]}}, PinCheckingView(Blocks()),
+                                addresses=load_address_sets(PINNED))
+    assert compiled.phases[0].masks == {"blocks.3.adapter.weight": (0, 2)}
+    # a checked book is still held to everything else the support record declares
+    with pytest.raises(FTSConfigurationError, match=r"(?s)does not tune:\n.*set `probe`: it selects a `site`"):
+        compile_schedule({0: {"params": ["@probe"]}}, PinCheckingView(Blocks()), addresses=load_address_sets(PINNED))
+
+
+@pytest.mark.parametrize("loaded, match", [
+    ({**LOADED, "base_model": {**BASE, "revision": "0000000"}}, "`requires.base_model`: .*org/base@0000000"),
+    ({**LOADED, "latent_models": {}}, "latent model `sae`, which is not loaded"),
+    ({**LOADED, "latent_models": {"sae": {"release": {**SAE["release"], "id": "layer_4"}}}},
+     r"`requires.latent_models.sae.release.id`: pinned `layer_3`, loaded `layer_4`"),
+], ids=["revision", "not_loaded", "release"])
+def test_a_book_whose_pins_differ_from_what_the_view_loaded_is_refused(loaded, match, imports_pinned):
+    for book in (PINNED, imports_pinned):
+        with pytest.raises(FTSConfigurationError, match=f"do not apply through this view: .*{match}") as err:
+            compile_schedule({0: {"params": ["@top"]}}, PinCheckingView(Blocks(), loaded),
+                             addresses=load_address_sets(book))
+        assert isinstance(err.value.__cause__, PinMismatchError)
+
+
+def test_a_pinned_book_is_refused_through_a_view_that_checks_no_pins(imports_pinned):
+    model = Blocks()
+    valued = CanonicalView(model, roles=adapter_roles(model))
+    valued.check_book = True  # a member that cannot be called checks nothing
+    for view in (CanonicalView(model, roles=adapter_roles(model)), valued):
+        for book in (PINNED, imports_pinned):
+            for entry in ("@top", "@top & of:grad"):
+                with pytest.raises(FTSConfigurationError, match="(?s)`pins: false`.*CanonicalView defines no"):
+                    compile_schedule({0: {"params": [entry]}}, view, addresses=load_address_sets(book))
+
+
+def test_every_pinned_book_of_a_schedule_is_checked_and_no_other(tmp_path):
+    other = {"schema_version": 8, "name": "other", "requires": {"base_model": {**BASE, "revision": "fffffff"}},
+             "sets": {"mid": {"role": "adapter", "layers": 1}}}
+    for name, book in {"top": TOP, "pinned": {**PINNED, "sets": {"p": "role:adapter"}}, "other": other}.items():
+        (tmp_path / f"{name}.yaml").write_text(yaml.safe_dump(book))
+    view = PinCheckingView(Blocks())
+    compile_schedule({0: {"params": ["@top"]}}, view,
+                     addresses=load_address_sets(["top.yaml", "pinned.yaml"], tmp_path))
+    assert view.checked == ["pinned"]
+    # the schedule's own phases use nothing of `other`, and its pins bind all the same
+    with pytest.raises(FTSConfigurationError, match="org/base@fffffff"):
+        compile_schedule({0: {"params": ["@top"]}}, view,
+                         addresses=load_address_sets(["top.yaml", "pinned.yaml", "other.yaml"], tmp_path))
+
+
+def test_both_interfaces_check_a_schedules_pins_through_the_view(tmp_path):
+    schedule = {"addresses": PINNED, 0: {"params": ["@top"], "max_transition_epoch": 1},
+                1: {"params": ["role:adapter - @top"], "max_transition_epoch": 2}}
+    stale = {**LOADED, "base_model": {**BASE, "revision": "0000000"}}
+
+    def core(loaded):
+        model = Blocks()
+        fts = TuningScheduler(model, schedule, optimizer=SGD, view=PinCheckingView(model, loaded))
+        fts.setup()
+        return fts.compiled_schedule
+
+    def lightning(loaded):
+        seed_everything(42)
+        module = _lightning_module()
+        module.tunable_view = PinCheckingView(module, loaded)
+        fts = FinetuningScheduler(ft_schedule=schedule, epoch_transitions_only=True)
+        _trainer(tmp_path, [fts], max_epochs=1).fit(module)
+        return fts.strategy_adapter.compiled_schedule
+
+    for run in (core, lightning):
+        assert [p.rpartition("blocks.")[2] for p in run(LOADED).phases[0].physical] == ["3.adapter.weight"]
+        with pytest.raises(FTSConfigurationError, match="org/base@0000000"):
+            run(stale)
+
+
+def test_a_book_exported_from_pinned_books_pins_the_same_models(tmp_path):
+    model = Blocks()
+    fts = TuningScheduler(model, {"addresses": PINNED, 0: {"params": ["@top"], "max_transition_epoch": 1},
+                                  1: {"params": ["head.weight"]}}, optimizer=SGD, view=PinCheckingView(model))
+    fts.setup()
+    book = fts.export_book(tmp_path / "exported.yaml")
+    assert book["schema_version"] == 8
+    assert book["requires"] == {"naming_scheme": "physical", **PINNED["requires"]}
+    exported = load_address_sets(str(tmp_path / "exported.yaml"))
+    replay = {0: {"params": ["@phase_0"]}, 1: {"params": ["@phase_1"]}}
+    back = compile_schedule(replay, PinCheckingView(model), addresses=exported)
+    assert [cp.physical for cp in back.phases] == [cp.physical for cp in fts.compiled_schedule.phases]
+    with pytest.raises(FTSConfigurationError, match="defines no `check_book`"):
+        compile_schedule(replay, CanonicalView(model, roles=adapter_roles(model)), addresses=exported)
+    # the latent models of several books are pinned together, and books that pin one model differently are refused
+    tc = {"release": {"hub": "org/tc", "revision": "9ab1f0e"}}
+    for requires, match in (({"latent_models": {"tc": tc}}, None),
+                            ({"base_model": {**BASE, "revision": "1111111"}}, "pin `base_model` differently"),
+                            ({"latent_models": {"sae": tc}}, "pin `latent_models.sae` differently")):
+        (tmp_path / "pinned.yaml").write_text(yaml.safe_dump(PINNED))
+        (tmp_path / "other.yaml").write_text(yaml.safe_dump(
+            {"schema_version": 8, "requires": {"base_model": BASE, **requires}, "sets": {"a": "layers:0"}}))
+        sets = load_address_sets(["pinned.yaml", "other.yaml"], tmp_path)
+        if match is None:
+            pins = schedule_book({0: {"params": ["@top | @a"]}}, name="two", addresses=sets)["requires"]
+            assert pins == {"base_model": BASE, "latent_models": {"sae": SAE, "tc": tc}}
+            continue
+        with pytest.raises(FTSConfigurationError, match=match):
+            schedule_book({0: {"params": ["@top | @a"]}}, name="two", addresses=sets)
+
+
+@pytest.mark.parametrize("entry, schema", [
+    ("role:adapter", 1), ("role:adapter & of:grad", 2), ("role:adapter & layers:0.5d:", 7),
+    ({"role": "adapter", "units": [0], "axis": 1, "of": "grad"}, 6),
+], ids=["plain", "of", "depth", "axis"])
+def test_an_exported_book_declares_the_schema_its_sets_need_and_loads(entry, schema):
+    addresses = load_address_sets({"sets": {"s": entry}})
+    book = schedule_book({0: {"params": ["@s"]}}, name="exported", addresses=addresses)
+    assert book["schema_version"] == schema
+    loaded = AddressBook.from_mapping(book, source="exported").sets()
+    assert to_mapping(loaded["phase_0"]) == to_mapping(addresses["s"])
+
+
+def test_a_schedule_whose_book_would_not_load_is_refused():
+    scaled = {0: {"params": ["role:adapter"], "grad_transforms": {"role:adapter": Scale(0.5)}}}
+    with pytest.raises(FTSConfigurationError, match="The exported book does not load: .*revision"):
+        schedule_book(scaled, name="refused", model={"id": "org/base"})  # a treatment's model states its revision
