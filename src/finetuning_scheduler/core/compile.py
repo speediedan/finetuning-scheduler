@@ -44,7 +44,7 @@ from torch import Tensor
 from finetuning_scheduler.core.dist import rank_zero_debug, rank_zero_info, rank_zero_warn
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 import venngram
-from venngram import is_address, ParamSpace, select
+from venngram import AddressBook, is_address, ParamSpace, select
 from venngram.address import parse as parse_address
 from venngram.address import references
 from venngram.errors import VenngramError
@@ -663,6 +663,13 @@ def _warn_addresses_experimental(schedule: Mapping[int, Mapping[str, Any]],
                    " and regexes are unaffected.", stacklevel=3)
 
 
+#: The optional view member that checks an address book's model pins: ``check_book(book)`` raises (venngram's
+#: ``PinMismatchError``, from :meth:`venngram.AddressBook.check_pins`) when the models ``book`` pins, or a book it
+#: imports (:meth:`venngram.AddressBook.pins`), differ from the ones the view's model has loaded. It is Fine-Tuning
+#: Scheduler's, beside the protocol's optional members, and has no default: a view that lacks it cannot drive a pinned
+#: book's sets.
+CHECK_BOOK = "check_book"
+
 SUPPORT_RECORD_PATH = pathlib.Path(__file__).with_name("support_record.yaml")
 
 
@@ -720,21 +727,44 @@ def _mask_support(tuning: TuningSupport) -> TuningSupport:
     return dataclasses.replace(tuning, fields=tuning.fields | {"units"}, units="unit-adapter")
 
 
-def _check_book_requirements(addresses: Mapping[str, Any] | None, naming_scheme: str,
+def _check_pins(book: AddressBook, bound: BoundView, record: SupportRecord) -> tuple[SupportRecord, list[str]]:
+    """The support record ``book`` is judged by, and what to add to its refusals: the record with ``pins`` true
+    when the view checked the models the book pins, and the record as it is (which refuses a pinned book) when the
+    view defines no ``check_book``.
+
+    Raises:
+        FTSConfigurationError: If the view refuses the book.
+    """
+    if not book.pins():
+        return record, []
+    if not bound.defines(CHECK_BOOK):
+        return record, [f"{type(bound.view).__name__} defines no `{CHECK_BOOK}`, so the models the book pins cannot be"
+                        " checked against the ones loaded"]
+    try:
+        bound.view.check_book(book)
+    except VenngramError as err:
+        raise FTSConfigurationError(f"The schedule's `addresses` do not apply through this view: {err}") from err
+    assert record.tuning is not None
+    checked = dataclasses.replace(record.tuning, pins=True)
+    return dataclasses.replace(record, sections={**record.sections, "tuning": checked}), []
+
+
+def _check_book_requirements(addresses: Mapping[str, Any] | None, bound: BoundView, naming_scheme: str,
                              used: Collection[str] = (), used_as_grad: Collection[str] = ()) -> None:
-    """Refuse address books written in another vocabulary than the view's (``requires.naming_scheme``), and books
-    whose sets in ``used`` and ``used_as_grad`` (and the sets those reference) ask for something
-    :func:`support_record` does not honour.
+    """Refuse address books written in another vocabulary than the view's (``requires.naming_scheme``), books that
+    pin models the view does not check or that differ from the ones it has loaded (``requires.base_model`` and
+    ``requires.latent_models``), and books whose sets in ``used`` and ``used_as_grad`` (and the sets those
+    reference) ask for something :func:`support_record` does not honour.
 
     A set in ``used_as_grad`` is referenced by an ``of: grad`` entry, so its unit sets are gradient masks.
     """
-    record = support_record()
-    assert record.tuning is not None
     for book in getattr(addresses, "books", ()):
         try:
             book.check_requires(naming_scheme=naming_scheme)
         except VenngramError as err:
             raise FTSConfigurationError(f"The schedule's `addresses` do not apply through this view: {err}") from err
+        record, unchecked = _check_pins(book, bound, support_record())
+        assert record.tuning is not None
         own = set(book.sets())
         refusals = record.check_book(book, sets=sorted(set(used) & own))
         if set(used_as_grad) & own:
@@ -742,7 +772,7 @@ def _check_book_requirements(addresses: Mapping[str, Any] | None, naming_scheme:
             refusals += [r for r in masked if r not in refusals]
         if refusals:
             raise FTSConfigurationError("The schedule's `addresses` ask for what Fine-Tuning Scheduler does not tune:"
-                                        "\n  " + "\n  ".join(refusals))
+                                        "\n  " + "\n  ".join(refusals + unchecked))
 
 
 def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, legacy: bool = False,
@@ -766,6 +796,9 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     second time; a ``refreeze`` drops the mask with the tensor. A book's unit sets are judged as gradient masks in the
     sets an ``of: grad`` entry uses, and as units to tune (refused) elsewhere.
 
+    A book that pins the models it was written against applies only through a view that defines ``check_book`` and
+    whose check passes (see :data:`CHECK_BOOK`).
+
     A phase's ``grad_transforms`` entries resolve the same way, to tensors trainable once the phase is in place, each
     with its transforms and the rows its entry's gradient unit set keeps (:attr:`CompiledPhase.transforms`); they apply
     until a later phase states its own (:meth:`CompiledSchedule.transforms_at`). A phase's ``grad_transforms`` naming a
@@ -784,7 +817,8 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
         The compiled schedule.
 
     Raises:
-        FTSConfigurationError: If an address book requires another naming scheme than the view's; an entry resolves
+        FTSConfigurationError: If an address book requires another naming scheme than the view's, or pins models
+            that the view cannot check or that differ from the ones it has loaded; an entry resolves
             to nothing or an address does not resolve; phases share storage
             (unless ``legacy``); a phase schedules a ``fitted`` or ``artifact`` tensor; a phase promotes a tensor
             that is not an ``artifact`` one; a phase schedules quantized or packed tensors through logical names
@@ -804,7 +838,7 @@ def compile_schedule(schedule: Mapping[int, Mapping[str, Any]], view: Any, *, le
     grads = gradient_entries(schedule, addresses)
     by_value = {d: {**p, "params": [e for e in p.get("params") or [] if e not in grads.get(d, ())]}
                 for d, p in schedule.items()}
-    _check_book_requirements(addresses, support.naming_scheme, referenced_sets(by_value),
+    _check_book_requirements(addresses, bound, support.naming_scheme, referenced_sets(by_value),
                              referenced_sets({d: {"params": es} for d, es in grads.items()}))
     root = bound.root
     tensors = dict(root.named_parameters())

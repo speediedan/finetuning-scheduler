@@ -26,15 +26,17 @@ Each phase's set is the union of its ``params`` entries, as written:
   Fine-Tuning Scheduler matches (``re.match``, a prefix match, where venngram's ``name`` matches in full). Names are in
   the view's vocabulary, so a book with any declares ``requires.naming_scheme``.
 
-A phase of gradient addresses (``of: grad``) becomes a set of gradients, in an address book of schema 2 (the first that
-can hold ``of``); a book without one keeps schema 1. A phase mixing whole tensors and gradient addresses becomes one set
-uniting a value part and a gradient part, each value entry stating ``of: value``, and a phase of several gradient
-entries with unit sets one set whose disjuncts each give their own mask, united per tensor (venngram's ``mixed-sets``
-and ``union-masks``, which Fine-Tuning Scheduler's support record declares). Either compiles back to the phase's masks.
+A book declares the address book schema its contents need: 1 for plain selections, 2 for a set of gradients
+(``of: grad``), 6 for one using ``axis``, 7 for layers relative to the depth, and so on (:mod:`venngram.book` lists
+them). A phase of gradient addresses becomes a set of gradients. A phase mixing whole tensors and gradient addresses
+becomes one set uniting a value part and a gradient part, each value entry stating ``of: value``, and a phase of several
+gradient entries with unit sets one set whose disjuncts each give their own mask, united per tensor (venngram's
+``mixed-sets`` and ``union-masks``, which Fine-Tuning Scheduler's support record declares). Either compiles back to the
+phase's masks.
 
 A phase's gradient transforms (``grad_transforms``) become a treatment of the book named after the phase's set
 (``phase_<depth>``), so a schedule reading the book names it (``grad_transforms: phase_1``), in an address book of
-schema 4 (the first that can hold a treatment's ``gradients``):
+schema 4 or later (the first that can hold a treatment's ``gradients``):
 
 - the built-ins :class:`~finetuning_scheduler.core.grad_transforms.Scale`,
   :class:`~finetuning_scheduler.core.grad_transforms.Replace`, :class:`~finetuning_scheduler.core.grad_transforms.Add`,
@@ -53,18 +55,22 @@ tensor's first axis unless told otherwise, where a venngram op on units or a spa
 export whose transforms would differ. A phase that clears its transforms (``grad_transforms: {}``) has no treatment: a
 schedule reading the book clears them itself.
 
-A book derived from address books fetched by reference records their exact references under ``derived_from``.
+A book derived from address books fetched by reference records their exact references under ``derived_from``, and a
+book derived from books that pin the models they were written against (``requires.base_model`` and
+``requires.latent_models``) pins the same models (schema 8).
 
 .. warning:: This is an experimental API and may change in a future release.
 """
+import copy
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 import torch
-from venngram import is_address
+from venngram import AddressBook, is_address
 from venngram.address import And, Expr, Guarded, Minus, Or, Ref, Term, terms, to_mapping
 from venngram.address import parse as parse_address
+from venngram.errors import VenngramError
 from venngram.recipe import INLINE_LIMIT
 
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
@@ -175,6 +181,23 @@ def _named_treatment(depth: int, name: str, addresses: Any) -> tuple[dict, dict]
     return body, targets
 
 
+def _merged_pins(books: Sequence[AddressBook]) -> dict[str, Any]:
+    """The model pins of ``books`` and everything they import, merged into one book's ``requires``."""
+    out: dict[tuple[str, ...], Any] = {}
+    for book in books:
+        pins = book.pins()
+        found: dict[tuple[str, ...], Any] = {("latent_models", n): p for n, p in pins.get("latent_models", {}).items()}
+        if "base_model" in pins:
+            found[("base_model",)] = pins["base_model"]
+        for key, pin in found.items():
+            if out.setdefault(key, pin) != pin:
+                raise FTSConfigurationError(f"The schedule's address books pin `{'.'.join(key)}` differently"
+                                            f" ({out[key]} and {pin}), so one book cannot hold their sets.")
+    merged: dict[str, Any] = {"base_model": dict(out[("base_model",)])} if ("base_model",) in out else {}
+    latents = {key[1]: copy.deepcopy(pin) for key, pin in out.items() if key[0] == "latent_models"}
+    return {**merged, **({"latent_models": latents} if latents else {})}
+
+
 def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addresses: Mapping[str, Any] | None = None,
                   logical_names: Sequence[str] | None = None, naming_scheme: str = "physical",
                   applies_to: Mapping[str, Any] | None = None, description: str | None = None,
@@ -187,7 +210,7 @@ def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addre
         name: The book's name.
         addresses: The named sets the entries reference (see
             :func:`~finetuning_scheduler.core.schedule.load_address_sets`); their ``references`` are recorded under
-            ``derived_from``.
+            ``derived_from``, and the models their ``books`` pin under ``requires``.
         logical_names: The view's logical names: an entry among them is written as an exact name rather than a regex.
             ``None`` treats every name entry as a regex.
         naming_scheme: The scheme of the view the names belong to, declared as ``requires.naming_scheme`` when any
@@ -198,15 +221,16 @@ def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addre
             recorded by the treatment they become; a treatment the schedule names keeps its own.
 
     Raises:
-        FTSConfigurationError: If a phase has no ``params``, an address references a set ``addresses`` lacks, or a
-            phase's gradient transforms cannot be exported: a transform venngram declares no op on gradients for, no
-            ``model`` for Python transforms, or a span with more values than a book holds inline.
+        FTSConfigurationError: If a phase has no ``params``, an address references a set ``addresses`` lacks, two of
+            the ``books`` pin one model differently, the book would not load, or a phase's gradient transforms cannot
+            be exported: a transform venngram declares no op on gradients for, no ``model`` for Python transforms, or a
+            span with more values than a book holds inline.
     """
     sets = dict(addresses or {})
     treatments: dict[str, Any] = {}
     treatment_sets: dict[str, Any] = {}
     out_sets: dict[str, Any] = {}
-    uses_names = uses_of = False
+    uses_names = False
     for depth in sorted(schedule):
         entries = schedule[depth].get("params") or []
         if not entries:
@@ -222,7 +246,6 @@ def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addre
         # states `of: value`, since terms that do not state `of` follow those that do
         if any(t.of == "grad" for e in exprs for t in terms(e)):
             exprs = [e if any(t.of is not None for t in terms(e)) else And((e, Term(of="value"))) for e in exprs]
-        uses_of |= any(t.of is not None for e in exprs for t in terms(e))
         out_sets[f"phase_{depth}"] = to_mapping(exprs[0] if len(exprs) == 1 else Or(tuple(exprs)))
         stated = schedule[depth].get("grad_transforms")
         if isinstance(stated, str):
@@ -235,21 +258,27 @@ def schedule_book(schedule: Mapping[int, Mapping[str, Any]], *, name: str, addre
             continue
         treatment_sets.update(targets)
     out_sets.update(treatment_sets)
-    book: dict[str, Any] = {"schema_version": 4 if treatments else 2 if uses_of else 1, "name": name}
+    book: dict[str, Any] = {"name": name}
     if description is not None:
         book["description"] = description
     book["portability"] = "family"
     if applies_to:
         book["applies_to"] = dict(applies_to)
-    if uses_names:
-        book["requires"] = {"naming_scheme": naming_scheme}
+    requires = {**({"naming_scheme": naming_scheme} if uses_names else {}),
+                **_merged_pins(getattr(addresses, "books", ()))}
+    if requires:
+        book["requires"] = requires
     references = list(getattr(addresses, "references", ()))
     if references:
         book["derived_from"] = references
     book["sets"] = out_sets
     if treatments:
         book["treatments"] = treatments
-    return book
+    try:  # an inline book without a schema takes the one its contents need
+        needed = AddressBook.from_mapping(book, source="the exported book", inline=True).schema_version
+    except VenngramError as err:
+        raise FTSConfigurationError(f"The exported book does not load: {err}") from err
+    return {"schema_version": needed, **book}
 
 
 __all__ = ["schedule_book"]
