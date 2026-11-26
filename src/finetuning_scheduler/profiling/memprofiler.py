@@ -45,6 +45,29 @@ from finetuning_scheduler.profiling.fsdp_report import (aggregate_fsdp_mem_repor
                                                         fsdp_mem_report, fsdp_mem_report_filename)
 
 
+class _FSDPMemTracker(FSDPMemTracker):
+    """``FSDPMemTracker`` that also tracks a step in which a sharded unit's forward does not run.
+
+    FSDP2's root post-backward callback calls ``post_backward`` on every parameter group, including the groups of units
+    the step never called (a multimodal model's vision tower on a text task, for one). Those groups were never
+    unsharded, and the upstream tracker's ``post_backward`` wrapper reads each parameter's ``_unsharded_param``, which
+    then does not exist, so the backward pass fails with an ``AttributeError``. Such a group has no unsharded gradient
+    to attribute, so it runs its own ``post_backward`` untracked; every other group is tracked as upstream tracks it.
+    """
+
+    def _fsdp_param_group_post_backward(self, fsdp_mod, orig_fsdp_param_group_post_backward):
+        tracked = super()._fsdp_param_group_post_backward(fsdp_mod, orig_fsdp_param_group_post_backward)
+
+        @wraps(orig_fsdp_param_group_post_backward)
+        def inner(*args, **kwargs):
+            group = fsdp_mod._get_fsdp_state()._fsdp_param_group
+            if group is not None and not all(hasattr(p, "_unsharded_param") for p in group.fsdp_params):
+                return orig_fsdp_param_group_post_backward(*args, **kwargs)
+            return tracked(*args, **kwargs)
+
+        return inner
+
+
 class MemProfiler:
     """MemProfiler is a powerful memory profiling utility that synthesizes numerous complementary profiling
     methods.
@@ -199,7 +222,7 @@ class MemProfiler:
                                " optimizer state; pass one to `MemProfiler.connect` to track it.")
             root = self.fsdp_mem_tracker_root_module
             assert isinstance(root, torch.nn.Module)  # `track_fsdp_mem` is set, so the root was resolved
-            self.fsdp_mem_tracker = FSDPMemTracker(root, optimizer)
+            self.fsdp_mem_tracker = _FSDPMemTracker(root, optimizer)
             self._fsdp_tracker_phase = _resolved(self._phase)
 
     def _sync_fsdp_phase(self) -> None:
