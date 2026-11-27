@@ -82,5 +82,6 @@ Integrations
    * - :ref:`Scheduled fine-tuning in interpretune<example-interpretune>`
      - Lightning and PyTorch (experimental)
      - An AI interpretability research framework that declares a tunable view for each model composition, so
-       schedules use the backend's own parameter names and select adapters and latents by role. A runnable placeholder
-       example, until a research-based one replaces it, tunes a small model on a CPU in seconds.
+       schedules use the backend's own parameter names and select adapters and latents by role. A runnable example
+       checks the integration on a CPU in seconds, and the page lists interpretune's research examples that tune with
+       Fine-Tuning Scheduler.

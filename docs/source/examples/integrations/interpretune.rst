@@ -64,10 +64,6 @@ unless ``tuning_scheduler_kwargs`` passes them, and transition policies, checkpo
 A runnable example
 ==================
 
-.. note::
-   This example is a placeholder that shows the integration on a toy model. A research-based example using interpretune
-   is in progress and will replace it.
-
 ``fts_examples/interpretune_phased_tuning.py`` runs flexible fine-tuning through an interpretune training loop, on a CPU
 in seconds and with no downloads. A small, randomly initialized GPT-2 class model is tuned in three phases by
 ``FTSCoreCallback``: the first phase thaws only a steering vector registered beside the model, selected by its role
@@ -81,6 +77,34 @@ It needs an interpretune revision that is not yet released: the one pinned in ``
 which Fine-Tuning Scheduler's CI installs to test it. Install that revision, and the example runs from a checkout of this
 repository.
 
+The example checks the integration's contract (a first phase selected by role, later phases by name) rather than
+producing a tuning result: the research examples below do that.
+
+Research examples
+=================
+
+interpretune's examples repository, `interpretune/examples <https://github.com/interpretune/examples>`_, holds worked
+examples that tune with Fine-Tuning Scheduler, each with its schedules written in addresses and its results:
+
+- `LoRA around a frozen SAE
+  <https://github.com/interpretune/examples/blob/main/tutorials/publish/tuning/sae_lora_tuning.ipynb>`_: low-rank
+  adapting a model to its sparse autoencoder (Chen, Engels and Tegmark, 2025). Adapters of the block after a spliced,
+  frozen SAE, adapters of every later block, and the SAE itself tuned end to end are compared against a staged run of
+  all three, each scored by the share of the SAE's loss gap it closes.
+- `Finding, steering and tuning neurons
+  <https://github.com/interpretune/examples/blob/main/tutorials/publish/neuron_finder/neuron_finder.ipynb>`_: MLP
+  neurons found on Qwen3-0.6B's RTE answers and steered against random controls are saved as an address book, then
+  tuned alone through unit adapters that a schedule thaws by role, against random neurons.
+- `Block-sparse featurizer blocks as steering and tuning targets
+  <https://github.com/interpretune/examples/blob/main/tutorials/publish/bsf_blocks/bsf_blocks.ipynb>`_: the featurizer
+  blocks that carry the RTE answer on gemma-3-1b-it, tuned through feature adapters that a schedule thaws by role,
+  against random blocks.
+- `Knowing but not using <https://interpretune.org/en/latest/usage/tuning_knowing_using.html>`_: a reproduction of the
+  Knowing-Using Gap's layer-wise self-distillation result (Dai et al.) on Qwen2.5-1.5B and Llama-3.2-1B, extended with
+  Fine-Tuning Scheduler's phases as experimental stages. A transition opens the next phase once memorization reaches
+  0.9, and that phase turns the alignment term on and refreezes every adapter outside one depth-relative band
+  (``role:adapter - layers:0.25d:0.75d``), against matched arms where the alignment runs throughout.
+
 What each composition declares
 ==============================
 
@@ -93,8 +117,8 @@ remote nnsight model with no local weights, are refused, with the reason.
 
 interpretune maintains the details, since they follow its backends:
 
-- `Tuning <https://interpretune.org/en/latest/usage/fts_tunable_views.html>`_: the view each composition declares,
+- `Tuning <https://interpretune.org/en/latest/usage/tuning.html>`_: the view each composition declares,
   flexible fine-tuning on the core loop (metrics, lr schedulers, resuming), and the conformance cases interpretune runs
   against each composition.
-- `Tuning: core and HF <https://interpretune.org/en/latest/usage/fts_tuning_core_hf.html>`_ and the pages for each
+- `Tuning: core and HF <https://interpretune.org/en/latest/usage/tuning_core_hf.html>`_ and the pages for each
   backend linked from there.
