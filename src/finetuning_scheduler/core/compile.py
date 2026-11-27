@@ -728,6 +728,18 @@ def _mask_support(tuning: TuningSupport) -> TuningSupport:
     return dataclasses.replace(tuning, fields=tuning.fields | {"units"}, units="unit-adapter")
 
 
+def _value_support(record: SupportRecord) -> SupportRecord:
+    """``record`` as it judges the sets a schedule uses as values, where a unit set is units to tune (refused).
+
+    Under ``units: grad-mask``, venngram's support check accepts a unit set wherever the book's own sets mask it, so a
+    schedule entry using that set as values (``@rows``, not ``@rows & of: grad``) would pass the check and be refused
+    only when it resolves. Judged with ``units: none`` here, it is refused by name with the other reasons.
+    """
+    assert record.tuning is not None
+    return dataclasses.replace(record, sections={**record.sections,
+                                                 "tuning": dataclasses.replace(record.tuning, units="none")})
+
+
 def _check_pins(book: AddressBook, bound: BoundView, record: SupportRecord) -> tuple[SupportRecord, list[str]]:
     """The support record ``book`` is judged by, and what to add to its refusals: the record with ``pins`` true
     when the view checked the models the book pins, and the record as it is (which refuses a pinned book) when the
@@ -767,7 +779,7 @@ def _check_book_requirements(addresses: Mapping[str, Any] | None, bound: BoundVi
         record, unchecked = _check_pins(book, bound, support_record())
         assert record.tuning is not None
         own = set(book.sets())
-        refusals = record.check_book(book, sets=sorted(set(used) & own))
+        refusals = _value_support(record).check_book(book, sets=sorted(set(used) & own))
         if set(used_as_grad) & own:
             masked = _mask_support(record.tuning).check_book(book, sets=sorted(set(used_as_grad) & own))
             refusals += [r for r in masked if r not in refusals]
