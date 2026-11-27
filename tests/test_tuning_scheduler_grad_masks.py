@@ -157,7 +157,7 @@ def test_unit_sets_under_a_difference_or_intersection_resolve_exactly(entry, phy
 
 def test_the_support_record_honours_gradient_masks_and_refuses_unit_sets_to_tune():
     tuning = support_record().tuning
-    assert "of" in tuning.fields and tuning.units == "none"
+    assert {"of", "units"} <= tuning.fields and tuning.units == "grad-mask"
     book = {"sets": {"rows": {"module": "1", "units": [0, 2]}, "rows_grad": "@rows & of:grad",
                      "top_rows": {"module": "2", "leaf": "weight", "units": [1], "of": "grad"}}}
     sets = load_address_sets(book)

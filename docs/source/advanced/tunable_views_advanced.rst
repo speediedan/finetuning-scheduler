@@ -226,10 +226,10 @@ only to transform them: it neither thaws nor masks them, and a tensor it selects
 .. _tunable-views-treatments:
 
 **Treatments.** ``grad_transforms`` may instead name a treatment of the schedule's address books. In venngram, a book's
-sets select what to address, and its ``treatments`` say what is done to them for one model. Each treatment is a
-*recipe* (``venngram.recipe.Recipe``; see `Large unit sets and treatments
-<https://github.com/speediedan/venngram#large-unit-sets-and-treatments>`_ in venngram's README), stored in the book
-under a name of its author's choosing. A recipe can hold several sections: ``stages`` act on activations,
+sets select what to address, and its ``treatments`` say what is done to them for one model. Each treatment
+(``venngram.treatment.Treatment``; see `Large unit sets and treatments
+<https://github.com/speediedan/venngram#large-unit-sets-and-treatments>`_ in venngram's README) is stored in the book
+under a name of its author's choosing. A treatment can hold several sections: ``stages`` act on activations,
 ``weights`` edit parameters, and ``gradients`` act on each step's parameter gradients. Fine-Tuning Scheduler applies
 the ``gradients`` section, and a phase names the treatment by its key. Because the ops are data rather than callables, a
 schedule read from YAML can name one:

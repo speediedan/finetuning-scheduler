@@ -41,7 +41,7 @@ for the ``scale``, ``replace``, ``add``, ``project`` and ``reject`` ops on a par
 and an orthonormal span ``U`` gives :math:`(I - aUU^\top)G`).
 
 **Treatments.** A phase's ``grad_transforms`` may instead name a treatment of the schedule's address books (a
-venngram recipe written in the book it treats, :mod:`venngram.recipe`), so a schedule read from YAML can transform
+venngram treatment written in the book it treats, :mod:`venngram.treatment`), so a schedule read from YAML can transform
 gradients too. Its ``gradients`` section's ops apply in order, each to the gradients of the tensors its target set
 selects, as these built-ins (:data:`GRADIENT_OPS`): a ``dose`` or per-unit ``doses`` for ``scale``, ``replace`` and
 ``add``, and a ``vector`` or ``subspace`` operand for ``project`` and ``reject``. A ``param_units`` target acts along
