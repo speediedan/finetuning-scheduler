@@ -71,7 +71,7 @@ from venngram import AddressBook, is_address
 from venngram.address import And, Expr, Guarded, Minus, Or, Ref, Term, terms, to_mapping
 from venngram.address import parse as parse_address
 from venngram.errors import VenngramError
-from venngram.recipe import INLINE_LIMIT
+from venngram.operands import INLINE_LIMIT
 
 from finetuning_scheduler.core.exceptions import FTSConfigurationError
 from finetuning_scheduler.core.grad_transforms import Add, Project, Reject, Replace, Scale
@@ -165,8 +165,8 @@ def _named_treatment(depth: int, name: str, addresses: Any) -> tuple[dict, dict]
     if len(found) != 1:
         raise FTSConfigurationError(f"Phase {depth}'s `grad_transforms` names the treatment `{name}`, which"
                                     f" {'several' if found else 'none'} of the schedule's address books have.")
-    recipe = found[0]
-    body = recipe.to_treatment()
+    treatment = found[0]
+    body = treatment.to_mapping()
     targets: dict[str, Any] = {}
     for op in body.get("gradients", ()):  # each op targets one set of the book (venngram refuses anything else)
         renamed = f"phase_{depth}_{op['target']['set']}"
@@ -174,7 +174,7 @@ def _named_treatment(depth: int, name: str, addresses: Any) -> tuple[dict, dict]
         op["target"] = {"set": renamed}
     for key, raw in list(body.get("operands", {}).items()):
         if "values" not in raw:
-            values, shape = recipe.operands[key].load(recipe.base_dir or ".")
+            values, shape = treatment.operands[key].load(treatment.base_dir or ".")
             body["operands"][key] = {**_inline_values(values, shape, f"Phase {depth}'s treatment `{name}` operand"
                                                                      f" `{key}`"),
                                      **{k: raw[k] for k in ("basis", "space") if k in raw}}

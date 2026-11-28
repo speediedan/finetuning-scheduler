@@ -127,9 +127,9 @@ def test_per_unit_doses_become_one_built_in_per_dose():
 
 
 def test_the_support_record_declares_the_ops_applied():
-    steering = support_record().steering
-    assert steering.gradient_ops == frozenset(GRADIENT_OPS) and steering.ops == frozenset()
-    assert steering.targets == {"param", "param_units"} and steering.of == {"grad"}
+    treatments = support_record().treatments
+    assert treatments.gradient_ops == frozenset(GRADIENT_OPS) and treatments.ops == frozenset()
+    assert treatments.targets == {"param", "param_units"} and treatments.of == {"grad"}
 
 
 # compilation

@@ -540,7 +540,7 @@ def _compile_transforms(depth: int, transforms: Mapping[str, Any], bound: BoundV
 
 
 def _treatment(name: str, sets: Mapping[str, Any], depth: int) -> Any:
-    """The treatment ``name`` of the schedule's address books (a :class:`venngram.recipe.Recipe`)."""
+    """The treatment ``name`` of the schedule's address books (a :class:`venngram.treatment.Treatment`)."""
     books = getattr(sets, "books", ())
     found = [b.treatments[name] for b in books if name in b.treatments]
     if len(found) != 1:
@@ -582,10 +582,10 @@ def _unit_doses(structure: Any, name: str, tensor: Tensor, doses: Mapping[tuple[
     return dim, units
 
 
-def _directions(recipe: Any, operand: str) -> Tensor:
+def _directions(treatment: Any, operand: str) -> Tensor:
     """A ``vector`` or ``subspace`` operand as directions, one per column (a subspace stacks them on its leading
     axis)."""
-    values, shape = recipe.operands[operand].load(recipe.base_dir or ".")
+    values, shape = treatment.operands[operand].load(treatment.base_dir or ".")
     directions = torch.tensor(values, dtype=torch.float64).reshape(shape)
     return directions if directions.dim() == 1 else directions.T
 
@@ -599,35 +599,35 @@ def _compile_treatment(depth: int, name: str, bound: BoundView, logical_names: S
     """Resolve the treatment phase ``depth``'s ``grad_transforms`` names to each physical tensor's transforms: its
     ``gradients`` ops in order, each on the trainable tensors its target set selects, as the built-ins
     (:func:`~finetuning_scheduler.core.grad_transforms.op_transforms`)."""
-    recipe = _treatment(name, addressing.sets, depth)
+    treatment = _treatment(name, addressing.sets, depth)
     where = f"Phase {depth}'s treatment `{name}`"
-    applied = [s for s in ("stages", "weights") if getattr(recipe, s)]
-    if applied or not recipe.gradients:
+    applied = [s for s in ("stages", "weights") if getattr(treatment, s)]
+    if applied or not treatment.gradients:
         what = f"has {' and '.join(f'`{s}`' for s in applied)}" if applied else "has no `gradients` section"
         raise FTSConfigurationError(f"{where} {what}: Fine-Tuning Scheduler applies a treatment's `gradients` ops"
                                     " (ops on parameter gradients), and nothing else.")
-    problems = support_record().check_recipe(recipe)
+    problems = support_record().check_treatment(treatment)
     problems += [f"gradients op {j} (`{op.op}`): an operand, which only `project` and `reject` take here"
-                 for j, op in enumerate(recipe.gradients) if op.operand is not None and op.op not in _SPAN_OPS]
+                 for j, op in enumerate(treatment.gradients) if op.operand is not None and op.op not in _SPAN_OPS]
     if problems:
         raise FTSConfigurationError(f"{where} asks for what Fine-Tuning Scheduler does not apply:"
                                     f" {'; '.join(problems)}.")
     structure = addressing.structure()
     out: dict[str, list[Transform]] = {}
-    for j, op in enumerate(recipe.gradients):
+    for j, op in enumerate(treatment.gradients):
         at = f"{where} op {j} (`{op.op}`)"
         physical = _transform_targets(f"@{op.target}", depth, bound, logical_names, roles, shared, addressing,
                                       trainable, f"treatment `{name}` op {j} (`{op.op}`, on `@{op.target}`)")
         doses = None
-        if op.target_kind(recipe.book) == "param_units":
+        if op.target_kind(treatment.book) == "param_units":
             if getattr(structure, "unit_dim", None) is None:
                 raise FTSConfigurationError(f"{at} acts on units of the tensors `@{op.target}` selects, whose unit axis"
                                             " only a view with a component map records (`venngram.view(model)`).")
             try:
-                doses = op.unit_doses(recipe.book, at)
+                doses = op.unit_doses(treatment.book, at)
             except VenngramError as err:
                 raise FTSConfigurationError(str(err)) from err
-        directions = _directions(recipe, op.operand) if op.operand is not None else None
+        directions = _directions(treatment, op.operand) if op.operand is not None else None
         for p in physical:
             if doses is not None:
                 dim, units = _unit_doses(structure, p, tensors[p], doses, at)
@@ -720,11 +720,24 @@ def _mask_support(tuning: TuningSupport) -> TuningSupport:
     """``tuning`` as it judges the sets a schedule uses under ``of: grad``, where a unit set is a gradient mask
     rather than units to tune.
 
-    venngram's support check reads every unit set as units to tune, which the record refuses (it honours no ``units``
-    field, and declares ``units: none``), and its unit patterns name no gradient mask, so the refusal is lifted here
-    for those sets only.
+    The record declares ``units: grad-mask``, under which venngram's support check accepts a unit set that the book's
+    own sets reference under ``of: grad``, and refuses any other as units read as values. A schedule entry outside the
+    book (``@<set> & of: grad``) masks a book's set that no set of the book masks, which that check cannot see, so the
+    refusal is lifted here for those sets only.
     """
     return dataclasses.replace(tuning, fields=tuning.fields | {"units"}, units="unit-adapter")
+
+
+def _value_support(record: SupportRecord) -> SupportRecord:
+    """``record`` as it judges the sets a schedule uses as values, where a unit set is units to tune (refused).
+
+    Under ``units: grad-mask``, venngram's support check accepts a unit set wherever the book's own sets mask it, so a
+    schedule entry using that set as values (``@rows``, not ``@rows & of: grad``) would pass the check and be refused
+    only when it resolves. Judged with ``units: none`` here, it is refused by name with the other reasons.
+    """
+    assert record.tuning is not None
+    return dataclasses.replace(record, sections={**record.sections,
+                                                 "tuning": dataclasses.replace(record.tuning, units="none")})
 
 
 def _check_pins(book: AddressBook, bound: BoundView, record: SupportRecord) -> tuple[SupportRecord, list[str]]:
@@ -766,7 +779,7 @@ def _check_book_requirements(addresses: Mapping[str, Any] | None, bound: BoundVi
         record, unchecked = _check_pins(book, bound, support_record())
         assert record.tuning is not None
         own = set(book.sets())
-        refusals = record.check_book(book, sets=sorted(set(used) & own))
+        refusals = _value_support(record).check_book(book, sets=sorted(set(used) & own))
         if set(used_as_grad) & own:
             masked = _mask_support(record.tuning).check_book(book, sets=sorted(set(used_as_grad) & own))
             refusals += [r for r in masked if r not in refusals]
